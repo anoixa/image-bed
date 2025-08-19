@@ -5,6 +5,7 @@ import (
 	"image-bed/database/images"
 	"image-bed/database/models"
 	"image-bed/storage"
+	"image-bed/utils/validator"
 	"log"
 	"net/http"
 	"time"
@@ -16,7 +17,7 @@ import (
 func UploadImageHandler(context *gin.Context) {
 	header, err := context.FormFile("file")
 	if err != nil {
-		context.JSON(http.StatusBadRequest, gin.H{"error": "必须上传图片文件"})
+		common.RespondError(context, http.StatusBadRequest, "Empty files are not allowed to be uploaded.")
 		return
 	}
 
@@ -27,6 +28,18 @@ func UploadImageHandler(context *gin.Context) {
 		return
 	}
 	defer file.Close()
+
+	// Verify image type
+	isValidImage, err := validator.IsImage(file)
+	if err != nil {
+		log.Printf("Error during file validation: %v", err)
+		common.RespondError(context, http.StatusInternalServerError, "Failed to validate file")
+		return
+	}
+	if !isValidImage {
+		common.RespondError(context, http.StatusBadRequest, "Unsupported image type or the file is corrupted")
+		return
+	}
 
 	storagePath, err := storage.AppStorage.Save(file, header)
 	if err != nil {
