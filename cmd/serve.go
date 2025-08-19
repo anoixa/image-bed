@@ -1,0 +1,100 @@
+package cmd
+
+import (
+	"context"
+	"errors"
+	"github.com/spf13/cobra"
+	"image-bed/api"
+	"image-bed/api/core"
+	"image-bed/config"
+	"image-bed/database/accounts"
+	"image-bed/database/dbcore"
+	"image-bed/storage"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+)
+
+// serveCmd represents the serve command
+var serveCmd = &cobra.Command{
+	Use:   "serve",
+	Short: "Start API server",
+	Run: func(cmd *cobra.Command, args []string) {
+		RunServer()
+	},
+}
+
+func init() {
+	rootCmd.AddCommand(serveCmd)
+}
+
+func RunServer() {
+	// 加载配置
+	config.InitConfig()
+	cfg := config.Get()
+
+	// 创建资源目录
+	if err := os.MkdirAll("./data", os.ModePerm); err != nil {
+		log.Fatalf("Failed to create data directory: %v", err)
+	}
+
+	// 初始化db, jwt, storage
+	InitDatabase(cfg)
+	storage.InitStorage()
+	if err := api.Init(cfg.Server.Jwt.Secret, cfg.Server.Jwt.ExpiresIn, cfg.Server.Jwt.RefreshExpiresIn); err != nil {
+		log.Fatalf("Failed to initialize JWT %s", err)
+	}
+
+	// 启动gin
+	server, cleanup := core.StartServer()
+	go func() {
+		log.Printf("Server started on %s", cfg.ServerAddr())
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("Server failed to start: %v", err)
+		}
+	}()
+
+	// 处理退出signal
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+	<-quit
+
+	log.Println("Shutting down server...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if cleanup != nil {
+		cleanup()
+		log.Println("Cleanup tasks finished.")
+	}
+
+	if err := server.Shutdown(ctx); err != nil {
+		log.Fatalf("Server forced to shutdown: %v", err)
+	}
+	if err := dbcore.CloseDB(); err != nil {
+		log.Printf("Error closing database: %v", err)
+	}
+
+	log.Println("Server exited successfully")
+}
+
+// InitDatabase init database
+func InitDatabase(cfg *config.Config) {
+	instance := dbcore.GetDBInstance()
+	log.Printf("Initializing database, database type: %s", cfg.Server.DatabaseConfig.Type)
+
+	// 自动迁移数据库
+	err := dbcore.AutoMigrateDB(instance)
+	if err != nil {
+		log.Fatalf("Failed to auto migrate database: %v", err)
+	}
+
+	// 创建默认管理员用户
+	accounts.CreateDefaultAdminUser()
+
+	log.Println("Database initialized successfully")
+}

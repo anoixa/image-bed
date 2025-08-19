@@ -1,0 +1,18 @@
+/data/
+
+config.yaml
+image-bed
+*.exe
+# Go test coverage files
+*.out
+cover.html
+
+vendor/
+
+# IDE - VSCode, GoLand, etc.
+.vscode/
+.idea/
+
+# OS generated files
+.DS_Store
+Thumbs.db

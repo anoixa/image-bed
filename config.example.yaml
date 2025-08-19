@@ -1,0 +1,18 @@
+server:
+  host: "localhost"
+  port: 8081
+  database:
+    type: "postgresql"
+    host: ""
+    port: 5432
+    username: "postgres"
+    password: "root"
+    database: "image-dev"
+  storage:
+    type: "local"
+    local:
+      path: "./data/update"
+  jwt:
+    secret: ""
+    expires_in: "30m"
+    refresh_expires_in: "10080m"
