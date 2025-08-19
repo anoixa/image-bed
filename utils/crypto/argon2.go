@@ -6,9 +6,10 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"golang.org/x/crypto/argon2"
 	"io"
 	"strings"
+
+	"golang.org/x/crypto/argon2"
 )
 
 // 定义 Argon2id 的推荐参数

@@ -3,19 +3,20 @@ package cmd
 import (
 	"context"
 	"errors"
-	"github.com/spf13/cobra"
-	"image-bed/api"
-	"image-bed/api/core"
-	"image-bed/config"
-	"image-bed/database/accounts"
-	"image-bed/database/dbcore"
-	"image-bed/storage"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/anoixa/image-bed/api"
+	"github.com/anoixa/image-bed/api/core"
+	"github.com/anoixa/image-bed/config"
+	"github.com/anoixa/image-bed/database/accounts"
+	"github.com/anoixa/image-bed/database/dbcore"
+	"github.com/anoixa/image-bed/storage"
+	"github.com/spf13/cobra"
 )
 
 // serveCmd represents the serve command
@@ -84,10 +85,11 @@ func RunServer() {
 
 // InitDatabase init database
 func InitDatabase(cfg *config.Config) {
+	dbcore.InitDB()
 	instance := dbcore.GetDBInstance()
 	log.Printf("Initializing database, database type: %s", cfg.Server.DatabaseConfig.Type)
 
-	// 自动迁移数据库
+	// 自动DDL
 	err := dbcore.AutoMigrateDB(instance)
 	if err != nil {
 		log.Fatalf("Failed to auto migrate database: %v", err)

@@ -2,9 +2,10 @@ package images
 
 import (
 	"fmt"
+
+	"github.com/anoixa/image-bed/database/dbcore"
+	"github.com/anoixa/image-bed/database/models"
 	"gorm.io/gorm"
-	"image-bed/database/dbcore"
-	"image-bed/database/models"
 )
 
 func SaveImage(image *models.Image) error {

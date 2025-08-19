@@ -4,10 +4,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"gorm.io/gorm"
-	"image-bed/database/dbcore"
-	"image-bed/database/models"
 	"time"
+
+	"github.com/anoixa/image-bed/database/dbcore"
+	"github.com/anoixa/image-bed/database/models"
+	"gorm.io/gorm"
 )
 
 // CreateLoginDevice Create device record

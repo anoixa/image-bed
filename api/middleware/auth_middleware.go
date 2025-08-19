@@ -1,10 +1,11 @@
 package middleware
 
 import (
-	"github.com/gin-gonic/gin"
-	"image-bed/api"
-	"image-bed/api/common"
 	"net/http"
+
+	"github.com/anoixa/image-bed/api"
+	"github.com/anoixa/image-bed/api/common"
+	"github.com/gin-gonic/gin"
 )
 
 const (

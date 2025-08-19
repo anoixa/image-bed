@@ -3,15 +3,16 @@ package storage
 import (
 	"context"
 	"fmt"
-	"github.com/google/uuid"
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
-	"image-bed/config"
 	"log"
 	"mime/multipart"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/anoixa/image-bed/config"
+	"github.com/google/uuid"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
 var (
