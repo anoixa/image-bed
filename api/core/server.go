@@ -1,13 +1,16 @@
 package core
 
 import (
-	"github.com/gin-contrib/cors"
-	"image-bed/api"
-	"image-bed/api/images"
-	"image-bed/api/middleware"
-	"image-bed/config"
 	"net/http"
 	"time"
+
+	"github.com/anoixa/image-bed/api"
+	"github.com/anoixa/image-bed/api/common"
+	"github.com/anoixa/image-bed/api/images"
+	"github.com/anoixa/image-bed/api/middleware"
+	"github.com/anoixa/image-bed/config"
+	"github.com/anoixa/image-bed/utils/version"
+	"github.com/gin-contrib/cors"
 
 	"github.com/gin-gonic/gin"
 )
@@ -15,9 +18,9 @@ import (
 // 启动gin
 func setupRouter() (*gin.Engine, func()) {
 	//cfg := config.Get()
-	//if cfg.Server.Mode == "release" {
-	//	gin.SetMode(gin.ReleaseMode)
-	//}
+	if version.CommitHash != "n/a" {
+		gin.SetMode(gin.ReleaseMode)
+	}
 
 	router := gin.New()
 
@@ -44,6 +47,13 @@ func setupRouter() (*gin.Engine, func()) {
 	// 健康检查
 	router.GET("/health", func(c *gin.Context) {
 		c.String(http.StatusOK, "^_^")
+	})
+	// 获取版本
+	router.GET("/version", func(c *gin.Context) {
+		common.RespondSuccess(c, gin.H{
+			"version": version.Version,
+			"commit":  version.CommitHash,
+		})
 	})
 
 	apiGroup := router.Group("/api")

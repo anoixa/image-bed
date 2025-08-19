@@ -2,14 +2,15 @@ package api
 
 import (
 	"fmt"
-	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
-	"image-bed/api/common"
-	"image-bed/database/accounts"
-	"image-bed/database/models"
-	cryptopackage "image-bed/utils/crypto"
 	"log"
 	"net/http"
+
+	"github.com/anoixa/image-bed/api/common"
+	"github.com/anoixa/image-bed/database/accounts"
+	"github.com/anoixa/image-bed/database/models"
+	cryptopackage "github.com/anoixa/image-bed/utils/crypto"
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 type userAuthRequestBody struct {

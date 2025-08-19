@@ -1,4 +1,4 @@
-module image-bed
+module github.com/anoixa/image-bed
 
 go 1.24.0
 

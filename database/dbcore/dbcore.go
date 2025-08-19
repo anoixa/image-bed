@@ -3,15 +3,18 @@ package dbcore
 import (
 	"context"
 	"fmt"
+	"log"
+	"os"
+	"sync"
+	"time"
+
+	"github.com/anoixa/image-bed/config"
+	"github.com/anoixa/image-bed/database/models"
+	"github.com/anoixa/image-bed/utils/version"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
-	"image-bed/config"
-	"image-bed/database/models"
-	"log"
-	"sync"
-	"time"
 )
 
 var (
@@ -21,6 +24,14 @@ var (
 
 // GetDBInstance Get database connection
 func GetDBInstance() *gorm.DB {
+	if db == nil {
+		log.Fatal("Database is not initialized. Call dbcore.InitDB() in main.go first.")
+	}
+	return db
+}
+
+// InitDB init database
+func InitDB() {
 	once.Do(func() {
 		var err error
 
@@ -28,6 +39,29 @@ func GetDBInstance() *gorm.DB {
 		dbType := cfg.Server.DatabaseConfig.Type
 		host := cfg.Server.DatabaseConfig.Host
 		port := cfg.Server.DatabaseConfig.Port
+
+		var gormLogger logger.Interface
+		if version.CommitHash != "n/a" {
+			gormLogger = logger.New(
+				log.New(os.Stdout, "\r\n", log.LstdFlags),
+				logger.Config{
+					SlowThreshold:             200 * time.Millisecond,
+					LogLevel:                  logger.Silent,
+					IgnoreRecordNotFoundError: true,
+					Colorful:                  false,
+				},
+			)
+		} else {
+			gormLogger = logger.New(
+				log.New(os.Stdout, "\r\n", log.LstdFlags),
+				logger.Config{
+					SlowThreshold:             200 * time.Millisecond,
+					LogLevel:                  logger.Info,
+					IgnoreRecordNotFoundError: true,
+					Colorful:                  true,
+				},
+			)
+		}
 
 		switch dbType {
 		case "sqlite", "sqlite3", "":
@@ -39,7 +73,7 @@ func GetDBInstance() *gorm.DB {
 			// WAL
 			dsn := fmt.Sprintf("%s?_journal_mode=WAL", path)
 			db, err = gorm.Open(sqlite.Open(dsn), &gorm.Config{
-				Logger:                 logger.Default.LogMode(logger.Silent),
+				Logger:                 gormLogger,
 				PrepareStmt:            true,
 				SkipDefaultTransaction: true,
 			})
@@ -59,7 +93,7 @@ func GetDBInstance() *gorm.DB {
 			)
 
 			db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
-				Logger:                 logger.Default.LogMode(logger.Silent),
+				Logger:                 gormLogger,
 				PrepareStmt:            true,
 				SkipDefaultTransaction: true,
 			})
@@ -86,8 +120,6 @@ func GetDBInstance() *gorm.DB {
 		//	log.Fatalf("Auto migrate failed: %v", err)
 		//}
 	})
-
-	return db
 }
 
 func CloseDB() error {

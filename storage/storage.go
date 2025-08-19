@@ -1,9 +1,10 @@
 package storage
 
 import (
-	"image-bed/config"
 	"log"
 	"mime/multipart"
+
+	"github.com/anoixa/image-bed/config"
 )
 
 var AppStorage Storage

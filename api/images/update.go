@@ -1,14 +1,15 @@
 package images
 
 import (
-	"image-bed/api/common"
-	"image-bed/database/images"
-	"image-bed/database/models"
-	"image-bed/storage"
-	"image-bed/utils/validator"
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/anoixa/image-bed/api/common"
+	"github.com/anoixa/image-bed/database/images"
+	"github.com/anoixa/image-bed/database/models"
+	"github.com/anoixa/image-bed/storage"
+	"github.com/anoixa/image-bed/utils/validator"
 
 	"github.com/gin-gonic/gin"
 )

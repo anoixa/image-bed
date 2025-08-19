@@ -3,11 +3,12 @@ package accounts
 import (
 	"errors"
 	"fmt"
-	"gorm.io/gorm"
-	"image-bed/database/dbcore"
-	"image-bed/database/models"
-	cryptopackage "image-bed/utils/crypto"
 	"log"
+
+	"github.com/anoixa/image-bed/database/dbcore"
+	"github.com/anoixa/image-bed/database/models"
+	cryptopackage "github.com/anoixa/image-bed/utils/crypto"
+	"gorm.io/gorm"
 )
 
 // CreateDefaultAdminUser Create default administrator user
