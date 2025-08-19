@@ -1,0 +1,129 @@
+package config
+
+import (
+	"errors"
+	"fmt"
+	"github.com/spf13/viper"
+	"os"
+	"strings"
+	"sync"
+)
+
+var (
+	globalConfig Config
+	once         sync.Once
+)
+
+type Config struct {
+	Server ServerConfig `mapstructure:"server"`
+}
+
+type ServerConfig struct {
+	Host           string         `mapstructure:"host"`
+	Port           int            `mapstructure:"port"`
+	Jwt            Jwt            `mapstructure:"jwt"`
+	DatabaseConfig DatabaseConfig `mapstructure:"database"`
+	StorageConfig  StorageConfig  `mapstructure:"storage"`
+}
+
+type DatabaseConfig struct {
+	Type     string `mapstructure:"type"`
+	Host     string `mapstructure:"host"`
+	Port     int    `mapstructure:"port"`
+	Username string `mapstructure:"username"`
+	Password string `mapstructure:"password"`
+	Database string `mapstructure:"database"`
+
+	DatabaseFilePath string `mapstructure:"database_file_path"` //sqlite数据库文件路径
+}
+
+type StorageConfig struct {
+	Type  string             `mapstructure:"type"`
+	Minio MinioConfig        `mapstructure:"minio"`
+	Local LocalStorageConfig `mapstructure:"local"`
+}
+
+type Jwt struct {
+	Secret           string `mapstructure:"secret"`
+	ExpiresIn        string `mapstructure:"expires_in"`
+	RefreshExpiresIn string `mapstructure:"refresh_expires_in"`
+}
+
+type MinioConfig struct {
+	Endpoint        string `mapstructure:"endpoint"`
+	AccessKeyID     string `mapstructure:"access_key_id"`
+	SecretAccessKey string `mapstructure:"secret_access_key"`
+	UseSSL          bool   `mapstructure:"use_ssl"`
+	BucketName      string `mapstructure:"bucket_name"`
+}
+
+type LocalStorageConfig struct {
+	Path string `mapstructure:"path"` // 本地文件存储路径
+}
+
+// InitConfig Initialize configuration
+func InitConfig() {
+	once.Do(func() {
+		loadConfig()
+	})
+}
+
+func Get() *Config {
+	return &globalConfig
+}
+
+// loadConfig Core configuration loading
+func loadConfig() {
+	// 默认值
+	viper.SetDefault("server.host", "127.0.0.1")
+	viper.SetDefault("server.port", 8080)
+	viper.SetDefault("server.storage.path", "./storage")
+
+	configFileFromFlag := viper.GetString("config_file_path")
+
+	// 优先从 flag 读取配置文件路径
+	if configFileFromFlag != "" {
+		fmt.Fprintf(os.Stderr, "Attempting to use config file: %s\n", configFileFromFlag)
+		viper.SetConfigFile(configFileFromFlag)
+	} else {
+		viper.SetConfigName("config")
+		viper.SetConfigType("yaml")
+		viper.AddConfigPath(".")
+	}
+
+	// 读取环境变量
+	viper.SetEnvPrefix("IMAGE_BED")
+	viper.AutomaticEnv()
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+
+	// 读取配置文件
+	if err := viper.ReadInConfig(); err != nil {
+		var configFileNotFoundError viper.ConfigFileNotFoundError
+
+		if errors.As(err, &configFileNotFoundError) {
+			if configFileFromFlag != "" {
+				fmt.Fprintf(os.Stderr, "Error: Configuration file not found at specified path: %s\n", configFileFromFlag)
+				os.Exit(1)
+			} else {
+				fmt.Fprintln(os.Stderr, "Warning: Configuration file not found. Using defaults and environment variables.")
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "Error reading configuration file: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		fmt.Fprintln(os.Stderr, "Using configuration file:", viper.ConfigFileUsed())
+	}
+
+	if err := viper.Unmarshal(&globalConfig); err != nil {
+		fmt.Fprintf(os.Stderr, "Fatal error: Unable to unmarshal config into struct, %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func (c *Config) ServerAddr() string {
+	if c.Server.Host == "" {
+		return fmt.Sprintf(":%d", c.Server.Port)
+	}
+	return fmt.Sprintf("%s:%d", c.Server.Host, c.Server.Port)
+}
