@@ -22,6 +22,7 @@ type Config struct {
 type ServerConfig struct {
 	Host           string         `mapstructure:"host"`
 	Port           int            `mapstructure:"port"`
+	BaseURL        string         `mapstructure:"base_url"`
 	Jwt            Jwt            `mapstructure:"jwt"`
 	DatabaseConfig DatabaseConfig `mapstructure:"database"`
 	StorageConfig  StorageConfig  `mapstructure:"storage"`

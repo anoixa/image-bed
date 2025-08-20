@@ -20,3 +20,24 @@ func SaveImage(image *models.Image) error {
 
 	return err
 }
+
+// GetImageByHash finds a single image by its SHA-256 hash.
+func GetImageByHash(hash string) (*models.Image, error) {
+	instance := dbcore.GetDBInstance()
+	var image models.Image
+
+	err := instance.Where("file_hash = ?", hash).First(&image).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &image, nil
+}
+
+func GetImageByIdentifier(identifier string) (*models.Image, error) {
+	instance := dbcore.GetDBInstance()
+	var image models.Image
+	result := instance.Where("identifier = ?", identifier).First(&image)
+	return &image, result.Error
+}

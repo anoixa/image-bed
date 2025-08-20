@@ -1,19 +1,19 @@
 package models
 
-import (
-	"time"
-
-	"gorm.io/gorm"
-)
+import "gorm.io/gorm"
 
 type Image struct {
-	ID          uint           `gorm:"primaryKey" json:"id"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-	DeletedAt   gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
-	FileName    string         `gorm:"not null" json:"file_name"`
-	FileSize    int64          `json:"file_size"`
-	MimeType    string         `json:"mime_type"`
-	StoragePath string         `json:"storage_path"`
-	UploadTime  time.Time      `json:"upload_time"`
+	gorm.Model
+	Identifier    string `gorm:"unique;not null"`
+	OriginalName  string `gorm:"not null"`
+	FileSize      int64  `gorm:"not null"`
+	MimeType      string `gorm:"not null"`
+	StorageDriver string `gorm:"not null"`
+
+	FileHash string `gorm:"unique;not null"`
+	Width    int
+	Height   int
+
+	UserID uint
+	User   User `gorm:"foreignKey:UserID"`
 }

@@ -15,24 +15,34 @@ var allowedImageMimeTypes = map[string]bool{
 }
 
 // IsImage Verify if the file content isan allowed image type.
-func IsImage(file io.ReadSeeker) (bool, error) {
+func IsImage(file io.ReadSeeker) (bool, string, error) {
 	buffer := make([]byte, 512)
 	_, err := file.Read(buffer)
 	if err != nil && err != io.EOF {
-		return false, err
+		return false, "", err
 	}
 
 	_, err = file.Seek(0, io.SeekStart)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
 
 	// 检测 MIME 类型
 	mimeType := http.DetectContentType(buffer)
 
 	if _, ok := allowedImageMimeTypes[mimeType]; ok {
-		return true, nil
+		return true, mimeType, nil
 	}
 
-	return false, nil
+	return false, "", nil
+}
+
+func IsImageBytes(data []byte) (bool, string) {
+	mimeType := http.DetectContentType(data)
+
+	if _, ok := allowedImageMimeTypes[mimeType]; ok {
+		return true, mimeType
+	}
+
+	return false, ""
 }
