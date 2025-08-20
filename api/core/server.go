@@ -17,7 +17,6 @@ import (
 
 // 启动gin
 func setupRouter() (*gin.Engine, func()) {
-	//cfg := config.Get()
 	if version.CommitHash != "n/a" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -28,27 +27,22 @@ func setupRouter() (*gin.Engine, func()) {
 	router.Use(gin.Logger())
 	router.Use(gin.Recovery())
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"*"}, // 在生产环境中应配置为具体的前端域名
+		AllowOrigins:     []string{"*"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Length", "Content-Type", "Authorization"},
+		AllowHeaders:     []string{"Origin", "Content-Length", "Content-Type", "Authorization", "X-Api-Token"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))
 
 	// 速率限制
-	authRateLimiter := middleware.NewIPRateLimiter(0.5, 5, 10*time.Minute) // rps=0.5 -> 30 req/min
+	authRateLimiter := middleware.NewIPRateLimiter(0.5, 5, 10*time.Minute)
 	generalRateLimiter := middleware.NewIPRateLimiter(10, 20, 10*time.Minute)
-
 	cleanup := func() {
 		authRateLimiter.StopCleanup()
 		generalRateLimiter.StopCleanup()
 	}
 
-	// 健康检查
-	router.GET("/health", func(c *gin.Context) {
-		c.String(http.StatusOK, "^_^")
-	})
-	// 获取版本
+	router.GET("/health", func(c *gin.Context) { c.String(http.StatusOK, "^_^") })
 	router.GET("/version", func(c *gin.Context) {
 		common.RespondSuccess(c, gin.H{
 			"version": version.Version,
@@ -56,31 +50,34 @@ func setupRouter() (*gin.Engine, func()) {
 		})
 	})
 
-	imagesGroup := router.Group("/images")
-	{
-		imagesGroup.GET("/:identifier", images.GetImageHandler)
-	}
+	router.GET("/images/:identifier", images.GetImageHandler)
 
 	apiGroup := router.Group("/api")
+	apiGroup.Use(func(c *gin.Context) { // 所有API禁止缓存
+		c.Header("Cache-Control", "no-store")
+		c.Next()
+	})
 	{
-		apiGroup.Use(func(c *gin.Context) {
-			c.Header("Cache-Control", "no-store")
-			c.Next()
-		})
-
 		authGroup := apiGroup.Group("/auth")
-		authGroup.Use(authRateLimiter.Middleware()) // 应用严格的限流策略
+		authGroup.Use(authRateLimiter.Middleware())
 		{
 			authGroup.POST("/login", api.LoginHandler)
 			authGroup.POST("/refresh", api.RefreshTokenHandler)
 			authGroup.POST("/logout", api.LogoutHandler)
 		}
 
-		v1 := apiGroup.Group("/v1")
-		v1.Use(generalRateLimiter.Middleware())
-		v1.Use(middleware.Auth())
+		webV1 := apiGroup.Group("/v1/web")
+		webV1.Use(generalRateLimiter.Middleware())
+		webV1.Use(middleware.Auth())
 		{
-			v1.POST("/upload", images.UploadImageHandler)
+			webV1.POST("/upload", images.UploadImageHandler)
+		}
+
+		clientV1 := apiGroup.Group("/v1/client")
+		clientV1.Use(generalRateLimiter.Middleware())
+		clientV1.Use(middleware.StaticTokenAuth())
+		{
+			clientV1.POST("/upload", images.UploadImageHandler)
 		}
 	}
 
