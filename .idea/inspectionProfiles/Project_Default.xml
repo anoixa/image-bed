@@ -4,6 +4,7 @@
     <inspection_tool class="GoDfaErrorMayBeNotNil" enabled="true" level="WARNING" enabled_by_default="true">
       <functions>
         <function importPath="image-bed/database/accounts" name="GetDeviceByRefreshTokenAndDeviceID" />
+        <function importPath="github.com/anoixa/image-bed/database/images" name="GetImageByHash" />
       </functions>
     </inspection_tool>
   </profile>

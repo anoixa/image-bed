@@ -56,6 +56,11 @@ func setupRouter() (*gin.Engine, func()) {
 		})
 	})
 
+	imagesGroup := router.Group("/images")
+	{
+		imagesGroup.GET("/:identifier", images.GetImageHandler)
+	}
+
 	apiGroup := router.Group("/api")
 	{
 		apiGroup.Use(func(c *gin.Context) {
@@ -68,6 +73,7 @@ func setupRouter() (*gin.Engine, func()) {
 		{
 			authGroup.POST("/login", api.LoginHandler)
 			authGroup.POST("/refresh", api.RefreshTokenHandler)
+			authGroup.POST("/logout", api.LogoutHandler)
 		}
 
 		v1 := apiGroup.Group("/v1")
@@ -75,7 +81,6 @@ func setupRouter() (*gin.Engine, func()) {
 		v1.Use(middleware.Auth())
 		{
 			v1.POST("/upload", images.UploadImageHandler)
-			v1.POST("/logout", api.LogoutHandler)
 		}
 	}
 

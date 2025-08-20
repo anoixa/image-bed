@@ -44,7 +44,7 @@ func RunServer() {
 
 	// 初始化db, jwt, storage
 	InitDatabase(cfg)
-	storage.InitStorage()
+	storage.InitStorage(cfg)
 	if err := api.Init(cfg.Server.Jwt.Secret, cfg.Server.Jwt.ExpiresIn, cfg.Server.Jwt.RefreshExpiresIn); err != nil {
 		log.Fatalf("Failed to initialize JWT %s", err)
 	}

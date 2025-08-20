@@ -1,21 +1,26 @@
 package storage
 
 import (
+	"io"
 	"log"
-	"mime/multipart"
 
 	"github.com/anoixa/image-bed/config"
 )
 
 var AppStorage Storage
 
-type Storage interface {
-	Save(file multipart.File, header *multipart.FileHeader) (string, error)
-	Get(identifier string) (string, error)
+type ImageStream struct {
+	Reader      io.ReadCloser
+	ContentType string
+	Size        int64
 }
 
-func InitStorage() {
-	cfg := config.Get()
+type Storage interface {
+	Save(identifier string, file io.Reader) error
+	Get(identifier string) (io.ReadCloser, error)
+}
+
+func InitStorage(cfg *config.Config) {
 	storageType := cfg.Server.StorageConfig.Type
 
 	log.Printf("Initializing storage, type: %s", storageType)

@@ -3,14 +3,12 @@ package storage
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
-	"mime/multipart"
-	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/anoixa/image-bed/config"
-	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
@@ -55,7 +53,7 @@ func initMinioClient() {
 	})
 }
 
-// getMinioClient 安全地获取已初始化的 MinIO 客户端。
+// getMinioClient get minio client
 func getMinioClient() *minio.Client {
 	if minioClient == nil {
 		log.Fatal("MinIO client is not initialized. Call storage.StorageInit() first.")
@@ -63,7 +61,7 @@ func getMinioClient() *minio.Client {
 	return minioClient
 }
 
-// newMinioStorage 是 minioStorage 的构造函数。
+// newMinioStorage
 func newMinioStorage() *minioStorage {
 	cfg := config.Get()
 	if cfg.Server.StorageConfig.Minio.BucketName == "" {
@@ -76,36 +74,35 @@ func newMinioStorage() *minioStorage {
 }
 
 // Save 方法将文件上传到 MinIO。
-func (s *minioStorage) Save(file multipart.File, header *multipart.FileHeader) (string, error) {
+func (s *minioStorage) Save(identifier string, file io.Reader) error {
 	client := getMinioClient()
-	ext := filepath.Ext(header.Filename)
-	// TODO 替换为时间戳
-	objectName := uuid.New().String() + ext
-	contentType := header.Header.Get("Content-Type")
-	if contentType == "" {
-		contentType = "application/octet-stream"
-	}
+	objectName := identifier
 
-	_, err := client.PutObject(context.Background(), s.bucketName, objectName, file, header.Size, minio.PutObjectOptions{
+	contentType := "application/octet-stream"
+
+	_, err := client.PutObject(context.Background(), s.bucketName, objectName, file, -1, minio.PutObjectOptions{
 		ContentType: contentType,
 	})
+
 	if err != nil {
-		return "", fmt.Errorf("failed to upload object to minio: %w", err)
+		return fmt.Errorf("failed to upload object '%s' to minio: %w", objectName, err)
 	}
-	return objectName, nil
+
+	return nil
 }
 
-// Get 方法为 MinIO 中的对象生成一个预签名的 URL。
-func (s *minioStorage) Get(filename string) (string, error) {
+// Get Get image
+func (s *minioStorage) Get(identifier string) (io.ReadCloser, error) {
 	client := getMinioClient()
-	_, err := client.StatObject(context.Background(), s.bucketName, filename, minio.StatObjectOptions{})
+
+	obj, err := client.GetObject(context.Background(), s.bucketName, identifier, minio.GetObjectOptions{})
 	if err != nil {
-		return "", fmt.Errorf("file not found in minio bucket '%s': %s", s.bucketName, filename)
+		errResponse := minio.ToErrorResponse(err)
+		if errResponse.Code == "NoSuchKey" {
+			return nil, fmt.Errorf("file not found in minio: %s", identifier)
+		}
+		return nil, fmt.Errorf("failed to get object stream from minio for '%s': %w", identifier, err)
 	}
 
-	presignedURL, err := client.PresignedGetObject(context.Background(), s.bucketName, filename, s.presignedURLExpiry, nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to generate presigned url for %s: %w", filename, err)
-	}
-	return presignedURL.String(), nil
+	return obj, nil
 }
