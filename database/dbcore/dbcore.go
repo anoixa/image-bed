@@ -3,6 +3,7 @@ package dbcore
 import (
 	"context"
 	"fmt"
+	"github.com/anoixa/image-bed/utils"
 	"log"
 	"os"
 	"sync"
@@ -10,7 +11,6 @@ import (
 
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
-	"github.com/anoixa/image-bed/utils/version"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -41,7 +41,7 @@ func InitDB() {
 		port := cfg.Server.DatabaseConfig.Port
 
 		var gormLogger logger.Interface
-		if version.CommitHash != "n/a" {
+		if utils.CommitHash != "n/a" {
 			gormLogger = logger.New(
 				log.New(os.Stdout, "\r\n", log.LstdFlags),
 				logger.Config{

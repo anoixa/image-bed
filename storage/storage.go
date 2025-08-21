@@ -18,6 +18,7 @@ type ImageStream struct {
 type Storage interface {
 	Save(identifier string, file io.Reader) error
 	Get(identifier string) (io.ReadCloser, error)
+	Delete(identifier string) error
 }
 
 func InitStorage(cfg *config.Config) {
