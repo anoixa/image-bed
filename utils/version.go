@@ -1,4 +1,4 @@
-package version
+package utils
 
 var (
 	Version    string = "dev"

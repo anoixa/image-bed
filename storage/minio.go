@@ -106,3 +106,16 @@ func (s *minioStorage) Get(identifier string) (io.ReadCloser, error) {
 
 	return obj, nil
 }
+
+// Delete
+func (s *minioStorage) Delete(identifier string) error {
+	client := getMinioClient()
+	objectName := identifier
+
+	err := client.RemoveObject(context.Background(), s.bucketName, objectName, minio.RemoveObjectOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to delete object '%s' from minio: %w", objectName, err)
+	}
+
+	return nil
+}

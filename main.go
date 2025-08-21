@@ -1,13 +1,13 @@
 package main
 
 import (
+	"github.com/anoixa/image-bed/utils"
 	"log"
 
 	"github.com/anoixa/image-bed/cmd"
-	"github.com/anoixa/image-bed/utils/version"
 )
 
 func main() {
-	log.Printf("image bed %s (%s)", version.Version, version.CommitHash)
+	log.Printf("image bed %s (%s)", utils.Version, utils.CommitHash)
 	cmd.Execute()
 }

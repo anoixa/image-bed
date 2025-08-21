@@ -52,3 +52,18 @@ func (s *localStorage) Get(identifier string) (io.ReadCloser, error) {
 
 	return file, nil
 }
+
+// Delete
+func (s *localStorage) Delete(identifier string) error {
+	fullPath := filepath.Join(s.basePath, identifier)
+
+	err := os.Remove(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("file to delete not found: %s", identifier)
+		}
+		return fmt.Errorf("failed to delete local file '%s': %w", fullPath, err)
+	}
+
+	return nil
+}
