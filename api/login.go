@@ -2,8 +2,10 @@ package api
 
 import (
 	"fmt"
+	"github.com/anoixa/image-bed/config"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/database/accounts"
@@ -19,21 +21,12 @@ type userAuthRequestBody struct {
 }
 
 type loginResponse struct {
-	AccessToken        string `json:"access_token"`
-	AccessTokenExpiry  int64  `json:"access_token_expiry"`
-	RefreshToken       string `json:"refresh_token"`
-	RefreshTokenExpiry int64  `json:"refresh_token_expiry"`
-	DeviceID           string `json:"device_id"`
+	AccessToken       string `json:"access_token"`
+	AccessTokenExpiry int64  `json:"access_token_expiry"`
 }
 
 type logoutResponse struct {
 	DeviceID string `json:"device_id"`
-}
-
-type refreshRuestBody struct {
-	GrantType    string `json:"grant_type" binding:"required"`
-	RefreshToken string `json:"refresh_token" binding:"required"`
-	DeviceID     string `json:"device_id" binding:"required"`
 }
 
 // LoginHandler user login
@@ -76,35 +69,32 @@ func LoginHandler(context *gin.Context) {
 		return
 	}
 
+	// 设置 HttpOnly Cookie
+	refreshTokenMaxAge := int(time.Until(refreshTokenExpiry).Seconds())
+	setAuthCookies(context, refreshToken, deviceID, refreshTokenMaxAge)
+
 	common.RespondSuccessMessage(context, "Login successful", loginResponse{
-		AccessToken:        "Bearer " + accessToken,
-		AccessTokenExpiry:  accessTokenExpiry.Unix(),
-		RefreshToken:       refreshToken,
-		RefreshTokenExpiry: refreshTokenExpiry.Unix(),
-		DeviceID:           deviceID,
+		AccessToken:       "Bearer " + accessToken,
+		AccessTokenExpiry: accessTokenExpiry.Unix(),
 	})
 }
 
 // RefreshTokenHandler Refresh token authentication
 func RefreshTokenHandler(context *gin.Context) {
-	var req refreshRuestBody
-	if err := context.ShouldBindJSON(&req); err != nil {
-		common.RespondError(context, http.StatusBadRequest, err.Error())
+	refreshToken, err := context.Cookie("refresh_token")
+	if err != nil {
+		common.RespondError(context, http.StatusUnauthorized, "Refresh token not found")
 		return
 	}
-	var deviceID = req.DeviceID
 
-	if req.GrantType != "refresh_token" {
-		common.RespondError(context, http.StatusBadRequest, "Invalid grant_type")
-		return
-	}
-	if req.DeviceID == "" {
-		common.RespondError(context, http.StatusBadRequest, "Device ID is required")
+	deviceID, err := context.Cookie("device_id")
+	if err != nil {
+		common.RespondError(context, http.StatusUnauthorized, "Device ID not found")
 		return
 	}
 
 	// 查询设备信息与用户信息
-	device, err := accounts.GetDeviceByRefreshTokenAndDeviceID(req.RefreshToken, req.DeviceID)
+	device, err := accounts.GetDeviceByRefreshTokenAndDeviceID(refreshToken, deviceID)
 	if err != nil {
 		common.RespondError(context, http.StatusUnauthorized, "User associated with token not found")
 		return
@@ -133,31 +123,30 @@ func RefreshTokenHandler(context *gin.Context) {
 		return
 	}
 
+	// 更新 cookies
+	newRefreshTokenMaxAge := int(time.Until(newRefreshTokenExpiry).Seconds())
+	setAuthCookies(context, newRefreshToken, deviceID, newRefreshTokenMaxAge)
+
 	common.RespondSuccessMessage(context, "Refresh token successful", loginResponse{
-		AccessToken:        "Bearer " + accessToken,
-		AccessTokenExpiry:  accessTokenExpiry.Unix(),
-		RefreshToken:       newRefreshToken,
-		RefreshTokenExpiry: newRefreshTokenExpiry.Unix(),
-		DeviceID:           deviceID,
+		AccessToken:       "Bearer " + accessToken,
+		AccessTokenExpiry: accessTokenExpiry.Unix(),
 	})
 
 }
 
 // LogoutHandler user logout
 func LogoutHandler(context *gin.Context) {
-	var req logoutResponse
-	if err := context.ShouldBindJSON(&req); err != nil {
-		common.RespondError(context, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	err := accounts.DeleteDeviceByDeviceID(req.DeviceID)
+	deviceID, err := context.Cookie("device_id")
 	if err != nil {
-		common.RespondError(context, http.StatusInternalServerError, "Failed to delete device")
+		common.RespondSuccessMessage(context, "Already logged out or session invalid", nil)
 		return
 	}
 
-	common.RespondSuccessMessage(context, "Logout successful", logoutResponse{})
+	_ = accounts.DeleteDeviceByDeviceID(deviceID)
+
+	clearAuthCookies(context)
+
+	common.RespondSuccessMessage(context, "Logout successful", nil)
 }
 
 // validateCredentials Verify user credentials
@@ -177,4 +166,28 @@ func validateCredentials(username, password string) (*models.User, bool, error) 
 	}
 
 	return user, ok, nil
+}
+
+// setAuthCookies 设置 refresh_token 和 device_id 的 cookie
+func setAuthCookies(c *gin.Context, refreshToken, deviceID string, maxAge int) {
+	cfg := config.Get()
+
+	path := "/api/auth/"
+	domain := cfg.Server.Domain
+	secure := config.IsProduction()
+
+	c.SetCookie("refresh_token", refreshToken, maxAge, path, domain, secure, true)
+	c.SetCookie("device_id", deviceID, maxAge, path, domain, secure, true)
+}
+
+// clearAuthCookies 清除认证相关的 cookie
+func clearAuthCookies(c *gin.Context) {
+	cfg := config.Get()
+
+	path := "/api/auth/"
+	domain := cfg.Server.Domain
+
+	// 将 MaxAge 设置为 -1 来让浏览器删除 Cookie
+	c.SetCookie("refresh_token", "", -1, path, domain, false, true)
+	c.SetCookie("device_id", "", -1, path, domain, false, true)
 }
