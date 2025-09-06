@@ -3,7 +3,6 @@ package dbcore
 import (
 	"context"
 	"fmt"
-	"github.com/anoixa/image-bed/utils"
 	"log"
 	"os"
 	"sync"
@@ -41,7 +40,7 @@ func InitDB() {
 		port := cfg.Server.DatabaseConfig.Port
 
 		var gormLogger logger.Interface
-		if utils.CommitHash != "n/a" {
+		if config.CommitHash != "n/a" {
 			gormLogger = logger.New(
 				log.New(os.Stdout, "\r\n", log.LstdFlags),
 				logger.Config{

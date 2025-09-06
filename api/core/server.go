@@ -1,7 +1,6 @@
 package core
 
 import (
-	"github.com/anoixa/image-bed/utils"
 	"net/http"
 	"time"
 
@@ -17,7 +16,7 @@ import (
 
 // 启动gin
 func setupRouter() (*gin.Engine, func()) {
-	if utils.CommitHash != "n/a" {
+	if config.CommitHash != "n/a" {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
@@ -45,8 +44,8 @@ func setupRouter() (*gin.Engine, func()) {
 	router.GET("/health", func(c *gin.Context) { c.String(http.StatusOK, "^_^") })
 	router.GET("/version", func(c *gin.Context) {
 		common.RespondSuccess(c, gin.H{
-			"version": utils.Version,
-			"commit":  utils.CommitHash,
+			"version": config.Version,
+			"commit":  config.CommitHash,
 		})
 	})
 
