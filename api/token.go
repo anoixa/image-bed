@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"github.com/anoixa/image-bed/database/key"
+	"github.com/anoixa/image-bed/database/models"
 	"log"
 	"time"
 
@@ -84,6 +86,13 @@ func GenerateRefreshToken() (refreshToken string, refreshTokenExpiry time.Time, 
 	return
 }
 
+// GenerateStaticToken Generate a new static key
+func GenerateStaticToken() (refreshToken string, err error) {
+	refreshToken, err = GenerateRandomToken(64)
+
+	return
+}
+
 // Parse Parse and validate JWT token
 func Parse(tokenString string) (jwt.MapClaims, error) {
 	if len(jwtSecret) == 0 {
@@ -115,17 +124,14 @@ func Parse(tokenString string) (jwt.MapClaims, error) {
 	return claims, nil
 }
 
-// ValidateAccessToken Verify access token
-func ValidateAccessToken(tokenString string) (jwt.MapClaims, error) {
-	claims, err := Parse(tokenString)
+// ValidateStaticToken Verify static token
+func ValidateStaticToken(tokenString string) (*models.User, error) {
+	user, err := key.GetUserByApiToken(tokenString)
+
 	if err != nil {
-		return nil, err
+		return user, err
+	} else if user == nil {
+		return user, nil
 	}
-
-	// 验证令牌类型
-	if tokenType, ok := claims["type"].(string); !ok || tokenType != "access" {
-		return nil, errors.New("invalid token type")
-	}
-
-	return claims, nil
+	return user, nil
 }

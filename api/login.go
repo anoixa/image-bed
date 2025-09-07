@@ -176,8 +176,32 @@ func setAuthCookies(c *gin.Context, refreshToken, deviceID string, maxAge int) {
 	domain := cfg.Server.Domain
 	secure := config.IsProduction()
 
-	c.SetCookie("refresh_token", refreshToken, maxAge, path, domain, secure, true)
-	c.SetCookie("device_id", deviceID, maxAge, path, domain, secure, true)
+	// 构造 refresh_token cookie
+	refreshTokenCookie := http.Cookie{
+		Name:     "refresh_token",
+		Value:    refreshToken,
+		MaxAge:   maxAge,
+		Path:     path,
+		Domain:   domain,
+		Secure:   secure,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	}
+
+	// 构造 device_id cookie
+	deviceIDCookie := http.Cookie{
+		Name:     "device_id",
+		Value:    deviceID,
+		MaxAge:   maxAge,
+		Path:     path,
+		Domain:   domain,
+		Secure:   secure,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	}
+
+	http.SetCookie(c.Writer, &refreshTokenCookie)
+	http.SetCookie(c.Writer, &deviceIDCookie)
 }
 
 // clearAuthCookies 清除认证相关的 cookie

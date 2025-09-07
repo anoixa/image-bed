@@ -20,9 +20,8 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Host           string         `mapstructure:"host"`
+	Addr           string         `mapstructure:"addr"`
 	Domain         string         `mapstructure:"domain"`
-	Port           int            `mapstructure:"port"`
 	BaseURL        string         `mapstructure:"base_url"`
 	Jwt            Jwt            `mapstructure:"jwt"`
 	DatabaseConfig DatabaseConfig `mapstructure:"database"`
@@ -124,9 +123,9 @@ func loadConfig() {
 	}
 }
 
-func (c *Config) ServerAddr() string {
-	if c.Server.Host == "" {
-		return fmt.Sprintf(":%d", c.Server.Port)
-	}
-	return fmt.Sprintf("%s:%d", c.Server.Host, c.Server.Port)
-}
+//func (c *Config) ServerAddr() string {
+//	if c.Server.Host == "" {
+//		return fmt.Sprintf(":%d", c.Server.Port)
+//	}
+//	return fmt.Sprintf("%s:%d", c.Server.Host, c.Server.Port)
+//}

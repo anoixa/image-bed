@@ -142,6 +142,7 @@ func AutoMigrateDB(db *gorm.DB) error {
 		&models.User{},
 		&models.Device{},
 		&models.Image{},
+		&models.ApiToken{},
 	}
 
 	err := db.AutoMigrate(modelsToMigrate...)

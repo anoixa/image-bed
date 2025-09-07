@@ -1,6 +1,8 @@
 package key
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"log"
 	"time"
@@ -19,10 +21,11 @@ func GetUserByApiToken(token string) (*models.User, error) {
 
 	var apiToken models.ApiToken
 
-	// 使用 Preload("User") 来告诉 GORM 在查询 ApiToken 的同时，
-	// 也要把关联的 User 对象一起查询出来并填充到 apiToken.User 字段中。
-	// "User" 对应的是 ApiToken 结构体中的字段名。
-	result := db.Preload("User").Where("token = ?", token).First(&apiToken)
+	hasher := sha256.New()
+	hasher.Write([]byte(token))
+	hashedToken := hex.EncodeToString(hasher.Sum(nil))
+
+	result := db.Preload("User").Where("token = ?", hashedToken).First(&apiToken)
 
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
