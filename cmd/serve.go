@@ -52,7 +52,7 @@ func RunServer() {
 	// 启动gin
 	server, cleanup := core.StartServer()
 	go func() {
-		log.Printf("Server started on %s", cfg.ServerAddr())
+		log.Printf("Server started on %s", cfg.Server.Addr)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("Server failed to start: %v", err)
 		}

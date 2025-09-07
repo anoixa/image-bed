@@ -12,6 +12,7 @@ type ApiToken struct {
 	UserID      uint       `gorm:"index;not null" json:"user_id"`
 	Token       string     `gorm:"size:64;unique;not null"`
 	Description string     `gorm:"size:255"`
+	IsActive    bool       `json:"isActive"`
 	LastUsedAt  *time.Time `json:"last_used_at"`
 	CreatedAt   time.Time  `json:"created_at"`
 

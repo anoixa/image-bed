@@ -16,6 +16,7 @@ import (
 
 // 启动gin
 func setupRouter() (*gin.Engine, func()) {
+	cfg := config.Get()
 	if config.CommitHash != "n/a" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -26,9 +27,9 @@ func setupRouter() (*gin.Engine, func()) {
 	router.Use(gin.Logger())
 	router.Use(gin.Recovery())
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"*"},
+		AllowOrigins:     []string{cfg.Server.Domain},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Length", "Content-Type", "Authorization", "X-Api-Token"},
+		AllowHeaders:     []string{"Origin", "Content-Length", "Content-Type", "Authorization"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))
@@ -60,23 +61,20 @@ func setupRouter() (*gin.Engine, func()) {
 		authGroup := apiGroup.Group("/auth")
 		authGroup.Use(authRateLimiter.Middleware())
 		{
-			authGroup.POST("/login", api.LoginHandler)
-			authGroup.POST("/refresh", api.RefreshTokenHandler)
-			authGroup.POST("/logout", api.LogoutHandler)
+			authGroup.POST("/login", api.LoginHandler)          //POST /api/auth/login
+			authGroup.POST("/refresh", api.RefreshTokenHandler) //POST /api/auth/refresh
+			authGroup.POST("/logout", api.LogoutHandler)        //POST /api/auth/logout
 		}
 
-		webV1 := apiGroup.Group("/v1/web")
-		webV1.Use(generalRateLimiter.Middleware())
-		webV1.Use(middleware.Auth())
+		v1 := apiGroup.Group("/v1")
+		v1.Use(generalRateLimiter.Middleware())
+		v1.Use(middleware.CombinedAuth())
 		{
-			webV1.POST("/upload", images.UploadImageHandler)
-		}
-
-		clientV1 := apiGroup.Group("/v1/client")
-		clientV1.Use(generalRateLimiter.Middleware())
-		clientV1.Use(middleware.StaticTokenAuth())
-		{
-			clientV1.POST("/upload", images.UploadImageHandler)
+			imagesGroup := v1.Group("/images")
+			imagesGroup.Use(middleware.Authorize("jwt", "static_token"))
+			{
+				imagesGroup.POST("/upload", images.UploadImageHandler) // POST /api/v1/images/upload
+			}
 		}
 	}
 
@@ -89,7 +87,7 @@ func StartServer() (*http.Server, func()) {
 	router, clean := setupRouter()
 
 	srv := &http.Server{
-		Addr:    cfg.ServerAddr(),
+		Addr:    cfg.Server.Addr,
 		Handler: router,
 	}
 
