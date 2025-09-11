@@ -38,7 +38,13 @@ func GetImageHandler(context *gin.Context) {
 		return
 	}
 
-	imageStream, err := storage.AppStorage.Get(identifier)
+	storageClient, err := storage.GetStorage(image.StorageDriver)
+	if err != nil {
+		common.RespondError(context, http.StatusInternalServerError, "Error retrieving image information")
+		return
+	}
+
+	imageStream, err := storageClient.Get(identifier)
 	if err != nil {
 		log.Printf("CRITICAL: File for identifier '%s' not found in storage, but exists in DB. Error: %v", identifier, err)
 		common.RespondError(context, http.StatusNotFound, "Image file not found in storage")

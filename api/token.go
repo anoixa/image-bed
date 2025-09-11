@@ -19,8 +19,8 @@ var (
 	jwtRefreshExpiresIn time.Duration
 )
 
-// Init Initialize JWT configuration
-func Init(secret, expiresIn, refreshExpiresIn string) error {
+// TokenInit Initialize JWT configuration
+func TokenInit(secret, expiresIn, refreshExpiresIn string) error {
 	jwtSecret = []byte(secret)
 
 	duration, err := time.ParseDuration(expiresIn)

@@ -26,10 +26,24 @@ import (
 // UploadImageHandler handles the image upload process efficiently by reading the file only once.
 func UploadImageHandler(context *gin.Context) {
 	fileHeader, err := context.FormFile("file")
-	cfg := config.Get()
 	if err != nil {
 		common.RespondError(context, http.StatusBadRequest, "Image file is required")
 		return
+	}
+
+	storageName := context.PostForm("storage")
+	if storageName == "" {
+		storageName = context.Query("storage")
+	}
+
+	storageClient, err := storage.GetStorage(storageName)
+	if err != nil {
+		common.RespondError(context, http.StatusBadRequest, err.Error())
+		return
+	}
+	driverToSave := storageName
+	if driverToSave == "" {
+		driverToSave = config.Get().Server.StorageConfig.Type
 	}
 
 	// open file
@@ -79,7 +93,7 @@ func UploadImageHandler(context *gin.Context) {
 	identifier := fmt.Sprintf("%d-%s%s", time.Now().UnixNano(), fileHash[:16], ext)
 
 	fileReader := bytes.NewReader(fileBytes)
-	if err := storage.AppStorage.Save(identifier, fileReader); err != nil {
+	if err := storageClient.Save(identifier, fileReader); err != nil {
 		log.Printf("Failed to save file to storage: %v", err)
 		common.RespondError(context, http.StatusInternalServerError, "Failed to save uploaded file")
 		return
@@ -91,7 +105,7 @@ func UploadImageHandler(context *gin.Context) {
 		OriginalName:  fileHeader.Filename,
 		FileSize:      fileHeader.Size,
 		MimeType:      mimeType,
-		StorageDriver: cfg.Server.StorageConfig.Type,
+		StorageDriver: driverToSave,
 		FileHash:      fileHash,
 		UserID:        context.GetUint(middleware.ContextUserIDKey),
 	}
@@ -100,7 +114,7 @@ func UploadImageHandler(context *gin.Context) {
 		log.Printf("Failed to create image record in database: %v", err)
 
 		log.Printf("Attempting to delete orphaned file from storage: %s", identifier)
-		if delErr := storage.AppStorage.Delete(identifier); delErr != nil {
+		if delErr := storageClient.Delete(identifier); delErr != nil {
 			log.Printf("CRITICAL: Failed to delete orphaned file '%s' after db error. Manual cleanup may be required. Delete error: %v", identifier, delErr)
 		}
 

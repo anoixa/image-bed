@@ -106,23 +106,30 @@ func (s *localStorage) Delete(identifier string) error {
 
 // isValidIdentifier 校验 identifier 是否合法
 func isValidIdentifier(identifier string) bool {
-	if filepath.IsAbs(identifier) {
-		return false
-	}
-	if strings.Contains(identifier, "..") {
-		return false
-	}
+	// 拒绝空标识符
 	if identifier == "" {
 		return false
 	}
-	// 严格限制字符集：只允许字母、数字、横线、下划线
+
+	// 拒绝绝对路径
+	if filepath.IsAbs(identifier) {
+		return false
+	}
+
+	// 拒绝 ".."
+	if strings.Contains(identifier, "..") {
+		return false
+	}
+
+	// 只允许字母、数字、横线、下划线和点
 	for _, r := range identifier {
 		if !((r >= 'a' && r <= 'z') ||
 			(r >= 'A' && r <= 'Z') ||
 			(r >= '0' && r <= '9') ||
-			r == '-' || r == '_') {
+			r == '-' || r == '_' || r == '.') {
 			return false
 		}
 	}
+
 	return true
 }
