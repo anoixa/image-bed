@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"sync"
 	"time"
 
 	"github.com/anoixa/image-bed/config"
@@ -13,74 +12,53 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
-var (
-	minioClient *minio.Client
-	once        sync.Once
-)
-
 type minioStorage struct {
+	client             *minio.Client
 	bucketName         string
 	presignedURLExpiry time.Duration
 }
 
-// initMinioClient 使用 sync.Once 确保 MinIO 客户端在程序生命周期中只被初始化一次。
-func initMinioClient() {
-	once.Do(func() {
-		cfg := config.Get()
-		client, err := minio.New(cfg.Server.StorageConfig.Minio.Endpoint, &minio.Options{
-			Creds:  credentials.NewStaticV4(cfg.Server.StorageConfig.Minio.AccessKeyID, cfg.Server.StorageConfig.Minio.SecretAccessKey, ""),
-			Secure: cfg.Server.StorageConfig.Minio.UseSSL,
-		})
-		if err != nil {
-			log.Fatalf("Failed to initialize MinIO client: %v", err)
-		}
-
-		ctx := context.Background()
-		bucketName := cfg.Server.StorageConfig.Minio.BucketName
-		exists, err := client.BucketExists(ctx, bucketName)
-		if err != nil {
-			log.Fatalf("Failed to check if bucket exists: %v", err)
-		}
-		if !exists {
-			err = client.MakeBucket(ctx, bucketName, minio.MakeBucketOptions{})
-			if err != nil {
-				log.Fatalf("Failed to create bucket '%s': %v", bucketName, err)
-			}
-			log.Printf("Successfully created bucket: %s", bucketName)
-		}
-		minioClient = client
-		log.Println("MinIO client singleton initialized successfully.")
-	})
-}
-
-// getMinioClient get minio client
-func getMinioClient() *minio.Client {
-	if minioClient == nil {
-		log.Fatal("MinIO client is not initialized. Call storage.StorageInit() first.")
-	}
-	return minioClient
-}
-
 // newMinioStorage
-func newMinioStorage() *minioStorage {
-	cfg := config.Get()
-	if cfg.Server.StorageConfig.Minio.BucketName == "" {
-		panic("MinIO bucket name is not configured")
+func newMinioClient(cfg config.MinioConfig) (*minioStorage, error) {
+	client, err := minio.New(cfg.Endpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(cfg.AccessKeyID, cfg.SecretAccessKey, ""),
+		Secure: cfg.UseSSL,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize MinIO client: %w", err)
 	}
-	return &minioStorage{
-		bucketName:         cfg.Server.StorageConfig.Minio.BucketName,
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	exists, err := client.BucketExists(ctx, cfg.BucketName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check if bucket '%s' exists: %w", cfg.BucketName, err)
+	}
+	if !exists {
+		err = client.MakeBucket(ctx, cfg.BucketName, minio.MakeBucketOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create bucket '%s': %w", cfg.BucketName, err)
+		}
+		log.Printf("Successfully created bucket: %s", cfg.BucketName)
+	}
+
+	storage := &minioStorage{
+		client:             client, // 在 struct 中持有 client
+		bucketName:         cfg.BucketName,
 		presignedURLExpiry: 24 * time.Hour,
 	}
+
+	return storage, nil
 }
 
 // Save 将文件上传到 MinIO。
 func (s *minioStorage) Save(identifier string, file io.Reader) error {
-	client := getMinioClient()
 	objectName := identifier
 
 	contentType := "application/octet-stream"
 
-	_, err := client.PutObject(context.Background(), s.bucketName, objectName, file, -1, minio.PutObjectOptions{
+	_, err := s.client.PutObject(context.Background(), s.bucketName, objectName, file, -1, minio.PutObjectOptions{
 		ContentType: contentType,
 	})
 
@@ -93,9 +71,7 @@ func (s *minioStorage) Save(identifier string, file io.Reader) error {
 
 // Get Get image
 func (s *minioStorage) Get(identifier string) (io.ReadCloser, error) {
-	client := getMinioClient()
-
-	obj, err := client.GetObject(context.Background(), s.bucketName, identifier, minio.GetObjectOptions{})
+	obj, err := s.client.GetObject(context.Background(), s.bucketName, identifier, minio.GetObjectOptions{})
 	if err != nil {
 		errResponse := minio.ToErrorResponse(err)
 		if errResponse.Code == "NoSuchKey" {
@@ -109,10 +85,9 @@ func (s *minioStorage) Get(identifier string) (io.ReadCloser, error) {
 
 // Delete
 func (s *minioStorage) Delete(identifier string) error {
-	client := getMinioClient()
 	objectName := identifier
 
-	err := client.RemoveObject(context.Background(), s.bucketName, objectName, minio.RemoveObjectOptions{})
+	err := s.client.RemoveObject(context.Background(), s.bucketName, objectName, minio.RemoveObjectOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to delete object '%s' from minio: %w", objectName, err)
 	}
