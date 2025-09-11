@@ -170,10 +170,7 @@ func validateCredentials(username, password string) (*models.User, bool, error) 
 
 // setAuthCookies 设置 refresh_token 和 device_id 的 cookie
 func setAuthCookies(c *gin.Context, refreshToken, deviceID string, maxAge int) {
-	cfg := config.Get()
-
 	path := "/api/auth/"
-	domain := cfg.Server.Domain
 	secure := config.IsProduction()
 
 	// 构造 refresh_token cookie
@@ -182,7 +179,7 @@ func setAuthCookies(c *gin.Context, refreshToken, deviceID string, maxAge int) {
 		Value:    refreshToken,
 		MaxAge:   maxAge,
 		Path:     path,
-		Domain:   domain,
+		Domain:   "",
 		Secure:   secure,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
@@ -194,7 +191,7 @@ func setAuthCookies(c *gin.Context, refreshToken, deviceID string, maxAge int) {
 		Value:    deviceID,
 		MaxAge:   maxAge,
 		Path:     path,
-		Domain:   domain,
+		Domain:   "",
 		Secure:   secure,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,

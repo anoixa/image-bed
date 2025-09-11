@@ -73,7 +73,7 @@ func newMinioStorage() *minioStorage {
 	}
 }
 
-// Save 方法将文件上传到 MinIO。
+// Save 将文件上传到 MinIO。
 func (s *minioStorage) Save(identifier string, file io.Reader) error {
 	client := getMinioClient()
 	objectName := identifier

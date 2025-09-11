@@ -23,13 +23,18 @@ type Storage interface {
 
 func InitStorage(cfg *config.Config) {
 	storageType := cfg.Server.StorageConfig.Type
+	var err error
 
 	log.Printf("Initializing storage, type: %s", storageType)
 
 	switch storageType {
 	case "local":
-		AppStorage = newLocalStorage(cfg.Server.StorageConfig.Local.Path)
-		log.Println("Successfully initialized Local storage.")
+		AppStorage, err = newLocalStorage(cfg.Server.StorageConfig.Local.Path)
+		if err != nil {
+			log.Println("failed initialized Local storage.")
+		} else {
+			log.Println("successfully initialized Local storage.")
+		}
 	case "minio":
 		initMinioClient()
 		AppStorage = newMinioStorage()

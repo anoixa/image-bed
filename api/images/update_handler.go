@@ -60,7 +60,10 @@ func UploadImageHandler(context *gin.Context) {
 		log.Printf("Duplicate image detected. Hash: %s, Identifier: %s", fileHash, image.Identifier)
 		fullURL := buildImageURL(image.Identifier)
 		common.RespondSuccessMessage(context, "Image already exists", gin.H{
-			"url": fullURL,
+			"identifier":    image.Identifier,
+			"original_name": image.OriginalName,
+			"file_size":     image.FileSize,
+			"url":           fullURL,
 		})
 		return
 	}
@@ -95,14 +98,22 @@ func UploadImageHandler(context *gin.Context) {
 
 	if err := images.SaveImage(&newImage); err != nil {
 		log.Printf("Failed to create image record in database: %v", err)
-		// TODO 回滚
+
+		log.Printf("Attempting to delete orphaned file from storage: %s", identifier)
+		if delErr := storage.AppStorage.Delete(identifier); delErr != nil {
+			log.Printf("CRITICAL: Failed to delete orphaned file '%s' after db error. Manual cleanup may be required. Delete error: %v", identifier, delErr)
+		}
+
 		common.RespondError(context, http.StatusInternalServerError, "Failed to save image metadata")
 		return
 	}
 
 	fullURL := buildImageURL(newImage.Identifier)
 	common.RespondSuccessMessage(context, "Image uploaded successfully", gin.H{
-		"url": fullURL,
+		"identifier":    newImage.Identifier,
+		"original_name": newImage.OriginalName,
+		"file_size":     newImage.FileSize,
+		"url":           fullURL,
 	})
 }
 
