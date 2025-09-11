@@ -5,24 +5,42 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // localStorage 本地文件存储。
 type localStorage struct {
-	basePath string
+	absBasePath string
 }
 
-// newLocalStorage
-func newLocalStorage(basePath string) *localStorage {
-	if err := os.MkdirAll(basePath, os.ModePerm); err != nil {
-		panic(fmt.Sprintf("failed to create local storage directory '%s': %v", basePath, err))
+// newLocalStorage 创建储存路径
+func newLocalStorage(basePath string) (*localStorage, error) {
+	absPath, err := filepath.Abs(basePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get absolute path for '%s': %w", basePath, err)
 	}
-	return &localStorage{basePath: basePath}
+
+	if err := os.MkdirAll(absPath, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create local storage directory '%s': %w", absPath, err)
+	}
+
+	return &localStorage{
+		absBasePath: absPath + string(os.PathSeparator),
+	}, nil
 }
 
-// Save
+// Save 保存文件
 func (s *localStorage) Save(identifier string, file io.Reader) error {
-	dstPath := filepath.Join(s.basePath, identifier)
+	if !isValidIdentifier(identifier) {
+		return fmt.Errorf("invalid file identifier: %s", identifier)
+	}
+
+	dstPath := filepath.Join(s.absBasePath, identifier)
+
+	// 确保最终路径在 basePath
+	if !strings.HasPrefix(dstPath, s.absBasePath) {
+		return fmt.Errorf("invalid file path, potential directory traversal: %s", identifier)
+	}
 
 	dst, err := os.Create(dstPath)
 	if err != nil {
@@ -38,9 +56,18 @@ func (s *localStorage) Save(identifier string, file io.Reader) error {
 	return nil
 }
 
-// Get Get image
+// Get 取得文件
 func (s *localStorage) Get(identifier string) (io.ReadCloser, error) {
-	fullPath := filepath.Join(s.basePath, identifier)
+	if !isValidIdentifier(identifier) {
+		return nil, fmt.Errorf("invalid file identifier: %s", identifier)
+	}
+
+	fullPath := filepath.Join(s.absBasePath, identifier)
+
+	// 确保路径未越界
+	if !strings.HasPrefix(fullPath, s.absBasePath) {
+		return nil, fmt.Errorf("invalid file path, potential directory traversal: %s", identifier)
+	}
 
 	file, err := os.Open(fullPath)
 	if err != nil {
@@ -53,9 +80,18 @@ func (s *localStorage) Get(identifier string) (io.ReadCloser, error) {
 	return file, nil
 }
 
-// Delete
+// Delete 删除文件
 func (s *localStorage) Delete(identifier string) error {
-	fullPath := filepath.Join(s.basePath, identifier)
+	if !isValidIdentifier(identifier) {
+		return fmt.Errorf("invalid file identifier: %s", identifier)
+	}
+
+	fullPath := filepath.Join(s.absBasePath, identifier)
+
+	// 确保路径不越界
+	if !strings.HasPrefix(fullPath, s.absBasePath) {
+		return fmt.Errorf("invalid file path: %s", identifier)
+	}
 
 	err := os.Remove(fullPath)
 	if err != nil {
@@ -66,4 +102,27 @@ func (s *localStorage) Delete(identifier string) error {
 	}
 
 	return nil
+}
+
+// isValidIdentifier 校验 identifier 是否合法
+func isValidIdentifier(identifier string) bool {
+	if filepath.IsAbs(identifier) {
+		return false
+	}
+	if strings.Contains(identifier, "..") {
+		return false
+	}
+	if identifier == "" {
+		return false
+	}
+	// 严格限制字符集：只允许字母、数字、横线、下划线
+	for _, r := range identifier {
+		if !((r >= 'a' && r <= 'z') ||
+			(r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') ||
+			r == '-' || r == '_') {
+			return false
+		}
+	}
+	return true
 }

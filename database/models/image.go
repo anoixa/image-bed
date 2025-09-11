@@ -4,16 +4,16 @@ import "gorm.io/gorm"
 
 type Image struct {
 	gorm.Model
-	Identifier    string `gorm:"unique;not null"`
+	Identifier    string `gorm:"uniqueIndex:idx_identifier;not null"`
 	OriginalName  string `gorm:"not null"`
 	FileSize      int64  `gorm:"not null"`
 	MimeType      string `gorm:"not null"`
 	StorageDriver string `gorm:"not null"`
 
-	FileHash string `gorm:"unique;not null"`
+	FileHash string `gorm:"uniqueIndex:idx_filehash;not null"`
 	Width    int
 	Height   int
 
-	UserID uint
+	UserID uint `gorm:"index:idx_user_deleted"`
 	User   User `gorm:"foreignKey:UserID"`
 }

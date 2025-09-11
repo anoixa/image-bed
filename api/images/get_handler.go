@@ -6,6 +6,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
+	"path/filepath"
+	"regexp"
 	"strconv"
 
 	"github.com/anoixa/image-bed/api/common"
@@ -44,8 +47,15 @@ func GetImageHandler(context *gin.Context) {
 	defer imageStream.Close()
 
 	if _, ok := context.GetQuery("download"); ok {
+		safeName := sanitizeFilename(image.OriginalName)
+
 		// 触发浏览器下载
-		context.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", image.OriginalName))
+		contentDisposition := fmt.Sprintf("attachment; filename=\"%s\"; filename*=UTF-8''%s",
+			safeName,
+			url.PathEscape(safeName),
+		)
+
+		context.Header("Content-Disposition", contentDisposition)
 	}
 
 	context.Header("Content-Type", image.MimeType)
@@ -56,4 +66,16 @@ func GetImageHandler(context *gin.Context) {
 	if err != nil {
 		log.Printf("Failed to stream image to client: %v", err)
 	}
+}
+
+func sanitizeFilename(name string) string {
+	name = filepath.Base(name)
+
+	re := regexp.MustCompile(`[^\w\-.]`)
+	safe := re.ReplaceAllString(name, "_")
+
+	if safe == "" {
+		safe = "file"
+	}
+	return safe
 }
