@@ -19,6 +19,15 @@ server:
       secret_access_key:
       use_ssl: false
       bucket_name:
+  cache:
+    provider: "memory"
+    redis:
+      address: "localhost:6379"
+      password: ""
+      db: 0
+    Memory:
+      default_expiration: "30m"
+      cleanup_interval: "10m"
   jwt:
     secret: ""
     expires_in: "30m"

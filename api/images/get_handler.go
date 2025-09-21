@@ -12,7 +12,9 @@ import (
 	"strconv"
 
 	"github.com/anoixa/image-bed/api/common"
+	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/database/images"
+	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -26,16 +28,27 @@ func GetImageHandler(context *gin.Context) {
 		return
 	}
 
-	// 查询元数据
-	image, err := images.GetImageByIdentifier(identifier)
+	// 尝试从缓存中获取元数据
+	var image models.Image
+	err := cache.GetCachedImage(identifier, &image)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			common.RespondError(context, http.StatusNotFound, "Image not found")
-		} else {
-			log.Printf("Database error when fetching identifier '%s': %v", identifier, err)
-			common.RespondError(context, http.StatusInternalServerError, "Error retrieving image information")
+		// 缓存未命中
+		imagePtr, err := images.GetImageByIdentifier(identifier)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				common.RespondError(context, http.StatusNotFound, "Image not found")
+			} else {
+				log.Printf("Database error when fetching identifier '%s': %v", identifier, err)
+				common.RespondError(context, http.StatusInternalServerError, "Error retrieving image information")
+			}
+			return
 		}
-		return
+		image = *imagePtr
+
+		// 图片元数据缓存
+		if cacheErr := cache.CacheImage(&image); cacheErr != nil {
+			log.Printf("Failed to cache image metadata: %v", cacheErr)
+		}
 	}
 
 	storageClient, err := storage.GetStorage(image.StorageDriver)

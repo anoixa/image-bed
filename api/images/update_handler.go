@@ -14,6 +14,7 @@ import (
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
+	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/images"
 	"github.com/anoixa/image-bed/database/models"
@@ -73,6 +74,12 @@ func UploadImageHandler(context *gin.Context) {
 	if err == nil {
 		log.Printf("Duplicate image detected. Hash: %s, Identifier: %s", fileHash, image.Identifier)
 		fullURL := buildImageURL(image.Identifier)
+
+		// 缓存图片元数据
+		if cacheErr := cache.CacheImage(image); cacheErr != nil {
+			log.Printf("Failed to cache image metadata: %v", cacheErr)
+		}
+
 		common.RespondSuccessMessage(context, "Image already exists", gin.H{
 			"identifier":    image.Identifier,
 			"original_name": image.OriginalName,
@@ -120,6 +127,11 @@ func UploadImageHandler(context *gin.Context) {
 
 		common.RespondError(context, http.StatusInternalServerError, "Failed to save image metadata")
 		return
+	}
+
+	// 缓存图片元数据
+	if cacheErr := cache.CacheImage(&newImage); cacheErr != nil {
+		log.Printf("Failed to cache image metadata: %v", cacheErr)
 	}
 
 	fullURL := buildImageURL(newImage.Identifier)
