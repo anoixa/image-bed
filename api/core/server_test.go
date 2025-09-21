@@ -14,7 +14,7 @@ func TestHealthCheck(t *testing.T) {
 
 	router := gin.New()
 	router.GET("/health", func(c *gin.Context) {
-		c.Status(http.StatusOK)
+		c.String(http.StatusOK, "OK")
 	})
 
 	req, _ := http.NewRequest("GET", "/health", nil)

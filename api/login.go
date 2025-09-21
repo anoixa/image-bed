@@ -2,12 +2,13 @@ package api
 
 import (
 	"fmt"
-	"github.com/anoixa/image-bed/config"
 	"log"
 	"net/http"
 	"time"
 
 	"github.com/anoixa/image-bed/api/common"
+	"github.com/anoixa/image-bed/cache"
+	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/accounts"
 	"github.com/anoixa/image-bed/database/models"
 	cryptopackage "github.com/anoixa/image-bed/utils/crypto"
@@ -34,6 +35,7 @@ func LoginHandler(context *gin.Context) {
 	var req userAuthRequestBody
 	if err := context.ShouldBindJSON(&req); err != nil {
 		common.RespondError(context, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	// 验证用户凭据
@@ -46,6 +48,11 @@ func LoginHandler(context *gin.Context) {
 	if !valid {
 		common.RespondError(context, http.StatusUnauthorized, "Invalid credentials")
 		return
+	}
+
+	// 缓存用户信息
+	if cacheErr := cache.CacheUser(user); cacheErr != nil {
+		log.Printf("Failed to cache user: %v", cacheErr)
 	}
 
 	// 生成 JWT access tokens

@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/spf13/viper"
 )
@@ -26,6 +27,7 @@ type ServerConfig struct {
 	Jwt            Jwt            `mapstructure:"jwt"`
 	DatabaseConfig DatabaseConfig `mapstructure:"database"`
 	StorageConfig  StorageConfig  `mapstructure:"storage"`
+	CacheConfig    CacheConfig    `mapstructure:"cache"`
 }
 
 type DatabaseConfig struct {
@@ -63,6 +65,23 @@ type LocalStorageConfig struct {
 	Path string `mapstructure:"path"` // 本地文件存储路径
 }
 
+type CacheConfig struct {
+	Provider string        `mapstructure:"provider"`
+	Redis    RedisConfig   `mapstructure:"redis"`
+	Memory   GoCacheConfig `mapstructure:"memory"`
+}
+
+type RedisConfig struct {
+	Address  string `mapstructure:"address"`
+	Password string `mapstructure:"password"`
+	DB       int    `mapstructure:"db"`
+}
+
+type GoCacheConfig struct {
+	DefaultExpiration time.Duration `mapstructure:"default_expiration"`
+	CleanupInterval   time.Duration `mapstructure:"cleanup_interval"`
+}
+
 // InitConfig Initialize configuration
 func InitConfig() {
 	once.Do(func() {
@@ -80,6 +99,10 @@ func loadConfig() {
 	viper.SetDefault("server.host", "127.0.0.1")
 	viper.SetDefault("server.port", 8080)
 	viper.SetDefault("server.storage.path", "./storage")
+	viper.SetDefault("server.cache.provider", "gocache")
+	// GoCache专属默认值
+	viper.SetDefault("server.cache.gocache.default_expiration", "30m")
+	viper.SetDefault("server.cache.gocache.cleanup_interval", "10m")
 
 	configFileFromFlag := viper.GetString("config_file_path")
 
@@ -122,10 +145,3 @@ func loadConfig() {
 		os.Exit(1)
 	}
 }
-
-//func (c *Config) ServerAddr() string {
-//	if c.Server.Host == "" {
-//		return fmt.Sprintf(":%d", c.Server.Port)
-//	}
-//	return fmt.Sprintf("%s:%d", c.Server.Host, c.Server.Port)
-//}

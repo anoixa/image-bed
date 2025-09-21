@@ -12,6 +12,7 @@ import (
 
 	"github.com/anoixa/image-bed/api"
 	"github.com/anoixa/image-bed/api/core"
+	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/accounts"
 	"github.com/anoixa/image-bed/database/dbcore"
@@ -42,9 +43,10 @@ func RunServer() {
 		log.Fatalf("Failed to create data directory: %v", err)
 	}
 
-	// 初始化db, jwt, storage
+	// 初始化db, jwt, storage, cache
 	InitDatabase(cfg)
 	storage.InitStorage(cfg)
+	cache.InitCache(cfg)
 	if err := api.TokenInit(cfg.Server.Jwt.Secret, cfg.Server.Jwt.ExpiresIn, cfg.Server.Jwt.RefreshExpiresIn); err != nil {
 		log.Fatalf("Failed to initialize JWT %s", err)
 	}
@@ -72,6 +74,9 @@ func RunServer() {
 		cleanup()
 		log.Println("Cleanup tasks finished.")
 	}
+
+	// 关闭缓存
+	cache.CloseCache()
 
 	if err := server.Shutdown(ctx); err != nil {
 		log.Fatalf("Server forced to shutdown: %v", err)

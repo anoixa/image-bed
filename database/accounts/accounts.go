@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/anoixa/image-bed/cache"
+	"github.com/anoixa/image-bed/cache/types"
 	"github.com/anoixa/image-bed/database/dbcore"
 	"github.com/anoixa/image-bed/database/models"
 	cryptopackage "github.com/anoixa/image-bed/utils/crypto"
@@ -70,10 +72,21 @@ func GetUserByUsername(username string) (*models.User, error) {
 
 // GetUserByUserID Get User by id
 func GetUserByUserID(id uint) (*models.User, error) {
-	db := dbcore.GetDBInstance()
+	// 首先尝试从缓存中获取用户信息
 	var user models.User
+	err := cache.GetCachedUser(id, &user)
+	if err == nil {
+		// 缓存命中
+		return &user, nil
+	} else if !types.IsCacheMiss(err) {
+		// 如果是其他错误，记录并继续从数据库查询
+		log.Printf("Cache error when getting user by ID %d: %v", id, err)
+	}
 
-	err := db.Where("id = ?", id).First(&user).Error
+	db := dbcore.GetDBInstance()
+	var dbUser models.User
+
+	err = db.Where("id = ?", id).First(&dbUser).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
@@ -81,5 +94,10 @@ func GetUserByUserID(id uint) (*models.User, error) {
 		return nil, err
 	}
 
-	return &user, nil
+	// 将用户信息缓存起来
+	if cacheErr := cache.CacheUser(&dbUser); cacheErr != nil {
+		log.Printf("Failed to cache user: %v", cacheErr)
+	}
+
+	return &dbUser, nil
 }
