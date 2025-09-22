@@ -98,11 +98,12 @@ func loadConfig() {
 	// 默认值
 	viper.SetDefault("server.host", "127.0.0.1")
 	viper.SetDefault("server.port", 8080)
-	viper.SetDefault("server.storage.path", "./storage")
-	viper.SetDefault("server.cache.provider", "gocache")
+	viper.SetDefault("server.storage.type", "local")
+	viper.SetDefault("server.storage.local.path", "data/upload")
+	viper.SetDefault("server.cache.provider", "memory")
 	// GoCache专属默认值
-	viper.SetDefault("server.cache.gocache.default_expiration", "30m")
-	viper.SetDefault("server.cache.gocache.cleanup_interval", "10m")
+	viper.SetDefault("server.cache.memory.default_expiration", "30m")
+	viper.SetDefault("server.cache.memory.cleanup_interval", "10m")
 
 	configFileFromFlag := viper.GetString("config_file_path")
 

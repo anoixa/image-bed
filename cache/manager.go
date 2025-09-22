@@ -45,7 +45,7 @@ func NewManager(config Config) (*Manager, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize redis provider: %w", err)
 		}
-	case "gocache":
+	case "memory":
 		provider = gocache.NewGoCache(config.GoCache.DefaultExpiration, config.GoCache.CleanupInterval)
 	default:
 		return nil, fmt.Errorf("unsupported cache provider: %s", config.Provider)

@@ -7,9 +7,13 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"sync"
+	"syscall"
+	"time"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/cache"
@@ -17,10 +21,19 @@ import (
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/gin-gonic/gin"
+	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 )
 
-// GetImageHandler serves an image file by first retrieving its metadata from the database,
+var imageGroup singleflight.Group
+
+var bufPool = sync.Pool{
+	New: func() interface{} {
+		return make([]byte, 32*1024) // 32KB
+	},
+}
+
+// GetImageHandler serves an image file by first retrieving its metadata from the database
 func GetImageHandler(context *gin.Context) {
 	identifier := context.Param("identifier")
 	if identifier == "" {
@@ -28,12 +41,22 @@ func GetImageHandler(context *gin.Context) {
 		return
 	}
 
-	// 尝试从缓存中获取元数据
 	var image models.Image
 	err := cache.GetCachedImage(identifier, &image)
 	if err != nil {
 		// 缓存未命中
-		imagePtr, err := images.GetImageByIdentifier(identifier)
+		val, err, _ := imageGroup.Do(identifier, func() (interface{}, error) {
+			imagePtr, err := images.GetImageByIdentifier(identifier)
+			if err != nil {
+				return nil, err
+			}
+			// 回写缓存
+			if cacheErr := cache.CacheImage(imagePtr); cacheErr != nil {
+				log.Printf("Failed to cache image metadata: %v", cacheErr)
+			}
+			return imagePtr, nil
+		})
+
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				common.RespondError(context, http.StatusNotFound, "Image not found")
@@ -43,12 +66,7 @@ func GetImageHandler(context *gin.Context) {
 			}
 			return
 		}
-		image = *imagePtr
-
-		// 图片元数据缓存
-		if cacheErr := cache.CacheImage(&image); cacheErr != nil {
-			log.Printf("Failed to cache image metadata: %v", cacheErr)
-		}
+		image = *(val.(*models.Image))
 	}
 
 	storageClient, err := storage.GetStorage(image.StorageDriver)
@@ -65,36 +83,55 @@ func GetImageHandler(context *gin.Context) {
 	}
 	defer imageStream.Close()
 
+	// 下载模式
 	if _, ok := context.GetQuery("download"); ok {
 		safeName := sanitizeFilename(image.OriginalName)
-
-		// 触发浏览器下载
-		contentDisposition := fmt.Sprintf("attachment; filename=\"%s\"; filename*=UTF-8''%s",
-			safeName,
-			url.PathEscape(safeName),
+		contentDisposition := fmt.Sprintf(
+			"attachment; filename=\"%s\"; filename*=UTF-8''%s", safeName, url.PathEscape(safeName),
 		)
-
 		context.Header("Content-Disposition", contentDisposition)
 	}
 
+	// 设置响应头
 	context.Header("Content-Type", image.MimeType)
 	context.Header("Content-Length", strconv.FormatInt(image.FileSize, 10))
-	context.Header("Cache-Control", "public, max-age=2592000") // 缓存30天
+	context.Header("Cache-Control", "public, max-age=2592000, immutable")
 
-	_, err = io.Copy(context.Writer, imageStream)
-	if err != nil {
+	// ETag
+	etag := fmt.Sprintf(`"%d-%s"`, image.FileSize, identifier)
+	context.Header("ETag", etag)
+	if match := context.GetHeader("If-None-Match"); match == etag {
+		context.Status(http.StatusNotModified)
+		return
+	}
+
+	seeker, ok := imageStream.(io.ReadSeeker)
+	if ok {
+		context.Header("Accept-Ranges", "bytes")
+		http.ServeContent(context.Writer, context.Request, image.OriginalName, time.Now(), seeker)
+		return
+	}
+
+	buf := bufPool.Get().([]byte)
+	defer bufPool.Put(buf)
+
+	_, err = io.CopyBuffer(context.Writer, imageStream, buf)
+	if err != nil && !isBrokenPipe(err) {
 		log.Printf("Failed to stream image to client: %v", err)
 	}
 }
 
 func sanitizeFilename(name string) string {
 	name = filepath.Base(name)
-
 	re := regexp.MustCompile(`[^\w\-.]`)
 	safe := re.ReplaceAllString(name, "_")
-
 	if safe == "" {
 		safe = "file"
 	}
 	return safe
+}
+
+func isBrokenPipe(err error) bool {
+	return err != nil && (errors.Is(err, io.ErrClosedPipe) || errors.Is(err, os.ErrClosed) ||
+		errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET))
 }
