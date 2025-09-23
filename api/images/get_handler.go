@@ -51,9 +51,17 @@ func GetImageHandler(context *gin.Context) {
 				return nil, err
 			}
 			// 回写缓存
-			if cacheErr := cache.CacheImage(imagePtr); cacheErr != nil {
-				log.Printf("Failed to cache image metadata: %v", cacheErr)
-			}
+			go func(imagePtr *models.Image) {
+				for i := 0; i < 3; i++ {
+					if cacheErr := cache.CacheImage(imagePtr); cacheErr == nil {
+						break
+					} else {
+						log.Printf("Asynchronous cache image failed (attempt %d): %v", i+1, cacheErr)
+						time.Sleep(time.Second * time.Duration(i+1))
+					}
+				}
+			}(imagePtr)
+
 			return imagePtr, nil
 		})
 
@@ -102,12 +110,14 @@ func GetImageHandler(context *gin.Context) {
 	context.Header("Cache-Control", "public, max-age=2592000, immutable")
 
 	// ETag
-	etag := fmt.Sprintf(`"%d-%s"`, image.FileSize, identifier)
-	context.Header("ETag", etag)
-	if match := context.GetHeader("If-None-Match"); match == etag {
-		context.Status(http.StatusNotModified)
-		return
-	}
+	//etag := fmt.Sprintf(`"%d-%s"`, image.FileSize, identifier)
+	//context.Header("ETag", etag)
+	//if match := context.GetHeader("If-None-Match"); match == etag {
+	//	context.Status(http.StatusNotModified)
+	//	return
+	//}
+	lastModified := image.UpdatedAt.UTC().Format(http.TimeFormat)
+	context.Header("Last-Modified", lastModified)
 
 	seeker, ok := imageStream.(io.ReadSeeker)
 	if ok {

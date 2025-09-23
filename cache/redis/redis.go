@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/anoixa/image-bed/cache/types"
+	"github.com/anoixa/image-bed/config"
 	"github.com/go-redis/redis/v8"
 )
 
@@ -17,10 +18,38 @@ type Redis struct {
 
 // NewRedis 创建一个新的Redis实例
 func NewRedis(addr, password string, db int) (types.Cache, error) {
+	// 获取配置
+	cfg := config.Get()
+
+	// 解析时间配置
+	var maxConnAge, poolTimeout, idleTimeout, idleCheckFrequency time.Duration
+
+	if cfg.Server.CacheConfig.Redis.MaxConnAge != "" {
+		maxConnAge, _ = time.ParseDuration(cfg.Server.CacheConfig.Redis.MaxConnAge)
+	}
+
+	if cfg.Server.CacheConfig.Redis.PoolTimeout != "" {
+		poolTimeout, _ = time.ParseDuration(cfg.Server.CacheConfig.Redis.PoolTimeout)
+	}
+
+	if cfg.Server.CacheConfig.Redis.IdleTimeout != "" {
+		idleTimeout, _ = time.ParseDuration(cfg.Server.CacheConfig.Redis.IdleTimeout)
+	}
+
+	if cfg.Server.CacheConfig.Redis.IdleCheckFrequency != "" {
+		idleCheckFrequency, _ = time.ParseDuration(cfg.Server.CacheConfig.Redis.IdleCheckFrequency)
+	}
+
 	client := redis.NewClient(&redis.Options{
-		Addr:     addr,
-		Password: password,
-		DB:       db,
+		Addr:               addr,
+		Password:           password,
+		DB:                 db,
+		PoolSize:           cfg.Server.CacheConfig.Redis.PoolSize,
+		MinIdleConns:       cfg.Server.CacheConfig.Redis.MinIdleConns,
+		MaxConnAge:         maxConnAge,
+		PoolTimeout:        poolTimeout,
+		IdleTimeout:        idleTimeout,
+		IdleCheckFrequency: idleCheckFrequency,
 	})
 
 	// 测试连接

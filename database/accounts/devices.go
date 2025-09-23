@@ -3,6 +3,7 @@ package accounts
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 
@@ -10,8 +11,11 @@ import (
 	"github.com/anoixa/image-bed/cache/types"
 	"github.com/anoixa/image-bed/database/dbcore"
 	"github.com/anoixa/image-bed/database/models"
+	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 )
+
+var deviceGroup singleflight.Group
 
 // CreateLoginDevice Create device record
 func CreateLoginDevice(userID uint, deviceID string, refreshToken string, refreshTokenExpiry time.Time) error {
@@ -60,23 +64,40 @@ func GetDeviceByRefreshTokenAndDeviceID(refreshToken string, deviceID string) (*
 		fmt.Printf("Cache error: %v\n", err)
 	}
 
-	db := dbcore.GetDBInstance()
-	var dbDevice models.Device
-	hasher := sha256.New()
-	hasher.Write([]byte(refreshToken))
-	hashedToken := hex.EncodeToString(hasher.Sum(nil))
+	// 使用singleflight防止缓存击穿
+	val, err, _ := deviceGroup.Do(fmt.Sprintf("device_%s", deviceID), func() (interface{}, error) {
+		db := dbcore.GetDBInstance()
+		var dbDevice models.Device
+		hasher := sha256.New()
+		hasher.Write([]byte(refreshToken))
+		hashedToken := hex.EncodeToString(hasher.Sum(nil))
 
-	err = db.Where("refresh_token = ? AND device_id = ?", hashedToken, deviceID).First(&dbDevice).Error
+		err = db.Where("refresh_token = ? AND device_id = ?", hashedToken, deviceID).First(&dbDevice).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				// 缓存空值防止缓存击穿
+				cacheKey := fmt.Sprintf("%s%s", cache.DeviceCachePrefix, deviceID)
+				if cacheErr := cache.CacheEmptyValue(cacheKey); cacheErr != nil {
+					fmt.Printf("Failed to cache empty device: %v\n", cacheErr)
+				}
+				return nil, nil
+			}
+			return nil, err
+		}
+
+		// 缓存设备信息
+		if cacheErr := cache.CacheDevice(&dbDevice); cacheErr != nil {
+			fmt.Printf("Failed to cache device: %v\n", cacheErr)
+		}
+
+		return &dbDevice, nil
+	})
+
 	if err != nil {
 		return nil, err
 	}
 
-	// 缓存设备信息缓存
-	if cacheErr := cache.CacheDevice(&dbDevice); cacheErr != nil {
-		fmt.Printf("Failed to cache device: %v\n", cacheErr)
-	}
-
-	return &dbDevice, nil
+	return val.(*models.Device), nil
 }
 
 func DeleteRefreshToken(device *models.Device) error {

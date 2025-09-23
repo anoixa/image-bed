@@ -10,8 +10,11 @@ import (
 	"github.com/anoixa/image-bed/database/dbcore"
 	"github.com/anoixa/image-bed/database/models"
 	cryptopackage "github.com/anoixa/image-bed/utils/crypto"
+	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 )
+
+var userGroup singleflight.Group
 
 // CreateDefaultAdminUser Create default administrator user
 func CreateDefaultAdminUser() {
@@ -83,21 +86,38 @@ func GetUserByUserID(id uint) (*models.User, error) {
 		log.Printf("Cache error when getting user by ID %d: %v", id, err)
 	}
 
-	db := dbcore.GetDBInstance()
-	var dbUser models.User
+	val, err, _ := userGroup.Do(fmt.Sprintf("user_%d", id), func() (interface{}, error) {
+		db := dbcore.GetDBInstance()
+		var dbUser models.User
 
-	err = db.Where("id = ?", id).First(&dbUser).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
+		err = db.Where("id = ?", id).First(&dbUser).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				// 缓存空值
+				cacheKey := fmt.Sprintf("%s%d", cache.UserCachePrefix, id)
+				if cacheErr := cache.CacheEmptyValue(cacheKey); cacheErr != nil {
+					log.Printf("Failed to cache empty user: %v", cacheErr)
+				}
+				return nil, nil
+			}
+			return nil, err
 		}
+
+		// 将用户信息缓存起来
+		if cacheErr := cache.CacheUser(&dbUser); cacheErr != nil {
+			log.Printf("Failed to cache user: %v", cacheErr)
+		}
+
+		return &dbUser, nil
+	})
+
+	if err != nil {
 		return nil, err
 	}
 
-	// 将用户信息缓存起来
-	if cacheErr := cache.CacheUser(&dbUser); cacheErr != nil {
-		log.Printf("Failed to cache user: %v", cacheErr)
+	if val == nil {
+		return nil, nil
 	}
 
-	return &dbUser, nil
+	return val.(*models.User), nil
 }

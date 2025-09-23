@@ -81,6 +81,14 @@ type RedisConfig struct {
 	Address  string `mapstructure:"address"`
 	Password string `mapstructure:"password"`
 	DB       int    `mapstructure:"db"`
+
+	// 连接池配置
+	PoolSize           int    `mapstructure:"pool_size"`
+	MinIdleConns       int    `mapstructure:"min_idle_conns"`
+	MaxConnAge         string `mapstructure:"max_conn_age"`
+	PoolTimeout        string `mapstructure:"pool_timeout"`
+	IdleTimeout        string `mapstructure:"idle_timeout"`
+	IdleCheckFrequency string `mapstructure:"idle_check_frequency"`
 }
 
 type GoCacheConfig struct {
@@ -114,6 +122,14 @@ func loadConfig() {
 	// GoCache专属默认值
 	viper.SetDefault("server.cache.memory.default_expiration", "30m")
 	viper.SetDefault("server.cache.memory.cleanup_interval", "10m")
+
+	// Redis专属默认值
+	viper.SetDefault("server.cache.redis.pool_size", 10)
+	viper.SetDefault("server.cache.redis.min_idle_conns", 5)
+	viper.SetDefault("server.cache.redis.max_conn_age", "30m")
+	viper.SetDefault("server.cache.redis.pool_timeout", "30s")
+	viper.SetDefault("server.cache.redis.idle_timeout", "10m")
+	viper.SetDefault("server.cache.redis.idle_check_frequency", "1m")
 
 	configFileFromFlag := viper.GetString("config_file_path")
 
