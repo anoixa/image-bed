@@ -57,7 +57,7 @@ func (s *localStorage) Save(identifier string, file io.Reader) error {
 }
 
 // Get 取得文件
-func (s *localStorage) Get(identifier string) (io.ReadCloser, error) {
+func (s *localStorage) Get(identifier string) (io.ReadSeeker, error) {
 	if !isValidIdentifier(identifier) {
 		return nil, fmt.Errorf("invalid file identifier: %s", identifier)
 	}

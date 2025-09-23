@@ -59,6 +59,12 @@ type MinioConfig struct {
 	SecretAccessKey string `mapstructure:"secret_access_key"`
 	UseSSL          bool   `mapstructure:"use_ssl"`
 	BucketName      string `mapstructure:"bucket_name"`
+
+	// 连接池配置
+	MaxIdleConns        int    `mapstructure:"max_idle_conns"`
+	MaxIdleConnsPerHost int    `mapstructure:"max_idle_conns_per_host"`
+	IdleConnTimeout     string `mapstructure:"idle_conn_timeout"`
+	TLSHandshakeTimeout string `mapstructure:"tls_handshake_timeout"`
 }
 
 type LocalStorageConfig struct {
@@ -100,6 +106,10 @@ func loadConfig() {
 	viper.SetDefault("server.port", 8080)
 	viper.SetDefault("server.storage.type", "local")
 	viper.SetDefault("server.storage.local.path", "data/upload")
+	viper.SetDefault("server.storage.minio.max_idle_conns", 256)
+	viper.SetDefault("server.storage.minio.max_idle_conns_per_host", 16)
+	viper.SetDefault("server.storage.minio.idle_conn_timeout", "60s")
+	viper.SetDefault("server.storage.minio.tls_handshake_timeout", "10s")
 	viper.SetDefault("server.cache.provider", "memory")
 	// GoCache专属默认值
 	viper.SetDefault("server.cache.memory.default_expiration", "30m")

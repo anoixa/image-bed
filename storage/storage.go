@@ -12,14 +12,14 @@ var storageClients = make(map[string]Storage)
 var defaultStorageType string
 
 type ImageStream struct {
-	Reader      io.ReadCloser
+	Reader      io.ReadSeeker
 	ContentType string
 	Size        int64
 }
 
 type Storage interface {
 	Save(identifier string, file io.Reader) error
-	Get(identifier string) (io.ReadCloser, error)
+	Get(identifier string) (io.ReadSeeker, error)
 	Delete(identifier string) error
 }
 
