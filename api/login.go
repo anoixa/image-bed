@@ -51,9 +51,16 @@ func LoginHandler(context *gin.Context) {
 	}
 
 	// 缓存用户信息
-	if cacheErr := cache.CacheUser(user); cacheErr != nil {
-		log.Printf("Failed to cache user: %v", cacheErr)
-	}
+	go func(user *models.User) {
+		for i := 0; i < 3; i++ {
+			if cacheErr := cache.CacheUser(user); cacheErr == nil {
+				break
+			} else {
+				log.Printf("Asynchronous cache user failed (attempt %d): %v", i+1, cacheErr)
+				time.Sleep(time.Second * time.Duration(i+1))
+			}
+		}
+	}(user)
 
 	// 生成 JWT access tokens
 	accessToken, accessTokenExpiry, err := GenerateTokens(user.Username, user.ID)

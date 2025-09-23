@@ -206,8 +206,13 @@ func processAndSaveImage(userID uint, fileHeader *multipart.FileHeader, storageC
 	if err == nil {
 		log.Printf("Duplicate image detected. Hash: %s, Identifier: %s", fileHash, image.Identifier)
 		go func() {
-			if cacheErr := cache.CacheImage(image); cacheErr != nil {
-				log.Printf("Failed to cache existing image metadata: %v", cacheErr)
+			for i := 0; i < 3; i++ {
+				if cacheErr := cache.CacheImage(image); cacheErr == nil {
+					break
+				} else {
+					log.Printf("Failed to cache existing image metadata (attempt %d): %v", i+1, cacheErr)
+					time.Sleep(time.Second * time.Duration(i+1))
+				}
 			}
 		}()
 		return image, true, nil
@@ -252,8 +257,13 @@ func processAndSaveImage(userID uint, fileHeader *multipart.FileHeader, storageC
 	}
 
 	go func() {
-		if cacheErr := cache.CacheImage(newImage); cacheErr != nil {
-			log.Printf("Failed to cache new image metadata: %v", cacheErr)
+		for i := 0; i < 3; i++ {
+			if cacheErr := cache.CacheImage(newImage); cacheErr == nil {
+				break
+			} else {
+				log.Printf("Failed to cache new image metadata (attempt %d): %v", i+1, cacheErr)
+				time.Sleep(time.Second * time.Duration(i+1))
+			}
 		}
 	}()
 
