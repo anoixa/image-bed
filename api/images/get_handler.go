@@ -81,7 +81,11 @@ func GetImageHandler(context *gin.Context) {
 		common.RespondError(context, http.StatusNotFound, "Image file not found in storage")
 		return
 	}
-	defer imageStream.Close()
+
+	// 关闭流
+	if closer, ok := imageStream.(io.Closer); ok {
+		defer closer.Close()
+	}
 
 	// 下载模式
 	if _, ok := context.GetQuery("download"); ok {
