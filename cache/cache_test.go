@@ -73,7 +73,7 @@ func TestGoCache(t *testing.T) {
 func TestCacheManagerWithGoCache(t *testing.T) {
 	// 创建缓存管理器配置
 	config := Config{
-		Provider: "gocache",
+		Provider: "memory",
 		GoCache: GoCacheConfig{
 			DefaultExpiration: 5 * time.Second,
 			CleanupInterval:   1 * time.Second,
