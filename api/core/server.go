@@ -50,7 +50,7 @@ func setupRouter() (*gin.Engine, func()) {
 		})
 	})
 
-	router.GET("/images/:identifier", images.GetImageHandler)
+	router.GET("/images/:identifier", images.GetImageHandler) //GET /images/{photo}
 
 	apiGroup := router.Group("/api")
 	apiGroup.Use(func(c *gin.Context) { // 所有API禁止缓存
@@ -73,7 +73,8 @@ func setupRouter() (*gin.Engine, func()) {
 			imagesGroup := v1.Group("/images")
 			imagesGroup.Use(middleware.Authorize("jwt", "static_token"))
 			{
-				imagesGroup.POST("/upload", images.UploadImageHandler) // POST /api/v1/images/upload
+				imagesGroup.POST("/upload", images.UploadImageHandler)   // POST /api/v1/images/upload (single file)
+				imagesGroup.POST("/uploads", images.UploadImagesHandler) // POST /api/v1/images/uploads (multiple files)
 			}
 		}
 	}
