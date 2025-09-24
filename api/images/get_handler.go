@@ -110,20 +110,28 @@ func GetImageHandler(context *gin.Context) {
 	context.Header("Cache-Control", "public, max-age=2592000, immutable")
 
 	// ETag
-	//etag := fmt.Sprintf(`"%d-%s"`, image.FileSize, identifier)
-	//context.Header("ETag", etag)
-	//if match := context.GetHeader("If-None-Match"); match == etag {
-	//	context.Status(http.StatusNotModified)
-	//	return
-	//}
-	lastModified := image.UpdatedAt.UTC().Format(http.TimeFormat)
-	context.Header("Last-Modified", lastModified)
+	etag := fmt.Sprintf("W/\"%x\"", image.UpdatedAt.UnixNano())
+	context.Header("ETag", etag)
+	context.Header("Last-Modified", image.UpdatedAt.UTC().Format(http.TimeFormat))
 
 	seeker, ok := imageStream.(io.ReadSeeker)
 	if ok {
 		context.Header("Accept-Ranges", "bytes")
-		http.ServeContent(context.Writer, context.Request, image.OriginalName, time.Now(), seeker)
+		http.ServeContent(context.Writer, context.Request, image.OriginalName, image.UpdatedAt, seeker)
 		return
+	}
+
+	if match := context.GetHeader("If-None-Match"); match == etag {
+		context.Status(http.StatusNotModified)
+		return
+	}
+	ifModifiedSince := context.GetHeader("If-Modified-Since")
+	if ifModifiedSince != "" {
+		t, err := time.Parse(http.TimeFormat, ifModifiedSince)
+		if err == nil && !image.UpdatedAt.After(t) {
+			context.Status(http.StatusNotModified)
+			return
+		}
 	}
 
 	buf := bufPool.Get().([]byte)

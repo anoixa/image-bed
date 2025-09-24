@@ -153,7 +153,6 @@ func ValidateStaticToken(tokenString string) (*models.User, error) {
 			return nil, errors.New("invalid static token")
 		}
 
-		// 异步缓存用户信息并添加重试机制
 		go func(user *models.User) {
 			for i := 0; i < 3; i++ {
 				if cacheErr := cache.CacheStaticToken(tokenString, user); cacheErr == nil {
