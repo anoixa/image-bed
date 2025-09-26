@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/anoixa/image-bed/cache/gocache"
 	"github.com/anoixa/image-bed/cache/redis"
+	"github.com/anoixa/image-bed/cache/ristretto"
 	"github.com/anoixa/image-bed/cache/types"
 )
 
@@ -16,9 +16,9 @@ type Manager struct {
 
 // Config 缓存配置
 type Config struct {
-	Provider string
-	Redis    RedisConfig
-	GoCache  GoCacheConfig
+	Provider  string
+	Redis     RedisConfig
+	Ristretto RistrettoConfig
 }
 
 // RedisConfig Redis配置
@@ -28,10 +28,12 @@ type RedisConfig struct {
 	DB       int
 }
 
-// GoCacheConfig GoCache配置
-type GoCacheConfig struct {
-	DefaultExpiration time.Duration
-	CleanupInterval   time.Duration
+// RistrettoConfig Ristretto配置
+type RistrettoConfig struct {
+	NumCounters int64
+	MaxCost     int64
+	BufferItems int64
+	Metrics     bool
 }
 
 // NewManager 创建一个新的缓存管理器
@@ -45,8 +47,18 @@ func NewManager(config Config) (*Manager, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize redis provider: %w", err)
 		}
-	case "memory":
-		provider = gocache.NewGoCache(config.GoCache.DefaultExpiration, config.GoCache.CleanupInterval)
+	case "memory", "ristretto":
+		ristrettoConfig := ristretto.Config{
+			NumCounters: config.Ristretto.NumCounters,
+			MaxCost:     config.Ristretto.MaxCost,
+			BufferItems: config.Ristretto.BufferItems,
+			Metrics:     config.Ristretto.Metrics,
+		}
+		var err error
+		provider, err = ristretto.NewRistretto(ristrettoConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize ristretto provider: %w", err)
+		}
 	default:
 		return nil, fmt.Errorf("unsupported cache provider: %s", config.Provider)
 	}

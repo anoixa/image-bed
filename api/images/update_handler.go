@@ -205,16 +205,11 @@ func processAndSaveImage(userID uint, fileHeader *multipart.FileHeader, storageC
 	image, err := images.GetImageByHash(fileHash)
 	if err == nil {
 		log.Printf("Duplicate image detected. Hash: %s, Identifier: %s", fileHash, image.Identifier)
-		go func() {
-			for i := 0; i < 3; i++ {
-				if cacheErr := cache.CacheImage(image); cacheErr == nil {
-					break
-				} else {
-					log.Printf("Failed to cache existing image metadata (attempt %d): %v", i+1, cacheErr)
-					time.Sleep(time.Second * time.Duration(i+1))
-				}
+		go func(img *models.Image) {
+			if cacheErr := cache.CacheImage(img); cacheErr != nil {
+				log.Printf("WARN: Failed to cache image metadata for '%s': %v", img.Identifier, cacheErr)
 			}
-		}()
+		}(image)
 		return image, true, nil
 	}
 
@@ -256,16 +251,11 @@ func processAndSaveImage(userID uint, fileHeader *multipart.FileHeader, storageC
 		return nil, false, errors.New("failed to save image metadata")
 	}
 
-	go func() {
-		for i := 0; i < 3; i++ {
-			if cacheErr := cache.CacheImage(newImage); cacheErr == nil {
-				break
-			} else {
-				log.Printf("Failed to cache new image metadata (attempt %d): %v", i+1, cacheErr)
-				time.Sleep(time.Second * time.Duration(i+1))
-			}
+	go func(imageToCache *models.Image) {
+		if err := cache.CacheImage(imageToCache); err != nil {
+			log.Printf("WARN: Failed to pre-warm cache for new image '%s': %v", imageToCache.Identifier, err)
 		}
-	}()
+	}(newImage)
 
 	return newImage, false, nil
 }

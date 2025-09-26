@@ -24,20 +24,24 @@ func InitCache(cfg *config.Config) {
 			Password: cfg.Server.CacheConfig.Redis.Password,
 			DB:       cfg.Server.CacheConfig.Redis.DB,
 		}
-	case "memory":
-		cacheConfig.GoCache = GoCacheConfig{
-			DefaultExpiration: cfg.Server.CacheConfig.Memory.DefaultExpiration,
-			CleanupInterval:   cfg.Server.CacheConfig.Memory.CleanupInterval,
+	case "memory", "ristretto":
+		cacheConfig.Ristretto = RistrettoConfig{
+			NumCounters: cfg.Server.CacheConfig.Ristretto.NumCounters,
+			MaxCost:     cfg.Server.CacheConfig.Ristretto.MaxCost,
+			BufferItems: cfg.Server.CacheConfig.Ristretto.BufferItems,
+			Metrics:     cfg.Server.CacheConfig.Ristretto.Metrics,
 		}
 	default:
-		// 使用默认（go-cache）
+		// 使用默认（ristretto）
 		if cacheConfig.Provider == "" {
 			cacheConfig.Provider = "memory"
-			cacheConfig.GoCache = GoCacheConfig{
-				DefaultExpiration: cfg.Server.CacheConfig.Memory.DefaultExpiration,
-				CleanupInterval:   cfg.Server.CacheConfig.Memory.CleanupInterval,
+			cacheConfig.Ristretto = RistrettoConfig{
+				NumCounters: cfg.Server.CacheConfig.Ristretto.NumCounters,
+				MaxCost:     cfg.Server.CacheConfig.Ristretto.MaxCost,
+				BufferItems: cfg.Server.CacheConfig.Ristretto.BufferItems,
+				Metrics:     cfg.Server.CacheConfig.Ristretto.Metrics,
 			}
-			log.Printf("Cache provider not specified, using default: gocache")
+			log.Printf("Cache provider not specified, using default: ristretto")
 		}
 	}
 

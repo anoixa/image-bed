@@ -73,16 +73,14 @@ func GetUserByUsername(username string) (*models.User, error) {
 	return &user, nil
 }
 
-// GetUserByUserID Get User by id
-func GetUserByUserID(id uint) (*models.User, error) {
-	// 首先尝试从缓存中获取用户信息
+// GetUserByUserIDWithCache Get User by id
+func GetUserByUserIDWithCache(id uint) (*models.User, error) {
 	var user models.User
 	err := cache.GetCachedUser(id, &user)
 	if err == nil {
 		// 缓存命中
 		return &user, nil
 	} else if !types.IsCacheMiss(err) {
-		// 如果是其他错误，记录并继续从数据库查询
 		log.Printf("Cache error when getting user by ID %d: %v", id, err)
 	}
 

@@ -23,6 +23,10 @@ func setupRouter() (*gin.Engine, func()) {
 
 	router := gin.New()
 
+	// 并发限制
+	concurrencyLimiter := middleware.NewConcurrencyLimiter(300)
+	router.Use(concurrencyLimiter.Middleware())
+
 	// 全局中间件
 	router.Use(gin.Logger())
 	router.Use(gin.Recovery())
@@ -50,7 +54,11 @@ func setupRouter() (*gin.Engine, func()) {
 		})
 	})
 
-	router.GET("/images/:identifier", images.GetImageHandler) //GET /images/{photo}
+	imagesGroup := router.Group("/images")
+	//imagesGroup.Use(generalRateLimiter.Middleware())
+	{
+		imagesGroup.GET("/:identifier", images.GetImageHandler) //GET /images/{photo}
+	}
 
 	apiGroup := router.Group("/api")
 	apiGroup.Use(func(c *gin.Context) { // 所有API禁止缓存
@@ -88,8 +96,11 @@ func StartServer() (*http.Server, func()) {
 	router, clean := setupRouter()
 
 	srv := &http.Server{
-		Addr:    cfg.Server.Addr,
-		Handler: router,
+		Addr:         cfg.Server.Addr,
+		Handler:      router,
+		ReadTimeout:  cfg.Server.ReadTimeout,
+		WriteTimeout: cfg.Server.WriteTimeout,
+		IdleTimeout:  cfg.Server.IdleTimeout,
 	}
 
 	return srv, clean

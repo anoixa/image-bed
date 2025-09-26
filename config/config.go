@@ -21,9 +21,13 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Addr           string         `mapstructure:"addr"`
-	Domain         string         `mapstructure:"domain"`
-	BaseURL        string         `mapstructure:"base_url"`
+	Addr         string        `mapstructure:"addr"`
+	Domain       string        `mapstructure:"domain"`
+	BaseURL      string        `mapstructure:"base_url"`
+	ReadTimeout  time.Duration `yaml:"readTimeout"`
+	WriteTimeout time.Duration `yaml:"writeTimeout"`
+	IdleTimeout  time.Duration `yaml:"idleTimeout"`
+
 	Jwt            Jwt            `mapstructure:"jwt"`
 	DatabaseConfig DatabaseConfig `mapstructure:"database"`
 	StorageConfig  StorageConfig  `mapstructure:"storage"`
@@ -72,9 +76,11 @@ type LocalStorageConfig struct {
 }
 
 type CacheConfig struct {
-	Provider string        `mapstructure:"provider"`
-	Redis    RedisConfig   `mapstructure:"redis"`
-	Memory   GoCacheConfig `mapstructure:"memory"`
+	Provider           string          `mapstructure:"provider"`
+	Redis              RedisConfig     `mapstructure:"redis"`
+	Ristretto          RistrettoConfig `mapstructure:"ristretto"`
+	MaxImageCacheSize  int64           `mapstructure:"max_image_cache_size"` // 最大图片缓存大小（字节），0表示无限制
+	EnableImageCaching bool            `mapstructure:"enable_image_caching"` // 是否启用图片缓存
 }
 
 type RedisConfig struct {
@@ -91,9 +97,11 @@ type RedisConfig struct {
 	IdleCheckFrequency string `mapstructure:"idle_check_frequency"`
 }
 
-type GoCacheConfig struct {
-	DefaultExpiration time.Duration `mapstructure:"default_expiration"`
-	CleanupInterval   time.Duration `mapstructure:"cleanup_interval"`
+type RistrettoConfig struct {
+	NumCounters int64 `mapstructure:"num_counters"`
+	MaxCost     int64 `mapstructure:"max_cost"`
+	BufferItems int64 `mapstructure:"buffer_items"`
+	Metrics     bool  `mapstructure:"metrics"`
 }
 
 // InitConfig Initialize configuration
@@ -112,6 +120,10 @@ func loadConfig() {
 	// 默认值
 	viper.SetDefault("server.host", "127.0.0.1")
 	viper.SetDefault("server.port", 8080)
+	viper.SetDefault("server.ReadTimeout", 15*time.Second)
+	viper.SetDefault("server.WriteTimeout", 30*time.Second)
+	viper.SetDefault("server.IdleTimeout", 120*time.Second)
+
 	viper.SetDefault("server.storage.type", "local")
 	viper.SetDefault("server.storage.local.path", "data/upload")
 	viper.SetDefault("server.storage.minio.max_idle_conns", 256)
@@ -119,11 +131,16 @@ func loadConfig() {
 	viper.SetDefault("server.storage.minio.idle_conn_timeout", "60s")
 	viper.SetDefault("server.storage.minio.tls_handshake_timeout", "10s")
 	viper.SetDefault("server.cache.provider", "memory")
-	// GoCache专属默认值
-	viper.SetDefault("server.cache.memory.default_expiration", "30m")
-	viper.SetDefault("server.cache.memory.cleanup_interval", "10m")
 
-	// Redis专属默认值
+	// Ristretto
+	viper.SetDefault("server.cache.ristretto.num_counters", 1000000)
+	viper.SetDefault("server.cache.ristretto.max_cost", 1073741824) // 1GB
+	viper.SetDefault("server.cache.ristretto.buffer_items", 64)
+	viper.SetDefault("server.cache.ristretto.metrics", true)
+	viper.SetDefault("server.cache.max_image_cache_size", 200)   // 0表示无限制
+	viper.SetDefault("server.cache.enable_image_caching", false) // 默认启用图片缓存
+
+	// Redis
 	viper.SetDefault("server.cache.redis.pool_size", 10)
 	viper.SetDefault("server.cache.redis.min_idle_conns", 5)
 	viper.SetDefault("server.cache.redis.max_conn_age", "30m")
