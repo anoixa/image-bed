@@ -218,3 +218,31 @@ func DeleteEmptyValue(key string) error {
 func IsCacheMiss(err error) bool {
 	return types.IsCacheMiss(err)
 }
+
+// GetCachedImageData 获取缓存的图片数据
+func GetCachedImageData(identifier string) ([]byte, error) {
+	if GlobalManager == nil {
+		return nil, fmt.Errorf("cache manager not initialized")
+	}
+
+	key := "image_data:" + identifier
+	var imageData []byte
+	err := GlobalManager.Get(key, &imageData)
+	if err != nil {
+		return nil, err
+	}
+
+	return imageData, nil
+}
+
+// CacheImageData 缓存图片数据
+func CacheImageData(identifier string, imageData []byte) error {
+	if GlobalManager == nil {
+		return fmt.Errorf("cache manager not initialized")
+	}
+
+	key := "image_data:" + identifier
+	// 设置1小时的过期时间
+	expiration := 1 * time.Hour
+	return GlobalManager.Set(key, imageData, expiration)
+}

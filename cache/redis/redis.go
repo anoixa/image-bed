@@ -3,6 +3,7 @@ package redis
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/anoixa/image-bed/cache/types"
@@ -67,10 +68,19 @@ func NewRedis(addr, password string, db int) (types.Cache, error) {
 
 // Set 设置缓存项
 func (r *Redis) Set(key string, value interface{}, expiration time.Duration) error {
-	// 将值序列化为JSON以便存储
-	data, err := json.Marshal(value)
-	if err != nil {
-		return err
+	var data []byte
+	var err error
+
+	// 检查值是否为[]byte类型
+	if byteData, ok := value.([]byte); ok {
+		// 如果是[]byte类型，直接使用
+		data = byteData
+	} else {
+		// 否则将值序列化为JSON以便存储
+		data, err = json.Marshal(value)
+		if err != nil {
+			return err
+		}
 	}
 
 	return r.client.Set(r.ctx, key, data, expiration).Err()
@@ -80,13 +90,17 @@ func (r *Redis) Set(key string, value interface{}, expiration time.Duration) err
 func (r *Redis) Get(key string, dest interface{}) error {
 	data, err := r.client.Get(r.ctx, key).Result()
 	if err != nil {
-		if err == redis.Nil {
+		if errors.Is(err, redis.Nil) {
 			return types.ErrCacheMiss
 		}
 		return err
 	}
 
-	// 将数据反序列化到目标结构
+	if byteDest, ok := dest.(*[]byte); ok {
+		*byteDest = []byte(data)
+		return nil
+	}
+
 	if err := json.Unmarshal([]byte(data), dest); err != nil {
 		return err
 	}

@@ -4,18 +4,28 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anoixa/image-bed/cache/gocache"
+	"github.com/anoixa/image-bed/cache/ristretto"
 	"github.com/anoixa/image-bed/cache/types"
 )
 
-func TestGoCache(t *testing.T) {
-	cache := gocache.NewGoCache(5*time.Second, 1*time.Second)
+func TestRistrettoCache(t *testing.T) {
+	config := ristretto.Config{
+		NumCounters: 1000,
+		MaxCost:     1000,
+		BufferItems: 64,
+		Metrics:     false,
+	}
+
+	cache, err := ristretto.NewRistretto(config)
+	if err != nil {
+		t.Fatalf("Failed to create ristretto cache: %v", err)
+	}
 
 	key := "test_key"
 	value := "test_value"
 	expiration := 10 * time.Second
 
-	err := cache.Set(key, value, expiration)
+	err = cache.Set(key, value, expiration)
 	if err != nil {
 		t.Fatalf("Failed to set cache value: %v", err)
 	}
@@ -70,13 +80,15 @@ func TestGoCache(t *testing.T) {
 	}
 }
 
-func TestCacheManagerWithGoCache(t *testing.T) {
+func TestCacheManagerWithRistretto(t *testing.T) {
 	// 创建缓存管理器配置
 	config := Config{
 		Provider: "memory",
-		GoCache: GoCacheConfig{
-			DefaultExpiration: 5 * time.Second,
-			CleanupInterval:   1 * time.Second,
+		Ristretto: RistrettoConfig{
+			NumCounters: 1000,
+			MaxCost:     1000,
+			BufferItems: 64,
+			Metrics:     false,
 		},
 	}
 
@@ -92,6 +104,7 @@ func TestCacheManagerWithGoCache(t *testing.T) {
 		"name": "test",
 		"age":  float64(30),
 	}
+
 	expiration := 10 * time.Second
 
 	err = manager.Set(key, value, expiration)

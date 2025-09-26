@@ -13,6 +13,7 @@ import (
 type clientLimiter struct {
 	limiter  *rate.Limiter
 	lastSeen time.Time
+	mu       sync.Mutex
 }
 
 type IPRateLimiter struct {
@@ -44,14 +45,20 @@ func (rl *IPRateLimiter) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ip := getClientIP(c)
 
-		newLimiter := rate.NewLimiter(rate.Limit(rl.rps), rl.burst)
-		val, _ := rl.limiterMap.LoadOrStore(ip, &clientLimiter{
-			limiter:  newLimiter,
-			lastSeen: time.Now(),
-		})
+		var client *clientLimiter
+		val, ok := rl.limiterMap.Load(ip)
+		if ok {
+			client = val.(*clientLimiter)
+		} else {
+			newLimiter := rate.NewLimiter(rate.Limit(rl.rps), rl.burst)
+			client = &clientLimiter{limiter: newLimiter}
+			val, _ = rl.limiterMap.LoadOrStore(ip, client)
+			client = val.(*clientLimiter)
+		}
 
-		client := val.(*clientLimiter)
+		client.mu.Lock()
 		client.lastSeen = time.Now()
+		client.mu.Unlock()
 
 		if !client.limiter.Allow() {
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
@@ -79,7 +86,12 @@ func (rl *IPRateLimiter) cleanupStaleClients() {
 			// 遍历 sync.Map，删除过期的条目
 			rl.limiterMap.Range(func(key, value interface{}) bool {
 				client := value.(*clientLimiter)
-				if time.Since(client.lastSeen) > rl.expireTime {
+
+				client.mu.Lock()
+				lastSeen := client.lastSeen
+				client.mu.Unlock()
+
+				if time.Since(lastSeen) > rl.expireTime {
 					rl.limiterMap.Delete(key)
 				}
 				return true

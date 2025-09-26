@@ -51,14 +51,9 @@ func LoginHandler(context *gin.Context) {
 	}
 
 	// 缓存用户信息
-	go func(user *models.User) {
-		for i := 0; i < 3; i++ {
-			if cacheErr := cache.CacheUser(user); cacheErr == nil {
-				break
-			} else {
-				log.Printf("Asynchronous cache user failed (attempt %d): %v", i+1, cacheErr)
-				time.Sleep(time.Second * time.Duration(i+1))
-			}
+	go func(userToCache *models.User) {
+		if err := cache.CacheUser(userToCache); err != nil {
+			log.Printf("WARN: Failed to cache user object for user ID '%d': %v", userToCache.ID, err)
 		}
 	}(user)
 
@@ -113,7 +108,7 @@ func RefreshTokenHandler(context *gin.Context) {
 		common.RespondError(context, http.StatusUnauthorized, "User associated with token not found")
 		return
 	}
-	user, err := accounts.GetUserByUserID(device.UserID)
+	user, err := accounts.GetUserByUserIDWithCache(device.UserID)
 	if err != nil {
 		common.RespondError(context, http.StatusUnauthorized, "Invalid refresh token")
 		return

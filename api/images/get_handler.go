@@ -1,6 +1,7 @@
 package images
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -10,13 +11,12 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
-	"sync"
 	"syscall"
 	"time"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/cache"
+	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/images"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/storage"
@@ -27,13 +27,7 @@ import (
 
 var imageGroup singleflight.Group
 
-var bufPool = sync.Pool{
-	New: func() interface{} {
-		return make([]byte, 32*1024) // 32KB
-	},
-}
-
-// GetImageHandler serves an image file by first retrieving its metadata from the database
+// GetImageHandler serves an image file.
 func GetImageHandler(context *gin.Context) {
 	identifier := context.Param("identifier")
 	if identifier == "" {
@@ -50,15 +44,10 @@ func GetImageHandler(context *gin.Context) {
 			if err != nil {
 				return nil, err
 			}
-			// 回写缓存
-			go func(imagePtr *models.Image) {
-				for i := 0; i < 3; i++ {
-					if cacheErr := cache.CacheImage(imagePtr); cacheErr == nil {
-						break
-					} else {
-						log.Printf("Asynchronous cache image failed (attempt %d): %v", i+1, cacheErr)
-						time.Sleep(time.Second * time.Duration(i+1))
-					}
+
+			go func(img *models.Image) {
+				if cacheErr := cache.CacheImage(img); cacheErr != nil {
+					log.Printf("Failed to cache image metadata for '%s': %v", img.Identifier, cacheErr)
 				}
 			}(imagePtr)
 
@@ -77,9 +66,17 @@ func GetImageHandler(context *gin.Context) {
 		image = *(val.(*models.Image))
 	}
 
+	// 判断cache
+	if imageData, err := cache.GetCachedImageData(identifier); err == nil {
+		serveImageData(context, &image, imageData)
+		return
+	}
+
+	// 缓存未命中
 	storageClient, err := storage.GetStorage(image.StorageDriver)
 	if err != nil {
-		common.RespondError(context, http.StatusInternalServerError, "Error retrieving image information")
+		log.Printf("Failed to get storage client for driver '%s': %v", image.StorageDriver, err)
+		common.RespondError(context, http.StatusInternalServerError, "Error retrieving storage client")
 		return
 	}
 
@@ -90,12 +87,47 @@ func GetImageHandler(context *gin.Context) {
 		return
 	}
 
-	// 关闭流
-	if closer, ok := imageStream.(io.Closer); ok {
-		defer closer.Close()
-	}
+	//关闭流
+	defer func() {
+		if closer, ok := imageStream.(io.Closer); ok {
+			_ = closer.Close()
+		}
+	}()
 
-	// 下载模式
+	// 检查是否启用图片缓存
+	cfg := config.Get()
+	enableImageCaching := cfg.Server.CacheConfig.EnableImageCaching
+	maxCacheSize := cfg.Server.CacheConfig.MaxImageCacheSize
+	shouldCache := image.FileSize > 0 && (maxCacheSize == 0 || image.FileSize <= maxCacheSize)
+
+	if shouldCache && enableImageCaching {
+		imageData, err := io.ReadAll(imageStream)
+		if err != nil {
+			log.Printf("Failed to read image stream into buffer for '%s': %v", identifier, err)
+			common.RespondError(context, http.StatusInternalServerError, "Failed to read image file")
+			return
+		}
+
+		go func(id string, data []byte) {
+			if cacheErr := cache.CacheImageData(id, data); cacheErr != nil {
+				log.Printf("Failed to cache image data for '%s': %v", id, cacheErr)
+			}
+		}(identifier, imageData)
+
+		serveImageData(context, &image, imageData)
+	} else {
+		serveImageStream(context, &image, imageStream)
+	}
+}
+
+// serveImageData 提供图片服务
+func serveImageData(context *gin.Context, image *models.Image, data []byte) {
+	reader := bytes.NewReader(data)
+	serveImageStream(context, image, reader)
+}
+
+// serveImageStream 提供图片服务
+func serveImageStream(context *gin.Context, image *models.Image, stream io.ReadSeeker) {
 	if _, ok := context.GetQuery("download"); ok {
 		safeName := sanitizeFilename(image.OriginalName)
 		contentDisposition := fmt.Sprintf(
@@ -104,23 +136,8 @@ func GetImageHandler(context *gin.Context) {
 		context.Header("Content-Disposition", contentDisposition)
 	}
 
-	// 设置响应头
-	context.Header("Content-Type", image.MimeType)
-	context.Header("Content-Length", strconv.FormatInt(image.FileSize, 10))
-	context.Header("Cache-Control", "public, max-age=2592000, immutable")
-
-	// ETag
+	// ETag  If-Modified-Since
 	etag := fmt.Sprintf("W/\"%x\"", image.UpdatedAt.UnixNano())
-	context.Header("ETag", etag)
-	context.Header("Last-Modified", image.UpdatedAt.UTC().Format(http.TimeFormat))
-
-	seeker, ok := imageStream.(io.ReadSeeker)
-	if ok {
-		context.Header("Accept-Ranges", "bytes")
-		http.ServeContent(context.Writer, context.Request, image.OriginalName, image.UpdatedAt, seeker)
-		return
-	}
-
 	if match := context.GetHeader("If-None-Match"); match == etag {
 		context.Status(http.StatusNotModified)
 		return
@@ -134,15 +151,17 @@ func GetImageHandler(context *gin.Context) {
 		}
 	}
 
-	buf := bufPool.Get().([]byte)
-	defer bufPool.Put(buf)
+	// 设置响应头
+	context.Header("Content-Type", image.MimeType)
+	context.Header("Cache-Control", "public, max-age=2592000, immutable")
+	context.Header("X-Content-Type-Options", "nosniff")
+	context.Header("ETag", etag)
+	context.Header("Last-Modified", image.UpdatedAt.UTC().Format(http.TimeFormat))
 
-	_, err = io.CopyBuffer(context.Writer, imageStream, buf)
-	if err != nil && !isBrokenPipe(err) {
-		log.Printf("Failed to stream image to client: %v", err)
-	}
+	http.ServeContent(context.Writer, context.Request, sanitizeFilename(image.OriginalName), image.UpdatedAt, stream)
 }
 
+// sanitizeFilename 文件名判断
 func sanitizeFilename(name string) string {
 	name = filepath.Base(name)
 	re := regexp.MustCompile(`[^\w\-.]`)
