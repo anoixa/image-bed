@@ -9,8 +9,8 @@ import (
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
-	"github.com/anoixa/image-bed/database/accounts"
 	"github.com/anoixa/image-bed/database/models"
+	accounts2 "github.com/anoixa/image-bed/database/repo/accounts"
 	cryptopackage "github.com/anoixa/image-bed/utils/crypto"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -72,7 +72,7 @@ func LoginHandler(context *gin.Context) {
 	}
 	// 存储设备信息
 	deviceID := uuid.New().String()
-	err = accounts.CreateLoginDevice(user.ID, deviceID, refreshToken, refreshTokenExpiry)
+	err = accounts2.CreateLoginDevice(user.ID, deviceID, refreshToken, refreshTokenExpiry)
 	if err != nil {
 		common.RespondError(context, http.StatusInternalServerError, "Failed to store device token")
 		return
@@ -103,12 +103,12 @@ func RefreshTokenHandler(context *gin.Context) {
 	}
 
 	// 查询设备信息与用户信息
-	device, err := accounts.GetDeviceByRefreshTokenAndDeviceID(refreshToken, deviceID)
+	device, err := accounts2.GetDeviceByRefreshTokenAndDeviceID(refreshToken, deviceID)
 	if err != nil {
 		common.RespondError(context, http.StatusUnauthorized, "User associated with token not found")
 		return
 	}
-	user, err := accounts.GetUserByUserIDWithCache(device.UserID)
+	user, err := accounts2.GetUserByUserIDWithCache(device.UserID)
 	if err != nil {
 		common.RespondError(context, http.StatusUnauthorized, "Invalid refresh token")
 		return
@@ -120,7 +120,7 @@ func RefreshTokenHandler(context *gin.Context) {
 		common.RespondError(context, http.StatusInternalServerError, "Failed to generate refresh tokens")
 		return
 	}
-	err = accounts.RotateRefreshToken(user.ID, device.DeviceID, newRefreshToken, newRefreshTokenExpiry)
+	err = accounts2.RotateRefreshToken(user.ID, device.DeviceID, newRefreshToken, newRefreshTokenExpiry)
 	if err != nil {
 		common.RespondError(context, http.StatusInternalServerError, "Failed to update device token")
 		return
@@ -151,7 +151,7 @@ func LogoutHandler(context *gin.Context) {
 		return
 	}
 
-	_ = accounts.DeleteDeviceByDeviceID(deviceID)
+	_ = accounts2.DeleteDeviceByDeviceID(deviceID)
 
 	clearAuthCookies(context)
 
@@ -160,7 +160,7 @@ func LogoutHandler(context *gin.Context) {
 
 // validateCredentials Verify user credentials
 func validateCredentials(username, password string) (*models.User, bool, error) {
-	user, err := accounts.GetUserByUsername(username)
+	user, err := accounts2.GetUserByUsername(username)
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to get user: %w", err)
 	}

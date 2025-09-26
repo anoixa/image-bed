@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/anoixa/image-bed/cache"
-	"github.com/anoixa/image-bed/database/key"
 	"github.com/anoixa/image-bed/database/models"
+	"github.com/anoixa/image-bed/database/repo/key"
 	"golang.org/x/sync/singleflight"
 
 	"github.com/golang-jwt/jwt/v5"

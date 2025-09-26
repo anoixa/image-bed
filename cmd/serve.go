@@ -14,8 +14,8 @@ import (
 	"github.com/anoixa/image-bed/api/core"
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
-	"github.com/anoixa/image-bed/database/accounts"
 	"github.com/anoixa/image-bed/database/dbcore"
+	"github.com/anoixa/image-bed/database/repo/accounts"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/spf13/cobra"
 )
