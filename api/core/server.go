@@ -83,6 +83,8 @@ func setupRouter() (*gin.Engine, func()) {
 			{
 				imagesGroup.POST("/upload", images.UploadImageHandler)   // POST /api/v1/images/upload (single file)
 				imagesGroup.POST("/uploads", images.UploadImagesHandler) // POST /api/v1/images/uploads (multiple files)
+
+				imagesGroup.POST("/list", images.ImageListHandler) // GET /api/v1/list
 			}
 		}
 	}
