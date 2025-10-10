@@ -21,6 +21,7 @@ import (
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/storage"
+	"github.com/anoixa/image-bed/utils"
 	"github.com/anoixa/image-bed/utils/validator"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/sync/errgroup"
@@ -74,7 +75,7 @@ func UploadImageHandler(context *gin.Context) {
 		"identifier": image.Identifier,
 		"filename":   image.OriginalName,
 		"file_size":  image.FileSize,
-		"url":        buildImageURL(image.Identifier),
+		"url":        utils.BuildImageURL(image.Identifier),
 	})
 }
 
@@ -142,7 +143,7 @@ func UploadImagesHandler(context *gin.Context) {
 				} else {
 					result.Identifier = image.Identifier
 					result.FileSize = image.FileSize
-					result.URL = buildImageURL(image.Identifier)
+					result.URL = utils.BuildImageURL(image.Identifier)
 				}
 
 				resultsMutex.Lock()
@@ -258,10 +259,4 @@ func processAndSaveImage(userID uint, fileHeader *multipart.FileHeader, storageC
 	}(newImage)
 
 	return newImage, false, nil
-}
-
-// buildImageURL Base URL for images
-func buildImageURL(identifier string) string {
-	cfg := config.Get()
-	return fmt.Sprintf("%s/images/%s", cfg.Server.BaseURL, identifier)
 }

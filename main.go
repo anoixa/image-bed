@@ -1,8 +1,9 @@
 package main
 
 import (
-	"github.com/anoixa/image-bed/config"
 	"log"
+
+	"github.com/anoixa/image-bed/config"
 
 	"github.com/anoixa/image-bed/cmd"
 )
