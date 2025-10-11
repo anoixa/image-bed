@@ -67,8 +67,11 @@ func GetImageList(StorageType, Identifier, search string, page, limit, userID in
 	}
 
 	if search != "" {
-		searchPattern := "%" + search + "%"
-		query = query.Where("original_name ILIKE ? OR identifier ILIKE ? OR file_hash ILIKE ?", searchPattern, searchPattern, searchPattern)
+		searchPattern := fmt.Sprintf("%%%s%%", search)
+		query = query.Where(
+			"LOWER(original_name) LIKE LOWER(?) OR LOWER(identifier) LIKE LOWER(?) OR LOWER(file_hash) LIKE LOWER(?)",
+			searchPattern, searchPattern, searchPattern,
+		)
 	}
 
 	var total int64

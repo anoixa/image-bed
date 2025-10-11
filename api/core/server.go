@@ -54,10 +54,10 @@ func setupRouter() (*gin.Engine, func()) {
 		})
 	})
 
-	imagesGroup := router.Group("/images")
-	//imagesGroup.Use(generalRateLimiter.Middleware())
+	publicGroup := router.Group("/images")
+	publicGroup.Use(generalRateLimiter.Middleware())
 	{
-		imagesGroup.GET("/:identifier", images.GetImageHandler) //GET /images/{photo}
+		publicGroup.GET("/:identifier", images.GetImageHandler) //GET /images/{photo}
 	}
 
 	apiGroup := router.Group("/api")
@@ -84,7 +84,7 @@ func setupRouter() (*gin.Engine, func()) {
 				imagesGroup.POST("/upload", images.UploadImageHandler)   // POST /api/v1/images/upload (single file)
 				imagesGroup.POST("/uploads", images.UploadImagesHandler) // POST /api/v1/images/uploads (multiple files)
 
-				imagesGroup.POST("/list", images.ImageListHandler) // GET /api/v1/list
+				imagesGroup.POST("/list", images.ImageListHandler) // POST /api/v1/images/list
 			}
 		}
 	}
