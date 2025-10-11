@@ -187,7 +187,6 @@ func UploadImagesHandler(context *gin.Context) {
 
 // processAndSaveImage save image
 func processAndSaveImage(userID uint, fileHeader *multipart.FileHeader, storageClient storage.Storage, driverToSave string) (*models.Image, bool, error) {
-	// open file
 	file, err := fileHeader.Open()
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to open file: %w", err)
@@ -203,21 +202,48 @@ func processAndSaveImage(userID uint, fileHeader *multipart.FileHeader, storageC
 	}
 
 	fileHash := hex.EncodeToString(hasher.Sum(nil))
+
 	image, err := images.GetImageByHash(fileHash)
 	if err == nil {
-		log.Printf("Duplicate image detected. Hash: %s, Identifier: %s", fileHash, image.Identifier)
-		go func(img *models.Image) {
-			if cacheErr := cache.CacheImage(img); cacheErr != nil {
-				log.Printf("WARN: Failed to cache image metadata for '%s': %v", img.Identifier, cacheErr)
-			}
-		}(image)
+		log.Printf("Duplicate active image detected. Hash: %s, Identifier: %s", fileHash, image.Identifier)
+
+		go warmCache(image)
 		return image, true, nil
 	}
 
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		log.Printf("Database error when checking for hash '%s': %v", fileHash, err)
+		log.Printf("Database error when checking for active hash '%s': %v", fileHash, err)
 		return nil, false, errors.New("database error during hash check")
 	}
+
+	softDeletedImage, err := images.GetSoftDeletedImageByHash(fileHash)
+	if err == nil {
+		log.Printf("Found a soft-deleted image with the same hash. Restoring it. Identifier: %s", softDeletedImage.Identifier)
+
+		updateData := map[string]interface{}{
+			"deleted_at":     nil,
+			"original_name":  fileHeader.Filename,
+			"user_id":        userID,
+			"storage_driver": driverToSave,
+		}
+
+		restoredImage, err := images.UpdateImageByIdentifier(softDeletedImage.Identifier, updateData)
+		if err != nil {
+			log.Printf("Failed to restore soft-deleted image '%s': %v", softDeletedImage.Identifier, err)
+			return nil, false, errors.New("failed to restore existing image data")
+		}
+
+		log.Printf("Image record restored successfully for identifier: %s", restoredImage.Identifier)
+		go warmCache(restoredImage)
+		return restoredImage, true, nil
+	}
+
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		log.Printf("Database error when checking for soft-deleted hash '%s': %v", fileHash, err)
+		return nil, false, errors.New("database error during hash check")
+	}
+
+	log.Printf("No existing image found for hash %s. Proceeding with new upload.", fileHash)
 
 	fileBytes := buf.Bytes()
 	isImage, mimeType := validator.IsImageBytes(fileBytes)
@@ -225,6 +251,7 @@ func processAndSaveImage(userID uint, fileHeader *multipart.FileHeader, storageC
 		return nil, false, errors.New("the uploaded file type is not supported")
 	}
 
+	// 生成唯一标识符
 	ext := filepath.Ext(fileHeader.Filename)
 	identifier := fmt.Sprintf("%d-%s%s", time.Now().UnixNano(), fileHash[:16], ext)
 
@@ -233,6 +260,7 @@ func processAndSaveImage(userID uint, fileHeader *multipart.FileHeader, storageC
 		return nil, false, errors.New("failed to save uploaded file")
 	}
 
+	// 入库
 	newImage := &models.Image{
 		Identifier:    identifier,
 		OriginalName:  fileHeader.Filename,
@@ -252,11 +280,13 @@ func processAndSaveImage(userID uint, fileHeader *multipart.FileHeader, storageC
 		return nil, false, errors.New("failed to save image metadata")
 	}
 
-	go func(imageToCache *models.Image) {
-		if err := cache.CacheImage(imageToCache); err != nil {
-			log.Printf("WARN: Failed to pre-warm cache for new image '%s': %v", imageToCache.Identifier, err)
-		}
-	}(newImage)
-
+	go warmCache(newImage)
 	return newImage, false, nil
+}
+
+// warmCache 更新缓存
+func warmCache(image *models.Image) {
+	if err := cache.CacheImage(image); err != nil {
+		log.Printf("WARN: Failed to pre-warm cache for image '%s': %v", image.Identifier, err)
+	}
 }

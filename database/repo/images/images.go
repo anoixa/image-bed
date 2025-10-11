@@ -53,6 +53,23 @@ func DeleteImage(image *models.Image) error {
 	return err
 }
 
+func DeleteImagesByIdentifiers(identifiers []string) error {
+	if len(identifiers) == 0 {
+		return nil
+	}
+
+	err := dbcore.Transaction(func(tx *gorm.DB) error {
+		result := tx.Where("identifier IN ?", identifiers).Delete(&models.Image{})
+		if result.Error != nil {
+			return fmt.Errorf("failed to batch delete images by identifiers in transaction: %w", result.Error)
+		}
+
+		return nil
+	})
+
+	return err
+}
+
 // GetImageList 获取图片列表
 func GetImageList(StorageType, Identifier, search string, page, limit, userID int) ([]*models.Image, int64, error) {
 	instance := dbcore.GetDBInstance()
@@ -94,4 +111,32 @@ func GetImageList(StorageType, Identifier, search string, page, limit, userID in
 	}
 
 	return images, total, nil
+}
+
+// GetSoftDeletedImageByHash 通过文件哈希查找一个被软删除的图片
+func GetSoftDeletedImageByHash(hash string) (*models.Image, error) {
+	var image models.Image
+	err := dbcore.GetDBInstance().Unscoped().Where("file_hash = ? AND deleted_at IS NOT NULL", hash).First(&image).Error
+	if err != nil {
+		return nil, err
+	}
+	return &image, nil
+}
+
+// UpdateImageByIdentifier 通过Identifier更新图片信息
+func UpdateImageByIdentifier(identifier string, updates map[string]interface{}) (*models.Image, error) {
+	var image models.Image
+
+	db := dbcore.GetDBInstance().Unscoped().Model(&models.Image{}).Where("identifier = ?", identifier)
+
+	// 执行更新
+	if err := db.Updates(updates).Error; err != nil {
+		return nil, err
+	}
+
+	if err := db.First(&image).Error; err != nil {
+		return nil, err
+	}
+
+	return &image, nil
 }
