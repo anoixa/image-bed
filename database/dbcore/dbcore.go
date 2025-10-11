@@ -24,7 +24,7 @@ var (
 // GetDBInstance Get database connection
 func GetDBInstance() *gorm.DB {
 	if db == nil {
-		log.Fatal("Database is not initialized. Call dbcore.InitDB() in main.go first.")
+		log.Fatal("Database is not initialized.")
 	}
 	return db
 }

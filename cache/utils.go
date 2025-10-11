@@ -246,3 +246,18 @@ func CacheImageData(identifier string, imageData []byte) error {
 	expiration := 1 * time.Hour
 	return GlobalManager.Set(key, imageData, expiration)
 }
+
+func DeleteCachedImageData(identifier string) error {
+	if GlobalManager == nil {
+		return nil
+	}
+
+	key := "image_data:" + identifier
+
+	err := GlobalManager.Delete(key)
+	if err != nil {
+		return fmt.Errorf("failed to delete image data from cache for identifier %s: %w", identifier, err)
+	}
+
+	return nil
+}
