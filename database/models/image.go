@@ -14,6 +14,6 @@ type Image struct {
 	Width    int
 	Height   int
 
-	UserID uint `gorm:"index:idx_user_deleted"`
+	UserID uint `gorm:"index:idx_user_created_at,priority:1"`
 	User   User `gorm:"foreignKey:UserID"`
 }
