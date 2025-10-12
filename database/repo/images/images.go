@@ -53,15 +53,60 @@ func DeleteImage(image *models.Image) error {
 	return err
 }
 
-func DeleteImagesByIdentifiers(identifiers []string) error {
+//func DeleteImagesByIdentifiers(identifiers []string) error {
+//	if len(identifiers) == 0 {
+//		return nil
+//	}
+//
+//	err := dbcore.Transaction(func(tx *gorm.DB) error {
+//		result := tx.Where("identifier IN ?", identifiers).Delete(&models.Image{})
+//		if result.Error != nil {
+//			return fmt.Errorf("failed to batch delete images by identifiers in transaction: %w", result.Error)
+//		}
+//
+//		return nil
+//	})
+//
+//	return err
+//}
+
+func DeleteImagesByIdentifiersAndUser(identifiers []string, userID uint) (int64, error) {
 	if len(identifiers) == 0 {
+		return 0, nil
+	}
+
+	var affectedCount int64
+	err := dbcore.Transaction(func(tx *gorm.DB) error {
+		result := tx.Where("identifier IN ? AND user_id = ?", identifiers, userID).Delete(&models.Image{})
+		if result.Error != nil {
+			return fmt.Errorf("failed to batch delete images by identifiers and user ID in transaction: %w", result.Error)
+		}
+
+		affectedCount = result.RowsAffected
 		return nil
+	})
+
+	if err != nil {
+		return 0, err
+	}
+
+	return affectedCount, nil
+}
+
+func DeleteImageByIdentifierAndUser(identifier string, userID uint) error {
+	if identifier == "" {
+		return gorm.ErrRecordNotFound
 	}
 
 	err := dbcore.Transaction(func(tx *gorm.DB) error {
-		result := tx.Where("identifier IN ?", identifiers).Delete(&models.Image{})
+
+		result := tx.Where("identifier = ? AND user_id = ?", identifier, userID).Delete(&models.Image{})
 		if result.Error != nil {
-			return fmt.Errorf("failed to batch delete images by identifiers in transaction: %w", result.Error)
+			return fmt.Errorf("failed to delete image by identifier and user ID in transaction: %w", result.Error)
+		}
+
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
 		}
 
 		return nil

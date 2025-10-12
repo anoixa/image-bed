@@ -31,6 +31,7 @@ func CreateStaticToken(context *gin.Context) {
 	userID := context.GetUint(middleware.ContextUserIDKey)
 
 	randomToken, err := utils.GenerateRandomToken(64)
+	tokenPrefix := randomToken[:12]
 	if err != nil {
 		common.RespondError(context, http.StatusInternalServerError, err.Error())
 		return
@@ -42,6 +43,7 @@ func CreateStaticToken(context *gin.Context) {
 	token := models.ApiToken{
 		UserID:      userID,
 		Token:       hashedToken,
+		TokenPrefix: tokenPrefix,
 		Description: requestBody.Description,
 		IsActive:    true,
 	}
@@ -55,5 +57,6 @@ func CreateStaticToken(context *gin.Context) {
 
 	common.RespondSuccessMessage(context, "success create static token", gin.H{
 		"token": "ApiKey " + randomToken,
+		"hash":  hashedToken,
 	})
 }
