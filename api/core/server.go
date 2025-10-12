@@ -7,6 +7,7 @@ import (
 	"github.com/anoixa/image-bed/api"
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/images"
+	"github.com/anoixa/image-bed/api/key"
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/config"
 	"github.com/gin-contrib/cors"
@@ -23,10 +24,6 @@ func setupRouter() (*gin.Engine, func()) {
 
 	router := gin.New()
 
-	// 并发限制
-	concurrencyLimiter := middleware.NewConcurrencyLimiter(300)
-	router.Use(concurrencyLimiter.Middleware())
-
 	// 全局中间件
 	router.Use(gin.Logger())
 	router.Use(gin.Recovery())
@@ -37,6 +34,12 @@ func setupRouter() (*gin.Engine, func()) {
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))
+
+	//router.SetTrustedProxies(nil)
+
+	// 并发限制
+	concurrencyLimiter := middleware.NewConcurrencyLimiter(300)
+	router.Use(concurrencyLimiter.Middleware())
 
 	// 速率限制
 	authRateLimiter := middleware.NewIPRateLimiter(0.5, 5, 10*time.Minute)
@@ -54,8 +57,9 @@ func setupRouter() (*gin.Engine, func()) {
 		})
 	})
 
+	// 公共接口
 	publicGroup := router.Group("/images")
-	publicGroup.Use(generalRateLimiter.Middleware())
+	//publicGroup.Use(generalRateLimiter.Middleware())
 	{
 		publicGroup.GET("/:identifier", images.GetImageHandler) //GET /images/{photo}
 	}
@@ -78,6 +82,7 @@ func setupRouter() (*gin.Engine, func()) {
 		v1.Use(generalRateLimiter.Middleware())
 		v1.Use(middleware.CombinedAuth())
 		{
+			// image
 			imagesGroup := v1.Group("/images")
 			imagesGroup.Use(middleware.Authorize("jwt", "static_token"))
 			{
@@ -87,6 +92,13 @@ func setupRouter() (*gin.Engine, func()) {
 				imagesGroup.POST("/list", images.ImageListHandler)      // POST /api/v1/images/list
 				imagesGroup.POST("/delete", images.DeleteImagesHandler) // POST /api/v1/images/delete
 
+			}
+
+			// static token
+			keyGroup := v1.Group("/token")
+			keyGroup.Use(middleware.Authorize("jwt"))
+			{
+				keyGroup.POST("/create", key.CreateStaticToken) // POST /api/v1/token/create
 			}
 		}
 	}

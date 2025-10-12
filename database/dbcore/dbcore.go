@@ -30,11 +30,10 @@ func GetDBInstance() *gorm.DB {
 }
 
 // InitDB init database
-func InitDB() {
+func InitDB(cfg *config.Config) {
 	once.Do(func() {
 		var err error
 
-		cfg := config.Get()
 		dbType := cfg.Server.DatabaseConfig.Type
 		host := cfg.Server.DatabaseConfig.Host
 		port := cfg.Server.DatabaseConfig.Port

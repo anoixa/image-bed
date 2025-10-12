@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log"
 	"time"
 
@@ -25,7 +26,7 @@ func GetUserByApiToken(token string) (*models.User, error) {
 	hasher.Write([]byte(token))
 	hashedToken := hex.EncodeToString(hasher.Sum(nil))
 
-	result := db.Preload("User").Where("token = ?", hashedToken).First(&apiToken)
+	result := db.Preload("User").Where("token = ? AND is_active = ?", hashedToken, true).First(&apiToken)
 
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
@@ -50,4 +51,26 @@ func updateTokenLastUsed(db *gorm.DB, tokenID uint) {
 	if err != nil {
 		log.Printf("Failed to update last_used_at for token ID %d: %v", tokenID, err)
 	}
+}
+
+func DeleteKey(key *models.ApiToken) error {
+	err := dbcore.Transaction(func(tx *gorm.DB) error {
+		err := tx.Delete(&key).Error
+		if err != nil {
+			return fmt.Errorf("failed to delete key in transaction: %w", err)
+		}
+		return err
+	})
+	return err
+}
+
+func CreateKey(key *models.ApiToken) error {
+	err := dbcore.Transaction(func(tx *gorm.DB) error {
+		err := tx.Create(&key).Error
+		if err != nil {
+			return fmt.Errorf("failed to create key in transaction: %w", err)
+		}
+		return err
+	})
+	return err
 }
