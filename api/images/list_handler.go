@@ -3,6 +3,7 @@ package images
 import (
 	"math"
 	"net/http"
+	"sort"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
@@ -66,6 +67,9 @@ func ImageListHandler(context *gin.Context) {
 	}
 
 	imageListDTO := toImageDTOs(list)
+	sort.Slice(imageListDTO, func(i, j int) bool {
+		return imageListDTO[i].ID < imageListDTO[j].ID
+	})
 
 	common.RespondSuccess(context, ImageListResponse{
 		Images:     imageListDTO,

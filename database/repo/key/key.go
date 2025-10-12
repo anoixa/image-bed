@@ -74,3 +74,95 @@ func CreateKey(key *models.ApiToken) error {
 	})
 	return err
 }
+
+func GetAllApiTokensByUser(userID uint) ([]models.ApiToken, error) {
+	if userID == 0 {
+		return nil, errors.New("invalid user ID")
+	}
+
+	db := dbcore.GetDBInstance()
+	var apiTokens []models.ApiToken
+
+	result := db.Where("user_id = ?", userID).Order("created_at desc").Find(&apiTokens)
+
+	if result.Error != nil {
+		log.Printf("Database error while searching for all API tokens by user ID %d: %v", userID, result.Error)
+		return nil, errors.New("database error")
+	}
+
+	return apiTokens, nil
+}
+
+func DisableApiToken(tokenID, userID uint) error {
+	if tokenID == 0 || userID == 0 {
+		return errors.New("invalid token ID or user ID")
+	}
+
+	err := dbcore.Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&models.ApiToken{}).
+			Where("id = ? AND user_id = ?", tokenID, userID).
+			Update("is_active", false)
+
+		if result.Error != nil {
+			log.Printf("Database error while disabling token ID %d for user ID %d: %v", tokenID, userID, result.Error)
+			return fmt.Errorf("failed to disable token: %w", result.Error)
+		}
+
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+
+		return nil
+	})
+
+	return err
+}
+
+func RevokeApiToken(tokenID, userID uint) error {
+	if tokenID == 0 || userID == 0 {
+		return errors.New("invalid token ID or user ID")
+	}
+
+	err := dbcore.Transaction(func(tx *gorm.DB) error {
+		result := tx.Where("id = ? AND user_id = ?", tokenID, userID).
+			Delete(&models.ApiToken{})
+
+		if result.Error != nil {
+			log.Printf("Database error while revoking token ID %d for user ID %d: %v", tokenID, userID, result.Error)
+			return fmt.Errorf("failed to revoke token: %w", result.Error)
+		}
+
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+
+		return nil
+	})
+
+	return err
+}
+
+func EnableApiToken(tokenID, userID uint) error {
+	if tokenID == 0 || userID == 0 {
+		return errors.New("invalid token ID or user ID")
+	}
+
+	err := dbcore.Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&models.ApiToken{}).
+			Where("id = ? AND user_id = ?", tokenID, userID).
+			Update("is_active", true)
+
+		if result.Error != nil {
+			log.Printf("Database error while enabling token ID %d for user ID %d: %v", tokenID, userID, result.Error)
+			return fmt.Errorf("failed to enable token: %w", result.Error)
+		}
+
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+
+		return nil
+	})
+
+	return err
+}

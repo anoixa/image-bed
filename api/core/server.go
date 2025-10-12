@@ -89,16 +89,21 @@ func setupRouter() (*gin.Engine, func()) {
 				imagesGroup.POST("/upload", images.UploadImageHandler)   // POST /api/v1/images/upload (single file)
 				imagesGroup.POST("/uploads", images.UploadImagesHandler) // POST /api/v1/images/uploads (multiple files)
 
-				imagesGroup.POST("/list", images.ImageListHandler)      // POST /api/v1/images/list
-				imagesGroup.POST("/delete", images.DeleteImagesHandler) // POST /api/v1/images/delete
-
+				imagesGroup.POST("/list", images.ImageListHandler)                  // POST /api/v1/images/list
+				imagesGroup.POST("/delete", images.DeleteImagesHandler)             // POST /api/v1/images/delete
+				imagesGroup.DELETE("/:identifier", images.DeleteSingleImageHandler) // POST /api/v1/images/{photo}
 			}
 
 			// static token
-			keyGroup := v1.Group("/token")
-			keyGroup.Use(middleware.Authorize("jwt"))
+			apiTokenGroup := v1.Group("/token")
+			apiTokenGroup.Use(middleware.Authorize("jwt"))
 			{
-				keyGroup.POST("/create", key.CreateStaticToken) // POST /api/v1/token/create
+				apiTokenGroup.POST("/create", key.CreateStaticToken) // POST /api/v1/token/create
+				apiTokenGroup.GET("/all", key.GetToken)              // GET /api/v1/token/all
+
+				apiTokenGroup.POST("/:id/disable", key.DisableToken) // POST /api/v1/token/{id}/disable
+				apiTokenGroup.POST("/:id/enable", key.EnableToken)   // POST /api/v1/token/{id}/enable
+				apiTokenGroup.DELETE("/:id", key.RevokeToken)        // DELETE /api/v1/token/{id}
 			}
 		}
 	}

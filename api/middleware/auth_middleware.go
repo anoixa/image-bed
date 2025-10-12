@@ -14,6 +14,9 @@ const (
 	ContextUserIDKey   = "user_id"
 	ContextUsernameKey = "username"
 	AuthTypeKey        = "auth_type"
+
+	AuthTypeJWT         = "jwt"
+	AuthTypeStaticToken = "static_token"
 )
 
 func CombinedAuth() gin.HandlerFunc {
@@ -78,7 +81,7 @@ func handleJwtAuth(c *gin.Context, token string) error {
 	// 验证成功，将用户信息存入上下文
 	c.Set(ContextUserIDKey, uint(userID))
 	c.Set(ContextUsernameKey, username)
-	c.Set(AuthTypeKey, "jwt")
+	c.Set(AuthTypeKey, AuthTypeJWT)
 
 	return nil
 }
@@ -90,9 +93,9 @@ func handleStaticTokenAuth(c *gin.Context, token string) error {
 	}
 
 	//将用户信息存入上下文
-	c.Set(AuthTypeKey, "static_token")
 	c.Set(ContextUserIDKey, user.ID)
 	c.Set(ContextUsernameKey, user.Username)
+	c.Set(AuthTypeKey, AuthTypeStaticToken)
 
 	return nil
 }
