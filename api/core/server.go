@@ -6,8 +6,8 @@ import (
 
 	"github.com/anoixa/image-bed/api"
 	"github.com/anoixa/image-bed/api/common"
-	"github.com/anoixa/image-bed/api/images"
-	"github.com/anoixa/image-bed/api/key"
+	images2 "github.com/anoixa/image-bed/api/handler/images"
+	key2 "github.com/anoixa/image-bed/api/handler/key"
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/config"
 	"github.com/gin-contrib/cors"
@@ -61,7 +61,7 @@ func setupRouter() (*gin.Engine, func()) {
 	publicGroup := router.Group("/images")
 	//publicGroup.Use(generalRateLimiter.Middleware())
 	{
-		publicGroup.GET("/:identifier", images.GetImageHandler) //GET /images/{photo}
+		publicGroup.GET("/:identifier", images2.GetImageHandler) //GET /images/{photo}
 	}
 
 	apiGroup := router.Group("/api")
@@ -86,24 +86,24 @@ func setupRouter() (*gin.Engine, func()) {
 			imagesGroup := v1.Group("/images")
 			imagesGroup.Use(middleware.Authorize("jwt", "static_token"))
 			{
-				imagesGroup.POST("/upload", images.UploadImageHandler)   // POST /api/v1/images/upload (single file)
-				imagesGroup.POST("/uploads", images.UploadImagesHandler) // POST /api/v1/images/uploads (multiple files)
+				imagesGroup.POST("/upload", images2.UploadImageHandler)   // POST /api/v1/images/upload (single file)
+				imagesGroup.POST("/uploads", images2.UploadImagesHandler) // POST /api/v1/images/uploads (multiple files)
 
-				imagesGroup.POST("/list", images.ImageListHandler)                  // POST /api/v1/images/list
-				imagesGroup.POST("/delete", images.DeleteImagesHandler)             // POST /api/v1/images/delete
-				imagesGroup.DELETE("/:identifier", images.DeleteSingleImageHandler) // POST /api/v1/images/{photo}
+				imagesGroup.POST("/list", images2.ImageListHandler)                  // POST /api/v1/images/list
+				imagesGroup.POST("/delete", images2.DeleteImagesHandler)             // POST /api/v1/images/delete
+				imagesGroup.DELETE("/:identifier", images2.DeleteSingleImageHandler) // POST /api/v1/images/{photo}
 			}
 
 			// static token
 			apiTokenGroup := v1.Group("/token")
 			apiTokenGroup.Use(middleware.Authorize("jwt"))
 			{
-				apiTokenGroup.POST("/create", key.CreateStaticToken) // POST /api/v1/token/create
-				apiTokenGroup.GET("/all", key.GetToken)              // GET /api/v1/token/all
+				apiTokenGroup.POST("/create", key2.CreateStaticToken) // POST /api/v1/token/create
+				apiTokenGroup.GET("/all", key2.GetToken)              // GET /api/v1/token/all
 
-				apiTokenGroup.POST("/:id/disable", key.DisableToken) // POST /api/v1/token/{id}/disable
-				apiTokenGroup.POST("/:id/enable", key.EnableToken)   // POST /api/v1/token/{id}/enable
-				apiTokenGroup.DELETE("/:id", key.RevokeToken)        // DELETE /api/v1/token/{id}
+				apiTokenGroup.POST("/:id/disable", key2.DisableToken) // POST /api/v1/token/{id}/disable
+				apiTokenGroup.POST("/:id/enable", key2.EnableToken)   // POST /api/v1/token/{id}/enable
+				apiTokenGroup.DELETE("/:id", key2.RevokeToken)        // DELETE /api/v1/token/{id}
 			}
 		}
 	}
