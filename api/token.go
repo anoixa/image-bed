@@ -1,8 +1,6 @@
 package api
 
 import (
-	"crypto/rand"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"log"
@@ -11,6 +9,7 @@ import (
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/key"
+	"github.com/anoixa/image-bed/utils"
 	"golang.org/x/sync/singleflight"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -45,15 +44,6 @@ func TokenInit(secret, expiresIn, refreshExpiresIn string) error {
 	return nil
 }
 
-// GenerateRandomToken Generate random token
-func GenerateRandomToken(length int) (string, error) {
-	bytes := make([]byte, length)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", fmt.Errorf("failed to generate random bytes: %w", err)
-	}
-	return base64.URLEncoding.EncodeToString(bytes), nil
-}
-
 // GenerateTokens Generate access token and refresh token
 func GenerateTokens(username string, userID uint) (accessToken string, accessTokenExpiry time.Time, err error) {
 	if len(jwtSecret) == 0 {
@@ -85,7 +75,7 @@ func GenerateTokens(username string, userID uint) (accessToken string, accessTok
 
 // GenerateRefreshToken Generate refresh token
 func GenerateRefreshToken() (refreshToken string, refreshTokenExpiry time.Time, err error) {
-	refreshToken, err = GenerateRandomToken(64)
+	refreshToken, err = utils.GenerateRandomToken(64)
 
 	refreshTokenExpiry = time.Now().Add(jwtRefreshExpiresIn)
 	return
@@ -93,7 +83,7 @@ func GenerateRefreshToken() (refreshToken string, refreshTokenExpiry time.Time, 
 
 // GenerateStaticToken Generate a new static key
 func GenerateStaticToken() (refreshToken string, err error) {
-	refreshToken, err = GenerateRandomToken(64)
+	refreshToken, err = utils.GenerateRandomToken(64)
 
 	return
 }
@@ -154,13 +144,8 @@ func ValidateStaticToken(tokenString string) (*models.User, error) {
 		}
 
 		go func(user *models.User) {
-			for i := 0; i < 3; i++ {
-				if cacheErr := cache.CacheStaticToken(tokenString, user); cacheErr == nil {
-					break
-				} else {
-					log.Printf("Failed to cache static token (attempt %d): %v", i+1, cacheErr)
-					time.Sleep(time.Second * time.Duration(i+1))
-				}
+			if cacheErr := cache.CacheStaticToken(tokenString, user); cacheErr != nil {
+				log.Printf("Failed to cache static token: %v", cacheErr)
 			}
 		}(user)
 

@@ -1,9 +1,10 @@
 package middleware
 
 import (
+	"net/http"
+
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/gin-gonic/gin"
-	"net/http"
 )
 
 // Authorize 检查context中的认证类型是否在允许的列表中

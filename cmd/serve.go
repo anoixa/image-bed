@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	//_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -60,6 +61,14 @@ func RunServer() {
 		}
 	}()
 
+	// pprof
+	//go func() {
+	//	log.Println("Starting pprof server on :6060")
+	//	if err := http.ListenAndServe("localhost:6060", nil); err != nil {
+	//		log.Fatalf("pprof server failed: %v", err)
+	//	}
+	//}()
+
 	// 处理退出signal
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
@@ -90,7 +99,7 @@ func RunServer() {
 
 // InitDatabase init database
 func InitDatabase(cfg *config.Config) {
-	dbcore.InitDB()
+	dbcore.InitDB(cfg)
 	instance := dbcore.GetDBInstance()
 	log.Printf("Initializing database, database type: %s", cfg.Server.DatabaseConfig.Type)
 
