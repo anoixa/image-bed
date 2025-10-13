@@ -16,4 +16,6 @@ type Image struct {
 
 	UserID uint `gorm:"index:idx_user_created_at,priority:1"`
 	User   User `gorm:"foreignKey:UserID"`
+
+	Albums []*Album `gorm:"many2many:album_images;"`
 }

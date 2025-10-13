@@ -8,7 +8,7 @@ import (
 
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/database/models"
-	"github.com/anoixa/image-bed/database/repo/key"
+	"github.com/anoixa/image-bed/database/repo/keys"
 	"github.com/anoixa/image-bed/utils"
 	"golang.org/x/sync/singleflight"
 

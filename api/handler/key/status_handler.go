@@ -8,7 +8,7 @@ import (
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
-	"github.com/anoixa/image-bed/database/repo/key"
+	"github.com/anoixa/image-bed/database/repo/keys"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
