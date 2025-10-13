@@ -6,6 +6,7 @@ import (
 
 	"github.com/anoixa/image-bed/api"
 	"github.com/anoixa/image-bed/api/common"
+	"github.com/anoixa/image-bed/api/handler/albums"
 	images2 "github.com/anoixa/image-bed/api/handler/images"
 	key2 "github.com/anoixa/image-bed/api/handler/key"
 	"github.com/anoixa/image-bed/api/middleware"
@@ -14,6 +15,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+var startTime = time.Now()
 
 // 启动gin
 func setupRouter() (*gin.Engine, func()) {
@@ -49,9 +52,15 @@ func setupRouter() (*gin.Engine, func()) {
 		generalRateLimiter.StopCleanup()
 	}
 
-	router.GET("/health", func(c *gin.Context) { c.String(http.StatusOK, "^_^") })
-	router.GET("/version", func(c *gin.Context) {
-		common.RespondSuccess(c, gin.H{
+	router.GET("/health", func(context *gin.Context) {
+		context.JSON(http.StatusOK, gin.H{
+			"status":  "ok",
+			"uptime":  time.Since(startTime).Round(time.Second).String(),
+			"version": config.Version,
+		})
+	})
+	router.GET("/version", func(context *gin.Context) {
+		common.RespondSuccess(context, gin.H{
 			"version": config.Version,
 			"commit":  config.CommitHash,
 		})
@@ -65,9 +74,9 @@ func setupRouter() (*gin.Engine, func()) {
 	}
 
 	apiGroup := router.Group("/api")
-	apiGroup.Use(func(c *gin.Context) { // 所有API禁止缓存
-		c.Header("Cache-Control", "no-store")
-		c.Next()
+	apiGroup.Use(func(context *gin.Context) { // 所有API禁止缓存
+		context.Header("Cache-Control", "no-store")
+		context.Next()
 	})
 	{
 		authGroup := apiGroup.Group("/auth")
@@ -89,7 +98,7 @@ func setupRouter() (*gin.Engine, func()) {
 				imagesGroup.POST("/upload", images2.UploadImageHandler)   // POST /api/v1/images/upload (single file)
 				imagesGroup.POST("/uploads", images2.UploadImagesHandler) // POST /api/v1/images/uploads (multiple files)
 
-				imagesGroup.POST("/list", images2.ImageListHandler)                  // POST /api/v1/images/list
+				imagesGroup.POST("", images2.ImageListHandler)                       // POST /api/v1/images/list
 				imagesGroup.POST("/delete", images2.DeleteImagesHandler)             // POST /api/v1/images/delete
 				imagesGroup.DELETE("/:identifier", images2.DeleteSingleImageHandler) // POST /api/v1/images/{photo}
 			}
@@ -98,12 +107,20 @@ func setupRouter() (*gin.Engine, func()) {
 			apiTokenGroup := v1.Group("/token")
 			apiTokenGroup.Use(middleware.Authorize("jwt"))
 			{
-				apiTokenGroup.POST("/create", key2.CreateStaticToken) // POST /api/v1/token/create
-				apiTokenGroup.GET("/all", key2.GetToken)              // GET /api/v1/token/all
+				apiTokenGroup.POST("", key2.CreateStaticToken) // POST /api/v1/token
+				apiTokenGroup.GET("", key2.GetToken)           // GET /api/v1/token
 
 				apiTokenGroup.POST("/:id/disable", key2.DisableToken) // POST /api/v1/token/{id}/disable
 				apiTokenGroup.POST("/:id/enable", key2.EnableToken)   // POST /api/v1/token/{id}/enable
 				apiTokenGroup.DELETE("/:id", key2.RevokeToken)        // DELETE /api/v1/token/{id}
+			}
+
+			// albums
+			albumsGroup := v1.Group("/albums")
+			albumsGroup.Use(middleware.Authorize("jwt"))
+			{
+				albumsGroup.POST("", albums.CreateAlbumHandler)       // POST /api/v1/albums
+				albumsGroup.DELETE("/:id", albums.DeleteAlbumHandler) // DELETE /api/v1/albums/{id}
 			}
 		}
 	}

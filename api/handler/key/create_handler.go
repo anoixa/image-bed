@@ -9,7 +9,7 @@ import (
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/database/models"
-	"github.com/anoixa/image-bed/database/repo/key"
+	"github.com/anoixa/image-bed/database/repo/keys"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/gin-gonic/gin"
 )
