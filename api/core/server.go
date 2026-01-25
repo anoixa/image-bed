@@ -10,9 +10,12 @@ import (
 	images2 "github.com/anoixa/image-bed/api/handler/images"
 	key2 "github.com/anoixa/image-bed/api/handler/key"
 	"github.com/anoixa/image-bed/api/middleware"
+	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
 	"github.com/gin-contrib/cors"
 
+	"github.com/anoixa/image-bed/database/dbcore"
+	"github.com/anoixa/image-bed/storage"
 	"github.com/gin-gonic/gin"
 )
 
@@ -40,9 +43,22 @@ func setupRouter() (*gin.Engine, func()) {
 
 	//router.SetTrustedProxies(nil)
 
+	// P0 修复：限制上传文件大小
+	// 限制内存中 multipart 表单的最大大小（50MB）
+	router.MaxMultipartMemory = 50 << 20 // 50MB
+
 	// 并发限制
 	concurrencyLimiter := middleware.NewConcurrencyLimiter(300)
 	router.Use(concurrencyLimiter.Middleware())
+
+	// P1 修复：请求体大小限制（100MB）
+	router.Use(middleware.RequestSizeLimit(100 << 20))
+
+	// P1 修复：添加请求ID追踪中间件
+	router.Use(middleware.RequestID())
+
+	// P1 修复：添加基础监控指标
+	router.Use(middleware.Metrics())
 
 	// 速率限制
 	authRateLimiter := middleware.NewIPRateLimiter(0.5, 5, 10*time.Minute)
@@ -53,17 +69,35 @@ func setupRouter() (*gin.Engine, func()) {
 	}
 
 	router.GET("/health", func(context *gin.Context) {
-		context.JSON(http.StatusOK, gin.H{
+		// P1 修复：改进健康检查，添加数据库、缓存、存储检查
+		health := gin.H{
 			"status":  "ok",
 			"uptime":  time.Since(startTime).Round(time.Second).String(),
 			"version": config.Version,
-		})
+			"checks": gin.H{
+				"database": checkDatabaseHealth(),
+				"cache":    checkCacheHealth(),
+				"storage":  checkStorageHealth(),
+			},
+		}
+		httpStatus := http.StatusOK
+		for _, checkResult := range health["checks"].(gin.H) {
+			if result, ok := checkResult.(string); ok && result != "ok" {
+				httpStatus = http.StatusServiceUnavailable
+				break
+			}
+		}
+		context.JSON(httpStatus, health)
 	})
 	router.GET("/version", func(context *gin.Context) {
 		common.RespondSuccess(context, gin.H{
 			"version": config.Version,
 			"commit":  config.CommitHash,
 		})
+	})
+	// P1 修复：添加监控指标端点
+	router.GET("/metrics", func(context *gin.Context) {
+		context.JSON(http.StatusOK, middleware.GetMetrics())
 	})
 
 	// 公共接口
@@ -129,6 +163,39 @@ func setupRouter() (*gin.Engine, func()) {
 }
 
 // StartServer 创建 http.Server
+// P1 修复：健康检查辅助函数
+func checkDatabaseHealth() string {
+	if db := dbcore.GetDBInstance(); db != nil {
+		sqlDB, err := db.DB()
+		if err != nil {
+			return "error: " + err.Error()
+		}
+		if err := sqlDB.Ping(); err != nil {
+			return "unavailable: " + err.Error()
+		}
+		return "ok"
+	}
+	return "not initialized"
+}
+
+func checkCacheHealth() string {
+	if cache.GlobalManager != nil {
+		return "ok"
+	}
+	return "not initialized"
+}
+
+func checkStorageHealth() string {
+	storageClient, err := storage.GetStorage(config.Get().Server.StorageConfig.Type)
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	if storageClient != nil {
+		return "ok"
+	}
+	return "not configured"
+}
+
 func StartServer() (*http.Server, func()) {
 	cfg := config.Get()
 	router, clean := setupRouter()

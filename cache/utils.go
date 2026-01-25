@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/anoixa/image-bed/cache/types"
+	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 )
 
@@ -47,7 +48,13 @@ func CacheImage(image *models.Image) error {
 	}
 
 	key := ImageCachePrefix + image.Identifier
-	return GlobalManager.Set(key, image, DefaultImageCacheExpiration)
+	// 性能优化：使用配置文件中的 TTL
+	cfg := config.Get()
+	ttl := DefaultImageCacheExpiration
+	if cfg != nil && cfg.Server.CacheConfig.ImageCacheTTL > 0 {
+		ttl = time.Duration(cfg.Server.CacheConfig.ImageCacheTTL) * time.Second
+	}
+	return GlobalManager.Set(key, image, ttl)
 }
 
 // GetCachedImage 获取缓存的图片元数据
@@ -242,8 +249,12 @@ func CacheImageData(identifier string, imageData []byte) error {
 	}
 
 	key := "image_data:" + identifier
-	// 设置1小时的过期时间
+	// 性能优化：使用配置文件中的 TTL
+	cfg := config.Get()
 	expiration := 1 * time.Hour
+	if cfg != nil && cfg.Server.CacheConfig.ImageDataCacheTTL > 0 {
+		expiration = time.Duration(cfg.Server.CacheConfig.ImageDataCacheTTL) * time.Second
+	}
 	return GlobalManager.Set(key, imageData, expiration)
 }
 

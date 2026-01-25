@@ -43,6 +43,11 @@ type DatabaseConfig struct {
 	Database string `mapstructure:"database"`
 
 	DatabaseFilePath string `mapstructure:"database_file_path"` //sqlite数据库文件路径
+
+	// 性能优化：连接池配置
+	MaxOpenConns    int `mapstructure:"max_open_conns"`
+	MaxIdleConns    int `mapstructure:"max_idle_conns"`
+	ConnMaxLifetime int `mapstructure:"conn_max_lifetime"`
 }
 
 type StorageConfig struct {
@@ -81,6 +86,10 @@ type CacheConfig struct {
 	Ristretto          RistrettoConfig `mapstructure:"ristretto"`
 	MaxImageCacheSize  int64           `mapstructure:"max_image_cache_size"` // 最大图片缓存大小（字节），0表示无限制
 	EnableImageCaching bool            `mapstructure:"enable_image_caching"` // 是否启用图片缓存
+
+	// 性能优化：缓存 TTL 配置
+	ImageCacheTTL     int `mapstructure:"image_cache_ttl"`      // 图片元数据缓存时间（秒）
+	ImageDataCacheTTL int `mapstructure:"image_data_cache_ttl"` // 图片数据缓存时间（秒）
 }
 
 type RedisConfig struct {

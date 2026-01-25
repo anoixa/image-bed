@@ -127,9 +127,27 @@ func streamAndCacheImage(context *gin.Context, image *models.Image) {
 
 	rs, isSeeker := imageStream.(io.ReadSeeker)
 
+	// 修复：检查客户端是否已断开
+	if context.IsAborted() {
+		return
+	}
+
 	if shouldCache && enableImageCaching {
 		if isSeeker {
-			data, readErr := io.ReadAll(rs)
+			// 修复：限制最大读取大小，防止大文件 OOM
+			data, readErr := io.ReadAll(io.LimitReader(rs, int64(maxCacheSize)))
+			if readErr != nil {
+				if !isBrokenPipe(readErr) {
+					log.Printf("Failed to read image data for %s: %v", image.Identifier, readErr)
+				}
+				return
+			}
+			// 检查是否被截断
+			if int64(len(data)) == maxCacheSize && int64(len(data)) < image.FileSize {
+				log.Printf("Image %s exceeds max cache size, skipping cache", image.Identifier)
+				_ = serveImageStream(context, image, rs)
+				return
+			}
 			if readErr != nil {
 				return
 			}
@@ -235,16 +253,19 @@ func setCommonHeaders(context *gin.Context, image *models.Image) {
 		}
 	}
 
+	// 只有在没有 ETag 的情况下才检查 If-Modified-Since
 	// If-Modified-Since 处理
-	ifModifiedSince := context.GetHeader("If-Modified-Since")
-	if ifModifiedSince != "" {
-		t, err := time.Parse(http.TimeFormat, ifModifiedSince)
-		if err == nil && !image.UpdatedAt.After(t) {
-			context.Header("ETag", etag)
-			context.Header("Last-Modified", image.UpdatedAt.UTC().Format(http.TimeFormat))
-			context.Status(http.StatusNotModified)
-			context.Abort()
-			return
+	if context.GetHeader("If-None-Match") == "" {
+		ifModifiedSince := context.GetHeader("If-Modified-Since")
+		if ifModifiedSince != "" {
+			t, err := time.Parse(http.TimeFormat, ifModifiedSince)
+			if err == nil && !image.UpdatedAt.After(t) {
+				context.Header("ETag", etag)
+				context.Header("Last-Modified", image.UpdatedAt.UTC().Format(http.TimeFormat))
+				context.Status(http.StatusNotModified)
+				context.Abort()
+				return
+			}
 		}
 	}
 

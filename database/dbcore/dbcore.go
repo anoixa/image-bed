@@ -109,10 +109,22 @@ func InitDB(cfg *config.Config) {
 		if err != nil {
 			log.Fatal("Failed to get underlying DB instance：", err)
 		}
-		sqlDB.SetConnMaxLifetime(time.Hour)
-		sqlDB.SetMaxIdleConns(10)
-		sqlDB.SetMaxOpenConns(100)
-
+		// 性能优化：使用配置文件中的连接池参数
+		maxOpenConns := cfg.Server.DatabaseConfig.MaxOpenConns
+		if maxOpenConns <= 0 {
+			maxOpenConns = 100
+		}
+		maxIdleConns := cfg.Server.DatabaseConfig.MaxIdleConns
+		if maxIdleConns <= 0 {
+			maxIdleConns = 10
+		}
+		connMaxLifetime := cfg.Server.DatabaseConfig.ConnMaxLifetime
+		if connMaxLifetime <= 0 {
+			connMaxLifetime = 3600
+		}
+		sqlDB.SetConnMaxLifetime(time.Duration(connMaxLifetime) * time.Second)
+		sqlDB.SetMaxIdleConns(maxIdleConns)
+		sqlDB.SetMaxOpenConns(maxOpenConns)
 		//err = AutoMigrateDB(db)
 		//if err != nil {
 		//	log.Fatalf("Auto migrate failed: %v", err)

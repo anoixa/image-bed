@@ -94,11 +94,9 @@ func Parse(tokenString string) (jwt.MapClaims, error) {
 		return nil, errors.New("JWT secret is not initialized")
 	}
 
-	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
-		tokenString = tokenString[7:]
-	}
-
 	// 解析令牌
+	// 注意：调用者（auth_middleware.go）已经处理了 Authorization 头中的 "Bearer " 前缀
+	// 这里不再重复移除
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])

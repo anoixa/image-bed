@@ -2,6 +2,7 @@ package images
 
 import (
 	"errors"
+	"log"
 	"net/http"
 
 	"github.com/anoixa/image-bed/api/common"
@@ -43,8 +44,12 @@ func DeleteImagesHandler(context *gin.Context) {
 
 	// 清除缓存
 	for _, imageID := range requestBody.ImageID {
-		_ = cache.DeleteCachedImage(imageID)
-		_ = cache.DeleteCachedImageData(imageID)
+		if err := cache.DeleteCachedImage(imageID); err != nil {
+			log.Printf("P1 修复：Failed to delete cache for image %s: %v", imageID, err)
+		}
+		if err := cache.DeleteCachedImageData(imageID); err != nil {
+			log.Printf("P1 修复：Failed to delete image data cache for image %s: %v", imageID, err)
+		}
 	}
 
 	common.RespondSuccessMessage(context, "Delete request processed successfully.", gin.H{"deleted_count": affectedCount})
@@ -74,8 +79,12 @@ func DeleteSingleImageHandler(context *gin.Context) {
 	}
 
 	// 清除缓存
-	_ = cache.DeleteCachedImage(imageIdentifier)
-	_ = cache.DeleteCachedImageData(imageIdentifier)
+	if err := cache.DeleteCachedImage(imageIdentifier); err != nil {
+		log.Printf("P1 修复：Failed to delete cache for image %s: %v", imageIdentifier, err)
+	}
+	if err := cache.DeleteCachedImageData(imageIdentifier); err != nil {
+		log.Printf("P1 修复：Failed to delete image data cache for image %s: %v", imageIdentifier, err)
+	}
 
 	common.RespondSuccessMessage(context, "Image deleted successfully", nil)
 }
