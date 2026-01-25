@@ -67,6 +67,10 @@ func UploadImageHandler(context *gin.Context) {
 	userID := context.GetUint(middleware.ContextUserIDKey)
 	image, _, err := processAndSaveImage(userID, fileHeader, storageClient, driverToSave)
 	if err != nil {
+		if !context.IsAborted() {
+			common.RespondError(context, http.StatusInternalServerError, err.Error())
+		}
+		return
 		common.RespondError(context, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -95,6 +99,17 @@ func UploadImagesHandler(context *gin.Context) {
 
 	if len(files) > 10 { // 限制最大上传文件数量
 		common.RespondError(context, http.StatusBadRequest, "Maximum 10 files allowed per upload")
+		return
+	}
+
+	// P1 修复：检查总文件大小限制（500MB）
+	var totalSize int64 = 0
+	for _, f := range files {
+		totalSize += f.Size
+	}
+	const maxTotalSize int64 = 500 * 1024 * 1024 // 500MB
+	if totalSize > maxTotalSize {
+		common.RespondError(context, http.StatusRequestEntityTooLarge, fmt.Sprintf("Total size of all files (%.2f MB) exceeds maximum allowed (%.2f MB)", float64(totalSize)/1024/1024, float64(maxTotalSize)/1024/1024))
 		return
 	}
 
@@ -139,7 +154,10 @@ func UploadImagesHandler(context *gin.Context) {
 				image, _, err := processAndSaveImage(userID, fileHeader, storageClient, driverToSave)
 
 				if err != nil {
-					result.Error = err.Error()
+					// P0 修复：如果客户端断开，不记录错误
+					if !context.IsAborted() {
+						result.Error = err.Error()
+					}
 				} else {
 					result.Identifier = image.Identifier
 					result.FileSize = image.FileSize

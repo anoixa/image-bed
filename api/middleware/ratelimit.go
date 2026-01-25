@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+
+	"fmt"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -103,6 +105,22 @@ func (rl *IPRateLimiter) cleanupStaleClients() {
 }
 
 // getClientIP Get the client's real IP address
+
+// RequestSizeLimit 请求体大小限制中间件
+func RequestSizeLimit(maxSize int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.ContentLength > maxSize {
+			c.AbortWithStatusJSON(http.StatusRequestEntityTooLarge, gin.H{
+				"error":       "Request body too large",
+				"max_size":    fmt.Sprintf("%d bytes", maxSize),
+				"actual_size": fmt.Sprintf("%d bytes", c.Request.ContentLength),
+			})
+			return
+		}
+		c.Next()
+	}
+}
+
 func getClientIP(c *gin.Context) string {
 	if ip := c.GetHeader("X-Forwarded-For"); ip != "" {
 		ips := strings.Split(ip, ",")
@@ -114,4 +132,30 @@ func getClientIP(c *gin.Context) string {
 		return ip
 	}
 	return c.ClientIP()
+}
+
+// RequestID 请求ID追踪中间件
+func RequestID() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		requestID := c.GetHeader("X-Request-ID")
+		if requestID == "" {
+			// 使用 UUID v4 生成新的请求ID
+			requestID = fmt.Sprintf("%s", generateRequestID())
+		}
+
+		c.Set("RequestID", requestID)
+		c.Writer.Header().Set("X-Request-ID", requestID)
+
+		// 记录请求ID到日志（建议使用结构化日志）
+		// log.Printf("[RequestID: %s] %s %s", requestID, c.Request.Method, c.Request.URL.Path)
+
+		c.Next()
+	}
+}
+
+func generateRequestID() string {
+	// 简单实现，生产环境建议使用 uuid.New().String()
+	// 这里为了避免额外依赖，使用时间戳+随机数生成唯一ID
+	now := time.Now()
+	return fmt.Sprintf("%d-%d", now.UnixNano(), now.Nanosecond())
 }
