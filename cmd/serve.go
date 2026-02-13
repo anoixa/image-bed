@@ -41,6 +41,9 @@ func RunServer() {
 	if err := os.MkdirAll("./data", os.ModePerm); err != nil {
 		log.Fatalf("Failed to create data directory: %v", err)
 	}
+	if err := os.MkdirAll("./data/temp", os.ModePerm); err != nil {
+		log.Fatalf("Failed to create temp directory: %v", err)
+	}
 
 	// 简陋的DI
 	container := di.NewContainer(cfg)
