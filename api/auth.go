@@ -27,6 +27,9 @@ func SetAuthRepositories(repos *repositories.Repositories) {
 
 // TokenInit Initialize JWT configuration
 func TokenInit(secret, expiresIn, refreshExpiresIn string) error {
+	if len(secret) < 32 {
+		return fmt.Errorf("JWT secret must be at least 32 characters long, got %d", len(secret))
+	}
 	jwtSecret = []byte(secret)
 
 	duration, err := time.ParseDuration(expiresIn)

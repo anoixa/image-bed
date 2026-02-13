@@ -20,6 +20,7 @@ import (
 	"unicode"
 
 	"github.com/anoixa/image-bed/api/common"
+	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/utils"
@@ -50,6 +51,15 @@ func (h *Handler) GetImage(c *gin.Context) {
 	if err != nil {
 		h.handleMetadataError(c, utils.SanitizeLogMessage(identifier), err)
 		return
+	}
+
+	// 检查私有图片权限
+	if !image.IsPublic {
+		userID := c.GetUint(middleware.ContextUserIDKey)
+		if userID == 0 || userID != image.UserID {
+			common.RespondError(c, http.StatusForbidden, "This image is private")
+			return
+		}
 	}
 
 	imageData, err := h.cacheHelper.GetCachedImageData(c.Request.Context(), identifier)
@@ -132,8 +142,10 @@ func (h *Handler) streamAndCacheImage(c *gin.Context, image *models.Image) {
 
 	cfg := config.Get()
 	enableImageCaching := cfg.Server.CacheConfig.EnableImageCaching
-	maxCacheSize := cfg.Server.CacheConfig.MaxImageCacheSize
-	shouldCache := enableImageCaching && image.FileSize > 0 && (maxCacheSize == 0 || image.FileSize <= maxCacheSize)
+	// MaxImageCacheSize 单位是 MB，转换为字节
+	maxCacheSizeMB := cfg.Server.CacheConfig.MaxImageCacheSize
+	maxCacheSize := maxCacheSizeMB * 1024 * 1024
+	shouldCache := enableImageCaching && image.FileSize > 0 && (maxCacheSizeMB == 0 || image.FileSize <= maxCacheSize)
 
 	rs, isSeeker := imageStream.(io.ReadSeeker)
 

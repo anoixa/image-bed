@@ -20,6 +20,7 @@ type ImageDTO struct {
 	MimeType     string `json:"mime_type"`
 	Width        int    `json:"width"`
 	Height       int    `json:"height"`
+	IsPublic     bool   `json:"is_public"`
 	CreatedAt    int64  `json:"created_at"`
 }
 
@@ -58,6 +59,12 @@ func (h *Handler) ListImages(c *gin.Context) {
 	if body.Limit <= 0 {
 		limit = 10
 	}
+	
+	// 限制最大分页数量
+	const maxLimit = 100
+	if limit > maxLimit {
+		limit = maxLimit
+	}
 
 	list, total, err := h.repo.GetImageList(body.StorageType, body.Identifier, body.Search, page, limit, int(userID))
 	if err != nil {
@@ -94,6 +101,7 @@ func toImageDTO(image *models.Image) *ImageDTO {
 		MimeType:     image.MimeType,
 		Width:        image.Width,
 		Height:       image.Height,
+		IsPublic:     image.IsPublic,
 		CreatedAt:    image.CreatedAt.Unix(),
 	}
 }

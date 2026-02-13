@@ -1,4 +1,4 @@
-package ristretto
+package memory
 
 import (
 	"context"
@@ -12,12 +12,12 @@ import (
 // ErrCacheMiss 缓存未命中错误
 var ErrCacheMiss = errors.New("cache miss")
 
-// Ristretto 实现接口
-type Ristretto struct {
+// Memory 内存缓存实现
+type Memory struct {
 	client *ristretto.Cache
 }
 
-// Config Ristretto 配置
+// Config 内存缓存配置
 type Config struct {
 	NumCounters int64
 	MaxCost     int64
@@ -25,8 +25,8 @@ type Config struct {
 	Metrics     bool
 }
 
-// NewRistretto 创建新的 Ristretto 缓存提供者
-func NewRistretto(config Config) (*Ristretto, error) {
+// NewMemory 创建新的内存缓存提供者
+func NewMemory(config Config) (*Memory, error) {
 	client, err := ristretto.NewCache(&ristretto.Config{
 		NumCounters: config.NumCounters,
 		MaxCost:     config.MaxCost,
@@ -38,29 +38,29 @@ func NewRistretto(config Config) (*Ristretto, error) {
 		return nil, err
 	}
 
-	return &Ristretto{
+	return &Memory{
 		client: client,
 	}, nil
 }
 
 // Set 设置缓存项
-func (r *Ristretto) Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error {
+func (m *Memory) Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error {
 	size := int64(1) // 默认大小
 	if data, ok := value.([]byte); ok {
 		size = int64(len(data))
 	}
 
-	set := r.client.SetWithTTL(key, value, size, expiration)
+	set := m.client.SetWithTTL(key, value, size, expiration)
 	if set {
 		// 等待值被实际设置
-		r.client.Wait()
+		m.client.Wait()
 	}
 	return nil
 }
 
 // Get 获取缓存项
-func (r *Ristretto) Get(ctx context.Context, key string, dest interface{}) error {
-	value, found := r.client.Get(key)
+func (m *Memory) Get(ctx context.Context, key string, dest interface{}) error {
+	value, found := m.client.Get(key)
 	if !found {
 		return ErrCacheMiss
 	}
@@ -97,24 +97,24 @@ func (r *Ristretto) Get(ctx context.Context, key string, dest interface{}) error
 }
 
 // Delete 删除缓存项
-func (r *Ristretto) Delete(ctx context.Context, key string) error {
-	r.client.Del(key)
+func (m *Memory) Delete(ctx context.Context, key string) error {
+	m.client.Del(key)
 	return nil
 }
 
 // Exists 检查缓存项是否存在
-func (r *Ristretto) Exists(ctx context.Context, key string) (bool, error) {
-	_, found := r.client.Get(key)
+func (m *Memory) Exists(ctx context.Context, key string) (bool, error) {
+	_, found := m.client.Get(key)
 	return found, nil
 }
 
 // Close 关闭缓存连接
-func (r *Ristretto) Close() error {
-	r.client.Close()
+func (m *Memory) Close() error {
+	m.client.Close()
 	return nil
 }
 
 // Name 返回缓存提供者名称
-func (r *Ristretto) Name() string {
-	return "ristretto"
+func (m *Memory) Name() string {
+	return "memory"
 }

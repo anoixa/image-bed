@@ -21,9 +21,9 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Addr         string        `mapstructure:"addr"`
-	Domain       string        `mapstructure:"domain"`
-	BaseURL      string        `mapstructure:"base_url"`
+	Host         string        `mapstructure:"host"`  // 服务器主机，如 "localhost" 或 "0.0.0.0"
+	Port         int           `mapstructure:"port"`  // 服务器端口，如 8080
+	Domain       string        `mapstructure:"domain"` // 外部访问域名，用于生成 URL
 	ReadTimeout  time.Duration `yaml:"readTimeout"`
 	WriteTimeout time.Duration `yaml:"writeTimeout"`
 	IdleTimeout  time.Duration `yaml:"idleTimeout"`
@@ -32,6 +32,30 @@ type ServerConfig struct {
 	DatabaseConfig DatabaseConfig `mapstructure:"database"`
 	StorageConfig  StorageConfig  `mapstructure:"storage"`
 	CacheConfig    CacheConfig    `mapstructure:"cache"`
+}
+
+// Addr 返回监听地址，格式为 "host:port"
+func (s ServerConfig) Addr() string {
+	if s.Host == "" {
+		s.Host = "0.0.0.0"
+	}
+	if s.Port == 0 {
+		s.Port = 8080
+	}
+	return fmt.Sprintf("%s:%d", s.Host, s.Port)
+}
+
+// BaseURL 返回基础 URL，用于生成图片链接
+func (s ServerConfig) BaseURL() string {
+	if s.Domain != "" {
+		return s.Domain
+	}
+	// 默认使用 localhost
+	host := s.Host
+	if host == "0.0.0.0" {
+		host = "localhost"
+	}
+	return fmt.Sprintf("http://%s:%d", host, s.Port)
 }
 
 type DatabaseConfig struct {
@@ -74,11 +98,11 @@ type LocalStorageConfig struct {
 }
 
 type CacheConfig struct {
-	Provider           string          `mapstructure:"provider"`
-	Redis              RedisConfig     `mapstructure:"redis"`
-	Ristretto          RistrettoConfig `mapstructure:"ristretto"`
-	MaxImageCacheSize  int64           `mapstructure:"max_image_cache_size"` // 最大图片缓存大小（字节），0表示无限制
-	EnableImageCaching bool            `mapstructure:"enable_image_caching"` // 是否启用图片缓存
+	Provider           string       `mapstructure:"provider"`
+	Redis              RedisConfig  `mapstructure:"redis"`
+	Memory             MemoryConfig `mapstructure:"memory"`
+	MaxImageCacheSize  int64        `mapstructure:"max_image_cache_size_mb"` // 最大图片缓存大小（MB），0表示无限制
+	EnableImageCaching bool         `mapstructure:"enable_image_caching"`    // 是否启用图片缓存
 
 	ImageCacheTTL     int `mapstructure:"image_cache_ttl"`      // 图片元数据缓存时间（秒）
 	ImageDataCacheTTL int `mapstructure:"image_data_cache_ttl"` // 图片数据缓存时间（秒）
@@ -98,7 +122,7 @@ type RedisConfig struct {
 	IdleCheckFrequency string `mapstructure:"idle_check_frequency"`
 }
 
-type RistrettoConfig struct {
+type MemoryConfig struct {
 	NumCounters int64 `mapstructure:"num_counters"`
 	MaxCost     int64 `mapstructure:"max_cost"`
 	BufferItems int64 `mapstructure:"buffer_items"`
@@ -138,13 +162,13 @@ func loadConfig() {
 	viper.SetDefault("server.storage.minio.tls_handshake_timeout", "10s")
 	viper.SetDefault("server.cache.provider", "memory")
 
-	// Ristretto
-	viper.SetDefault("server.cache.ristretto.num_counters", 1000000)
-	viper.SetDefault("server.cache.ristretto.max_cost", 1073741824) // 1GB
-	viper.SetDefault("server.cache.ristretto.buffer_items", 64)
-	viper.SetDefault("server.cache.ristretto.metrics", true)
-	viper.SetDefault("server.cache.max_image_cache_size", 200)   // 0表示无限制
-	viper.SetDefault("server.cache.enable_image_caching", false) // 默认启用图片缓存
+	// Memory cache defaults
+	viper.SetDefault("server.cache.memory.num_counters", 1000000)
+	viper.SetDefault("server.cache.memory.max_cost", 1073741824) // 1GB
+	viper.SetDefault("server.cache.memory.buffer_items", 64)
+	viper.SetDefault("server.cache.memory.metrics", true)
+	viper.SetDefault("server.cache.max_image_cache_size_mb", 10) // 最大缓存 10MB 的图片
+	viper.SetDefault("server.cache.enable_image_caching", false) // 默认不启用图片缓存
 
 	// Redis
 	viper.SetDefault("server.cache.redis.pool_size", 10)

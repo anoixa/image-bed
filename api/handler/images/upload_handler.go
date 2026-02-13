@@ -66,7 +66,9 @@ func (h *Handler) UploadImage(c *gin.Context) {
 	}
 
 	userID := c.GetUint(middleware.ContextUserIDKey)
-	image, _, err := h.processAndSaveImage(c.Request.Context(), userID, fileHeader, storageProvider, driverToSave)
+	// 读取公开/私有参数，默认为公开
+	isPublic := c.PostForm("is_public") != "false"
+	image, _, err := h.processAndSaveImage(c.Request.Context(), userID, fileHeader, storageProvider, driverToSave, isPublic)
 	if err != nil {
 		if !c.IsAborted() {
 			common.RespondError(c, http.StatusInternalServerError, err.Error())
@@ -139,6 +141,8 @@ func (h *Handler) UploadImages(c *gin.Context) {
 	results := make([]uploadResult, len(files))
 	var resultsMutex sync.Mutex
 	userID := c.GetUint(middleware.ContextUserIDKey)
+	// 读取公开/私有参数，默认为公开
+	isPublic := c.PostForm("is_public") != "false"
 
 	g, ctx := errgroup.WithContext(c.Request.Context())
 
@@ -151,7 +155,7 @@ func (h *Handler) UploadImages(c *gin.Context) {
 				return ctx.Err()
 			default:
 				result := uploadResult{FileName: fileHeader.Filename}
-				image, _, err := h.processAndSaveImage(ctx, userID, fileHeader, storageProvider, driverToSave)
+				image, _, err := h.processAndSaveImage(ctx, userID, fileHeader, storageProvider, driverToSave, isPublic)
 
 				if err != nil {
 					// 如果客户端断开，不记录错误
@@ -204,7 +208,7 @@ func (h *Handler) UploadImages(c *gin.Context) {
 }
 
 // processAndSaveImage 保存图片
-func (h *Handler) processAndSaveImage(ctx context.Context, userID uint, fileHeader *multipart.FileHeader, storageProvider storage.Provider, driverToSave string) (*models.Image, bool, error) {
+func (h *Handler) processAndSaveImage(ctx context.Context, userID uint, fileHeader *multipart.FileHeader, storageProvider storage.Provider, driverToSave string, isPublic bool) (*models.Image, bool, error) {
 	file, err := fileHeader.Open()
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to open file: %w", err)
@@ -302,6 +306,7 @@ func (h *Handler) processAndSaveImage(ctx context.Context, userID uint, fileHead
 		MimeType:      mimeType,
 		StorageDriver: driverToSave,
 		FileHash:      fileHash,
+		IsPublic:      isPublic,
 		UserID:        userID,
 	}
 
@@ -311,7 +316,7 @@ func (h *Handler) processAndSaveImage(ctx context.Context, userID uint, fileHead
 	}
 
 	// 异步提取图片尺寸
-	async.ExtractImageDimensionsAsync(identifier, driverToSave, h.repo.DB())
+	async.ExtractImageDimensionsAsync(identifier, driverToSave, h.repo.DB(), storageProvider)
 	go h.warmCache(newImage)
 
 	return newImage, false, nil

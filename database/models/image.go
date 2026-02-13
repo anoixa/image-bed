@@ -13,6 +13,7 @@ type Image struct {
 	FileHash string `gorm:"uniqueIndex:idx_filehash;not null"`
 	Width    int
 	Height   int
+	IsPublic bool `gorm:"default:true;not null"`
 
 	UserID uint `gorm:"index:idx_user_created_at,priority:1"`
 	User   User `gorm:"foreignKey:UserID"`
