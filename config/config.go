@@ -67,12 +67,6 @@ type MinioConfig struct {
 	SecretAccessKey string `mapstructure:"secret_access_key"`
 	UseSSL          bool   `mapstructure:"use_ssl"`
 	BucketName      string `mapstructure:"bucket_name"`
-
-	// 连接池配置
-	MaxIdleConns        int    `mapstructure:"max_idle_conns"`
-	MaxIdleConnsPerHost int    `mapstructure:"max_idle_conns_per_host"`
-	IdleConnTimeout     string `mapstructure:"idle_conn_timeout"`
-	TLSHandshakeTimeout string `mapstructure:"tls_handshake_timeout"`
 }
 
 type LocalStorageConfig struct {

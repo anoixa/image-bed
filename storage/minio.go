@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"time"
@@ -25,40 +24,26 @@ type MinioStorage struct {
 
 // NewMinioStorage 创建 MinIO 存储提供者
 func NewMinioStorage(cfg config.MinioConfig) (*MinioStorage, error) {
-	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   30 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
-		MaxIdleConns:          getOrDefaultInt(cfg.MaxIdleConns, 256),
-		MaxIdleConnsPerHost:   getOrDefaultInt(cfg.MaxIdleConnsPerHost, 16),
-		IdleConnTimeout:       parseDurationOrDefault(cfg.IdleConnTimeout, time.Minute),
-		TLSHandshakeTimeout:   parseDurationOrDefault(cfg.TLSHandshakeTimeout, 10*time.Second),
-		ExpectContinueTimeout: 10 * time.Second,
-		DisableCompression:    true,
+	opts := &minio.Options{
+		Creds:  credentials.NewStaticV4(cfg.AccessKeyID, cfg.SecretAccessKey, ""),
+		Secure: cfg.UseSSL,
 	}
 
-	// SSL 配置
-	if cfg.UseSSL {
-		transport.TLSClientConfig = &tls.Config{
-			MinVersion: tls.VersionTLS12,
+	// SSL 自定义证书配置（如果需要）
+	if cfg.UseSSL && os.Getenv("SSL_CERT_FILE") != "" {
+		rootCAs := mustGetSystemCertPool()
+		if data, err := os.ReadFile(os.Getenv("SSL_CERT_FILE")); err == nil {
+			rootCAs.AppendCertsFromPEM(data)
 		}
-		if f := os.Getenv("SSL_CERT_FILE"); f != "" {
-			rootCAs := mustGetSystemCertPool()
-			data, err := os.ReadFile(f)
-			if err == nil {
-				rootCAs.AppendCertsFromPEM(data)
-			}
-			transport.TLSClientConfig.RootCAs = rootCAs
+		opts.Transport = &http.Transport{
+			TLSClientConfig: &tls.Config{
+				MinVersion: tls.VersionTLS12,
+				RootCAs:    rootCAs,
+			},
 		}
 	}
 
-	client, err := minio.New(cfg.Endpoint, &minio.Options{
-		Creds:     credentials.NewStaticV4(cfg.AccessKeyID, cfg.SecretAccessKey, ""),
-		Secure:    cfg.UseSSL,
-		Transport: transport,
-	})
+	client, err := minio.New(cfg.Endpoint, opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize MinIO client: %w", err)
 	}
@@ -148,28 +133,6 @@ func (s *MinioStorage) Health(ctx context.Context) error {
 // Name 返回存储名称
 func (s *MinioStorage) Name() string {
 	return "minio"
-}
-
-// getOrDefaultInt 获取整数值或默认值
-func getOrDefaultInt(value int, defaultValue int) int {
-	if value <= 0 {
-		return defaultValue
-	}
-	return value
-}
-
-// parseDurationOrDefault 解析持续时间或使用默认值
-func parseDurationOrDefault(durationStr string, defaultValue time.Duration) time.Duration {
-	if durationStr == "" {
-		return defaultValue
-	}
-
-	duration, err := time.ParseDuration(durationStr)
-	if err != nil {
-		return defaultValue
-	}
-
-	return duration
 }
 
 // mustGetSystemCertPool 获取系统证书池
