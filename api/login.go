@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/anoixa/image-bed/api/common"
-	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 	accounts2 "github.com/anoixa/image-bed/database/repo/accounts"
@@ -50,13 +49,6 @@ func LoginHandler(context *gin.Context) {
 		common.RespondError(context, http.StatusUnauthorized, "Invalid credentials")
 		return
 	}
-
-	// 缓存用户信息
-	go func(userToCache *models.User) {
-		if err := cache.CacheUser(userToCache); err != nil {
-			log.Printf("WARN: Failed to cache user object for user ID '%d': %v", userToCache.ID, err)
-		}
-	}(user)
 
 	// 生成 JWT access tokens
 	accessToken, accessTokenExpiry, err := GenerateTokens(user.Username, user.ID)

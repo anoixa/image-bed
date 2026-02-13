@@ -6,47 +6,44 @@ import (
 	"errors"
 	"time"
 
-	"github.com/anoixa/image-bed/cache/types"
 	"github.com/anoixa/image-bed/config"
 	"github.com/go-redis/redis/v8"
 )
 
-// Redis 实现了types.Cache接口
+// ErrCacheMiss 缓存未命中错误
+var ErrCacheMiss = errors.New("cache miss")
+
+// Redis 实现了缓存 Provider 接口
 type Redis struct {
 	client *redis.Client
-	ctx    context.Context
 }
 
-// NewRedis 创建一个新的Redis实例
-func NewRedis(addr, password string, db int) (types.Cache, error) {
-	// 获取配置
-	cfg := config.Get()
+// NewRedis 创建一个新的 Redis 缓存提供者
+func NewRedis(cfg *config.Config) (*Redis, error) {
+	redisCfg := cfg.Server.CacheConfig.Redis
 
 	// 解析时间配置
 	var maxConnAge, poolTimeout, idleTimeout, idleCheckFrequency time.Duration
 
-	if cfg.Server.CacheConfig.Redis.MaxConnAge != "" {
-		maxConnAge, _ = time.ParseDuration(cfg.Server.CacheConfig.Redis.MaxConnAge)
+	if redisCfg.MaxConnAge != "" {
+		maxConnAge, _ = time.ParseDuration(redisCfg.MaxConnAge)
 	}
-
-	if cfg.Server.CacheConfig.Redis.PoolTimeout != "" {
-		poolTimeout, _ = time.ParseDuration(cfg.Server.CacheConfig.Redis.PoolTimeout)
+	if redisCfg.PoolTimeout != "" {
+		poolTimeout, _ = time.ParseDuration(redisCfg.PoolTimeout)
 	}
-
-	if cfg.Server.CacheConfig.Redis.IdleTimeout != "" {
-		idleTimeout, _ = time.ParseDuration(cfg.Server.CacheConfig.Redis.IdleTimeout)
+	if redisCfg.IdleTimeout != "" {
+		idleTimeout, _ = time.ParseDuration(redisCfg.IdleTimeout)
 	}
-
-	if cfg.Server.CacheConfig.Redis.IdleCheckFrequency != "" {
-		idleCheckFrequency, _ = time.ParseDuration(cfg.Server.CacheConfig.Redis.IdleCheckFrequency)
+	if redisCfg.IdleCheckFrequency != "" {
+		idleCheckFrequency, _ = time.ParseDuration(redisCfg.IdleCheckFrequency)
 	}
 
 	client := redis.NewClient(&redis.Options{
-		Addr:               addr,
-		Password:           password,
-		DB:                 db,
-		PoolSize:           cfg.Server.CacheConfig.Redis.PoolSize,
-		MinIdleConns:       cfg.Server.CacheConfig.Redis.MinIdleConns,
+		Addr:               redisCfg.Address,
+		Password:           redisCfg.Password,
+		DB:                 redisCfg.DB,
+		PoolSize:           redisCfg.PoolSize,
+		MinIdleConns:       redisCfg.MinIdleConns,
 		MaxConnAge:         maxConnAge,
 		PoolTimeout:        poolTimeout,
 		IdleTimeout:        idleTimeout,
@@ -54,44 +51,40 @@ func NewRedis(addr, password string, db int) (types.Cache, error) {
 	})
 
 	// 测试连接
-	ctx := context.Background()
-	_, err := client.Ping(ctx).Result()
-	if err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := client.Ping(ctx).Result(); err != nil {
 		return nil, err
 	}
 
 	return &Redis{
 		client: client,
-		ctx:    ctx,
 	}, nil
 }
 
 // Set 设置缓存项
-func (r *Redis) Set(key string, value interface{}, expiration time.Duration) error {
+func (r *Redis) Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error {
 	var data []byte
 	var err error
 
-	// 检查值是否为[]byte类型
 	if byteData, ok := value.([]byte); ok {
-		// 如果是[]byte类型，直接使用
 		data = byteData
 	} else {
-		// 否则将值序列化为JSON以便存储
 		data, err = json.Marshal(value)
 		if err != nil {
 			return err
 		}
 	}
 
-	return r.client.Set(r.ctx, key, data, expiration).Err()
+	return r.client.Set(ctx, key, data, expiration).Err()
 }
 
 // Get 获取缓存项
-func (r *Redis) Get(key string, dest interface{}) error {
-	data, err := r.client.Get(r.ctx, key).Result()
+func (r *Redis) Get(ctx context.Context, key string, dest interface{}) error {
+	data, err := r.client.Get(ctx, key).Result()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
-			return types.ErrCacheMiss
+			return ErrCacheMiss
 		}
 		return err
 	}
@@ -101,28 +94,26 @@ func (r *Redis) Get(key string, dest interface{}) error {
 		return nil
 	}
 
-	if err := json.Unmarshal([]byte(data), dest); err != nil {
-		return err
-	}
-
-	return nil
+	return json.Unmarshal([]byte(data), dest)
 }
 
 // Delete 删除缓存项
-func (r *Redis) Delete(key string) error {
-	return r.client.Del(r.ctx, key).Err()
+func (r *Redis) Delete(ctx context.Context, key string) error {
+	return r.client.Del(ctx, key).Err()
 }
 
 // Exists 检查缓存项是否存在
-func (r *Redis) Exists(key string) (bool, error) {
-	exists, err := r.client.Exists(r.ctx, key).Result()
-	if err != nil {
-		return false, err
-	}
-	return exists > 0, nil
+func (r *Redis) Exists(ctx context.Context, key string) (bool, error) {
+	result, err := r.client.Exists(ctx, key).Result()
+	return result > 0, err
 }
 
 // Close 关闭缓存连接
 func (r *Redis) Close() error {
 	return r.client.Close()
+}
+
+// Name 返回缓存名称
+func (r *Redis) Name() string {
+	return "redis"
 }

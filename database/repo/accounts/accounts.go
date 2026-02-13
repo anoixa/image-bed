@@ -5,16 +5,11 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/anoixa/image-bed/cache"
-	"github.com/anoixa/image-bed/cache/types"
 	"github.com/anoixa/image-bed/database/dbcore"
 	"github.com/anoixa/image-bed/database/models"
 	cryptopackage "github.com/anoixa/image-bed/utils/crypto"
-	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 )
-
-var userGroup singleflight.Group
 
 // CreateDefaultAdminUser Create default administrator user
 func CreateDefaultAdminUser() {
@@ -73,49 +68,18 @@ func GetUserByUsername(username string) (*models.User, error) {
 	return &user, nil
 }
 
-// GetUserByUserIDWithCache Get User by id
+// GetUserByUserIDWithCache Get User by id (缓存功能已移除，直接使用数据库查询)
 func GetUserByUserIDWithCache(id uint) (*models.User, error) {
+	db := dbcore.GetDBInstance()
 	var user models.User
-	err := cache.GetCachedUser(id, &user)
-	if err == nil {
-		// 缓存命中
-		return &user, nil
-	} else if !types.IsCacheMiss(err) {
-		log.Printf("Cache error when getting user by ID %d: %v", id, err)
-	}
 
-	val, err, _ := userGroup.Do(fmt.Sprintf("user_%d", id), func() (interface{}, error) {
-		db := dbcore.GetDBInstance()
-		var dbUser models.User
-
-		err = db.Where("id = ?", id).First(&dbUser).Error
-		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				// 缓存空值
-				cacheKey := fmt.Sprintf("%s%d", cache.UserCachePrefix, id)
-				if cacheErr := cache.CacheEmptyValue(cacheKey); cacheErr != nil {
-					log.Printf("Failed to cache empty user: %v", cacheErr)
-				}
-				return nil, nil
-			}
-			return nil, err
-		}
-
-		// 将用户信息缓存起来
-		if cacheErr := cache.CacheUser(&dbUser); cacheErr != nil {
-			log.Printf("Failed to cache user: %v", cacheErr)
-		}
-
-		return &dbUser, nil
-	})
-
+	err := db.Where("id = ?", id).First(&user).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 
-	if val == nil {
-		return nil, nil
-	}
-
-	return val.(*models.User), nil
+	return &user, nil
 }

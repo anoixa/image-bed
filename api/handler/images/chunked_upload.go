@@ -2,6 +2,7 @@ package images
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -19,7 +20,6 @@ import (
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
-	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/anoixa/image-bed/utils/async"
 	"github.com/anoixa/image-bed/utils/validator"
@@ -28,41 +28,41 @@ import (
 )
 
 const (
-	// 默认分片大小：5MB
+	// DefaultChunkSize 默认分片大小：5MB
 	DefaultChunkSize = 5 * 1024 * 1024
-	// 最大分片数
+	// MaxChunks 最大分片数
 	MaxChunks = 1000
-	// 上传会话过期时间
+	// UploadSessionExpiry 上传会话过期时间
 	UploadSessionExpiry = 24 * time.Hour
 )
 
 // ChunkedUploadSession 分片上传会话
 type ChunkedUploadSession struct {
-	SessionID     string
-	FileName      string
-	FileHash      string
-	TotalSize     int64
-	ChunkSize     int64
-	TotalChunks   int
+	SessionID      string
+	FileName       string
+	FileHash       string
+	TotalSize      int64
+	ChunkSize      int64
+	TotalChunks    int
 	ReceivedChunks map[int]bool
-	StorageDriver string
-	UserID        uint
-	TempDir       string
-	CreatedAt     time.Time
+	StorageDriver  string
+	UserID         uint
+	TempDir        string
+	CreatedAt      time.Time
 }
 
 // 内存中的上传会话管理
 var (
-	sessions     = make(map[string]*ChunkedUploadSession)
-	sessionsMu   sync.RWMutex
+	sessions   = make(map[string]*ChunkedUploadSession)
+	sessionsMu sync.RWMutex
 )
 
 // InitChunkedUploadRequest 初始化分片上传请求
 type InitChunkedUploadRequest struct {
-	FileName    string `json:"file_name" binding:"required"`
-	FileHash    string `json:"file_hash" binding:"required"` // 客户端预计算的哈希
-	TotalSize   int64  `json:"total_size" binding:"required,min=1"`
-	ChunkSize   int64  `json:"chunk_size" binding:"required,min=1048576,max=52428800"` // 1MB - 50MB
+	FileName  string `json:"file_name" binding:"required"`
+	FileHash  string `json:"file_hash" binding:"required"` // 客户端预计算的哈希
+	TotalSize int64  `json:"total_size" binding:"required,min=1"`
+	ChunkSize int64  `json:"chunk_size" binding:"required,min=1048576,max=52428800"` // 1MB - 50MB
 }
 
 // InitChunkedUploadResponse 初始化分片上传响应
@@ -74,8 +74,8 @@ type InitChunkedUploadResponse struct {
 
 // UploadChunkRequest 上传分片请求
 type UploadChunkRequest struct {
-	SessionID string `form:"session_id" binding:"required"`
-	ChunkIndex int   `form:"chunk_index" binding:"required,min=0"`
+	SessionID  string `form:"session_id" binding:"required"`
+	ChunkIndex int    `form:"chunk_index" binding:"required,min=0"`
 }
 
 // CompleteChunkedUploadRequest 完成分片上传请求
@@ -83,8 +83,8 @@ type CompleteChunkedUploadRequest struct {
 	SessionID string `json:"session_id" binding:"required"`
 }
 
-// InitChunkedUploadHandler 初始化分片上传
-func InitChunkedUploadHandler(c *gin.Context) {
+// InitChunkedUpload 初始化分片上传
+func (h *Handler) InitChunkedUpload(c *gin.Context) {
 	var req InitChunkedUploadRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		common.RespondError(c, http.StatusBadRequest, err.Error())
@@ -103,12 +103,12 @@ func InitChunkedUploadHandler(c *gin.Context) {
 	if err == nil {
 		// 文件已存在，直接返回
 		common.RespondSuccess(c, gin.H{
-			"session_id":   "",
-			"total_chunks": 0,
-			"chunk_size":   0,
+			"session_id":     "",
+			"total_chunks":   0,
+			"chunk_size":     0,
 			"instant_upload": true,
-			"identifier":   existingImage.Identifier,
-			"url":          utils.BuildImageURL(existingImage.Identifier),
+			"identifier":     existingImage.Identifier,
+			"url":            utils.BuildImageURL(existingImage.Identifier),
 		})
 		return
 	}
@@ -147,8 +147,8 @@ func InitChunkedUploadHandler(c *gin.Context) {
 	})
 }
 
-// UploadChunkHandler 上传单个分片
-func UploadChunkHandler(c *gin.Context) {
+// UploadChunk 上传单个分片
+func (h *Handler) UploadChunk(c *gin.Context) {
 	var req UploadChunkRequest
 	if err := c.ShouldBind(&req); err != nil {
 		common.RespondError(c, http.StatusBadRequest, err.Error())
@@ -216,8 +216,8 @@ func UploadChunkHandler(c *gin.Context) {
 	})
 }
 
-// CompleteChunkedUploadHandler 完成分片上传并合并
-func CompleteChunkedUploadHandler(c *gin.Context) {
+// CompleteChunkedUpload 完成分片上传并合并
+func (h *Handler) CompleteChunkedUpload(c *gin.Context) {
 	var req CompleteChunkedUploadRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		common.RespondError(c, http.StatusBadRequest, err.Error())
@@ -251,7 +251,8 @@ func CompleteChunkedUploadHandler(c *gin.Context) {
 
 	// 异步合并分片并保存
 	go func() {
-		if err := processChunkedUpload(session); err != nil {
+		ctx := context.Background()
+		if err := h.processChunkedUpload(ctx, session); err != nil {
 			log.Printf("Failed to process chunked upload: %v", err)
 		}
 		// 清理临时目录
@@ -265,7 +266,7 @@ func CompleteChunkedUploadHandler(c *gin.Context) {
 }
 
 // processChunkedUpload 合并分片并保存
-func processChunkedUpload(session *ChunkedUploadSession) error {
+func (h *Handler) processChunkedUpload(ctx context.Context, session *ChunkedUploadSession) error {
 	// 合并所有分片
 	mergedFile := filepath.Join(session.TempDir, "merged")
 	outFile, err := os.Create(mergedFile)
@@ -311,13 +312,13 @@ func processChunkedUpload(session *ChunkedUploadSession) error {
 		return fmt.Errorf("uploaded file is not a valid image")
 	}
 
-	// 获取存储客户端
-	cfg := config.Get()
-	storageClient, err := storage.GetStorage("")
+	// 获取存储提供者
+	storageProvider, err := h.storageFactory.Get("")
 	if err != nil {
 		return fmt.Errorf("failed to get storage: %w", err)
 	}
 
+	cfg := config.Get()
 	driverToSave := cfg.Server.StorageConfig.Type
 
 	// 生成唯一标识符
@@ -325,7 +326,7 @@ func processChunkedUpload(session *ChunkedUploadSession) error {
 	identifier := fmt.Sprintf("%d-%s%s", time.Now().UnixNano(), fileHash[:16], ext)
 
 	// 保存到存储
-	if err := storageClient.Save(identifier, bytes.NewReader(fileBytes)); err != nil {
+	if err := storageProvider.SaveWithContext(ctx, identifier, bytes.NewReader(fileBytes)); err != nil {
 		return fmt.Errorf("failed to save file to storage: %w", err)
 	}
 
@@ -341,7 +342,7 @@ func processChunkedUpload(session *ChunkedUploadSession) error {
 	}
 
 	if err := images.SaveImage(newImage); err != nil {
-		storageClient.Delete(identifier)
+		storageProvider.DeleteWithContext(ctx, identifier)
 		return fmt.Errorf("failed to save image metadata: %w", err)
 	}
 
@@ -352,8 +353,8 @@ func processChunkedUpload(session *ChunkedUploadSession) error {
 	return nil
 }
 
-// GetChunkedUploadStatusHandler 获取分片上传状态
-func GetChunkedUploadStatusHandler(c *gin.Context) {
+// GetChunkedUploadStatus 获取分片上传状态
+func (h *Handler) GetChunkedUploadStatus(c *gin.Context) {
 	sessionID := c.Query("session_id")
 	if sessionID == "" {
 		common.RespondError(c, http.StatusBadRequest, "session_id is required")

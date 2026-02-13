@@ -1,6 +1,7 @@
 package images
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -16,7 +17,6 @@ import (
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
-	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
@@ -30,35 +30,35 @@ import (
 	"gorm.io/gorm"
 )
 
-// UploadImageHandler handles single image upload
-func UploadImageHandler(context *gin.Context) {
-	form, err := context.MultipartForm()
+// UploadImage 处理单图片上传
+func (h *Handler) UploadImage(c *gin.Context) {
+	form, err := c.MultipartForm()
 	if err != nil {
-		common.RespondError(context, http.StatusBadRequest, "Invalid form data")
+		common.RespondError(c, http.StatusBadRequest, "Invalid form data")
 		return
 	}
 
 	files := form.File["file"]
 	if len(files) == 0 {
-		common.RespondError(context, http.StatusBadRequest, "At least one file is required under the 'file' key")
+		common.RespondError(c, http.StatusBadRequest, "At least one file is required under the 'file' key")
 		return
 	}
 
 	if len(files) > 1 {
-		common.RespondError(context, http.StatusBadRequest, "Only one file is allowed for single upload")
+		common.RespondError(c, http.StatusBadRequest, "Only one file is allowed for single upload")
 		return
 	}
 
 	fileHeader := files[0]
 
-	storageName := context.PostForm("storage")
+	storageName := c.PostForm("storage")
 	if storageName == "" {
-		storageName = context.Query("storage")
+		storageName = c.Query("storage")
 	}
 
-	storageClient, err := storage.GetStorage(storageName)
+	storageProvider, err := h.storageFactory.Get(storageName)
 	if err != nil {
-		common.RespondError(context, http.StatusBadRequest, err.Error())
+		common.RespondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	driverToSave := storageName
@@ -66,18 +66,16 @@ func UploadImageHandler(context *gin.Context) {
 		driverToSave = config.Get().Server.StorageConfig.Type
 	}
 
-	userID := context.GetUint(middleware.ContextUserIDKey)
-	image, _, err := processAndSaveImage(userID, fileHeader, storageClient, driverToSave)
+	userID := c.GetUint(middleware.ContextUserIDKey)
+	image, _, err := h.processAndSaveImage(c.Request.Context(), userID, fileHeader, storageProvider, driverToSave)
 	if err != nil {
-		if !context.IsAborted() {
-			common.RespondError(context, http.StatusInternalServerError, err.Error())
+		if !c.IsAborted() {
+			common.RespondError(c, http.StatusInternalServerError, err.Error())
 		}
-		return
-		common.RespondError(context, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	common.RespondSuccess(context, gin.H{
+	common.RespondSuccess(c, gin.H{
 		"identifier": image.Identifier,
 		"filename":   image.OriginalName,
 		"file_size":  image.FileSize,
@@ -85,22 +83,22 @@ func UploadImageHandler(context *gin.Context) {
 	})
 }
 
-// UploadImagesHandler Multiple file upload interface
-func UploadImagesHandler(context *gin.Context) {
-	form, err := context.MultipartForm()
+// UploadImages 处理多图片上传
+func (h *Handler) UploadImages(c *gin.Context) {
+	form, err := c.MultipartForm()
 	if err != nil {
-		common.RespondError(context, http.StatusBadRequest, "Invalid form data")
+		common.RespondError(c, http.StatusBadRequest, "Invalid form data")
 		return
 	}
 
 	files := form.File["files"]
 	if len(files) == 0 {
-		common.RespondError(context, http.StatusBadRequest, "At least one file is required under the 'files' key")
+		common.RespondError(c, http.StatusBadRequest, "At least one file is required under the 'files' key")
 		return
 	}
 
 	if len(files) > 10 { // 限制最大上传文件数量
-		common.RespondError(context, http.StatusBadRequest, "Maximum 10 files allowed per upload")
+		common.RespondError(c, http.StatusBadRequest, "Maximum 10 files allowed per upload")
 		return
 	}
 
@@ -111,18 +109,18 @@ func UploadImagesHandler(context *gin.Context) {
 	}
 	const maxTotalSize int64 = 500 * 1024 * 1024 // 500MB
 	if totalSize > maxTotalSize {
-		common.RespondError(context, http.StatusRequestEntityTooLarge, fmt.Sprintf("Total size of all files (%.2f MB) exceeds maximum allowed (%.2f MB)", float64(totalSize)/1024/1024, float64(maxTotalSize)/1024/1024))
+		common.RespondError(c, http.StatusRequestEntityTooLarge, fmt.Sprintf("Total size of all files (%.2f MB) exceeds maximum allowed (%.2f MB)", float64(totalSize)/1024/1024, float64(maxTotalSize)/1024/1024))
 		return
 	}
 
-	storageName := context.PostForm("storage")
+	storageName := c.PostForm("storage")
 	if storageName == "" {
-		storageName = context.Query("storage")
+		storageName = c.Query("storage")
 	}
 
-	storageClient, err := storage.GetStorage(storageName)
+	storageProvider, err := h.storageFactory.Get(storageName)
 	if err != nil {
-		common.RespondError(context, http.StatusBadRequest, err.Error())
+		common.RespondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	driverToSave := storageName
@@ -140,9 +138,9 @@ func UploadImagesHandler(context *gin.Context) {
 
 	results := make([]uploadResult, len(files))
 	var resultsMutex sync.Mutex
-	userID := context.GetUint(middleware.ContextUserIDKey)
+	userID := c.GetUint(middleware.ContextUserIDKey)
 
-	g, ctx := errgroup.WithContext(context.Request.Context())
+	g, ctx := errgroup.WithContext(c.Request.Context())
 
 	// 异步上传
 	for i, fileHeader := range files {
@@ -153,11 +151,11 @@ func UploadImagesHandler(context *gin.Context) {
 				return ctx.Err()
 			default:
 				result := uploadResult{FileName: fileHeader.Filename}
-				image, _, err := processAndSaveImage(userID, fileHeader, storageClient, driverToSave)
+				image, _, err := h.processAndSaveImage(ctx, userID, fileHeader, storageProvider, driverToSave)
 
 				if err != nil {
 					// 如果客户端断开，不记录错误
-					if !context.IsAborted() {
+					if !c.IsAborted() {
 						result.Error = err.Error()
 					}
 				} else {
@@ -176,7 +174,7 @@ func UploadImagesHandler(context *gin.Context) {
 
 	if err := g.Wait(); err != nil {
 		log.Printf("Error during concurrent upload processing: %v", err)
-		common.RespondError(context, http.StatusInternalServerError, "Failed to process uploads due to a context error")
+		common.RespondError(c, http.StatusInternalServerError, "Failed to process uploads due to a context error")
 		return
 	}
 
@@ -195,7 +193,7 @@ func UploadImagesHandler(context *gin.Context) {
 		}
 	}
 
-	common.RespondSuccess(context, gin.H{
+	common.RespondSuccess(c, gin.H{
 		"message":       "Upload completed",
 		"total_files":   len(files),
 		"success_count": len(successResults),
@@ -205,8 +203,8 @@ func UploadImagesHandler(context *gin.Context) {
 	})
 }
 
-// processAndSaveImage save image 流式处理避免内存占用
-func processAndSaveImage(userID uint, fileHeader *multipart.FileHeader, storageClient storage.Storage, driverToSave string) (*models.Image, bool, error) {
+// processAndSaveImage 保存图片（流式处理避免内存占用）
+func (h *Handler) processAndSaveImage(ctx context.Context, userID uint, fileHeader *multipart.FileHeader, storageProvider storage.Provider, driverToSave string) (*models.Image, bool, error) {
 	file, err := fileHeader.Open()
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to open file: %w", err)
@@ -240,7 +238,7 @@ func processAndSaveImage(userID uint, fileHeader *multipart.FileHeader, storageC
 	// 检查重复文件
 	image, err := images.GetImageByHash(fileHash)
 	if err == nil {
-		go warmCache(image)
+		go h.warmCache(image)
 		return image, true, nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -262,7 +260,7 @@ func processAndSaveImage(userID uint, fileHeader *multipart.FileHeader, storageC
 			return nil, false, errors.New("failed to restore existing image data")
 		}
 
-		go warmCache(restoredImage)
+		go h.warmCache(restoredImage)
 		return restoredImage, true, nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -292,7 +290,7 @@ func processAndSaveImage(userID uint, fileHeader *multipart.FileHeader, storageC
 		return nil, false, fmt.Errorf("failed to seek temp file: %w", err)
 	}
 
-	if err := storageClient.Save(identifier, tempFile); err != nil {
+	if err := storageProvider.SaveWithContext(ctx, identifier, tempFile); err != nil {
 		return nil, false, errors.New("failed to save uploaded file")
 	}
 
@@ -308,20 +306,24 @@ func processAndSaveImage(userID uint, fileHeader *multipart.FileHeader, storageC
 	}
 
 	if err := images.SaveImage(newImage); err != nil {
-		storageClient.Delete(identifier)
+		storageProvider.DeleteWithContext(ctx, identifier)
 		return nil, false, errors.New("failed to save image metadata")
 	}
 
 	// 异步提取图片尺寸
 	async.ExtractImageDimensionsAsync(identifier, driverToSave)
-	go warmCache(newImage)
+	go h.warmCache(newImage)
 
 	return newImage, false, nil
 }
 
 // warmCache 更新缓存
-func warmCache(image *models.Image) {
-	if err := cache.CacheImage(image); err != nil {
+func (h *Handler) warmCache(image *models.Image) {
+	if h.cacheHelper == nil {
+		return
+	}
+	ctx := context.Background()
+	if err := h.cacheHelper.CacheImage(ctx, image); err != nil {
 		log.Printf("WARN: Failed to pre-warm cache for image '%s': %v", utils.SanitizeLogMessage(image.Identifier), err)
 	}
 }

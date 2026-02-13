@@ -17,46 +17,14 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
-type minioStorage struct {
-	client             *minio.Client
-	bucketName         string
-	presignedURLExpiry time.Duration
+// MinioStorage MinIO 存储实现
+type MinioStorage struct {
+	client     *minio.Client
+	bucketName string
 }
 
-// getOrDefaultInt 获取整数值或默认值
-func getOrDefaultInt(value int, defaultValue int) int {
-	if value <= 0 {
-		return defaultValue
-	}
-	return value
-}
-
-// parseDurationOrDefault 解析持续时间
-func parseDurationOrDefault(durationStr string, defaultValue time.Duration) time.Duration {
-	if durationStr == "" {
-		return defaultValue
-	}
-
-	duration, err := time.ParseDuration(durationStr)
-	if err != nil {
-		return defaultValue
-	}
-
-	return duration
-}
-
-// mustGetSystemCertPool 获取系统证书池
-func mustGetSystemCertPool() *x509.CertPool {
-	pool, err := x509.SystemCertPool()
-	if err != nil {
-		log.Printf("Failed to load system cert pool: %v", err)
-		return x509.NewCertPool()
-	}
-	return pool
-}
-
-// newMinioStorage
-func newMinioClient(cfg config.MinioConfig) (*minioStorage, error) {
+// NewMinioStorage 创建 MinIO 存储提供者
+func NewMinioStorage(cfg config.MinioConfig) (*MinioStorage, error) {
 	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
@@ -71,7 +39,7 @@ func newMinioClient(cfg config.MinioConfig) (*minioStorage, error) {
 		DisableCompression:    true,
 	}
 
-	// SSL
+	// SSL 配置
 	if cfg.UseSSL {
 		transport.TLSClientConfig = &tls.Config{
 			MinVersion: tls.VersionTLS12,
@@ -110,54 +78,106 @@ func newMinioClient(cfg config.MinioConfig) (*minioStorage, error) {
 		log.Printf("Successfully created bucket: %s", cfg.BucketName)
 	}
 
-	storage := &minioStorage{
-		client:             client, // 在 struct 中持有 client
-		bucketName:         cfg.BucketName,
-		presignedURLExpiry: 24 * time.Hour,
-	}
-
-	return storage, nil
+	return &MinioStorage{
+		client:     client,
+		bucketName: cfg.BucketName,
+	}, nil
 }
 
-// Save 将文件上传到 MinIO。
-func (s *minioStorage) Save(identifier string, file io.Reader) error {
-	objectName := identifier
-
+// SaveWithContext 保存文件到 MinIO
+func (s *MinioStorage) SaveWithContext(ctx context.Context, identifier string, file io.Reader) error {
 	contentType := "application/octet-stream"
 
-	_, err := s.client.PutObject(context.Background(), s.bucketName, objectName, file, -1, minio.PutObjectOptions{
+	_, err := s.client.PutObject(ctx, s.bucketName, identifier, file, -1, minio.PutObjectOptions{
 		ContentType: contentType,
 	})
 
 	if err != nil {
-		return fmt.Errorf("failed to upload object '%s' to minio: %w", objectName, err)
+		return fmt.Errorf("failed to upload object '%s' to minio: %w", identifier, err)
 	}
 
 	return nil
 }
 
-// Get Get image
-func (s *minioStorage) Get(identifier string) (io.ReadSeeker, error) {
-	obj, err := s.client.GetObject(context.Background(), s.bucketName, identifier, minio.GetObjectOptions{})
+// GetWithContext 从 MinIO 获取文件
+func (s *MinioStorage) GetWithContext(ctx context.Context, identifier string) (io.ReadSeeker, error) {
+	obj, err := s.client.GetObject(ctx, s.bucketName, identifier, minio.GetObjectOptions{})
 	if err != nil {
 		errResponse := minio.ToErrorResponse(err)
 		if errResponse.Code == "NoSuchKey" {
 			return nil, fmt.Errorf("file not found in minio: %s", identifier)
 		}
-		return nil, fmt.Errorf("failed to get object stream from minio for '%s': %w", identifier, err)
+		return nil, fmt.Errorf("failed to get object from minio for '%s': %w", identifier, err)
 	}
 
 	return obj, nil
 }
 
-// Delete
-func (s *minioStorage) Delete(identifier string) error {
-	objectName := identifier
-
-	err := s.client.RemoveObject(context.Background(), s.bucketName, objectName, minio.RemoveObjectOptions{})
+// DeleteWithContext 从 MinIO 删除文件
+func (s *MinioStorage) DeleteWithContext(ctx context.Context, identifier string) error {
+	err := s.client.RemoveObject(ctx, s.bucketName, identifier, minio.RemoveObjectOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to delete object '%s' from minio: %w", objectName, err)
+		return fmt.Errorf("failed to delete object '%s' from minio: %w", identifier, err)
 	}
 
 	return nil
+}
+
+// Exists 检查文件是否存在于 MinIO
+func (s *MinioStorage) Exists(ctx context.Context, identifier string) (bool, error) {
+	_, err := s.client.StatObject(ctx, s.bucketName, identifier, minio.StatObjectOptions{})
+	if err != nil {
+		errResponse := minio.ToErrorResponse(err)
+		if errResponse.Code == "NoSuchKey" {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// Health 检查 MinIO 健康状态
+func (s *MinioStorage) Health(ctx context.Context) error {
+	_, err := s.client.ListBuckets(ctx)
+	if err != nil {
+		return fmt.Errorf("minio storage health check failed: %w", err)
+	}
+	return nil
+}
+
+// Name 返回存储名称
+func (s *MinioStorage) Name() string {
+	return "minio"
+}
+
+// getOrDefaultInt 获取整数值或默认值
+func getOrDefaultInt(value int, defaultValue int) int {
+	if value <= 0 {
+		return defaultValue
+	}
+	return value
+}
+
+// parseDurationOrDefault 解析持续时间或使用默认值
+func parseDurationOrDefault(durationStr string, defaultValue time.Duration) time.Duration {
+	if durationStr == "" {
+		return defaultValue
+	}
+
+	duration, err := time.ParseDuration(durationStr)
+	if err != nil {
+		return defaultValue
+	}
+
+	return duration
+}
+
+// mustGetSystemCertPool 获取系统证书池
+func mustGetSystemCertPool() *x509.CertPool {
+	pool, err := x509.SystemCertPool()
+	if err != nil {
+		log.Printf("Failed to load system cert pool: %v", err)
+		return x509.NewCertPool()
+	}
+	return pool
 }

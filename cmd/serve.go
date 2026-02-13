@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log"
 	"net/http"
-	//_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -14,11 +13,10 @@ import (
 	"github.com/anoixa/image-bed/api"
 	"github.com/anoixa/image-bed/api/core"
 	handlerImages "github.com/anoixa/image-bed/api/handler/images"
-	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/dbcore"
 	"github.com/anoixa/image-bed/database/repo/accounts"
-	"github.com/anoixa/image-bed/storage"
+	"github.com/anoixa/image-bed/internal/di"
 	"github.com/anoixa/image-bed/utils/async"
 	"github.com/spf13/cobra"
 )
@@ -46,17 +44,31 @@ func RunServer() {
 		log.Fatalf("Failed to create data directory: %v", err)
 	}
 
-	// 初始化db, jwt, storage, cache, async worker pool
+	// 初始化数据库
 	InitDatabase(cfg)
-	storage.InitStorage(cfg)
-	cache.InitCache(cfg)
-	async.InitGlobalPool(1000) // 初始化异步任务协程池
+
+	// 创建并初始化 DI 容器
+	container := di.NewContainer(cfg)
+	if err := container.Init(); err != nil {
+		log.Fatalf("Failed to initialize DI container: %v", err)
+	}
+
+	// 初始化异步任务协程池
+	async.InitGlobalPool(1000)
+
+	// 初始化 JWT
 	if err := api.TokenInit(cfg.Server.Jwt.Secret, cfg.Server.Jwt.ExpiresIn, cfg.Server.Jwt.RefreshExpiresIn); err != nil {
 		log.Fatalf("Failed to initialize JWT %s", err)
 	}
 
+	// 创建服务器依赖
+	deps := &core.ServerDependencies{
+		StorageFactory: container.GetStorageFactory(),
+		CacheFactory:   container.GetCacheFactory(),
+	}
+
 	// 启动gin
-	server, cleanup := core.StartServer()
+	server, cleanup := core.StartServer(deps)
 	go func() {
 		log.Printf("Server started on %s", cfg.Server.Addr)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -66,14 +78,6 @@ func RunServer() {
 
 	// 启动分片上传会话清理任务
 	go startChunkedUploadCleanup()
-
-	// pprof
-	//go func() {
-	//	log.Println("Starting pprof server on :6060")
-	//	if err := http.ListenAndServe("localhost:6060", nil); err != nil {
-	//		log.Fatalf("pprof server failed: %v", err)
-	//	}
-	//}()
 
 	// 处理退出signal
 	quit := make(chan os.Signal, 1)
@@ -93,8 +97,10 @@ func RunServer() {
 	// 关闭异步任务池
 	async.StopGlobalPool()
 
-	// 关闭缓存
-	cache.CloseCache()
+	// 关闭 DI 容器
+	if err := container.Close(); err != nil {
+		log.Printf("Error closing container: %v", err)
+	}
 
 	if err := server.Shutdown(ctx); err != nil {
 		log.Fatalf("Server forced to shutdown: %v", err)

@@ -7,10 +7,12 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"log"
+	"os"
+	"path/filepath"
 
+	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/dbcore"
 	"github.com/anoixa/image-bed/database/models"
-	"github.com/anoixa/image-bed/storage"
 )
 
 // ImageDimensionsTask 图片尺寸提取任务
@@ -21,28 +23,23 @@ type ImageDimensionsTask struct {
 
 // Execute 执行任务
 func (t *ImageDimensionsTask) Execute() {
-	// 从存储获取图片
-	storageClient, err := storage.GetStorage(t.StorageKey)
-	if err != nil {
-		log.Printf("Failed to get storage for dimensions extraction: %v", err)
-		return
+	// 从本地存储获取图片（异步任务直接使用本地文件系统）
+	basePath := config.Get().Server.StorageConfig.Local.Path
+	if basePath == "" {
+		basePath = "./data/upload"
 	}
 
-	reader, err := storageClient.Get(t.Identifier)
-	if err != nil {
-		log.Printf("Failed to get image for dimensions extraction: %v", err)
-		return
-	}
+	filePath := filepath.Join(basePath, t.Identifier)
 
 	// 读取图片数据
-	buf := new(bytes.Buffer)
-	if _, err := buf.ReadFrom(reader); err != nil {
-		log.Printf("Failed to read image data: %v", err)
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		log.Printf("Failed to read image file for dimensions extraction: %v", err)
 		return
 	}
 
 	// 解码图片获取尺寸
-	img, _, err := image.Decode(bytes.NewReader(buf.Bytes()))
+	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		log.Printf("Failed to decode image for dimensions: %v", err)
 		return

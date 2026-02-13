@@ -41,18 +41,18 @@ type ImageListResponse struct {
 	TotalPages int         `json:"total_pages"`
 }
 
-func ImageListHandler(context *gin.Context) {
+// ListImages 获取图片列表
+func (h *Handler) ListImages(c *gin.Context) {
 	var body ImageRequestBody
-	var page, limit int
 
-	if err := context.ShouldBindJSON(&body); err != nil {
-		common.RespondError(context, http.StatusBadRequest, err.Error())
+	if err := c.ShouldBindJSON(&body); err != nil {
+		common.RespondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	userID := context.GetUint(middleware.ContextUserIDKey)
+	userID := c.GetUint(middleware.ContextUserIDKey)
 
-	page, limit = body.Page, body.Limit
+	page, limit := body.Page, body.Limit
 	if body.Page <= 0 {
 		page = 1
 	}
@@ -62,7 +62,7 @@ func ImageListHandler(context *gin.Context) {
 
 	list, total, err := images.GetImageList(body.StorageType, body.Identifier, body.Search, page, limit, int(userID))
 	if err != nil {
-		common.RespondError(context, http.StatusInternalServerError, "Failed to get image list")
+		common.RespondError(c, http.StatusInternalServerError, "Failed to get image list")
 		return
 	}
 
@@ -71,7 +71,7 @@ func ImageListHandler(context *gin.Context) {
 		return imageListDTO[i].ID < imageListDTO[j].ID
 	})
 
-	common.RespondSuccess(context, ImageListResponse{
+	common.RespondSuccess(c, ImageListResponse{
 		Images:     imageListDTO,
 		Total:      total,
 		Page:       body.Page,
@@ -79,6 +79,7 @@ func ImageListHandler(context *gin.Context) {
 		TotalPages: int(math.Ceil(float64(total) / float64(body.Limit))),
 	})
 }
+
 func toImageDTO(image *models.Image) *ImageDTO {
 	if image == nil {
 		return nil
@@ -94,7 +95,7 @@ func toImageDTO(image *models.Image) *ImageDTO {
 		MimeType:     image.MimeType,
 		Width:        image.Width,
 		Height:       image.Height,
-		CreatedAt:    image.CreatedAt.Unix(), // 转换为 Unix 时间戳
+		CreatedAt:    image.CreatedAt.Unix(),
 	}
 }
 
