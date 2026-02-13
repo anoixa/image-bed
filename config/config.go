@@ -44,7 +44,6 @@ type DatabaseConfig struct {
 
 	DatabaseFilePath string `mapstructure:"database_file_path"` //sqlite数据库文件路径
 
-	// 性能优化：连接池配置
 	MaxOpenConns    int `mapstructure:"max_open_conns"`
 	MaxIdleConns    int `mapstructure:"max_idle_conns"`
 	ConnMaxLifetime int `mapstructure:"conn_max_lifetime"`
@@ -87,7 +86,6 @@ type CacheConfig struct {
 	MaxImageCacheSize  int64           `mapstructure:"max_image_cache_size"` // 最大图片缓存大小（字节），0表示无限制
 	EnableImageCaching bool            `mapstructure:"enable_image_caching"` // 是否启用图片缓存
 
-	// 性能优化：缓存 TTL 配置
 	ImageCacheTTL     int `mapstructure:"image_cache_ttl"`      // 图片元数据缓存时间（秒）
 	ImageDataCacheTTL int `mapstructure:"image_data_cache_ttl"` // 图片数据缓存时间（秒）
 }
@@ -135,6 +133,11 @@ func loadConfig() {
 
 	viper.SetDefault("server.storage.type", "local")
 	viper.SetDefault("server.storage.local.path", "data/upload")
+
+	// Database connection pool defaults
+	viper.SetDefault("server.database.max_open_conns", 100)
+	viper.SetDefault("server.database.max_idle_conns", 10)
+	viper.SetDefault("server.database.conn_max_lifetime", 3600)
 	viper.SetDefault("server.storage.minio.max_idle_conns", 256)
 	viper.SetDefault("server.storage.minio.max_idle_conns_per_host", 16)
 	viper.SetDefault("server.storage.minio.idle_conn_timeout", "60s")

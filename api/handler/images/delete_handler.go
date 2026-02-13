@@ -8,6 +8,7 @@ import (
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/cache"
+	"github.com/anoixa/image-bed/utils"
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -45,10 +46,10 @@ func DeleteImagesHandler(context *gin.Context) {
 	// 清除缓存
 	for _, imageID := range requestBody.ImageID {
 		if err := cache.DeleteCachedImage(imageID); err != nil {
-			log.Printf("P1 修复：Failed to delete cache for image %s: %v", imageID, err)
+			log.Printf("Failed to delete cache for image %s: %v", utils.SanitizeLogMessage(imageID), err)
 		}
 		if err := cache.DeleteCachedImageData(imageID); err != nil {
-			log.Printf("P1 修复：Failed to delete image data cache for image %s: %v", imageID, err)
+			log.Printf("Failed to delete image data cache for image %s: %v", utils.SanitizeLogMessage(imageID), err)
 		}
 	}
 
@@ -80,10 +81,10 @@ func DeleteSingleImageHandler(context *gin.Context) {
 
 	// 清除缓存
 	if err := cache.DeleteCachedImage(imageIdentifier); err != nil {
-		log.Printf("P1 修复：Failed to delete cache for image %s: %v", imageIdentifier, err)
+		log.Printf("Failed to delete cache for image %s: %v", utils.SanitizeLogMessage(imageIdentifier), err)
 	}
 	if err := cache.DeleteCachedImageData(imageIdentifier); err != nil {
-		log.Printf("P1 修复：Failed to delete image data cache for image %s: %v", imageIdentifier, err)
+		log.Printf("Failed to delete image data cache for image %s: %v", utils.SanitizeLogMessage(imageIdentifier), err)
 	}
 
 	common.RespondSuccessMessage(context, "Image deleted successfully", nil)

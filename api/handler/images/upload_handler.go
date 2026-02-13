@@ -1,7 +1,6 @@
 package images
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -10,6 +9,7 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -22,6 +22,8 @@ import (
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
+	"github.com/anoixa/image-bed/utils/async"
+	"github.com/anoixa/image-bed/utils/pool"
 	"github.com/anoixa/image-bed/utils/validator"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/sync/errgroup"
@@ -102,7 +104,7 @@ func UploadImagesHandler(context *gin.Context) {
 		return
 	}
 
-	// P1 修复：检查总文件大小限制（500MB）
+	// 检查总文件大小限制（500MB）
 	var totalSize int64 = 0
 	for _, f := range files {
 		totalSize += f.Size
@@ -154,7 +156,7 @@ func UploadImagesHandler(context *gin.Context) {
 				image, _, err := processAndSaveImage(userID, fileHeader, storageClient, driverToSave)
 
 				if err != nil {
-					// P0 修复：如果客户端断开，不记录错误
+					// 如果客户端断开，不记录错误
 					if !context.IsAborted() {
 						result.Error = err.Error()
 					}
@@ -203,7 +205,7 @@ func UploadImagesHandler(context *gin.Context) {
 	})
 }
 
-// processAndSaveImage save image
+// processAndSaveImage save image 流式处理避免内存占用
 func processAndSaveImage(userID uint, fileHeader *multipart.FileHeader, storageClient storage.Storage, driverToSave string) (*models.Image, bool, error) {
 	file, err := fileHeader.Open()
 	if err != nil {
@@ -211,33 +213,43 @@ func processAndSaveImage(userID uint, fileHeader *multipart.FileHeader, storageC
 	}
 	defer file.Close()
 
-	hasher := sha256.New()
-	var buf bytes.Buffer
-	teeReader := io.TeeReader(file, hasher)
+	// 使用临时文件代替内存缓冲区
+	tempFile, err := os.CreateTemp("./data/temp", "upload-*")
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer func() {
+		tempFile.Close()
+		os.Remove(tempFile.Name()) // 清理临时文件
+	}()
 
-	if _, err = io.Copy(&buf, teeReader); err != nil {
+	// 流式计算哈希并写入临时文件
+	hasher := sha256.New()
+	writer := io.MultiWriter(tempFile, hasher)
+
+	// 使用共享缓冲池优化复制
+	buf := pool.SharedBufferPool.Get().([]byte)
+	defer pool.SharedBufferPool.Put(buf)
+
+	if _, err = io.CopyBuffer(writer, file, buf); err != nil {
 		return nil, false, fmt.Errorf("failed to process file stream: %w", err)
 	}
 
 	fileHash := hex.EncodeToString(hasher.Sum(nil))
 
+	// 检查重复文件
 	image, err := images.GetImageByHash(fileHash)
 	if err == nil {
-		log.Printf("Duplicate active image detected. Hash: %s, Identifier: %s", fileHash, image.Identifier)
-
 		go warmCache(image)
 		return image, true, nil
 	}
-
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		log.Printf("Database error when checking for active hash '%s': %v", fileHash, err)
 		return nil, false, errors.New("database error during hash check")
 	}
 
+	// 检查软删除的文件
 	softDeletedImage, err := images.GetSoftDeletedImageByHash(fileHash)
 	if err == nil {
-		log.Printf("Found a soft-deleted image with the same hash. Restoring it. Identifier: %s", softDeletedImage.Identifier)
-
 		updateData := map[string]interface{}{
 			"deleted_at":     nil,
 			"original_name":  fileHeader.Filename,
@@ -247,24 +259,26 @@ func processAndSaveImage(userID uint, fileHeader *multipart.FileHeader, storageC
 
 		restoredImage, err := images.UpdateImageByIdentifier(softDeletedImage.Identifier, updateData)
 		if err != nil {
-			log.Printf("Failed to restore soft-deleted image '%s': %v", softDeletedImage.Identifier, err)
 			return nil, false, errors.New("failed to restore existing image data")
 		}
 
-		log.Printf("Image record restored successfully for identifier: %s", restoredImage.Identifier)
 		go warmCache(restoredImage)
 		return restoredImage, true, nil
 	}
-
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		log.Printf("Database error when checking for soft-deleted hash '%s': %v", fileHash, err)
 		return nil, false, errors.New("database error during hash check")
 	}
 
-	log.Printf("No existing image found for hash %s. Proceeding with new upload.", fileHash)
+	// 验证文件类型（读取前512字节）
+	if _, err := tempFile.Seek(0, io.SeekStart); err != nil {
+		return nil, false, fmt.Errorf("failed to seek temp file: %w", err)
+	}
 
-	fileBytes := buf.Bytes()
-	isImage, mimeType := validator.IsImageBytes(fileBytes)
+	fileHeaderBuf := make([]byte, 512)
+	n, _ := tempFile.Read(fileHeaderBuf)
+	fileHeaderBuf = fileHeaderBuf[:n]
+
+	isImage, mimeType := validator.IsImageBytes(fileHeaderBuf)
 	if !isImage {
 		return nil, false, errors.New("the uploaded file type is not supported")
 	}
@@ -273,12 +287,16 @@ func processAndSaveImage(userID uint, fileHeader *multipart.FileHeader, storageC
 	ext := filepath.Ext(fileHeader.Filename)
 	identifier := fmt.Sprintf("%d-%s%s", time.Now().UnixNano(), fileHash[:16], ext)
 
-	if err := storageClient.Save(identifier, bytes.NewReader(fileBytes)); err != nil {
-		log.Printf("Failed to save file to storage: %v", err)
+	// 保存到存储
+	if _, err := tempFile.Seek(0, io.SeekStart); err != nil {
+		return nil, false, fmt.Errorf("failed to seek temp file: %w", err)
+	}
+
+	if err := storageClient.Save(identifier, tempFile); err != nil {
 		return nil, false, errors.New("failed to save uploaded file")
 	}
 
-	// 入库
+	// 创建数据库记录
 	newImage := &models.Image{
 		Identifier:    identifier,
 		OriginalName:  fileHeader.Filename,
@@ -290,21 +308,20 @@ func processAndSaveImage(userID uint, fileHeader *multipart.FileHeader, storageC
 	}
 
 	if err := images.SaveImage(newImage); err != nil {
-		log.Printf("Failed to create image record in database: %v", err)
-		log.Printf("Attempting to delete orphaned file from storage: %s", identifier)
-		if delErr := storageClient.Delete(identifier); delErr != nil {
-			log.Printf("CRITICAL: Failed to delete orphaned file '%s'. Manual cleanup may be required. Delete error: %v", identifier, delErr)
-		}
+		storageClient.Delete(identifier)
 		return nil, false, errors.New("failed to save image metadata")
 	}
 
+	// 异步提取图片尺寸
+	async.ExtractImageDimensionsAsync(identifier, driverToSave)
 	go warmCache(newImage)
+
 	return newImage, false, nil
 }
 
 // warmCache 更新缓存
 func warmCache(image *models.Image) {
 	if err := cache.CacheImage(image); err != nil {
-		log.Printf("WARN: Failed to pre-warm cache for image '%s': %v", image.Identifier, err)
+		log.Printf("WARN: Failed to pre-warm cache for image '%s': %v", utils.SanitizeLogMessage(image.Identifier), err)
 	}
 }

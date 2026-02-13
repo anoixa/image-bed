@@ -11,6 +11,7 @@ import (
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 	accounts2 "github.com/anoixa/image-bed/database/repo/accounts"
+	"github.com/anoixa/image-bed/utils"
 	cryptopackage "github.com/anoixa/image-bed/utils/crypto"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -41,7 +42,7 @@ func LoginHandler(context *gin.Context) {
 	// 验证用户凭据
 	user, valid, err := validateCredentials(req.Username, req.Password)
 	if err != nil {
-		log.Printf("LoginHandler error for user %s: %v\n", req.Username, err)
+		log.Printf("LoginHandler error for user %s: %v\n", utils.SanitizeLogUsername(req.Username), err)
 		common.RespondError(context, http.StatusInternalServerError, "Internal server error")
 		return
 	}

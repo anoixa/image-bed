@@ -109,7 +109,7 @@ func InitDB(cfg *config.Config) {
 		if err != nil {
 			log.Fatal("Failed to get underlying DB instance：", err)
 		}
-		// 性能优化：使用配置文件中的连接池参数
+		// 使用配置文件中的连接池参数
 		maxOpenConns := cfg.Server.DatabaseConfig.MaxOpenConns
 		if maxOpenConns <= 0 {
 			maxOpenConns = 100

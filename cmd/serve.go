@@ -13,11 +13,13 @@ import (
 
 	"github.com/anoixa/image-bed/api"
 	"github.com/anoixa/image-bed/api/core"
+	handlerImages "github.com/anoixa/image-bed/api/handler/images"
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/dbcore"
 	"github.com/anoixa/image-bed/database/repo/accounts"
 	"github.com/anoixa/image-bed/storage"
+	"github.com/anoixa/image-bed/utils/async"
 	"github.com/spf13/cobra"
 )
 
@@ -44,10 +46,11 @@ func RunServer() {
 		log.Fatalf("Failed to create data directory: %v", err)
 	}
 
-	// 初始化db, jwt, storage, cache
+	// 初始化db, jwt, storage, cache, async worker pool
 	InitDatabase(cfg)
 	storage.InitStorage(cfg)
 	cache.InitCache(cfg)
+	async.InitGlobalPool(1000) // 初始化异步任务协程池
 	if err := api.TokenInit(cfg.Server.Jwt.Secret, cfg.Server.Jwt.ExpiresIn, cfg.Server.Jwt.RefreshExpiresIn); err != nil {
 		log.Fatalf("Failed to initialize JWT %s", err)
 	}
@@ -60,6 +63,9 @@ func RunServer() {
 			log.Fatalf("Server failed to start: %v", err)
 		}
 	}()
+
+	// 启动分片上传会话清理任务
+	go startChunkedUploadCleanup()
 
 	// pprof
 	//go func() {
@@ -83,6 +89,9 @@ func RunServer() {
 		cleanup()
 		log.Println("Cleanup tasks finished.")
 	}
+
+	// 关闭异步任务池
+	async.StopGlobalPool()
 
 	// 关闭缓存
 	cache.CloseCache()
@@ -113,4 +122,17 @@ func InitDatabase(cfg *config.Config) {
 	accounts.CreateDefaultAdminUser()
 
 	log.Println("Database initialized successfully")
+}
+
+// startChunkedUploadCleanup 启动分片上传会话定期清理
+func startChunkedUploadCleanup() {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			handlerImages.CleanupExpiredSessions()
+		}
+	}
 }

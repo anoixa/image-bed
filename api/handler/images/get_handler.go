@@ -24,6 +24,8 @@ import (
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/storage"
+	"github.com/anoixa/image-bed/utils"
+	"github.com/anoixa/image-bed/utils/pool"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
@@ -32,7 +34,7 @@ import (
 var (
 	imageGroup          singleflight.Group
 	ErrTemporaryFailure = errors.New("temporary failure, should be retried")
-	metaFetchTimeout    = 5 * time.Second
+	metaFetchTimeout    = 30 * time.Second
 )
 
 func GetImageHandler(context *gin.Context) {
@@ -44,7 +46,7 @@ func GetImageHandler(context *gin.Context) {
 
 	image, err := fetchImageMetadata(identifier)
 	if err != nil {
-		handleMetadataError(context, identifier, err)
+		handleMetadataError(context, utils.SanitizeLogMessage(identifier), err)
 		return
 	}
 
@@ -109,7 +111,7 @@ func streamAndCacheImage(context *gin.Context, image *models.Image) {
 
 	imageStream, err := storageClient.Get(image.Identifier)
 	if err != nil {
-		log.Printf("WARN: File for identifier '%s' not found in storage, but exists in DB. Error: %v", image.Identifier, err)
+		log.Printf("WARN: File for identifier '%s' not found in storage, but exists in DB. Error: %v", utils.SanitizeLogMessage(image.Identifier), err)
 		common.RespondError(context, http.StatusNotFound, "Image file not found in storage")
 		return
 	}
@@ -123,72 +125,87 @@ func streamAndCacheImage(context *gin.Context, image *models.Image) {
 	cfg := config.Get()
 	enableImageCaching := cfg.Server.CacheConfig.EnableImageCaching
 	maxCacheSize := cfg.Server.CacheConfig.MaxImageCacheSize
-	shouldCache := image.FileSize > 0 && (maxCacheSize == 0 || image.FileSize <= maxCacheSize)
+	shouldCache := enableImageCaching && image.FileSize > 0 &&
+		(maxCacheSize == 0 || image.FileSize <= maxCacheSize)
 
 	rs, isSeeker := imageStream.(io.ReadSeeker)
 
-	// 修复：检查客户端是否已断开
 	if context.IsAborted() {
 		return
 	}
 
-	if shouldCache && enableImageCaching {
+	// 如果文件太大或禁用缓存，直接流式传输
+	if !shouldCache {
 		if isSeeker {
-			// 修复：限制最大读取大小，防止大文件 OOM
-			data, readErr := io.ReadAll(io.LimitReader(rs, int64(maxCacheSize)))
-			if readErr != nil {
-				if !isBrokenPipe(readErr) {
-					log.Printf("Failed to read image data for %s: %v", image.Identifier, readErr)
-				}
-				return
+			_ = serveImageStream(context, image, rs)
+		} else {
+			if image.FileSize > 0 {
+				context.Header("Content-Length", strconv.FormatInt(image.FileSize, 10))
 			}
-			// 检查是否被截断
-			if int64(len(data)) == maxCacheSize && int64(len(data)) < image.FileSize {
-				log.Printf("Image %s exceeds max cache size, skipping cache", image.Identifier)
-				_ = serveImageStream(context, image, rs)
-				return
-			}
-			if readErr != nil {
-				return
-			}
+			_ = serveImageStreamManualCopy(context, image, imageStream)
+		}
+		return
+	}
 
-			go func(id string, d []byte) {
-				if cacheErr := cache.CacheImageData(id, d); cacheErr != nil {
-					log.Printf("Failed to cache image data for '%s': %v", id, cacheErr)
-				}
-			}(image.Identifier, data)
-
-			_ = serveImageStream(context, image, bytes.NewReader(data))
+	// 缓存逻辑：仅对小文件启用
+	if isSeeker {
+		// 小文件直接读入内存缓存
+		data, readErr := io.ReadAll(rs)
+		if readErr != nil {
+			if !isBrokenPipe(readErr) {
+				log.Printf("Failed to read image data for %s: %v", image.Identifier, readErr)
+			}
 			return
 		}
 
-		var buffer bytes.Buffer
-		tee := io.TeeReader(imageStream, &buffer)
+		// 异步缓存
+		go func(id string, d []byte) {
+			if cacheErr := cache.CacheImageData(id, d); cacheErr != nil {
+				log.Printf("Failed to cache image data for '%s': %v", id, cacheErr)
+			}
+		}(image.Identifier, data)
 
-		streamErr := serveImageStreamManualCopy(context, image, tee)
-		if streamErr == nil && buffer.Len() > 0 {
-			data := make([]byte, buffer.Len())
-			copy(data, buffer.Bytes())
-			go func(id string, d []byte) {
-				if cacheErr := cache.CacheImageData(id, d); cacheErr != nil {
-					log.Printf("Failed to cache image data for '%s': %v", id, cacheErr)
-				}
-			}(image.Identifier, data)
-		} else if streamErr != nil && !isBrokenPipe(streamErr) {
-			log.Printf("Stream ended with error, caching aborted for '%s'. Error: %v", image.Identifier, streamErr)
+		_ = serveImageStream(context, image, bytes.NewReader(data))
+		return
+	}
+
+	maxBufferSize := int64(maxCacheSize)
+	if maxBufferSize <= 0 {
+		maxBufferSize = 10 * 1024 * 1024 // 默认 10MB
+	}
+
+	// 使用 LimitReader 限制读取大小
+	limitedReader := io.LimitReader(imageStream, maxBufferSize)
+	var buffer bytes.Buffer
+	
+	// 先尝试读取到缓冲区（带大小限制）
+	n, copyErr := io.Copy(&buffer, limitedReader)
+	if copyErr != nil && !isBrokenPipe(copyErr) {
+		log.Printf("Failed to buffer image stream for '%s': %v", image.Identifier, copyErr)
+		return
+	}
+
+	// 如果实际大小超过限制，改用流式传输
+	if n >= maxBufferSize || (image.FileSize > 0 && n < image.FileSize) {
+		log.Printf("Image %s too large for buffering (%d bytes), streaming directly", image.Identifier, n)
+		// 由于已经读了部分内容，需要组合传输
+		multiReader := io.MultiReader(bytes.NewReader(buffer.Bytes()), imageStream)
+		if image.FileSize > 0 {
+			context.Header("Content-Length", strconv.FormatInt(image.FileSize, 10))
 		}
+		_ = serveImageStreamManualCopy(context, image, multiReader)
 		return
 	}
 
-	if isSeeker {
-		_ = serveImageStream(context, image, rs)
-		return
-	}
+	// 完整读取，可以缓存
+	data := buffer.Bytes()
+	go func(id string, d []byte) {
+		if cacheErr := cache.CacheImageData(id, d); cacheErr != nil {
+			log.Printf("Failed to cache image data for '%s': %v", id, cacheErr)
+		}
+	}(image.Identifier, data)
 
-	if image.FileSize > 0 {
-		context.Header("Content-Length", strconv.FormatInt(image.FileSize, 10))
-	}
-	_ = serveImageStreamManualCopy(context, image, imageStream)
+	_ = serveImageStream(context, image, bytes.NewReader(data))
 }
 
 // serveImageData
@@ -213,7 +230,7 @@ func serveImageStream(context *gin.Context, image *models.Image, stream io.Reade
 	return serveImageStreamManualCopy(context, image, stream)
 }
 
-// serveImageStreamManualCopy
+// serveImageStreamManualCopy 使用缓冲池优化传输
 func serveImageStreamManualCopy(context *gin.Context, image *models.Image, stream io.Reader) error {
 	setCommonHeaders(context, image)
 	if context.Writer.Status() == http.StatusNotModified {
@@ -225,7 +242,12 @@ func serveImageStreamManualCopy(context *gin.Context, image *models.Image, strea
 	}
 
 	context.Writer.WriteHeader(http.StatusOK)
-	_, err := io.Copy(context.Writer, stream)
+	
+	// 使用共享缓冲池优化传输
+	buf := pool.SharedBufferPool.Get().([]byte)
+	defer pool.SharedBufferPool.Put(buf)
+	
+	_, err := io.CopyBuffer(context.Writer, stream, buf)
 	return err
 }
 
@@ -283,7 +305,7 @@ func handleMetadataError(context *gin.Context, identifier string, err error) {
 		log.Printf("Transient error for identifier '%s'. Client should retry.", identifier)
 		common.RespondError(context, http.StatusServiceUnavailable, "Service is temporarily busy, please try again.")
 	} else {
-		log.Printf("Database error when fetching identifier '%s': %v", identifier, err)
+		log.Printf("Database error when fetching identifier '%s': %v", utils.SanitizeLogMessage(identifier), err)
 		common.RespondError(context, http.StatusInternalServerError, "Error retrieving image information")
 	}
 }
