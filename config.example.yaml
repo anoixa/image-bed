@@ -41,3 +41,22 @@ server:
     secret: "your-very-long-secret-key-at-least-32-characters-long"
     expires_in: "30m"
     refresh_expires_in: "10080m"
+
+  rate_limit:
+    # API接口限流 (上传/管理等操作)
+    api_rps: 30        # 每秒请求数
+    api_burst: 60      # 突发请求数
+    # 图片访问限流 (查看图片，应更宽松)
+    image_rps: 100     # 每秒请求数
+    image_burst: 200   # 突发请求数
+    # 认证接口限流 (登录等)
+    auth_rps: 0.5      # 每秒请求数
+    auth_burst: 5      # 突发请求数
+    # 限流器过期时间
+    expire_time: "10m"
+
+  upload:
+    # 单文件最大上传大小（MB）
+    max_size_mb: 50
+    # 批量上传总大小限制（MB）
+    max_batch_total_mb: 500
