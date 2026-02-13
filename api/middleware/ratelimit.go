@@ -1,65 +1,71 @@
 package middleware
 
 import (
+	"fmt"
+	"hash/fnv"
 	"net/http"
 	"sync"
-
-	"fmt"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/time/rate"
 )
 
+// clientLimiter 单个客户端的限流器
 type clientLimiter struct {
 	limiter  *rate.Limiter
 	lastSeen time.Time
-	mu       sync.Mutex
 }
 
+// rateLimiterShard 单个分片
+type rateLimiterShard struct {
+	mu       sync.Mutex
+	limiters map[string]*clientLimiter
+}
+
+// IPRateLimiter 分片 IP 限流器
 type IPRateLimiter struct {
-	rps        float64       // 每秒请求数
-	burst      int           // 令牌桶的容量
-	expireTime time.Duration // 过期时间
-	limiterMap *sync.Map
+	rps        rate.Limit
+	burst      int
+	expireTime time.Duration
+	shards     []*rateLimiterShard
+	numShards  int
+	maxSize    int
 	stopChan   chan struct{}
 }
 
-// NewIPRateLimiter Create new IP-based rate limits
+// NewIPRateLimiter 创建分片 IP 限流器
 func NewIPRateLimiter(rps float64, burst int, expireTime time.Duration) *IPRateLimiter {
-	limiter := &IPRateLimiter{
-		rps:        rps,
+	numShards := 32
+	shards := make([]*rateLimiterShard, numShards)
+
+	for i := 0; i < numShards; i++ {
+		shards[i] = &rateLimiterShard{
+			limiters: make(map[string]*clientLimiter),
+		}
+	}
+
+	rl := &IPRateLimiter{
+		rps:        rate.Limit(rps),
 		burst:      burst,
 		expireTime: expireTime,
-		limiterMap: &sync.Map{},
+		shards:     shards,
+		numShards:  numShards,
+		maxSize:    10000,
 		stopChan:   make(chan struct{}),
 	}
 
-	// 启动后台清理 goroutine
-	go limiter.cleanupStaleClients()
+	// 启动后台清理 goroutine，每 5 分钟扫描一次
+	go rl.cleanupStaleClients()
 
-	return limiter
+	return rl
 }
 
-// Middleware Return a Gin middleware handler
+// Middleware 返回 Gin 中间件
 func (rl *IPRateLimiter) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ip := getClientIP(c)
-
-		var client *clientLimiter
-		val, ok := rl.limiterMap.Load(ip)
-		if ok {
-			client = val.(*clientLimiter)
-		} else {
-			newLimiter := rate.NewLimiter(rate.Limit(rl.rps), rl.burst)
-			client = &clientLimiter{limiter: newLimiter}
-			val, _ = rl.limiterMap.LoadOrStore(ip, client)
-			client = val.(*clientLimiter)
-		}
-
-		client.mu.Lock()
-		client.lastSeen = time.Now()
-		client.mu.Unlock()
+		client := rl.getClientLimiter(ip)
 
 		if !client.limiter.Allow() {
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
@@ -73,72 +79,121 @@ func (rl *IPRateLimiter) Middleware() gin.HandlerFunc {
 	}
 }
 
+// StopCleanup 停止清理 goroutine
 func (rl *IPRateLimiter) StopCleanup() {
 	close(rl.stopChan)
 }
 
+// getShardIndex 使用 FNV 哈希获取 IP 对应的分片索引
+func (rl *IPRateLimiter) getShardIndex(ip string) int {
+	h := fnv.New32a()
+	h.Write([]byte(ip))
+	return int(h.Sum32()) % rl.numShards
+}
+
+// getClientLimiter 获取或创建客户端限流器
+func (rl *IPRateLimiter) getClientLimiter(ip string) *clientLimiter {
+	shardIdx := rl.getShardIndex(ip)
+	shard := rl.shards[shardIdx]
+
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+
+	// 更新 lastSeen 时检查过期
+	if client, ok := shard.limiters[ip]; ok {
+		if time.Since(client.lastSeen) > rl.expireTime {
+			// 已过期，删除旧条目
+			delete(shard.limiters, ip)
+		} else {
+			client.lastSeen = time.Now()
+			return client
+		}
+	}
+
+	// 检查总容量，如果超过则清理过期条目
+	if len(shard.limiters) >= rl.maxSize/rl.numShards {
+		rl.evictExpiredLocked(shard)
+	}
+
+	// 创建新的限流器
+	limiter := rate.NewLimiter(rl.rps, rl.burst)
+	client := &clientLimiter{
+		limiter:  limiter,
+		lastSeen: time.Now(),
+	}
+	shard.limiters[ip] = client
+
+	return client
+}
+
+// evictExpiredLocked 清理过期条目
+func (rl *IPRateLimiter) evictExpiredLocked(shard *rateLimiterShard) {
+	now := time.Now()
+	for ip, client := range shard.limiters {
+		if now.Sub(client.lastSeen) > rl.expireTime {
+			delete(shard.limiters, ip)
+		}
+	}
+}
+
+// cleanupStaleClients 后台清理过期客户端
 func (rl *IPRateLimiter) cleanupStaleClients() {
-	ticker := time.NewTicker(time.Minute)
+	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			// 遍历 sync.Map，删除过期的条目
-			rl.limiterMap.Range(func(key, value interface{}) bool {
-				client := value.(*clientLimiter)
-
-				client.mu.Lock()
-				lastSeen := client.lastSeen
-				client.mu.Unlock()
-
-				if time.Since(lastSeen) > rl.expireTime {
-					rl.limiterMap.Delete(key)
-				}
-				return true
-			})
+			rl.cleanupAllShards()
 		case <-rl.stopChan:
 			return
 		}
 	}
 }
 
-// RequestSizeLimit 请求体大小限制中间件
-func RequestSizeLimit(maxSize int64) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if c.Request.ContentLength > maxSize {
-			c.AbortWithStatusJSON(http.StatusRequestEntityTooLarge, gin.H{
-				"error":       "Request body too large",
-				"max_size":    fmt.Sprintf("%d bytes", maxSize),
-				"actual_size": fmt.Sprintf("%d bytes", c.Request.ContentLength),
-			})
-			return
+// cleanupAllShards 清理所有分片
+func (rl *IPRateLimiter) cleanupAllShards() {
+	now := time.Now()
+	for _, shard := range rl.shards {
+		shard.mu.Lock()
+		for ip, client := range shard.limiters {
+			if now.Sub(client.lastSeen) > rl.expireTime {
+				delete(shard.limiters, ip)
+			}
 		}
+		shard.mu.Unlock()
+	}
+}
+
+// MaxBytesReader 请求体大小限制中间件（使用 MaxBytesReader 防止内存攻击）
+func MaxBytesReader(maxSize int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxSize)
 		c.Next()
 	}
 }
 
-// getClientIP Get the client's real IP address
-// Security: Only uses c.ClientIP() to prevent IP forgery attacks
-// Do not use X-Forwarded-For or X-Real-IP headers as they can be spoofed
+// RequestSizeLimit 请求体大小限制中间件（已废弃，使用 MaxBytesReader）
+// Deprecated: Use MaxBytesReader instead
+func RequestSizeLimit(maxSize int64) gin.HandlerFunc {
+	return MaxBytesReader(maxSize)
+}
+
+// getClientIP 获取客户端真实 IP
 func getClientIP(c *gin.Context) string {
 	return c.ClientIP()
 }
 
-// RequestID 请求ID追踪中间件
+// RequestID 请求 ID 追踪中间件
 func RequestID() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		requestID := c.GetHeader("X-Request-ID")
 		if requestID == "" {
-			// 使用 UUID v4 生成新的请求ID
-			requestID = fmt.Sprintf("%s", generateRequestID())
+			requestID = generateRequestID()
 		}
 
 		c.Set("RequestID", requestID)
 		c.Writer.Header().Set("X-Request-ID", requestID)
-
-		// 记录请求ID到日志
-		// log.Printf("[RequestID: %s] %s %s", requestID, c.Request.Method, c.Request.URL.Path)
 
 		c.Next()
 	}

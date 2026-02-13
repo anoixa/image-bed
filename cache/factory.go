@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/anoixa/image-bed/cache/redis"
-	"github.com/anoixa/image-bed/cache/ristretto"
+	"github.com/anoixa/image-bed/cache/memory"
 	"github.com/anoixa/image-bed/config"
 )
 
@@ -18,9 +18,9 @@ type Factory struct {
 
 // Config 缓存配置
 type Config struct {
-	Provider  string
-	Redis     RedisConfig
-	Ristretto RistrettoConfig
+	Provider string
+	Redis    RedisConfig
+	Memory   MemoryConfig
 }
 
 // RedisConfig Redis配置
@@ -30,8 +30,8 @@ type RedisConfig struct {
 	DB       int
 }
 
-// RistrettoConfig Ristretto配置
-type RistrettoConfig struct {
+// MemoryConfig 内存缓存配置
+type MemoryConfig struct {
 	NumCounters int64
 	MaxCost     int64
 	BufferItems int64
@@ -61,14 +61,14 @@ func createProvider(cfg *config.Config) (Provider, error) {
 	switch providerType {
 	case "redis":
 		return redis.NewRedis(cfg)
-	case "memory", "ristretto":
-		ristrettoConfig := ristretto.Config{
-			NumCounters: cfg.Server.CacheConfig.Ristretto.NumCounters,
-			MaxCost:     cfg.Server.CacheConfig.Ristretto.MaxCost,
-			BufferItems: cfg.Server.CacheConfig.Ristretto.BufferItems,
-			Metrics:     cfg.Server.CacheConfig.Ristretto.Metrics,
+	case "memory":
+		memoryConfig := memory.Config{
+			NumCounters: cfg.Server.CacheConfig.Memory.NumCounters,
+			MaxCost:     cfg.Server.CacheConfig.Memory.MaxCost,
+			BufferItems: cfg.Server.CacheConfig.Memory.BufferItems,
+			Metrics:     cfg.Server.CacheConfig.Memory.Metrics,
 		}
-		return ristretto.NewRistretto(ristrettoConfig)
+		return memory.NewMemory(memoryConfig)
 	default:
 		return nil, fmt.Errorf("unsupported cache provider: %s", providerType)
 	}
@@ -100,22 +100,15 @@ func (f *Factory) Set(ctx context.Context, key string, value interface{}, expira
 // Get 获取缓存项
 func (f *Factory) Get(ctx context.Context, key string, dest interface{}) error {
 	if f.provider == nil {
-		return ErrCacheMiss
+		return fmt.Errorf("cache provider not initialized")
 	}
-	err := f.provider.Get(ctx, key, dest)
-	// 处理来自不同实现的 ErrCacheMiss
-	if err != nil {
-		if err.Error() == "cache miss" {
-			return ErrCacheMiss
-		}
-	}
-	return err
+	return f.provider.Get(ctx, key, dest)
 }
 
 // Delete 删除缓存项
 func (f *Factory) Delete(ctx context.Context, key string) error {
 	if f.provider == nil {
-		return nil
+		return fmt.Errorf("cache provider not initialized")
 	}
 	return f.provider.Delete(ctx, key)
 }
@@ -123,7 +116,7 @@ func (f *Factory) Delete(ctx context.Context, key string) error {
 // Exists 检查缓存项是否存在
 func (f *Factory) Exists(ctx context.Context, key string) (bool, error) {
 	if f.provider == nil {
-		return false, nil
+		return false, fmt.Errorf("cache provider not initialized")
 	}
 	return f.provider.Exists(ctx, key)
 }

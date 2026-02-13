@@ -5,6 +5,7 @@ import (
 	"log"
 	"runtime"
 	"sync"
+	"time"
 )
 
 // Task 异步任务接口
@@ -104,7 +105,7 @@ func (p *WorkerPool) Stop() {
 	log.Println("Async worker pool stopped")
 }
 
-// Submit 提交任务
+// Submit 提交任务（非阻塞，队列满时丢弃）
 func (p *WorkerPool) Submit(task Task) bool {
 	select {
 	case p.queue <- task:
@@ -116,6 +117,42 @@ func (p *WorkerPool) Submit(task Task) bool {
 		log.Println("WARN: Worker pool queue is full, task dropped")
 		return false
 	}
+}
+
+// SubmitBlocking 阻塞提交任务，队列满时等待（带超时）
+func (p *WorkerPool) SubmitBlocking(task Task, timeout time.Duration) bool {
+	if timeout <= 0 {
+		// 无限期等待
+		select {
+		case p.queue <- task:
+			return true
+		case <-p.ctx.Done():
+			return false
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(p.ctx, timeout)
+	defer cancel()
+
+	select {
+	case p.queue <- task:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// TrySubmit 尝试提交任务，可配置重试次数和间隔
+func (p *WorkerPool) TrySubmit(task Task, retries int, interval time.Duration) bool {
+	for i := 0; i <= retries; i++ {
+		if i > 0 {
+			time.Sleep(interval)
+		}
+		if p.Submit(task) {
+			return true
+		}
+	}
+	return false
 }
 
 // worker 工作协程
@@ -151,4 +188,12 @@ func Submit(task Task) bool {
 		InitGlobalPool(1000)
 	}
 	return globalPool.Submit(task)
+}
+
+// TrySubmit 尝试提交任务到全局池，可配置重试次数和间隔
+func TrySubmit(task Task, retries int, interval time.Duration) bool {
+	if globalPool == nil {
+		InitGlobalPool(1000)
+	}
+	return globalPool.TrySubmit(task, retries, interval)
 }

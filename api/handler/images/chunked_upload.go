@@ -345,7 +345,7 @@ func (h *Handler) processChunkedUpload(ctx context.Context, session *ChunkedUplo
 	}
 
 	// 异步提取图片尺寸
-	async.ExtractImageDimensionsAsync(identifier, driverToSave, h.repo.DB())
+	async.ExtractImageDimensionsAsync(identifier, driverToSave, h.repo.DB(), storageProvider)
 
 	log.Printf("Chunked upload completed: %s -> %s", session.FileName, identifier)
 	return nil

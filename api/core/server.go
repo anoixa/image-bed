@@ -40,7 +40,7 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	router.Use(gin.Logger())
 	router.Use(gin.Recovery())
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{cfg.Server.BaseURL},
+		AllowOrigins:     []string{cfg.Server.BaseURL()},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Length", "Content-Type", "Authorization"},
 		AllowCredentials: true,
@@ -52,8 +52,8 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	// 限制上传文件大小（50MB）
 	router.MaxMultipartMemory = 50 << 20
 
-	// 并发限制
-	concurrencyLimiter := middleware.NewConcurrencyLimiter(300)
+	// 并发限制（100并发，避免内存过载）
+	concurrencyLimiter := middleware.NewConcurrencyLimiter(100)
 	router.Use(concurrencyLimiter.Middleware())
 
 	// 请求体大小限制（100MB）
@@ -114,7 +114,7 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 
 	// 公共接口
 	publicGroup := router.Group("/images")
-	//publicGroup.Use(generalRateLimiter.Middleware())
+	publicGroup.Use(generalRateLimiter.Middleware())
 	{
 		publicGroup.GET("/:identifier", imageHandler.GetImage) //GET /images/{photo}
 	}
@@ -151,6 +151,7 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 				imagesGroup.POST("", imageHandler.ListImages)                       // POST /api/v1/images/list
 				imagesGroup.POST("/delete", imageHandler.DeleteImages)             // POST /api/v1/images/delete
 				imagesGroup.DELETE("/:identifier", imageHandler.DeleteSingleImage) // DELETE /api/v1/images/{photo}
+				imagesGroup.PATCH("/:identifier/visibility", imageHandler.UpdateImageVisibility) // PATCH /api/v1/images/{photo}/visibility
 			}
 
 			// static token
@@ -184,7 +185,7 @@ func StartServer(deps *ServerDependencies) (*http.Server, func()) {
 	router, clean := setupRouter(deps)
 
 	srv := &http.Server{
-		Addr:         cfg.Server.Addr,
+		Addr:         cfg.Server.Addr(),
 		Handler:      router,
 		ReadTimeout:  cfg.Server.ReadTimeout,
 		WriteTimeout: cfg.Server.WriteTimeout,

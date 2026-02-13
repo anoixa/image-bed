@@ -1,42 +1,43 @@
 server:
-  host: "localhost"
-  domain: "localhost"
-  port: 8081
+  host: "0.0.0.0"      # 监听地址，0.0.0.0 表示所有接口
+  port: 8081           # 服务端口
+  domain: ""           # 外部访问域名，为空则自动生成 http://host:port
+
   database:
-    type: "postgresql"
-    host: ""
+    type: "postgresql"  # sqlite / postgresql
+    host: "localhost"
     port: 5432
     username: "postgres"
     password: "root"
     database: "image-dev"
-    # 连接池配置
-    max_open_conns: 100       # 最大打开连接数
-    max_idle_conns: 10        # 最大空闲连接数
-    conn_max_lifetime: 3600   # 连接最大生命周期（秒）
+
   storage:
-    type: "local"
+    type: "local"       # local / minio
     local:
       path: "./data/upload"
     minio:
-      endpoint:
-      access_key_id:
-      secret_access_key:
+      endpoint: ""
+      access_key_id: ""
+      secret_access_key: ""
       use_ssl: false
-      bucket_name:
+      bucket_name: ""
+
   cache:
-    provider: "memory"
+    provider: "memory"  # memory / redis
+    max_image_cache_size_mb: 10
+    enable_image_caching: true
     redis:
       address: "localhost:6379"
       password: ""
       db: 0
-    Ristretto:
+    memory:
       num_counters: 1000000
-      max_cost: 1073741824  # 1GB
+      max_cost: 1073741824
       buffer_items: 64
       metrics: true
-    max_image_cache_size: 10485760  # 10MB，超过此大小的图片不缓存，0表示无限制
-    enable_image_caching: true     # 是否启用图片缓存
+
   jwt:
-    secret: ""
+    # openssl rand -base64 32
+    secret: "your-very-long-secret-key-at-least-32-characters-long"
     expires_in: "30m"
     refresh_expires_in: "10080m"
