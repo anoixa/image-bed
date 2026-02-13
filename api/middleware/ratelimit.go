@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"net/http"
-	"strings"
 	"sync"
 
 	"fmt"
@@ -104,8 +103,6 @@ func (rl *IPRateLimiter) cleanupStaleClients() {
 	}
 }
 
-// getClientIP Get the client's real IP address
-
 // RequestSizeLimit 请求体大小限制中间件
 func RequestSizeLimit(maxSize int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -121,16 +118,10 @@ func RequestSizeLimit(maxSize int64) gin.HandlerFunc {
 	}
 }
 
+// getClientIP Get the client's real IP address
+// Security: Only uses c.ClientIP() to prevent IP forgery attacks
+// Do not use X-Forwarded-For or X-Real-IP headers as they can be spoofed
 func getClientIP(c *gin.Context) string {
-	if ip := c.GetHeader("X-Forwarded-For"); ip != "" {
-		ips := strings.Split(ip, ",")
-		if len(ips) > 0 {
-			return strings.TrimSpace(ips[0])
-		}
-	}
-	if ip := c.GetHeader("X-Real-IP"); ip != "" {
-		return ip
-	}
 	return c.ClientIP()
 }
 
@@ -146,7 +137,7 @@ func RequestID() gin.HandlerFunc {
 		c.Set("RequestID", requestID)
 		c.Writer.Header().Set("X-Request-ID", requestID)
 
-		// 记录请求ID到日志（建议使用结构化日志）
+		// 记录请求ID到日志
 		// log.Printf("[RequestID: %s] %s %s", requestID, c.Request.Method, c.Request.URL.Path)
 
 		c.Next()
@@ -154,8 +145,6 @@ func RequestID() gin.HandlerFunc {
 }
 
 func generateRequestID() string {
-	// 简单实现，生产环境建议使用 uuid.New().String()
-	// 这里为了避免额外依赖，使用时间戳+随机数生成唯一ID
 	now := time.Now()
 	return fmt.Sprintf("%d-%d", now.UnixNano(), now.Nanosecond())
 }

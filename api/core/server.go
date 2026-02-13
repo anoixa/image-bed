@@ -41,23 +41,22 @@ func setupRouter() (*gin.Engine, func()) {
 		MaxAge:           12 * time.Hour,
 	}))
 
-	//router.SetTrustedProxies(nil)
+	router.SetTrustedProxies(nil)
 
-	// P0 修复：限制上传文件大小
-	// 限制内存中 multipart 表单的最大大小（50MB）
-	router.MaxMultipartMemory = 50 << 20 // 50MB
+	// 限制上传文件大小（50MB）
+	router.MaxMultipartMemory = 50 << 20
 
 	// 并发限制
 	concurrencyLimiter := middleware.NewConcurrencyLimiter(300)
 	router.Use(concurrencyLimiter.Middleware())
 
-	// P1 修复：请求体大小限制（100MB）
+	// 请求体大小限制（100MB）
 	router.Use(middleware.RequestSizeLimit(100 << 20))
 
-	// P1 修复：添加请求ID追踪中间件
+	// 请求ID追踪
 	router.Use(middleware.RequestID())
 
-	// P1 修复：添加基础监控指标
+	// 基础监控指标
 	router.Use(middleware.Metrics())
 
 	// 速率限制
@@ -69,7 +68,6 @@ func setupRouter() (*gin.Engine, func()) {
 	}
 
 	router.GET("/health", func(context *gin.Context) {
-		// P1 修复：改进健康检查，添加数据库、缓存、存储检查
 		health := gin.H{
 			"status":  "ok",
 			"uptime":  time.Since(startTime).Round(time.Second).String(),
@@ -95,7 +93,6 @@ func setupRouter() (*gin.Engine, func()) {
 			"commit":  config.CommitHash,
 		})
 	})
-	// P1 修复：添加监控指标端点
 	router.GET("/metrics", func(context *gin.Context) {
 		context.JSON(http.StatusOK, middleware.GetMetrics())
 	})
@@ -129,8 +126,12 @@ func setupRouter() (*gin.Engine, func()) {
 			imagesGroup := v1.Group("/images")
 			imagesGroup.Use(middleware.Authorize("jwt", "static_token"))
 			{
-				imagesGroup.POST("/upload", images2.UploadImageHandler)   // POST /api/v1/images/upload (single file)
-				imagesGroup.POST("/uploads", images2.UploadImagesHandler) // POST /api/v1/images/uploads (multiple files)
+				imagesGroup.POST("/upload", images2.UploadImageHandler)           // POST /api/v1/images/upload (single file)
+					imagesGroup.POST("/uploads", images2.UploadImagesHandler)         // POST /api/v1/images/uploads (multiple files)
+					imagesGroup.POST("/upload/chunked/init", images2.InitChunkedUploadHandler)   // POST /api/v1/images/upload/chunked/init
+					imagesGroup.POST("/upload/chunked", images2.UploadChunkHandler)              // POST /api/v1/images/upload/chunked
+					imagesGroup.GET("/upload/chunked/status", images2.GetChunkedUploadStatusHandler) // GET /api/v1/images/upload/chunked/status
+					imagesGroup.POST("/upload/chunked/complete", images2.CompleteChunkedUploadHandler) // POST /api/v1/images/upload/chunked/complete
 
 				imagesGroup.POST("", images2.ImageListHandler)                       // POST /api/v1/images/list
 				imagesGroup.POST("/delete", images2.DeleteImagesHandler)             // POST /api/v1/images/delete
@@ -163,7 +164,6 @@ func setupRouter() (*gin.Engine, func()) {
 }
 
 // StartServer 创建 http.Server
-// P1 修复：健康检查辅助函数
 func checkDatabaseHealth() string {
 	if db := dbcore.GetDBInstance(); db != nil {
 		sqlDB, err := db.DB()

@@ -118,7 +118,10 @@ func DeleteImageByIdentifierAndUser(identifier string, userID uint) error {
 // GetImageList 获取图片列表
 func GetImageList(StorageType, Identifier, search string, page, limit, userID int) ([]*models.Image, int64, error) {
 	instance := dbcore.GetDBInstance()
-	query := instance.Model(&models.Image{}).Where("user_id = ?", userID)
+	
+	query := instance.Model(&models.Image{}).
+		Select("id", "identifier", "original_name", "file_size", "mime_type", "width", "height", "created_at", "updated_at").
+		Where("user_id = ?", userID)
 
 	if StorageType != "" {
 		query = query.Where("storage_driver = ?", StorageType)

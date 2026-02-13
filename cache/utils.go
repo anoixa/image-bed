@@ -48,7 +48,7 @@ func CacheImage(image *models.Image) error {
 	}
 
 	key := ImageCachePrefix + image.Identifier
-	// 性能优化：使用配置文件中的 TTL
+	// 使用配置文件中的 TTL
 	cfg := config.Get()
 	ttl := DefaultImageCacheExpiration
 	if cfg != nil && cfg.Server.CacheConfig.ImageCacheTTL > 0 {
@@ -249,7 +249,7 @@ func CacheImageData(identifier string, imageData []byte) error {
 	}
 
 	key := "image_data:" + identifier
-	// 性能优化：使用配置文件中的 TTL
+	// 使用配置文件中的 TTL
 	cfg := config.Get()
 	expiration := 1 * time.Hour
 	if cfg != nil && cfg.Server.CacheConfig.ImageDataCacheTTL > 0 {
