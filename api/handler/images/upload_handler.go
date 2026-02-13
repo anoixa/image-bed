@@ -39,7 +39,10 @@ func (h *Handler) UploadImage(c *gin.Context) {
 
 	files := form.File["file"]
 	if len(files) == 0 {
-		common.RespondError(c, http.StatusBadRequest, "At least one file is required under the 'file' key")
+		files = form.File["files"]
+	}
+	if len(files) == 0 {
+		common.RespondError(c, http.StatusBadRequest, "At least one file is required under the 'file' or 'files' key")
 		return
 	}
 
