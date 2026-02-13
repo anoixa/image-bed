@@ -1,19 +1,23 @@
 package ristretto
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
-	"github.com/anoixa/image-bed/cache/types"
 	"github.com/dgraph-io/ristretto"
 )
 
-// Ristretto 实现缓存接口
+// ErrCacheMiss 缓存未命中错误
+var ErrCacheMiss = errors.New("cache miss")
+
+// Ristretto 实现了 cache.Provider 接口
 type Ristretto struct {
 	client *ristretto.Cache
 }
 
-// Config Ristretto配置
+// Config Ristretto 配置
 type Config struct {
 	NumCounters int64
 	MaxCost     int64
@@ -21,9 +25,9 @@ type Config struct {
 	Metrics     bool
 }
 
-// NewRistretto 创建新的Ristretto实例
-func NewRistretto(config Config) (types.Cache, error) {
-	cache, err := ristretto.NewCache(&ristretto.Config{
+// NewRistretto 创建新的 Ristretto 缓存提供者
+func NewRistretto(config Config) (*Ristretto, error) {
+	client, err := ristretto.NewCache(&ristretto.Config{
 		NumCounters: config.NumCounters,
 		MaxCost:     config.MaxCost,
 		BufferItems: config.BufferItems,
@@ -35,12 +39,12 @@ func NewRistretto(config Config) (types.Cache, error) {
 	}
 
 	return &Ristretto{
-		client: cache,
+		client: client,
 	}, nil
 }
 
 // Set 设置缓存项
-func (r *Ristretto) Set(key string, value interface{}, expiration time.Duration) error {
+func (r *Ristretto) Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error {
 	size := int64(1) // 默认大小
 	if data, ok := value.([]byte); ok {
 		size = int64(len(data))
@@ -55,10 +59,10 @@ func (r *Ristretto) Set(key string, value interface{}, expiration time.Duration)
 }
 
 // Get 获取缓存项
-func (r *Ristretto) Get(key string, dest interface{}) error {
+func (r *Ristretto) Get(ctx context.Context, key string, dest interface{}) error {
 	value, found := r.client.Get(key)
 	if !found {
-		return types.ErrCacheMiss
+		return ErrCacheMiss
 	}
 
 	switch dest := dest.(type) {
@@ -68,7 +72,7 @@ func (r *Ristretto) Get(key string, dest interface{}) error {
 		} else {
 			jsonData, err := json.Marshal(value)
 			if err != nil {
-				return types.ErrCacheMiss
+				return ErrCacheMiss
 			}
 			*dest = jsonData
 		}
@@ -79,13 +83,13 @@ func (r *Ristretto) Get(key string, dest interface{}) error {
 		} else {
 			jsonData, err := json.Marshal(value)
 			if err != nil {
-				return types.ErrCacheMiss
+				return ErrCacheMiss
 			}
 			data = jsonData
 		}
 
 		if err := json.Unmarshal(data, dest); err != nil {
-			return types.ErrCacheMiss
+			return ErrCacheMiss
 		}
 	}
 
@@ -93,13 +97,13 @@ func (r *Ristretto) Get(key string, dest interface{}) error {
 }
 
 // Delete 删除缓存项
-func (r *Ristretto) Delete(key string) error {
+func (r *Ristretto) Delete(ctx context.Context, key string) error {
 	r.client.Del(key)
 	return nil
 }
 
 // Exists 检查缓存项是否存在
-func (r *Ristretto) Exists(key string) (bool, error) {
+func (r *Ristretto) Exists(ctx context.Context, key string) (bool, error) {
 	_, found := r.client.Get(key)
 	return found, nil
 }
@@ -108,4 +112,9 @@ func (r *Ristretto) Exists(key string) (bool, error) {
 func (r *Ristretto) Close() error {
 	r.client.Close()
 	return nil
+}
+
+// Name 返回缓存提供者名称
+func (r *Ristretto) Name() string {
+	return "ristretto"
 }

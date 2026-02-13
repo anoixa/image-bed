@@ -6,16 +6,12 @@ import (
 	"log"
 	"time"
 
-	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/keys"
 	"github.com/anoixa/image-bed/utils"
-	"golang.org/x/sync/singleflight"
 
 	"github.com/golang-jwt/jwt/v5"
 )
-
-var staticTokenGroup singleflight.Group
 
 var (
 	jwtSecret           []byte
@@ -117,42 +113,14 @@ func Parse(tokenString string) (jwt.MapClaims, error) {
 	return claims, nil
 }
 
-// ValidateStaticToken Verify static token
+// ValidateStaticToken Verify static token (缓存功能已移除)
 func ValidateStaticToken(tokenString string) (*models.User, error) {
-	var cachedUser models.User
-	if err := cache.GetCachedStaticToken(tokenString, &cachedUser); err == nil {
-		// 缓存命中
-		return &cachedUser, nil
-	} else if !cache.IsCacheMiss(err) {
-		log.Printf("Cache error when fetching static token: %v", err)
-	}
-
-	val, err, _ := staticTokenGroup.Do(fmt.Sprintf("static_token_%s", tokenString), func() (interface{}, error) {
-		// 缓存未命中
-		user, err := key.GetUserByApiToken(tokenString)
-		if err != nil {
-			return nil, err
-		}
-		if user == nil {
-			cacheKey := fmt.Sprintf("%s%s", cache.StaticTokenCachePrefix, tokenString)
-			if cacheErr := cache.CacheEmptyValue(cacheKey); cacheErr != nil {
-				log.Printf("Failed to cache empty static token: %v", cacheErr)
-			}
-			return nil, errors.New("invalid static token")
-		}
-
-		go func(user *models.User) {
-			if cacheErr := cache.CacheStaticToken(tokenString, user); cacheErr != nil {
-				log.Printf("Failed to cache static token: %v", cacheErr)
-			}
-		}(user)
-
-		return user, nil
-	})
-
+	user, err := key.GetUserByApiToken(tokenString)
 	if err != nil {
 		return nil, err
 	}
-
-	return val.(*models.User), nil
+	if user == nil {
+		return nil, errors.New("invalid static token")
+	}
+	return user, nil
 }

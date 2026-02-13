@@ -1,10 +1,10 @@
 package cache
 
 import (
+	"context"
 	"fmt"
 	"time"
 
-	"github.com/anoixa/image-bed/cache/types"
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 )
@@ -41,169 +41,178 @@ const (
 	DefaultEmptyValueCacheExpiration = 5 * time.Minute
 )
 
+// Helper 缓存辅助工具结构
+type Helper struct {
+	factory *Factory
+}
+
+// NewHelper 创建新的缓存辅助工具
+func NewHelper(factory *Factory) *Helper {
+	return &Helper{factory: factory}
+}
+
 // CacheImage 缓存图片元数据
-func CacheImage(image *models.Image) error {
-	if GlobalManager == nil {
-		return fmt.Errorf("cache manager not initialized")
+func (h *Helper) CacheImage(ctx context.Context, image *models.Image) error {
+	if h.factory == nil || h.factory.provider == nil {
+		return fmt.Errorf("cache provider not initialized")
 	}
 
 	key := ImageCachePrefix + image.Identifier
-	// 使用配置文件中的 TTL
 	cfg := config.Get()
 	ttl := DefaultImageCacheExpiration
 	if cfg != nil && cfg.Server.CacheConfig.ImageCacheTTL > 0 {
 		ttl = time.Duration(cfg.Server.CacheConfig.ImageCacheTTL) * time.Second
 	}
-	return GlobalManager.Set(key, image, ttl)
+	return h.factory.Set(ctx, key, image, ttl)
 }
 
 // GetCachedImage 获取缓存的图片元数据
-func GetCachedImage(identifier string, image *models.Image) error {
-	if GlobalManager == nil {
-		return fmt.Errorf("cache manager not initialized")
+func (h *Helper) GetCachedImage(ctx context.Context, identifier string, image *models.Image) error {
+	if h.factory == nil || h.factory.provider == nil {
+		return ErrCacheMiss
 	}
 
 	key := ImageCachePrefix + identifier
-	return GlobalManager.Get(key, image)
+	return h.factory.Get(ctx, key, image)
 }
 
 // CacheUser 缓存用户信息
-func CacheUser(user *models.User) error {
-	if GlobalManager == nil {
-		return fmt.Errorf("cache manager not initialized")
+func (h *Helper) CacheUser(ctx context.Context, user *models.User) error {
+	if h.factory == nil || h.factory.provider == nil {
+		return fmt.Errorf("cache provider not initialized")
 	}
 
 	key := UserCachePrefix + fmt.Sprintf("%d", user.ID)
-	return GlobalManager.Set(key, user, DefaultUserCacheExpiration)
+	return h.factory.Set(ctx, key, user, DefaultUserCacheExpiration)
 }
 
 // GetCachedUser 获取缓存的用户信息
-func GetCachedUser(userID uint, user *models.User) error {
-	if GlobalManager == nil {
-		return fmt.Errorf("cache manager not initialized")
+func (h *Helper) GetCachedUser(ctx context.Context, userID uint, user *models.User) error {
+	if h.factory == nil || h.factory.provider == nil {
+		return ErrCacheMiss
 	}
 
 	key := UserCachePrefix + fmt.Sprintf("%d", userID)
 
 	// 检查是否为空值
-	if isEmpty, err := IsEmptyValue(key); err == nil && isEmpty {
-		return types.ErrCacheMiss
+	if isEmpty, err := h.IsEmptyValue(ctx, key); err == nil && isEmpty {
+		return ErrCacheMiss
 	}
 
-	return GlobalManager.Get(key, user)
+	return h.factory.Get(ctx, key, user)
 }
 
 // CacheDevice 缓存设备信息
-func CacheDevice(device *models.Device) error {
-	if GlobalManager == nil {
-		return fmt.Errorf("cache manager not initialized")
+func (h *Helper) CacheDevice(ctx context.Context, device *models.Device) error {
+	if h.factory == nil || h.factory.provider == nil {
+		return fmt.Errorf("cache provider not initialized")
 	}
 
 	key := DeviceCachePrefix + device.DeviceID
-	return GlobalManager.Set(key, device, DefaultDeviceCacheExpiration)
+	return h.factory.Set(ctx, key, device, DefaultDeviceCacheExpiration)
 }
 
 // GetCachedDevice 获取缓存的设备信息
-func GetCachedDevice(deviceID string, device *models.Device) error {
-	if GlobalManager == nil {
-		return fmt.Errorf("cache manager not initialized")
+func (h *Helper) GetCachedDevice(ctx context.Context, deviceID string, device *models.Device) error {
+	if h.factory == nil || h.factory.provider == nil {
+		return ErrCacheMiss
 	}
 
 	key := DeviceCachePrefix + deviceID
 
 	// 检查是否为空值
-	if isEmpty, err := IsEmptyValue(key); err == nil && isEmpty {
-		return types.ErrCacheMiss
+	if isEmpty, err := h.IsEmptyValue(ctx, key); err == nil && isEmpty {
+		return ErrCacheMiss
 	}
 
-	return GlobalManager.Get(key, device)
+	return h.factory.Get(ctx, key, device)
 }
 
 // DeleteCachedImage 删除缓存的图片
-func DeleteCachedImage(identifier string) error {
-	if GlobalManager == nil {
-		return nil // 如果缓存未初始化，直接返回
+func (h *Helper) DeleteCachedImage(ctx context.Context, identifier string) error {
+	if h.factory == nil || h.factory.provider == nil {
+		return nil
 	}
 
 	key := ImageCachePrefix + identifier
-	return GlobalManager.Delete(key)
+	return h.factory.Delete(ctx, key)
 }
 
 // DeleteCachedUser 删除缓存的用户
-func DeleteCachedUser(userID uint) error {
-	if GlobalManager == nil {
-		return nil // 如果缓存未初始化，直接返回
+func (h *Helper) DeleteCachedUser(ctx context.Context, userID uint) error {
+	if h.factory == nil || h.factory.provider == nil {
+		return nil
 	}
 
 	key := UserCachePrefix + fmt.Sprintf("%d", userID)
-	return GlobalManager.Delete(key)
+	return h.factory.Delete(ctx, key)
 }
 
 // DeleteCachedDevice 删除缓存的设备
-func DeleteCachedDevice(deviceID string) error {
-	if GlobalManager == nil {
-		return nil // 如果缓存未初始化，直接返回
+func (h *Helper) DeleteCachedDevice(ctx context.Context, deviceID string) error {
+	if h.factory == nil || h.factory.provider == nil {
+		return nil
 	}
 
 	key := DeviceCachePrefix + deviceID
-	return GlobalManager.Delete(key)
+	return h.factory.Delete(ctx, key)
 }
 
-// CacheStaticToken 缓存static_token和用户信息
-func CacheStaticToken(token string, user *models.User) error {
-	if GlobalManager == nil {
-		return fmt.Errorf("cache manager not initialized")
+// CacheStaticToken 缓存 static_token 和用户信息
+func (h *Helper) CacheStaticToken(ctx context.Context, token string, user *models.User) error {
+	if h.factory == nil || h.factory.provider == nil {
+		return fmt.Errorf("cache provider not initialized")
 	}
 
 	key := StaticTokenCachePrefix + token
-	return GlobalManager.Set(key, user, DefaultStaticTokenCacheExpiration)
+	return h.factory.Set(ctx, key, user, DefaultStaticTokenCacheExpiration)
 }
 
-// GetCachedStaticToken 获取缓存的static_token用户信息
-func GetCachedStaticToken(token string, user *models.User) error {
-	if GlobalManager == nil {
-		return fmt.Errorf("cache manager not initialized")
+// GetCachedStaticToken 获取缓存的 static_token 用户信息
+func (h *Helper) GetCachedStaticToken(ctx context.Context, token string, user *models.User) error {
+	if h.factory == nil || h.factory.provider == nil {
+		return ErrCacheMiss
 	}
 
 	key := StaticTokenCachePrefix + token
 
 	// 检查是否为空值
-	if isEmpty, err := IsEmptyValue(key); err == nil && isEmpty {
-		return types.ErrCacheMiss
+	if isEmpty, err := h.IsEmptyValue(ctx, key); err == nil && isEmpty {
+		return ErrCacheMiss
 	}
 
-	return GlobalManager.Get(key, user)
+	return h.factory.Get(ctx, key, user)
 }
 
-// DeleteCachedStaticToken 删除缓存的static_token
-func DeleteCachedStaticToken(token string) error {
-	if GlobalManager == nil {
-		return nil // 如果缓存未初始化，直接返回
+// DeleteCachedStaticToken 删除缓存的 static_token
+func (h *Helper) DeleteCachedStaticToken(ctx context.Context, token string) error {
+	if h.factory == nil || h.factory.provider == nil {
+		return nil
 	}
 
 	key := StaticTokenCachePrefix + token
-	return GlobalManager.Delete(key)
+	return h.factory.Delete(ctx, key)
 }
 
 // CacheEmptyValue 缓存空值标记
-func CacheEmptyValue(key string) error {
-	if GlobalManager == nil {
-		return fmt.Errorf("cache manager not initialized")
+func (h *Helper) CacheEmptyValue(ctx context.Context, key string) error {
+	if h.factory == nil || h.factory.provider == nil {
+		return fmt.Errorf("cache provider not initialized")
 	}
 
 	cacheKey := EmptyValueCachePrefix + key
-	return GlobalManager.Set(cacheKey, "EMPTY", DefaultEmptyValueCacheExpiration)
+	return h.factory.Set(ctx, cacheKey, "EMPTY", DefaultEmptyValueCacheExpiration)
 }
 
 // IsEmptyValue 检查是否为空值标记
-func IsEmptyValue(key string) (bool, error) {
-	if GlobalManager == nil {
-		return false, fmt.Errorf("cache manager not initialized")
+func (h *Helper) IsEmptyValue(ctx context.Context, key string) (bool, error) {
+	if h.factory == nil || h.factory.provider == nil {
+		return false, fmt.Errorf("cache provider not initialized")
 	}
 
 	cacheKey := EmptyValueCachePrefix + key
 	var value string
-	err := GlobalManager.Get(cacheKey, &value)
+	err := h.factory.Get(ctx, cacheKey, &value)
 	if err != nil {
 		return false, err
 	}
@@ -212,29 +221,39 @@ func IsEmptyValue(key string) (bool, error) {
 }
 
 // DeleteEmptyValue 删除空值标记
-func DeleteEmptyValue(key string) error {
-	if GlobalManager == nil {
+func (h *Helper) DeleteEmptyValue(ctx context.Context, key string) error {
+	if h.factory == nil || h.factory.provider == nil {
 		return nil
 	}
 
 	cacheKey := EmptyValueCachePrefix + key
-	return GlobalManager.Delete(cacheKey)
+	return h.factory.Delete(ctx, cacheKey)
 }
 
-// IsCacheMiss 判断是否为缓存未命中错误
-func IsCacheMiss(err error) bool {
-	return types.IsCacheMiss(err)
+// CacheImageData 缓存图片数据
+func (h *Helper) CacheImageData(ctx context.Context, identifier string, imageData []byte) error {
+	if h.factory == nil || h.factory.provider == nil {
+		return fmt.Errorf("cache provider not initialized")
+	}
+
+	key := "image_data:" + identifier
+	cfg := config.Get()
+	expiration := 1 * time.Hour
+	if cfg != nil && cfg.Server.CacheConfig.ImageDataCacheTTL > 0 {
+		expiration = time.Duration(cfg.Server.CacheConfig.ImageDataCacheTTL) * time.Second
+	}
+	return h.factory.Set(ctx, key, imageData, expiration)
 }
 
 // GetCachedImageData 获取缓存的图片数据
-func GetCachedImageData(identifier string) ([]byte, error) {
-	if GlobalManager == nil {
-		return nil, fmt.Errorf("cache manager not initialized")
+func (h *Helper) GetCachedImageData(ctx context.Context, identifier string) ([]byte, error) {
+	if h.factory == nil || h.factory.provider == nil {
+		return nil, ErrCacheMiss
 	}
 
 	key := "image_data:" + identifier
 	var imageData []byte
-	err := GlobalManager.Get(key, &imageData)
+	err := h.factory.Get(ctx, key, &imageData)
 	if err != nil {
 		return nil, err
 	}
@@ -242,33 +261,12 @@ func GetCachedImageData(identifier string) ([]byte, error) {
 	return imageData, nil
 }
 
-// CacheImageData 缓存图片数据
-func CacheImageData(identifier string, imageData []byte) error {
-	if GlobalManager == nil {
-		return fmt.Errorf("cache manager not initialized")
-	}
-
-	key := "image_data:" + identifier
-	// 使用配置文件中的 TTL
-	cfg := config.Get()
-	expiration := 1 * time.Hour
-	if cfg != nil && cfg.Server.CacheConfig.ImageDataCacheTTL > 0 {
-		expiration = time.Duration(cfg.Server.CacheConfig.ImageDataCacheTTL) * time.Second
-	}
-	return GlobalManager.Set(key, imageData, expiration)
-}
-
-func DeleteCachedImageData(identifier string) error {
-	if GlobalManager == nil {
+// DeleteCachedImageData 删除缓存的图片数据
+func (h *Helper) DeleteCachedImageData(ctx context.Context, identifier string) error {
+	if h.factory == nil || h.factory.provider == nil {
 		return nil
 	}
 
 	key := "image_data:" + identifier
-
-	err := GlobalManager.Delete(key)
-	if err != nil {
-		return fmt.Errorf("failed to delete image data from cache for identifier %s: %w", identifier, err)
-	}
-
-	return nil
+	return h.factory.Delete(ctx, key)
 }

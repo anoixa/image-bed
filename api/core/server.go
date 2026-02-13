@@ -12,17 +12,21 @@ import (
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
-	"github.com/gin-contrib/cors"
-
-	"github.com/anoixa/image-bed/database/dbcore"
 	"github.com/anoixa/image-bed/storage"
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
 var startTime = time.Now()
 
+// ServerDependencies 服务器依赖项
+type ServerDependencies struct {
+	StorageFactory *storage.Factory
+	CacheFactory   *cache.Factory
+}
+
 // 启动gin
-func setupRouter() (*gin.Engine, func()) {
+func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	cfg := config.Get()
 	if config.CommitHash != "n/a" {
 		gin.SetMode(gin.ReleaseMode)
@@ -74,8 +78,8 @@ func setupRouter() (*gin.Engine, func()) {
 			"version": config.Version,
 			"checks": gin.H{
 				"database": checkDatabaseHealth(),
-				"cache":    checkCacheHealth(),
-				"storage":  checkStorageHealth(),
+				"cache":    checkCacheHealth(deps.CacheFactory),
+				"storage":  checkStorageHealth(deps.StorageFactory),
 			},
 		}
 		httpStatus := http.StatusOK
@@ -97,11 +101,14 @@ func setupRouter() (*gin.Engine, func()) {
 		context.JSON(http.StatusOK, middleware.GetMetrics())
 	})
 
+	// 创建图片处理器（依赖注入）
+	imageHandler := images2.NewHandler(deps.StorageFactory, deps.CacheFactory)
+
 	// 公共接口
 	publicGroup := router.Group("/images")
 	//publicGroup.Use(generalRateLimiter.Middleware())
 	{
-		publicGroup.GET("/:identifier", images2.GetImageHandler) //GET /images/{photo}
+		publicGroup.GET("/:identifier", imageHandler.GetImage) //GET /images/{photo}
 	}
 
 	apiGroup := router.Group("/api")
@@ -126,16 +133,16 @@ func setupRouter() (*gin.Engine, func()) {
 			imagesGroup := v1.Group("/images")
 			imagesGroup.Use(middleware.Authorize("jwt", "static_token"))
 			{
-				imagesGroup.POST("/upload", images2.UploadImageHandler)           // POST /api/v1/images/upload (single file)
-					imagesGroup.POST("/uploads", images2.UploadImagesHandler)         // POST /api/v1/images/uploads (multiple files)
-					imagesGroup.POST("/upload/chunked/init", images2.InitChunkedUploadHandler)   // POST /api/v1/images/upload/chunked/init
-					imagesGroup.POST("/upload/chunked", images2.UploadChunkHandler)              // POST /api/v1/images/upload/chunked
-					imagesGroup.GET("/upload/chunked/status", images2.GetChunkedUploadStatusHandler) // GET /api/v1/images/upload/chunked/status
-					imagesGroup.POST("/upload/chunked/complete", images2.CompleteChunkedUploadHandler) // POST /api/v1/images/upload/chunked/complete
+				imagesGroup.POST("/upload", imageHandler.UploadImage)           // POST /api/v1/images/upload (single file)
+				imagesGroup.POST("/uploads", imageHandler.UploadImages)         // POST /api/v1/images/uploads (multiple files)
+				imagesGroup.POST("/upload/chunked/init", imageHandler.InitChunkedUpload)   // POST /api/v1/images/upload/chunked/init
+				imagesGroup.POST("/upload/chunked", imageHandler.UploadChunk)              // POST /api/v1/images/upload/chunked
+				imagesGroup.GET("/upload/chunked/status", imageHandler.GetChunkedUploadStatus) // GET /api/v1/images/upload/chunked/status
+				imagesGroup.POST("/upload/chunked/complete", imageHandler.CompleteChunkedUpload) // POST /api/v1/images/upload/chunked/complete
 
-				imagesGroup.POST("", images2.ImageListHandler)                       // POST /api/v1/images/list
-				imagesGroup.POST("/delete", images2.DeleteImagesHandler)             // POST /api/v1/images/delete
-				imagesGroup.DELETE("/:identifier", images2.DeleteSingleImageHandler) // POST /api/v1/images/{photo}
+				imagesGroup.POST("", imageHandler.ListImages)                       // POST /api/v1/images/list
+				imagesGroup.POST("/delete", imageHandler.DeleteImages)             // POST /api/v1/images/delete
+				imagesGroup.DELETE("/:identifier", imageHandler.DeleteSingleImage) // DELETE /api/v1/images/{photo}
 			}
 
 			// static token
@@ -164,41 +171,9 @@ func setupRouter() (*gin.Engine, func()) {
 }
 
 // StartServer 创建 http.Server
-func checkDatabaseHealth() string {
-	if db := dbcore.GetDBInstance(); db != nil {
-		sqlDB, err := db.DB()
-		if err != nil {
-			return "error: " + err.Error()
-		}
-		if err := sqlDB.Ping(); err != nil {
-			return "unavailable: " + err.Error()
-		}
-		return "ok"
-	}
-	return "not initialized"
-}
-
-func checkCacheHealth() string {
-	if cache.GlobalManager != nil {
-		return "ok"
-	}
-	return "not initialized"
-}
-
-func checkStorageHealth() string {
-	storageClient, err := storage.GetStorage(config.Get().Server.StorageConfig.Type)
-	if err != nil {
-		return "error: " + err.Error()
-	}
-	if storageClient != nil {
-		return "ok"
-	}
-	return "not configured"
-}
-
-func StartServer() (*http.Server, func()) {
+func StartServer(deps *ServerDependencies) (*http.Server, func()) {
 	cfg := config.Get()
-	router, clean := setupRouter()
+	router, clean := setupRouter(deps)
 
 	srv := &http.Server{
 		Addr:         cfg.Server.Addr,

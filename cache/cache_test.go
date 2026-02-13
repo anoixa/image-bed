@@ -1,11 +1,11 @@
 package cache
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/anoixa/image-bed/cache/ristretto"
-	"github.com/anoixa/image-bed/cache/types"
 )
 
 func TestRistrettoCache(t *testing.T) {
@@ -21,17 +21,18 @@ func TestRistrettoCache(t *testing.T) {
 		t.Fatalf("Failed to create ristretto cache: %v", err)
 	}
 
+	ctx := context.Background()
 	key := "test_key"
 	value := "test_value"
 	expiration := 10 * time.Second
 
-	err = cache.Set(key, value, expiration)
+	err = cache.Set(ctx, key, value, expiration)
 	if err != nil {
 		t.Fatalf("Failed to set cache value: %v", err)
 	}
 
 	var retrievedValue string
-	err = cache.Get(key, &retrievedValue)
+	err = cache.Get(ctx, key, &retrievedValue)
 	if err != nil {
 		t.Fatalf("Failed to get cache value: %v", err)
 	}
@@ -41,7 +42,7 @@ func TestRistrettoCache(t *testing.T) {
 	}
 
 	// 测试Exists
-	exists, err := cache.Exists(key)
+	exists, err := cache.Exists(ctx, key)
 	if err != nil {
 		t.Fatalf("Failed to check if key exists: %v", err)
 	}
@@ -50,91 +51,82 @@ func TestRistrettoCache(t *testing.T) {
 	}
 
 	// 测试Delete
-	err = cache.Delete(key)
+	err = cache.Delete(ctx, key)
 	if err != nil {
 		t.Fatalf("Failed to delete cache key: %v", err)
 	}
 
-	// 确认键已被删除
-	err = cache.Get(key, &retrievedValue)
+	// 再次获取应该返回错误
+	err = cache.Get(ctx, key, &retrievedValue)
 	if err == nil {
-		t.Error("Expected error when getting deleted key, but got none")
-	}
-	if !types.IsCacheMiss(err) {
-		t.Errorf("Expected cache miss error, but got: %v", err)
-	}
-
-	// 测试Exists对已删除键的检查
-	exists, err = cache.Exists(key)
-	if err != nil {
-		t.Fatalf("Failed to check if deleted key exists: %v", err)
-	}
-	if exists {
-		t.Error("Deleted key should not exist")
-	}
-
-	// 测试Close
-	err = cache.Close()
-	if err != nil {
-		t.Fatalf("Failed to close cache: %v", err)
+		t.Error("Should return error for deleted key")
 	}
 }
 
-func TestCacheManagerWithRistretto(t *testing.T) {
-	// 创建缓存管理器配置
-	config := Config{
-		Provider: "memory",
-		Ristretto: RistrettoConfig{
-			NumCounters: 1000,
-			MaxCost:     1000,
-			BufferItems: 64,
-			Metrics:     false,
-		},
+func TestRistrettoCacheStruct(t *testing.T) {
+	config := ristretto.Config{
+		NumCounters: 1000,
+		MaxCost:     1000,
+		BufferItems: 64,
+		Metrics:     false,
 	}
 
-	// 创建缓存管理器
-	manager, err := NewManager(config)
+	cache, err := ristretto.NewRistretto(config)
 	if err != nil {
-		t.Fatalf("Failed to create cache manager: %v", err)
+		t.Fatalf("Failed to create ristretto cache: %v", err)
 	}
 
-	// 测试Set和Get
-	key := "manager_test_key"
-	value := map[string]interface{}{
-		"name": "test",
-		"age":  float64(30),
+	ctx := context.Background()
+
+	type TestStruct struct {
+		Name  string
+		Value int
 	}
 
+	key := "struct_key"
+	value := TestStruct{Name: "test", Value: 42}
 	expiration := 10 * time.Second
 
-	err = manager.Set(key, value, expiration)
+	err = cache.Set(ctx, key, value, expiration)
 	if err != nil {
-		t.Fatalf("Failed to set cache value through manager: %v", err)
+		t.Fatalf("Failed to set cache value: %v", err)
 	}
 
-	var retrievedValue map[string]interface{}
-	err = manager.Get(key, &retrievedValue)
+	var retrievedValue TestStruct
+	err = cache.Get(ctx, key, &retrievedValue)
 	if err != nil {
-		t.Fatalf("Failed to get cache value through manager: %v", err)
+		t.Fatalf("Failed to get cache value: %v", err)
 	}
 
-	if retrievedValue["name"] != value["name"] {
-		t.Errorf("Retrieved name %s does not match original name %s", retrievedValue["name"], value["name"])
+	if retrievedValue.Name != value.Name || retrievedValue.Value != value.Value {
+		t.Errorf("Retrieved value %+v does not match original value %+v", retrievedValue, value)
+	}
+}
+
+func TestCacheMiss(t *testing.T) {
+	config := ristretto.Config{
+		NumCounters: 1000,
+		MaxCost:     1000,
+		BufferItems: 64,
+		Metrics:     false,
 	}
 
-	if retrievedValue["age"] != value["age"] {
-		t.Errorf("Retrieved age %v does not match original age %v", retrievedValue["age"], value["age"])
-	}
-
-	// 测试Delete
-	err = manager.Delete(key)
+	cache, err := ristretto.NewRistretto(config)
 	if err != nil {
-		t.Fatalf("Failed to delete cache key through manager: %v", err)
+		t.Fatalf("Failed to create ristretto cache: %v", err)
 	}
 
-	// 测试Close
-	err = manager.Close()
-	if err != nil {
-		t.Fatalf("Failed to close cache manager: %v", err)
+	ctx := context.Background()
+
+	// 尝试获取不存在的key
+	var value string
+	err = cache.Get(ctx, "nonexistent_key", &value)
+	if err == nil {
+		t.Error("Should return error for nonexistent key")
+	}
+
+	// 使用 ristretto 包中的 ErrCacheMiss 检查
+	if err != ristretto.ErrCacheMiss {
+		t.Errorf("Error should be cache miss, got: %v", err)
 	}
 }

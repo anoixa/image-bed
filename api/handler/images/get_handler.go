@@ -2,6 +2,7 @@ package images
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -19,11 +20,9 @@ import (
 	"unicode"
 
 	"github.com/anoixa/image-bed/api/common"
-	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
-	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/anoixa/image-bed/utils/pool"
 	"github.com/gin-gonic/gin"
@@ -32,37 +31,43 @@ import (
 )
 
 var (
-	imageGroup          singleflight.Group
-	ErrTemporaryFailure = errors.New("temporary failure, should be retried")
-	metaFetchTimeout    = 30 * time.Second
+	imageGroup       singleflight.Group
+	metaFetchTimeout = 30 * time.Second
 )
 
-func GetImageHandler(context *gin.Context) {
-	identifier := context.Param("identifier")
+var (
+	ErrTemporaryFailure = errors.New("temporary failure, should be retried")
+)
+
+// GetImage 获取图片
+func (h *Handler) GetImage(c *gin.Context) {
+	identifier := c.Param("identifier")
 	if identifier == "" {
-		common.RespondError(context, http.StatusBadRequest, "Image identifier is required")
+		common.RespondError(c, http.StatusBadRequest, "Image identifier is required")
 		return
 	}
 
-	image, err := fetchImageMetadata(identifier)
+	image, err := h.fetchImageMetadata(c.Request.Context(), identifier)
 	if err != nil {
-		handleMetadataError(context, utils.SanitizeLogMessage(identifier), err)
+		h.handleMetadataError(c, utils.SanitizeLogMessage(identifier), err)
 		return
 	}
 
-	if imageData, err := cache.GetCachedImageData(identifier); err == nil {
-		serveImageData(context, image, imageData)
+	imageData, err := h.cacheHelper.GetCachedImageData(c.Request.Context(), identifier)
+	if err == nil {
+		h.serveImageData(c, image, imageData)
 		return
 	}
 
-	streamAndCacheImage(context, image)
+	h.streamAndCacheImage(c, image)
 }
 
 // fetchImageMetadata 查询图片信息
-func fetchImageMetadata(identifier string) (*models.Image, error) {
+func (h *Handler) fetchImageMetadata(ctx context.Context, identifier string) (*models.Image, error) {
 	var image models.Image
+
 	// 缓存命中
-	if err := cache.GetCachedImage(identifier, &image); err == nil {
+	if err := h.cacheHelper.GetCachedImage(ctx, identifier, &image); err == nil {
 		return &image, nil
 	}
 
@@ -77,7 +82,11 @@ func fetchImageMetadata(identifier string) (*models.Image, error) {
 
 		// 写入缓存（异步）
 		go func(img *models.Image) {
-			if cacheErr := cache.CacheImage(img); cacheErr != nil {
+			if h.cacheHelper == nil {
+				return
+			}
+			cacheCtx := context.Background()
+			if cacheErr := h.cacheHelper.CacheImage(cacheCtx, img); cacheErr != nil {
 				log.Printf("Failed to cache image metadata for '%s': %v", img.Identifier, cacheErr)
 			}
 		}(imagePtr)
@@ -101,18 +110,18 @@ func fetchImageMetadata(identifier string) (*models.Image, error) {
 }
 
 // streamAndCacheImage 流式处理
-func streamAndCacheImage(context *gin.Context, image *models.Image) {
-	storageClient, err := storage.GetStorage(image.StorageDriver)
+func (h *Handler) streamAndCacheImage(c *gin.Context, image *models.Image) {
+	storageProvider, err := h.storageFactory.Get(image.StorageDriver)
 	if err != nil {
-		log.Printf("Failed to get storage client for driver '%s': %v", image.StorageDriver, err)
-		common.RespondError(context, http.StatusInternalServerError, "Error retrieving storage client")
+		log.Printf("Failed to get storage provider for driver '%s': %v", image.StorageDriver, err)
+		common.RespondError(c, http.StatusInternalServerError, "Error retrieving storage provider")
 		return
 	}
 
-	imageStream, err := storageClient.Get(image.Identifier)
+	imageStream, err := storageProvider.GetWithContext(c.Request.Context(), image.Identifier)
 	if err != nil {
 		log.Printf("WARN: File for identifier '%s' not found in storage, but exists in DB. Error: %v", utils.SanitizeLogMessage(image.Identifier), err)
-		common.RespondError(context, http.StatusNotFound, "Image file not found in storage")
+		common.RespondError(c, http.StatusNotFound, "Image file not found in storage")
 		return
 	}
 
@@ -130,19 +139,19 @@ func streamAndCacheImage(context *gin.Context, image *models.Image) {
 
 	rs, isSeeker := imageStream.(io.ReadSeeker)
 
-	if context.IsAborted() {
+	if c.IsAborted() {
 		return
 	}
 
 	// 如果文件太大或禁用缓存，直接流式传输
 	if !shouldCache {
 		if isSeeker {
-			_ = serveImageStream(context, image, rs)
+			_ = h.serveImageStream(c, image, rs)
 		} else {
 			if image.FileSize > 0 {
-				context.Header("Content-Length", strconv.FormatInt(image.FileSize, 10))
+				c.Header("Content-Length", strconv.FormatInt(image.FileSize, 10))
 			}
-			_ = serveImageStreamManualCopy(context, image, imageStream)
+			_ = h.serveImageStreamManualCopy(c, image, imageStream)
 		}
 		return
 	}
@@ -160,12 +169,16 @@ func streamAndCacheImage(context *gin.Context, image *models.Image) {
 
 		// 异步缓存
 		go func(id string, d []byte) {
-			if cacheErr := cache.CacheImageData(id, d); cacheErr != nil {
+			if h.cacheHelper == nil {
+				return
+			}
+			ctx := context.Background()
+			if cacheErr := h.cacheHelper.CacheImageData(ctx, id, d); cacheErr != nil {
 				log.Printf("Failed to cache image data for '%s': %v", id, cacheErr)
 			}
 		}(image.Identifier, data)
 
-		_ = serveImageStream(context, image, bytes.NewReader(data))
+		_ = h.serveImageStream(c, image, bytes.NewReader(data))
 		return
 	}
 
@@ -177,7 +190,7 @@ func streamAndCacheImage(context *gin.Context, image *models.Image) {
 	// 使用 LimitReader 限制读取大小
 	limitedReader := io.LimitReader(imageStream, maxBufferSize)
 	var buffer bytes.Buffer
-	
+
 	// 先尝试读取到缓冲区（带大小限制）
 	n, copyErr := io.Copy(&buffer, limitedReader)
 	if copyErr != nil && !isBrokenPipe(copyErr) {
@@ -191,122 +204,125 @@ func streamAndCacheImage(context *gin.Context, image *models.Image) {
 		// 由于已经读了部分内容，需要组合传输
 		multiReader := io.MultiReader(bytes.NewReader(buffer.Bytes()), imageStream)
 		if image.FileSize > 0 {
-			context.Header("Content-Length", strconv.FormatInt(image.FileSize, 10))
+			c.Header("Content-Length", strconv.FormatInt(image.FileSize, 10))
 		}
-		_ = serveImageStreamManualCopy(context, image, multiReader)
+		_ = h.serveImageStreamManualCopy(c, image, multiReader)
 		return
 	}
 
 	// 完整读取，可以缓存
 	data := buffer.Bytes()
 	go func(id string, d []byte) {
-		if cacheErr := cache.CacheImageData(id, d); cacheErr != nil {
+		if h.cacheHelper == nil {
+			return
+		}
+		ctx := context.Background()
+		if cacheErr := h.cacheHelper.CacheImageData(ctx, id, d); cacheErr != nil {
 			log.Printf("Failed to cache image data for '%s': %v", id, cacheErr)
 		}
 	}(image.Identifier, data)
 
-	_ = serveImageStream(context, image, bytes.NewReader(data))
+	_ = h.serveImageStream(c, image, bytes.NewReader(data))
 }
 
-// serveImageData
-func serveImageData(context *gin.Context, image *models.Image, data []byte) {
+// serveImageData 直接提供图片数据
+func (h *Handler) serveImageData(c *gin.Context, image *models.Image, data []byte) {
 	reader := bytes.NewReader(data)
-	_ = serveImageStream(context, image, reader)
+	_ = h.serveImageStream(c, image, reader)
 }
 
 // serveImageStream 流式处理
-func serveImageStream(context *gin.Context, image *models.Image, stream io.Reader) error {
-	setCommonHeaders(context, image)
+func (h *Handler) serveImageStream(c *gin.Context, image *models.Image, stream io.Reader) error {
+	h.setCommonHeaders(c, image)
 
-	if context.Writer.Status() == http.StatusNotModified {
+	if c.Writer.Status() == http.StatusNotModified {
 		return nil
 	}
 
 	if rs, ok := stream.(io.ReadSeeker); ok {
-		http.ServeContent(context.Writer, context.Request, image.OriginalName, image.UpdatedAt, rs)
+		http.ServeContent(c.Writer, c.Request, image.OriginalName, image.UpdatedAt, rs)
 		return nil
 	}
 
-	return serveImageStreamManualCopy(context, image, stream)
+	return h.serveImageStreamManualCopy(c, image, stream)
 }
 
 // serveImageStreamManualCopy 使用缓冲池优化传输
-func serveImageStreamManualCopy(context *gin.Context, image *models.Image, stream io.Reader) error {
-	setCommonHeaders(context, image)
-	if context.Writer.Status() == http.StatusNotModified {
+func (h *Handler) serveImageStreamManualCopy(c *gin.Context, image *models.Image, stream io.Reader) error {
+	h.setCommonHeaders(c, image)
+	if c.Writer.Status() == http.StatusNotModified {
 		return nil
 	}
 
-	if context.Writer.Header().Get("Content-Length") == "" && image.FileSize > 0 {
-		context.Header("Content-Length", strconv.FormatInt(image.FileSize, 10))
+	if c.Writer.Header().Get("Content-Length") == "" && image.FileSize > 0 {
+		c.Header("Content-Length", strconv.FormatInt(image.FileSize, 10))
 	}
 
-	context.Writer.WriteHeader(http.StatusOK)
-	
+	c.Writer.WriteHeader(http.StatusOK)
+
 	// 使用共享缓冲池优化传输
 	buf := pool.SharedBufferPool.Get().([]byte)
 	defer pool.SharedBufferPool.Put(buf)
-	
-	_, err := io.CopyBuffer(context.Writer, stream, buf)
+
+	_, err := io.CopyBuffer(c.Writer, stream, buf)
 	return err
 }
 
 // setCommonHeaders 响应头处理
-func setCommonHeaders(context *gin.Context, image *models.Image) {
-	if _, ok := context.GetQuery("download"); ok {
+func (h *Handler) setCommonHeaders(c *gin.Context, image *models.Image) {
+	if _, ok := c.GetQuery("download"); ok {
 		safeName := sanitizeFilename(image.OriginalName)
 		asciiName := toASCII(safeName)
 		utf8Name := url.PathEscape(safeName)
 
 		contentDisposition := fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, asciiName, utf8Name)
-		context.Header("Content-Disposition", contentDisposition)
+		c.Header("Content-Disposition", contentDisposition)
 	}
 
 	etag := fmt.Sprintf("W/\"%x\"", image.UpdatedAt.UnixNano())
 
 	// If-None-Match 处理
-	if inm := context.GetHeader("If-None-Match"); inm != "" {
+	if inm := c.GetHeader("If-None-Match"); inm != "" {
 		if matchETag(inm, etag) {
-			context.Header("ETag", etag)
-			context.Header("Last-Modified", image.UpdatedAt.UTC().Format(http.TimeFormat))
-			context.Status(http.StatusNotModified)
-			context.Abort()
+			c.Header("ETag", etag)
+			c.Header("Last-Modified", image.UpdatedAt.UTC().Format(http.TimeFormat))
+			c.Status(http.StatusNotModified)
+			c.Abort()
 			return
 		}
 	}
 
 	// 只有在没有 ETag 的情况下才检查 If-Modified-Since
-	// If-Modified-Since 处理
-	if context.GetHeader("If-None-Match") == "" {
-		ifModifiedSince := context.GetHeader("If-Modified-Since")
+	if c.GetHeader("If-None-Match") == "" {
+		ifModifiedSince := c.GetHeader("If-Modified-Since")
 		if ifModifiedSince != "" {
 			t, err := time.Parse(http.TimeFormat, ifModifiedSince)
 			if err == nil && !image.UpdatedAt.After(t) {
-				context.Header("ETag", etag)
-				context.Header("Last-Modified", image.UpdatedAt.UTC().Format(http.TimeFormat))
-				context.Status(http.StatusNotModified)
-				context.Abort()
+				c.Header("ETag", etag)
+				c.Header("Last-Modified", image.UpdatedAt.UTC().Format(http.TimeFormat))
+				c.Status(http.StatusNotModified)
+				c.Abort()
 				return
 			}
 		}
 	}
 
-	context.Header("Content-Type", image.MimeType)
-	context.Header("Cache-Control", "public, max-age=2592000, immutable")
-	context.Header("X-Content-Type-Options", "nosniff")
-	context.Header("ETag", etag)
-	context.Header("Last-Modified", image.UpdatedAt.UTC().Format(http.TimeFormat))
+	c.Header("Content-Type", image.MimeType)
+	c.Header("Cache-Control", "public, max-age=2592000, immutable")
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("ETag", etag)
+	c.Header("Last-Modified", image.UpdatedAt.UTC().Format(http.TimeFormat))
 }
 
-func handleMetadataError(context *gin.Context, identifier string, err error) {
+func (h *Handler) handleMetadataError(c *gin.Context, identifier string, err error) {
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		common.RespondError(context, http.StatusNotFound, "Image not found")
+		common.RespondError(c, http.StatusNotFound, "Image not found")
 	} else if errors.Is(err, ErrTemporaryFailure) {
 		log.Printf("Transient error for identifier '%s'. Client should retry.", identifier)
-		common.RespondError(context, http.StatusServiceUnavailable, "Service is temporarily busy, please try again.")
+		common.RespondError(c, http.StatusServiceUnavailable, "Service is temporarily busy, please try again.")
 	} else {
 		log.Printf("Database error when fetching identifier '%s': %v", utils.SanitizeLogMessage(identifier), err)
-		common.RespondError(context, http.StatusInternalServerError, "Error retrieving image information")
+		common.RespondError(c, http.StatusInternalServerError, "Error retrieving image information")
 	}
 }
 
@@ -351,7 +367,7 @@ func isTransientError(err error) bool {
 	return false
 }
 
-// isBrokenPipe 跳过BrokenPipe错误
+// isBrokenPipe 跳过 BrokenPipe 错误
 func isBrokenPipe(err error) bool {
 	return err != nil && (errors.Is(err, io.ErrClosedPipe) || errors.Is(err, os.ErrClosed) ||
 		errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET))
@@ -369,7 +385,6 @@ func matchETag(headerVal, etag string) bool {
 		if p == etag {
 			return true
 		}
-
 		if p == strings.TrimPrefix(etag, "W/") {
 			return true
 		}
