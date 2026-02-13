@@ -30,6 +30,11 @@ func (r *Repository) SaveImage(image *models.Image) error {
 	})
 }
 
+// CreateWithTx 在指定事务中创建图片记录
+func (r *Repository) CreateWithTx(tx *gorm.DB, image *models.Image) error {
+	return tx.Create(image).Error
+}
+
 // GetImageByHash 通过哈希获取图片
 func (r *Repository) GetImageByHash(hash string) (*models.Image, error) {
 	var image models.Image
