@@ -19,7 +19,6 @@ import (
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
-	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/anoixa/image-bed/utils/async"
 	"github.com/anoixa/image-bed/utils/validator"
@@ -51,7 +50,6 @@ type ChunkedUploadSession struct {
 	CreatedAt      time.Time
 }
 
-// 内存中的上传会话管理
 var (
 	sessions   = make(map[string]*ChunkedUploadSession)
 	sessionsMu sync.RWMutex
@@ -98,8 +96,8 @@ func (h *Handler) InitChunkedUpload(c *gin.Context) {
 		return
 	}
 
-	// 检查文件是否已存在（秒传）
-	existingImage, err := images.GetImageByHash(req.FileHash)
+	// 秒传
+	existingImage, err := h.repo.GetImageByHash(req.FileHash)
 	if err == nil {
 		// 文件已存在，直接返回
 		common.RespondSuccess(c, gin.H{
@@ -341,13 +339,13 @@ func (h *Handler) processChunkedUpload(ctx context.Context, session *ChunkedUplo
 		UserID:        session.UserID,
 	}
 
-	if err := images.SaveImage(newImage); err != nil {
+	if err := h.repo.SaveImage(newImage); err != nil {
 		storageProvider.DeleteWithContext(ctx, identifier)
 		return fmt.Errorf("failed to save image metadata: %w", err)
 	}
 
 	// 异步提取图片尺寸
-	async.ExtractImageDimensionsAsync(identifier, driverToSave)
+	async.ExtractImageDimensionsAsync(identifier, driverToSave, h.repo.DB())
 
 	log.Printf("Chunked upload completed: %s -> %s", session.FileName, identifier)
 	return nil

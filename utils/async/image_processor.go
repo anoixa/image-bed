@@ -11,19 +11,24 @@ import (
 	"path/filepath"
 
 	"github.com/anoixa/image-bed/config"
-	"github.com/anoixa/image-bed/database/dbcore"
 	"github.com/anoixa/image-bed/database/models"
+	"gorm.io/gorm"
 )
 
 // ImageDimensionsTask 图片尺寸提取任务
 type ImageDimensionsTask struct {
 	Identifier string
 	StorageKey string
+	DB         *gorm.DB
 }
 
 // Execute 执行任务
 func (t *ImageDimensionsTask) Execute() {
-	// 从本地存储获取图片（异步任务直接使用本地文件系统）
+	if t.DB == nil {
+		log.Printf("Database not provided for image dimensions task")
+		return
+	}
+
 	basePath := config.Get().Server.StorageConfig.Local.Path
 	if basePath == "" {
 		basePath = "./data/upload"
@@ -31,14 +36,12 @@ func (t *ImageDimensionsTask) Execute() {
 
 	filePath := filepath.Join(basePath, t.Identifier)
 
-	// 读取图片数据
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		log.Printf("Failed to read image file for dimensions extraction: %v", err)
 		return
 	}
 
-	// 解码图片获取尺寸
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		log.Printf("Failed to decode image for dimensions: %v", err)
@@ -49,9 +52,7 @@ func (t *ImageDimensionsTask) Execute() {
 	width := bounds.Dx()
 	height := bounds.Dy()
 
-	// 更新数据库
-	db := dbcore.GetDBInstance()
-	result := db.Model(&models.Image{}).
+	result := t.DB.Model(&models.Image{}).
 		Where("identifier = ?", t.Identifier).
 		UpdateColumns(map[string]interface{}{
 			"width":  width,
@@ -69,10 +70,11 @@ func (t *ImageDimensionsTask) Execute() {
 }
 
 // ExtractImageDimensionsAsync 异步提取图片尺寸
-func ExtractImageDimensionsAsync(identifier, storageKey string) {
+func ExtractImageDimensionsAsync(identifier, storageKey string, db *gorm.DB) {
 	task := &ImageDimensionsTask{
 		Identifier: identifier,
 		StorageKey: storageKey,
+		DB:         db,
 	}
 	Submit(task)
 }

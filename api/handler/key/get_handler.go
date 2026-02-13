@@ -8,7 +8,6 @@ import (
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
-	"github.com/anoixa/image-bed/database/repo/keys"
 	"github.com/gin-gonic/gin"
 )
 
@@ -22,14 +21,14 @@ type apiTokenResponse struct {
 	LastUsedAt  *time.Time `json:"last_used_at,omitempty"`
 }
 
-func GetToken(context *gin.Context) {
+func (h *Handler) GetToken(context *gin.Context) {
 	userID := context.GetUint(middleware.ContextUserIDKey)
 	if userID == 0 {
 		common.RespondError(context, http.StatusUnauthorized, "Invalid user session")
 		return
 	}
 
-	apiTokens, err := key.GetAllApiTokensByUser(userID)
+	apiTokens, err := h.repo.GetAllApiTokensByUser(userID)
 	if err != nil {
 		log.Printf("Failed to get API tokens for user %d: %v", userID, err)
 

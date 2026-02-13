@@ -19,7 +19,6 @@ import (
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
-	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/anoixa/image-bed/utils/async"
@@ -97,7 +96,8 @@ func (h *Handler) UploadImages(c *gin.Context) {
 		return
 	}
 
-	if len(files) > 10 { // 限制最大上传文件数量
+	// 限制最大上传文件数量
+	if len(files) > 10 {
 		common.RespondError(c, http.StatusBadRequest, "Maximum 10 files allowed per upload")
 		return
 	}
@@ -203,7 +203,7 @@ func (h *Handler) UploadImages(c *gin.Context) {
 	})
 }
 
-// processAndSaveImage 保存图片（流式处理避免内存占用）
+// processAndSaveImage 保存图片
 func (h *Handler) processAndSaveImage(ctx context.Context, userID uint, fileHeader *multipart.FileHeader, storageProvider storage.Provider, driverToSave string) (*models.Image, bool, error) {
 	file, err := fileHeader.Open()
 	if err != nil {
@@ -211,7 +211,7 @@ func (h *Handler) processAndSaveImage(ctx context.Context, userID uint, fileHead
 	}
 	defer file.Close()
 
-	// 使用临时文件代替内存缓冲区
+	// 不再使用内存
 	tempFile, err := os.CreateTemp("./data/temp", "upload-*")
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to create temp file: %w", err)
@@ -236,7 +236,7 @@ func (h *Handler) processAndSaveImage(ctx context.Context, userID uint, fileHead
 	fileHash := hex.EncodeToString(hasher.Sum(nil))
 
 	// 检查重复文件
-	image, err := images.GetImageByHash(fileHash)
+	image, err := h.repo.GetImageByHash(fileHash)
 	if err == nil {
 		go h.warmCache(image)
 		return image, true, nil
@@ -246,7 +246,7 @@ func (h *Handler) processAndSaveImage(ctx context.Context, userID uint, fileHead
 	}
 
 	// 检查软删除的文件
-	softDeletedImage, err := images.GetSoftDeletedImageByHash(fileHash)
+	softDeletedImage, err := h.repo.GetSoftDeletedImageByHash(fileHash)
 	if err == nil {
 		updateData := map[string]interface{}{
 			"deleted_at":     nil,
@@ -255,7 +255,7 @@ func (h *Handler) processAndSaveImage(ctx context.Context, userID uint, fileHead
 			"storage_driver": driverToSave,
 		}
 
-		restoredImage, err := images.UpdateImageByIdentifier(softDeletedImage.Identifier, updateData)
+		restoredImage, err := h.repo.UpdateImageByIdentifier(softDeletedImage.Identifier, updateData)
 		if err != nil {
 			return nil, false, errors.New("failed to restore existing image data")
 		}
@@ -305,13 +305,13 @@ func (h *Handler) processAndSaveImage(ctx context.Context, userID uint, fileHead
 		UserID:        userID,
 	}
 
-	if err := images.SaveImage(newImage); err != nil {
+	if err := h.repo.SaveImage(newImage); err != nil {
 		storageProvider.DeleteWithContext(ctx, identifier)
 		return nil, false, errors.New("failed to save image metadata")
 	}
 
 	// 异步提取图片尺寸
-	async.ExtractImageDimensionsAsync(identifier, driverToSave)
+	async.ExtractImageDimensionsAsync(identifier, driverToSave, h.repo.DB())
 	go h.warmCache(newImage)
 
 	return newImage, false, nil

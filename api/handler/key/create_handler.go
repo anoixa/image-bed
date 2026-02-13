@@ -9,7 +9,6 @@ import (
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/database/models"
-	"github.com/anoixa/image-bed/database/repo/keys"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/gin-gonic/gin"
 )
@@ -19,7 +18,7 @@ type req struct {
 }
 
 // CreateStaticToken 创建新的static token
-func CreateStaticToken(context *gin.Context) {
+func (h *Handler) CreateStaticToken(context *gin.Context) {
 	var requestBody req
 	if err := context.ShouldBindJSON(&requestBody); err != nil {
 		if err != io.EOF {
@@ -48,7 +47,7 @@ func CreateStaticToken(context *gin.Context) {
 		IsActive:    true,
 	}
 
-	err = key.CreateKey(&token)
+	err = h.repo.CreateKey(&token)
 
 	if err != nil {
 		common.RespondError(context, http.StatusInternalServerError, err.Error())

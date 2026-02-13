@@ -22,7 +22,6 @@ import (
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
-	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/anoixa/image-bed/utils/pool"
 	"github.com/gin-gonic/gin"
@@ -72,7 +71,7 @@ func (h *Handler) fetchImageMetadata(ctx context.Context, identifier string) (*m
 	}
 
 	resultChan := imageGroup.DoChan(identifier, func() (interface{}, error) {
-		imagePtr, err := images.GetImageByIdentifier(identifier)
+		imagePtr, err := h.repo.GetImageByIdentifier(identifier)
 		if err != nil {
 			if isTransientError(err) {
 				return nil, ErrTemporaryFailure
@@ -134,8 +133,7 @@ func (h *Handler) streamAndCacheImage(c *gin.Context, image *models.Image) {
 	cfg := config.Get()
 	enableImageCaching := cfg.Server.CacheConfig.EnableImageCaching
 	maxCacheSize := cfg.Server.CacheConfig.MaxImageCacheSize
-	shouldCache := enableImageCaching && image.FileSize > 0 &&
-		(maxCacheSize == 0 || image.FileSize <= maxCacheSize)
+	shouldCache := enableImageCaching && image.FileSize > 0 && (maxCacheSize == 0 || image.FileSize <= maxCacheSize)
 
 	rs, isSeeker := imageStream.(io.ReadSeeker)
 
@@ -143,7 +141,7 @@ func (h *Handler) streamAndCacheImage(c *gin.Context, image *models.Image) {
 		return
 	}
 
-	// 如果文件太大或禁用缓存，直接流式传输
+	// if文件太大或禁用缓存fallback到流式传输
 	if !shouldCache {
 		if isSeeker {
 			_ = h.serveImageStream(c, image, rs)
@@ -156,9 +154,8 @@ func (h *Handler) streamAndCacheImage(c *gin.Context, image *models.Image) {
 		return
 	}
 
-	// 缓存逻辑：仅对小文件启用
+	// 缓存仅对小文件启用
 	if isSeeker {
-		// 小文件直接读入内存缓存
 		data, readErr := io.ReadAll(rs)
 		if readErr != nil {
 			if !isBrokenPipe(readErr) {
@@ -191,17 +188,17 @@ func (h *Handler) streamAndCacheImage(c *gin.Context, image *models.Image) {
 	limitedReader := io.LimitReader(imageStream, maxBufferSize)
 	var buffer bytes.Buffer
 
-	// 先尝试读取到缓冲区（带大小限制）
+	// 尝试读取到缓冲区
 	n, copyErr := io.Copy(&buffer, limitedReader)
 	if copyErr != nil && !isBrokenPipe(copyErr) {
 		log.Printf("Failed to buffer image stream for '%s': %v", image.Identifier, copyErr)
 		return
 	}
 
-	// 如果实际大小超过限制，改用流式传输
+	// 如果实际大小超过限制fallback流式传输
 	if n >= maxBufferSize || (image.FileSize > 0 && n < image.FileSize) {
 		log.Printf("Image %s too large for buffering (%d bytes), streaming directly", image.Identifier, n)
-		// 由于已经读了部分内容，需要组合传输
+
 		multiReader := io.MultiReader(bytes.NewReader(buffer.Bytes()), imageStream)
 		if image.FileSize > 0 {
 			c.Header("Content-Length", strconv.FormatInt(image.FileSize, 10))

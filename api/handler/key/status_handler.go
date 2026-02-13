@@ -8,12 +8,11 @@ import (
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
-	"github.com/anoixa/image-bed/database/repo/keys"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
 
-func DisableToken(context *gin.Context) {
+func (h *Handler) DisableToken(context *gin.Context) {
 	userID := context.GetUint(middleware.ContextUserIDKey)
 	if userID == 0 {
 		common.RespondError(context, http.StatusUnauthorized, "Invalid user session")
@@ -28,7 +27,7 @@ func DisableToken(context *gin.Context) {
 	}
 	tokenID := uint(tokenID64)
 
-	err = key.DisableApiToken(tokenID, userID)
+	err = h.repo.DisableApiToken(tokenID, userID)
 
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -44,7 +43,7 @@ func DisableToken(context *gin.Context) {
 	common.RespondSuccessMessage(context, "API token has been successfully disabled.", nil)
 }
 
-func RevokeToken(context *gin.Context) {
+func (h *Handler) RevokeToken(context *gin.Context) {
 	userID := context.GetUint(middleware.ContextUserIDKey)
 	if userID == 0 {
 		common.RespondError(context, http.StatusUnauthorized, "Invalid user session")
@@ -59,7 +58,7 @@ func RevokeToken(context *gin.Context) {
 	}
 	tokenID := uint(tokenID64)
 
-	err = key.RevokeApiToken(tokenID, userID)
+	err = h.repo.RevokeApiToken(tokenID, userID)
 
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -75,7 +74,7 @@ func RevokeToken(context *gin.Context) {
 	common.RespondSuccessMessage(context, "API token has been successfully revoked", nil)
 }
 
-func EnableToken(context *gin.Context) {
+func (h *Handler) EnableToken(context *gin.Context) {
 	userID := context.GetUint(middleware.ContextUserIDKey)
 	if userID == 0 {
 		common.RespondError(context, http.StatusUnauthorized, "Invalid user session")
@@ -90,7 +89,7 @@ func EnableToken(context *gin.Context) {
 	}
 	tokenID := uint(tokenID64)
 
-	err = key.EnableApiToken(tokenID, userID)
+	err = h.repo.EnableApiToken(tokenID, userID)
 
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {

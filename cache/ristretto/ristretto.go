@@ -12,7 +12,7 @@ import (
 // ErrCacheMiss 缓存未命中错误
 var ErrCacheMiss = errors.New("cache miss")
 
-// Ristretto 实现了 cache.Provider 接口
+// Ristretto 实现接口
 type Ristretto struct {
 	client *ristretto.Cache
 }

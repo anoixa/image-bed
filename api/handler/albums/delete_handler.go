@@ -8,11 +8,10 @@ import (
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
-	"github.com/anoixa/image-bed/database/repo/albums"
 	"github.com/gin-gonic/gin"
 )
 
-func DeleteAlbumHandler(context *gin.Context) {
+func (h *Handler) DeleteAlbumHandler(context *gin.Context) {
 	// 获取相册 ID
 	albumIDStr := context.Param("id")
 	albumID, err := strconv.ParseUint(albumIDStr, 10, 32)
@@ -23,7 +22,7 @@ func DeleteAlbumHandler(context *gin.Context) {
 
 	userID := context.GetUint(middleware.ContextUserIDKey)
 
-	err = albums.DeleteAlbum(uint(albumID), userID)
+	err = h.repo.DeleteAlbum(uint(albumID), userID)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found or access denied") {
 			common.RespondError(context, http.StatusNotFound, err.Error())
