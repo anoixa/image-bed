@@ -28,6 +28,7 @@ type ImageRequestBody struct {
 	StorageType string `json:"storage_type"`
 	Identifier  string `json:"identifier"`
 	Search      string `json:"search"`
+	AlbumID     *uint  `json:"album_id"`
 
 	Page  int `json:"page" binding:"required"`
 	Limit int `json:"limit" binding:"required"`
@@ -66,7 +67,7 @@ func (h *Handler) ListImages(c *gin.Context) {
 		limit = maxLimit
 	}
 
-	list, total, err := h.repo.GetImageList(body.StorageType, body.Identifier, body.Search, page, limit, int(userID))
+	list, total, err := h.repo.GetImageList(body.StorageType, body.Identifier, body.Search, body.AlbumID, page, limit, int(userID))
 	if err != nil {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to get image list")
 		return

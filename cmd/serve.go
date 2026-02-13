@@ -121,6 +121,12 @@ func InitDatabase(container *di.Container) {
 		log.Fatalf("Failed to auto migrate database: %v", err)
 	}
 
+	// 创建默认管理员用户
+	repos := container.GetRepositories()
+	if repos != nil && repos.Accounts != nil {
+		repos.Accounts.CreateDefaultAdminUser()
+	}
+
 	log.Println("Database initialized successfully")
 }
 

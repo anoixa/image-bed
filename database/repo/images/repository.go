@@ -193,7 +193,7 @@ func (r *Repository) UpdateImageByIdentifier(identifier string, updates map[stri
 }
 
 // GetImageList 获取图片列表（支持搜索和过滤）
-func (r *Repository) GetImageList(storageType, identifier, search string, page, pageSize, userID int) ([]*models.Image, int64, error) {
+func (r *Repository) GetImageList(storageType, identifier, search string, albumID *uint, page, pageSize, userID int) ([]*models.Image, int64, error) {
 	var imageList []*models.Image
 	var total int64
 
@@ -214,6 +214,12 @@ func (r *Repository) GetImageList(storageType, identifier, search string, page, 
 		db = db.Where("original_name LIKE ?", "%"+search+"%")
 	}
 
+	// 应用相册过滤
+	if albumID != nil {
+		db = db.Joins("JOIN album_images ON album_images.image_id = images.id").
+			Where("album_images.album_id = ?", *albumID)
+	}
+
 	// 获取总数
 	if err := db.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -222,6 +228,26 @@ func (r *Repository) GetImageList(storageType, identifier, search string, page, 
 	// 分页查询
 	offset := (page - 1) * pageSize
 	err := db.Order("created_at desc").Offset(offset).Limit(pageSize).Find(&imageList).Error
+	return imageList, total, err
+}
+
+// GetImagesByAlbumID 根据相册ID获取图片列表
+func (r *Repository) GetImagesByAlbumID(albumID uint, page, pageSize int) ([]*models.Image, int64, error) {
+	var imageList []*models.Image
+	var total int64
+
+	db := r.db.DB().Model(&models.Image{}).
+		Joins("JOIN album_images ON album_images.image_id = images.id").
+		Where("album_images.album_id = ?", albumID)
+
+	// 获取总数
+	if err := db.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	// 分页查询
+	offset := (page - 1) * pageSize
+	err := db.Order("images.created_at desc").Offset(offset).Limit(pageSize).Find(&imageList).Error
 	return imageList, total, err
 }
 
