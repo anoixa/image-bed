@@ -9,5 +9,5 @@ import (
 // BuildImageURL  Base URL for images
 func BuildImageURL(identifier string) string {
 	cfg := config.Get()
-	return fmt.Sprintf("%s/images/%s", cfg.Server.BaseURL, identifier)
+	return fmt.Sprintf("%s/images/%s", cfg.Server.BaseURL(), identifier)
 }
