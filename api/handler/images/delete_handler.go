@@ -7,7 +7,6 @@ import (
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
-	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -36,7 +35,7 @@ func (h *Handler) DeleteImages(c *gin.Context) {
 		return
 	}
 
-	affectedCount, err := images.DeleteImagesByIdentifiersAndUser(requestBody.ImageID, userID)
+	affectedCount, err := h.repo.DeleteImagesByIdentifiersAndUser(requestBody.ImageID, userID)
 	if err != nil {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to delete images due to an internal error.")
 		return
@@ -70,7 +69,7 @@ func (h *Handler) DeleteSingleImage(c *gin.Context) {
 		return
 	}
 
-	err := images.DeleteImageByIdentifierAndUser(imageIdentifier, userID)
+	err := h.repo.DeleteImageByIdentifierAndUser(imageIdentifier, userID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			common.RespondError(c, http.StatusNotFound, "Image not found or you do not have permission to delete it.")

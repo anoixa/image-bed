@@ -7,11 +7,12 @@ import (
 	"github.com/anoixa/image-bed/api"
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/handler/albums"
-	images2 "github.com/anoixa/image-bed/api/handler/images"
-	key2 "github.com/anoixa/image-bed/api/handler/key"
+	"github.com/anoixa/image-bed/api/handler/images"
+	"github.com/anoixa/image-bed/api/handler/key"
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
+	"github.com/anoixa/image-bed/internal/repositories"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -23,6 +24,7 @@ var startTime = time.Now()
 type ServerDependencies struct {
 	StorageFactory *storage.Factory
 	CacheFactory   *cache.Factory
+	Repositories   *repositories.Repositories
 }
 
 // 启动gin
@@ -77,7 +79,7 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 			"uptime":  time.Since(startTime).Round(time.Second).String(),
 			"version": config.Version,
 			"checks": gin.H{
-				"database": checkDatabaseHealth(),
+				"database": checkDatabaseHealth(deps.Repositories),
 				"cache":    checkCacheHealth(deps.CacheFactory),
 				"storage":  checkStorageHealth(deps.StorageFactory),
 			},
@@ -101,8 +103,14 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 		context.JSON(http.StatusOK, middleware.GetMetrics())
 	})
 
-	// 创建图片处理器（依赖注入）
-	imageHandler := images2.NewHandler(deps.StorageFactory, deps.CacheFactory)
+	// 设置认证仓库
+	api.SetAuthRepositories(deps.Repositories)
+
+	// 创建处理器（依赖注入）
+	imageHandler := images.NewHandler(deps.StorageFactory, deps.CacheFactory, deps.Repositories)
+	albumHandler := albums.NewHandler(deps.Repositories)
+	keyHandler := key.NewHandler(deps.Repositories)
+	loginHandler := api.NewLoginHandler(deps.Repositories)
 
 	// 公共接口
 	publicGroup := router.Group("/images")
@@ -120,9 +128,9 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 		authGroup := apiGroup.Group("/auth")
 		authGroup.Use(authRateLimiter.Middleware())
 		{
-			authGroup.POST("/login", api.LoginHandler)          //POST /api/auth/login
-			authGroup.POST("/refresh", api.RefreshTokenHandler) //POST /api/auth/refresh
-			authGroup.POST("/logout", api.LogoutHandler)        //POST /api/auth/logout
+			authGroup.POST("/login", loginHandler.LoginHandlerFunc)          //POST /api/auth/login
+			authGroup.POST("/refresh", loginHandler.RefreshTokenHandlerFunc) //POST /api/auth/refresh
+			authGroup.POST("/logout", loginHandler.LogoutHandlerFunc)        //POST /api/auth/logout
 		}
 
 		v1 := apiGroup.Group("/v1")
@@ -149,20 +157,20 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 			apiTokenGroup := v1.Group("/token")
 			apiTokenGroup.Use(middleware.Authorize("jwt"))
 			{
-				apiTokenGroup.POST("", key2.CreateStaticToken) // POST /api/v1/token
-				apiTokenGroup.GET("", key2.GetToken)           // GET /api/v1/token
+				apiTokenGroup.POST("", keyHandler.CreateStaticToken) // POST /api/v1/token
+				apiTokenGroup.GET("", keyHandler.GetToken)           // GET /api/v1/token
 
-				apiTokenGroup.POST("/:id/disable", key2.DisableToken) // POST /api/v1/token/{id}/disable
-				apiTokenGroup.POST("/:id/enable", key2.EnableToken)   // POST /api/v1/token/{id}/enable
-				apiTokenGroup.DELETE("/:id", key2.RevokeToken)        // DELETE /api/v1/token/{id}
+				apiTokenGroup.POST("/:id/disable", keyHandler.DisableToken) // POST /api/v1/token/{id}/disable
+				apiTokenGroup.POST("/:id/enable", keyHandler.EnableToken)   // POST /api/v1/token/{id}/enable
+				apiTokenGroup.DELETE("/:id", keyHandler.RevokeToken)        // DELETE /api/v1/token/{id}
 			}
 
 			// albums
 			albumsGroup := v1.Group("/albums")
 			albumsGroup.Use(middleware.Authorize("jwt"))
 			{
-				albumsGroup.POST("", albums.CreateAlbumHandler)       // POST /api/v1/albums
-				albumsGroup.DELETE("/:id", albums.DeleteAlbumHandler) // DELETE /api/v1/albums/{id}
+				albumsGroup.POST("", albumHandler.CreateAlbumHandler)       // POST /api/v1/albums
+				albumsGroup.DELETE("/:id", albumHandler.DeleteAlbumHandler) // DELETE /api/v1/albums/{id}
 			}
 		}
 	}

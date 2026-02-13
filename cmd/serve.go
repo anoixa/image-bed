@@ -14,8 +14,6 @@ import (
 	"github.com/anoixa/image-bed/api/core"
 	handlerImages "github.com/anoixa/image-bed/api/handler/images"
 	"github.com/anoixa/image-bed/config"
-	"github.com/anoixa/image-bed/database/dbcore"
-	"github.com/anoixa/image-bed/database/repo/accounts"
 	"github.com/anoixa/image-bed/internal/di"
 	"github.com/anoixa/image-bed/utils/async"
 	"github.com/spf13/cobra"
@@ -44,14 +42,14 @@ func RunServer() {
 		log.Fatalf("Failed to create data directory: %v", err)
 	}
 
-	// 初始化数据库
-	InitDatabase(cfg)
-
-	// 创建并初始化 DI 容器
+	// 简陋的DI
 	container := di.NewContainer(cfg)
 	if err := container.Init(); err != nil {
 		log.Fatalf("Failed to initialize DI container: %v", err)
 	}
+
+	// 初始化数据库
+	InitDatabase(container)
 
 	// 初始化异步任务协程池
 	async.InitGlobalPool(1000)
@@ -65,6 +63,7 @@ func RunServer() {
 	deps := &core.ServerDependencies{
 		StorageFactory: container.GetStorageFactory(),
 		CacheFactory:   container.GetCacheFactory(),
+		Repositories:   container.GetRepositories(),
 	}
 
 	// 启动gin
@@ -105,27 +104,19 @@ func RunServer() {
 	if err := server.Shutdown(ctx); err != nil {
 		log.Fatalf("Server forced to shutdown: %v", err)
 	}
-	if err := dbcore.CloseDB(); err != nil {
-		log.Printf("Error closing database: %v", err)
-	}
 
 	log.Println("Server exited successfully")
 }
 
-// InitDatabase init database
-func InitDatabase(cfg *config.Config) {
-	dbcore.InitDB(cfg)
-	instance := dbcore.GetDBInstance()
-	log.Printf("Initializing database, database type: %s", cfg.Server.DatabaseConfig.Type)
+// InitDatabase init database using DI container
+func InitDatabase(container *di.Container) {
+	factory := container.GetDatabaseFactory()
+	log.Printf("Initializing database, database type: %s", factory.GetProvider().Name())
 
 	// 自动DDL
-	err := dbcore.AutoMigrateDB(instance)
-	if err != nil {
+	if err := factory.AutoMigrate(); err != nil {
 		log.Fatalf("Failed to auto migrate database: %v", err)
 	}
-
-	// 创建默认管理员用户
-	accounts.CreateDefaultAdminUser()
 
 	log.Println("Database initialized successfully")
 }

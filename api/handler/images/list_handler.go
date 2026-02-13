@@ -8,7 +8,6 @@ import (
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/database/models"
-	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/gin-gonic/gin"
 )
@@ -60,7 +59,7 @@ func (h *Handler) ListImages(c *gin.Context) {
 		limit = 10
 	}
 
-	list, total, err := images.GetImageList(body.StorageType, body.Identifier, body.Search, page, limit, int(userID))
+	list, total, err := h.repo.GetImageList(body.StorageType, body.Identifier, body.Search, page, limit, int(userID))
 	if err != nil {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to get image list")
 		return

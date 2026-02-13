@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/anoixa/image-bed/database/models"
-	"github.com/anoixa/image-bed/database/repo/keys"
+	"github.com/anoixa/image-bed/internal/repositories"
 	"github.com/anoixa/image-bed/utils"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -17,7 +17,13 @@ var (
 	jwtSecret           []byte
 	jwtExpiresIn        time.Duration
 	jwtRefreshExpiresIn time.Duration
+	authRepos           *repositories.Repositories
 )
+
+// SetAuthRepositories 设置认证相关的仓库（在服务器启动时调用）
+func SetAuthRepositories(repos *repositories.Repositories) {
+	authRepos = repos
+}
 
 // TokenInit Initialize JWT configuration
 func TokenInit(secret, expiresIn, refreshExpiresIn string) error {
@@ -115,7 +121,10 @@ func Parse(tokenString string) (jwt.MapClaims, error) {
 
 // ValidateStaticToken Verify static token (缓存功能已移除)
 func ValidateStaticToken(tokenString string) (*models.User, error) {
-	user, err := key.GetUserByApiToken(tokenString)
+	if authRepos == nil {
+		return nil, errors.New("auth repositories not initialized")
+	}
+	user, err := authRepos.Keys.GetUserByApiToken(tokenString)
 	if err != nil {
 		return nil, err
 	}

@@ -2,6 +2,8 @@ package images
 
 import (
 	"github.com/anoixa/image-bed/cache"
+	"github.com/anoixa/image-bed/database/repo/images"
+	"github.com/anoixa/image-bed/internal/repositories"
 	"github.com/anoixa/image-bed/storage"
 )
 
@@ -9,12 +11,14 @@ import (
 type Handler struct {
 	storageFactory *storage.Factory
 	cacheHelper    *cache.Helper
+	repo           *images.Repository
 }
 
 // NewHandler 创建新的图片处理器
-func NewHandler(storageFactory *storage.Factory, cacheFactory *cache.Factory) *Handler {
+func NewHandler(storageFactory *storage.Factory, cacheFactory *cache.Factory, repos *repositories.Repositories) *Handler {
 	return &Handler{
 		storageFactory: storageFactory,
 		cacheHelper:    cache.NewHelper(cacheFactory),
+		repo:           repos.Images,
 	}
 }

@@ -13,7 +13,7 @@ import (
 // ErrCacheMiss 缓存未命中错误
 var ErrCacheMiss = errors.New("cache miss")
 
-// Redis 实现了缓存 Provider 接口
+// Redis 实现接口
 type Redis struct {
 	client *redis.Client
 }

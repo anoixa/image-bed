@@ -5,22 +5,27 @@ import (
 
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
-	"github.com/anoixa/image-bed/database/dbcore"
+	"github.com/anoixa/image-bed/internal/repositories"
 	"github.com/anoixa/image-bed/storage"
 )
 
-func checkDatabaseHealth() string {
-	if db := dbcore.GetDBInstance(); db != nil {
-		sqlDB, err := db.DB()
-		if err != nil {
-			return "error: " + err.Error()
-		}
-		if err := sqlDB.Ping(); err != nil {
-			return "unavailable: " + err.Error()
-		}
-		return "ok"
+func checkDatabaseHealth(repos *repositories.Repositories) string {
+	if repos == nil {
+		return "not initialized"
 	}
-	return "not initialized"
+
+	db := repos.Accounts.DB()
+	if db == nil {
+		return "not initialized"
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	if err := sqlDB.Ping(); err != nil {
+		return "unavailable: " + err.Error()
+	}
+	return "ok"
 }
 
 func checkCacheHealth(cacheFactory *cache.Factory) string {
