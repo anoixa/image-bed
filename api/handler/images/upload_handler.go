@@ -104,14 +104,15 @@ func (h *Handler) UploadImages(c *gin.Context) {
 		return
 	}
 
-	// 检查总文件大小限制（500MB）
+	// 检查总文件大小限制
 	var totalSize int64 = 0
 	for _, f := range files {
 		totalSize += f.Size
 	}
-	const maxTotalSize int64 = 500 * 1024 * 1024 // 500MB
+	maxBatchTotalMB := config.Get().Server.Upload.MaxBatchTotalMB
+	maxTotalSize := int64(maxBatchTotalMB) * 1024 * 1024
 	if totalSize > maxTotalSize {
-		common.RespondError(c, http.StatusRequestEntityTooLarge, fmt.Sprintf("Total size of all files (%.2f MB) exceeds maximum allowed (%.2f MB)", float64(totalSize)/1024/1024, float64(maxTotalSize)/1024/1024))
+		common.RespondError(c, http.StatusRequestEntityTooLarge, fmt.Sprintf("Total size of all files (%.2f MB) exceeds maximum allowed (%d MB)", float64(totalSize)/1024/1024, maxBatchTotalMB))
 		return
 	}
 

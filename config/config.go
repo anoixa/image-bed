@@ -28,10 +28,33 @@ type ServerConfig struct {
 	WriteTimeout time.Duration `yaml:"writeTimeout"`
 	IdleTimeout  time.Duration `yaml:"idleTimeout"`
 
-	Jwt            Jwt            `mapstructure:"jwt"`
-	DatabaseConfig DatabaseConfig `mapstructure:"database"`
-	StorageConfig  StorageConfig  `mapstructure:"storage"`
-	CacheConfig    CacheConfig    `mapstructure:"cache"`
+	Jwt            Jwt             `mapstructure:"jwt"`
+	DatabaseConfig DatabaseConfig  `mapstructure:"database"`
+	StorageConfig  StorageConfig   `mapstructure:"storage"`
+	CacheConfig    CacheConfig     `mapstructure:"cache"`
+	RateLimit      RateLimitConfig `mapstructure:"rate_limit"`
+	Upload         UploadConfig    `mapstructure:"upload"`
+}
+
+// UploadConfig 上传配置
+type UploadConfig struct {
+	MaxSizeMB        int `mapstructure:"max_size_mb"`        // 单文件最大上传大小（MB）
+	MaxBatchTotalMB  int `mapstructure:"max_batch_total_mb"` // 批量上传总大小限制（MB）
+}
+
+// RateLimitConfig 速率限制配置
+type RateLimitConfig struct {
+	// API 接口限流 (上传/管理等操作)
+	ApiRPS   float64 `mapstructure:"api_rps"`   // 每秒请求数
+	ApiBurst int     `mapstructure:"api_burst"` // 突发请求数
+	// 图片访问限流 (查看图片，应更宽松)
+	ImageRPS   float64 `mapstructure:"image_rps"`   // 每秒请求数
+	ImageBurst int     `mapstructure:"image_burst"` // 突发请求数
+	// 认证接口限流 (登录等)
+	AuthRPS   float64 `mapstructure:"auth_rps"`   // 每秒请求数
+	AuthBurst int     `mapstructure:"auth_burst"` // 突发请求数
+	// 限流器过期时间
+	ExpireTime time.Duration `mapstructure:"expire_time"`
 }
 
 // Addr 返回监听地址，格式为 "host:port"
@@ -177,6 +200,19 @@ func loadConfig() {
 	viper.SetDefault("server.cache.redis.pool_timeout", "30s")
 	viper.SetDefault("server.cache.redis.idle_timeout", "10m")
 	viper.SetDefault("server.cache.redis.idle_check_frequency", "1m")
+
+	// Rate limit defaults - more generous limits to avoid 429 errors
+	viper.SetDefault("server.rate_limit.api_rps", 30)         // API: 30 rps
+	viper.SetDefault("server.rate_limit.api_burst", 60)       // API: burst 60
+	viper.SetDefault("server.rate_limit.image_rps", 100)      // Image access: 100 rps
+	viper.SetDefault("server.rate_limit.image_burst", 200)    // Image access: burst 200
+	viper.SetDefault("server.rate_limit.auth_rps", 0.5)       // Auth: 0.5 rps
+	viper.SetDefault("server.rate_limit.auth_burst", 5)       // Auth: burst 5
+	viper.SetDefault("server.rate_limit.expire_time", "10m")  // Limiter expire time
+
+	// Upload limits
+	viper.SetDefault("server.upload.max_size_mb", 50)         // 单文件最大 50MB
+	viper.SetDefault("server.upload.max_batch_total_mb", 500) // 批量上传总限制 500MB
 
 	configFileFromFlag := viper.GetString("config_file_path")
 

@@ -49,15 +49,19 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 
 	router.SetTrustedProxies(nil)
 
-	// 限制上传文件大小（50MB）
-	router.MaxMultipartMemory = 50 << 20
+	// 限制上传文件大小
+	router.MaxMultipartMemory = int64(cfg.Server.Upload.MaxSizeMB) << 20
 
 	// 并发限制（100并发，避免内存过载）
 	concurrencyLimiter := middleware.NewConcurrencyLimiter(100)
 	router.Use(concurrencyLimiter.Middleware())
 
-	// 请求体大小限制（100MB）
-	router.Use(middleware.RequestSizeLimit(100 << 20))
+	// 请求体大小限制（批量上传总限制的2倍，确保能容纳批量请求）
+	requestBodyLimit := int64(cfg.Server.Upload.MaxBatchTotalMB) * 2 << 20
+	if requestBodyLimit < 100<<20 {
+		requestBodyLimit = 100 << 20 // 最小 100MB
+	}
+	router.Use(middleware.RequestSizeLimit(requestBodyLimit))
 
 	// 请求ID追踪
 	router.Use(middleware.RequestID())
@@ -66,11 +70,14 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	router.Use(middleware.Metrics())
 
 	// 速率限制
-	authRateLimiter := middleware.NewIPRateLimiter(0.5, 5, 10*time.Minute)
-	generalRateLimiter := middleware.NewIPRateLimiter(10, 20, 10*time.Minute)
+	rl := cfg.Server.RateLimit
+	authRateLimiter := middleware.NewIPRateLimiter(rl.AuthRPS, rl.AuthBurst, rl.ExpireTime)
+	apiRateLimiter := middleware.NewIPRateLimiter(rl.ApiRPS, rl.ApiBurst, rl.ExpireTime)
+	imageRateLimiter := middleware.NewIPRateLimiter(rl.ImageRPS, rl.ImageBurst, rl.ExpireTime)
 	cleanup := func() {
 		authRateLimiter.StopCleanup()
-		generalRateLimiter.StopCleanup()
+		apiRateLimiter.StopCleanup()
+		imageRateLimiter.StopCleanup()
 	}
 
 	router.GET("/health", func(context *gin.Context) {
@@ -114,7 +121,7 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 
 	// 公共接口
 	publicGroup := router.Group("/images")
-	publicGroup.Use(generalRateLimiter.Middleware())
+	publicGroup.Use(imageRateLimiter.Middleware())
 	{
 		publicGroup.GET("/:identifier", imageHandler.GetImage) //GET /images/{photo}
 	}
@@ -134,7 +141,7 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 		}
 
 		v1 := apiGroup.Group("/v1")
-		v1.Use(generalRateLimiter.Middleware())
+		v1.Use(apiRateLimiter.Middleware())
 		v1.Use(middleware.CombinedAuth())
 		{
 			// image
