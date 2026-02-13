@@ -21,8 +21,15 @@ func NewRepository(db database.Provider) *Repository {
 	return &Repository{db: db}
 }
 
+// AlbumInfo 包含图片数量和封面的相册信息
+type AlbumInfo struct {
+	Album      *models.Album
+	ImageCount int64
+	CoverURL   string
+}
+
 // GetUserAlbums 获取用户相册列表
-func (r *Repository) GetUserAlbums(userID uint, page, pageSize int) ([]*models.Album, int64, error) {
+func (r *Repository) GetUserAlbums(userID uint, page, pageSize int) ([]*AlbumInfo, int64, error) {
 	var albums []*models.Album
 	var total int64
 	db := r.db.DB().Model(&models.Album{}).Where("user_id = ?", userID)
@@ -32,8 +39,39 @@ func (r *Repository) GetUserAlbums(userID uint, page, pageSize int) ([]*models.A
 	}
 
 	offset := (page - 1) * pageSize
-	err := db.Order("created_at desc").Offset(offset).Limit(pageSize).Find(&albums).Error
-	return albums, total, err
+	if err := db.Order("created_at desc").Offset(offset).Limit(pageSize).Find(&albums).Error; err != nil {
+		return nil, 0, err
+	}
+
+	// 转换为 AlbumInfo 并获取每个相册的图片数量和封面
+	result := make([]*AlbumInfo, len(albums))
+	for i, album := range albums {
+		info := &AlbumInfo{
+			Album: album,
+		}
+
+		// 获取图片数量
+		var count int64
+		r.db.DB().Table("album_images").Where("album_id = ?", album.ID).Count(&count)
+		info.ImageCount = count
+
+		// 获取最近一张图片作为封面
+		if count > 0 {
+			var coverImage models.Image
+			err := r.db.DB().
+				Joins("JOIN album_images ON album_images.image_id = images.id").
+				Where("album_images.album_id = ?", album.ID).
+				Order("images.created_at desc").
+				First(&coverImage).Error
+			if err == nil {
+				info.CoverURL = coverImage.Identifier
+			}
+		}
+
+		result[i] = info
+	}
+
+	return result, total, nil
 }
 
 // GetAlbumWithImagesByID 获取相册及其图片

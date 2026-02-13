@@ -8,6 +8,7 @@ import (
 
 	"github.com/anoixa/image-bed/database"
 	"github.com/anoixa/image-bed/database/models"
+	"github.com/anoixa/image-bed/utils"
 	cryptopackage "github.com/anoixa/image-bed/utils/crypto"
 	"gorm.io/gorm"
 )
@@ -37,8 +38,17 @@ func (r *Repository) CreateDefaultAdminUser() {
 	}
 
 	if count == 0 {
-		defaultPassword := "admin123"
-		hashedPassword, err := cryptopackage.GenerateFromPassword(defaultPassword)
+		// random password generation
+		randomPassword, err := utils.GenerateRandomToken(16)
+		if err != nil {
+			log.Fatalf("Failed to generate random password: %v", err)
+		}
+
+		if len(randomPassword) > 16 {
+			randomPassword = randomPassword[:16]
+		}
+
+		hashedPassword, err := cryptopackage.GenerateFromPassword(randomPassword)
 		if err != nil {
 			log.Fatalf("Failed to hash default password: %v", err)
 		}
@@ -53,8 +63,12 @@ func (r *Repository) CreateDefaultAdminUser() {
 				return fmt.Errorf("failed to create admin user: %w", err)
 			}
 
-			log.Printf("Created default admin user with ID: %d", user.ID)
-			log.Printf("IMPORTANT: Please change the default admin password immediately!")
+			log.Println("========================================")
+			log.Println("🎉 默认管理员用户创建成功")
+			log.Printf("   用户名: admin")
+			log.Printf("   密码: %s", randomPassword)
+			log.Println("========================================")
+			log.Println("⚠️  请登录后立即修改默认密码！")
 
 			return nil
 		})

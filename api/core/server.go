@@ -116,6 +116,7 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	// 创建处理器（依赖注入）
 	imageHandler := images.NewHandler(deps.StorageFactory, deps.CacheFactory, deps.Repositories)
 	albumHandler := albums.NewHandler(deps.Repositories)
+	albumImageHandler := albums.NewAlbumImageHandler(deps.Repositories)
 	keyHandler := key.NewHandler(deps.Repositories)
 	loginHandler := api.NewLoginHandler(deps.Repositories)
 
@@ -177,8 +178,15 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 			albumsGroup := v1.Group("/albums")
 			albumsGroup.Use(middleware.Authorize("jwt"))
 			{
+				albumsGroup.GET("", albumHandler.ListAlbumsHandler)          // GET /api/v1/albums
 				albumsGroup.POST("", albumHandler.CreateAlbumHandler)       // POST /api/v1/albums
+				albumsGroup.GET("/:id", albumHandler.GetAlbumDetailHandler) // GET /api/v1/albums/{id}
+				albumsGroup.PUT("/:id", albumHandler.UpdateAlbumHandler)    // PUT /api/v1/albums/{id}
 				albumsGroup.DELETE("/:id", albumHandler.DeleteAlbumHandler) // DELETE /api/v1/albums/{id}
+
+				// 相册图片管理
+				albumsGroup.POST("/:id/images", albumImageHandler.AddImagesToAlbumHandler)         // POST /api/v1/albums/{id}/images
+				albumsGroup.DELETE("/:id/images/:imageId", albumImageHandler.RemoveImageFromAlbumHandler) // DELETE /api/v1/albums/{id}/images/{imageId}
 			}
 		}
 	}

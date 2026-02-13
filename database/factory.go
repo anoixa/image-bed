@@ -35,7 +35,7 @@ func (f *Factory) GetProvider() Provider {
 	return f.provider
 }
 
-// GetDB 获取底层 GORM DB 实例（便捷方法）
+// GetDB 获取底层 GORM DB 实例
 func (f *Factory) GetDB() interface{} {
 	if f.provider == nil {
 		return nil
@@ -72,8 +72,6 @@ func (f *Factory) AutoMigrate() error {
 	log.Println("Database auto migration completed.")
 	return nil
 }
-
-// --- 便捷方法 ---
 
 // DB 返回底层 *gorm.DB 实例
 func (f *Factory) DB() interface{} {
