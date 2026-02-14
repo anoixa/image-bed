@@ -56,7 +56,7 @@ func RunServer() {
 	InitDatabase(container)
 
 	// 初始化异步任务协程池
-	async.InitGlobalPool(1000)
+	async.InitGlobalPool(cfg.Server.WorkerCount, 1000)
 
 	// 初始化 JWT
 	if err := api.TokenInit(cfg.Server.Jwt.Secret, cfg.Server.Jwt.ExpiresIn, cfg.Server.Jwt.RefreshExpiresIn); err != nil {

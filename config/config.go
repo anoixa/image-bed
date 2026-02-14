@@ -21,8 +21,8 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Host         string        `mapstructure:"host"`  // 服务器主机，如 "localhost" 或 "0.0.0.0"
-	Port         int           `mapstructure:"port"`  // 服务器端口，如 8080
+	Host         string        `mapstructure:"host"`   // 服务器主机，如 "localhost" 或 "0.0.0.0"
+	Port         int           `mapstructure:"port"`   // 服务器端口，如 8080
 	Domain       string        `mapstructure:"domain"` // 外部访问域名，用于生成 URL
 	ReadTimeout  time.Duration `yaml:"readTimeout"`
 	WriteTimeout time.Duration `yaml:"writeTimeout"`
@@ -34,12 +34,13 @@ type ServerConfig struct {
 	CacheConfig    CacheConfig     `mapstructure:"cache"`
 	RateLimit      RateLimitConfig `mapstructure:"rate_limit"`
 	Upload         UploadConfig    `mapstructure:"upload"`
+	WorkerCount    int             `mapstructure:"worker_count"` // 异步任务协程池worker数量
 }
 
 // UploadConfig 上传配置
 type UploadConfig struct {
-	MaxSizeMB        int `mapstructure:"max_size_mb"`        // 单文件最大上传大小（MB）
-	MaxBatchTotalMB  int `mapstructure:"max_batch_total_mb"` // 批量上传总大小限制（MB）
+	MaxSizeMB       int `mapstructure:"max_size_mb"`        // 单文件最大上传大小（MB）
+	MaxBatchTotalMB int `mapstructure:"max_batch_total_mb"` // 批量上传总大小限制（MB）
 }
 
 // RateLimitConfig 速率限制配置
@@ -202,17 +203,20 @@ func loadConfig() {
 	viper.SetDefault("server.cache.redis.idle_check_frequency", "1m")
 
 	// Rate limit defaults - more generous limits to avoid 429 errors
-	viper.SetDefault("server.rate_limit.api_rps", 30)         // API: 30 rps
-	viper.SetDefault("server.rate_limit.api_burst", 60)       // API: burst 60
-	viper.SetDefault("server.rate_limit.image_rps", 100)      // Image access: 100 rps
-	viper.SetDefault("server.rate_limit.image_burst", 200)    // Image access: burst 200
-	viper.SetDefault("server.rate_limit.auth_rps", 0.5)       // Auth: 0.5 rps
-	viper.SetDefault("server.rate_limit.auth_burst", 5)       // Auth: burst 5
-	viper.SetDefault("server.rate_limit.expire_time", "10m")  // Limiter expire time
+	viper.SetDefault("server.rate_limit.api_rps", 30)        // API: 30 rps
+	viper.SetDefault("server.rate_limit.api_burst", 60)      // API: burst 60
+	viper.SetDefault("server.rate_limit.image_rps", 100)     // Image access: 100 rps
+	viper.SetDefault("server.rate_limit.image_burst", 200)   // Image access: burst 200
+	viper.SetDefault("server.rate_limit.auth_rps", 0.5)      // Auth: 0.5 rps
+	viper.SetDefault("server.rate_limit.auth_burst", 5)      // Auth: burst 5
+	viper.SetDefault("server.rate_limit.expire_time", "10m") // Limiter expire time
 
 	// Upload limits
 	viper.SetDefault("server.upload.max_size_mb", 50)         // 单文件最大 50MB
 	viper.SetDefault("server.upload.max_batch_total_mb", 500) // 批量上传总限制 500MB
+
+	// Worker pool defaults
+	viper.SetDefault("server.worker_count", 12) // 异步任务协程池worker数量，默认12
 
 	configFileFromFlag := viper.GetString("config_file_path")
 
