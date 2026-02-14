@@ -15,13 +15,13 @@ type Task interface {
 
 // WorkerPool 协程池
 type WorkerPool struct {
-	workers   int
-	queue     chan Task
-	wg        sync.WaitGroup
-	ctx       context.Context
-	cancel    context.CancelFunc
-	started   bool
-	mu        sync.Mutex
+	workers int
+	queue   chan Task
+	wg      sync.WaitGroup
+	ctx     context.Context
+	cancel  context.CancelFunc
+	started bool
+	mu      sync.Mutex
 }
 
 var (
@@ -30,9 +30,12 @@ var (
 )
 
 // InitGlobalPool 初始化全局协程池
-func InitGlobalPool(queueSize int) {
+func InitGlobalPool(workers, queueSize int) {
 	once.Do(func() {
-		globalPool = NewWorkerPool(runtime.NumCPU()*2, queueSize)
+		if workers <= 0 {
+			workers = 12 // 默认12个worker
+		}
+		globalPool = NewWorkerPool(workers, queueSize)
 		globalPool.Start()
 	})
 }
@@ -185,7 +188,7 @@ func (p *WorkerPool) executeTask(task Task) {
 // Submit 提交任务到全局池
 func Submit(task Task) bool {
 	if globalPool == nil {
-		InitGlobalPool(1000)
+		InitGlobalPool(12, 1000)
 	}
 	return globalPool.Submit(task)
 }
@@ -193,7 +196,7 @@ func Submit(task Task) bool {
 // TrySubmit 尝试提交任务到全局池，可配置重试次数和间隔
 func TrySubmit(task Task, retries int, interval time.Duration) bool {
 	if globalPool == nil {
-		InitGlobalPool(1000)
+		InitGlobalPool(12, 1000)
 	}
 	return globalPool.TrySubmit(task, retries, interval)
 }
