@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -128,6 +129,48 @@ func InitDatabase(container *di.Container) {
 	}
 
 	log.Println("Database initialized successfully")
+
+	// 启动时清理残留临时文件
+	go cleanOldTempFiles()
+}
+
+// cleanOldTempFiles 清理超过24小时的临时文件
+func cleanOldTempFiles() {
+	tempDir := "./data/temp"
+	if _, err := os.Stat(tempDir); os.IsNotExist(err) {
+		return
+	}
+
+	entries, err := os.ReadDir(tempDir)
+	if err != nil {
+		log.Printf("Failed to read temp directory: %v", err)
+		return
+	}
+
+	cutoff := time.Now().Add(-24 * time.Hour)
+	var cleaned int
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+
+		if info.ModTime().Before(cutoff) {
+			sessionDir := filepath.Join(tempDir, entry.Name())
+			if err := os.RemoveAll(sessionDir); err == nil {
+				cleaned++
+			}
+		}
+	}
+
+	if cleaned > 0 {
+		log.Printf("Cleaned %d expired temp directories on startup", cleaned)
+	}
 }
 
 // startChunkedUploadCleanup 启动分片上传会话定期清理
