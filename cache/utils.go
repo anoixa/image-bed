@@ -39,6 +39,24 @@ const (
 
 	// DefaultEmptyValueCacheExpiration 空值缓存过期时间
 	DefaultEmptyValueCacheExpiration = 5 * time.Minute
+
+	// AlbumCachePrefix 相册缓存前缀
+	AlbumCachePrefix = "album:"
+
+	// AlbumListCachePrefix 相册列表缓存前缀
+	AlbumListCachePrefix = "album_list:"
+
+	// AlbumListVersionPrefix 相册列表版本号缓存前缀
+	AlbumListVersionPrefix = "album_list_version:"
+
+	// DefaultAlbumCacheExpiration 相册缓存过期时间
+	DefaultAlbumCacheExpiration = 30 * time.Minute
+
+	// DefaultAlbumListCacheExpiration 相册列表缓存过期时间
+	DefaultAlbumListCacheExpiration = 10 * time.Minute
+
+	// DefaultAlbumListVersionExpiration 相册列表版本号过期时间
+	DefaultAlbumListVersionExpiration = 30 * time.Minute
 )
 
 // Helper 缓存辅助工具结构
@@ -269,4 +287,93 @@ func (h *Helper) DeleteCachedImageData(ctx context.Context, identifier string) e
 
 	key := "image_data:" + identifier
 	return h.factory.Delete(ctx, key)
+}
+
+// CacheAlbum 缓存相册信息
+func (h *Helper) CacheAlbum(ctx context.Context, album *models.Album) error {
+	if h.factory == nil || h.factory.GetProvider() == nil {
+		return fmt.Errorf("cache provider not initialized")
+	}
+
+	key := AlbumCachePrefix + fmt.Sprintf("%d", album.ID)
+	return h.factory.Set(ctx, key, album, DefaultAlbumCacheExpiration)
+}
+
+// GetCachedAlbum 获取缓存的相册信息
+func (h *Helper) GetCachedAlbum(ctx context.Context, albumID uint, album *models.Album) error {
+	if h.factory == nil || h.factory.GetProvider() == nil {
+		return ErrCacheMiss
+	}
+
+	key := AlbumCachePrefix + fmt.Sprintf("%d", albumID)
+	return h.factory.Get(ctx, key, album)
+}
+
+// DeleteCachedAlbum 删除缓存的相册
+func (h *Helper) DeleteCachedAlbum(ctx context.Context, albumID uint) error {
+	if h.factory == nil || h.factory.GetProvider() == nil {
+		return nil
+	}
+
+	key := AlbumCachePrefix + fmt.Sprintf("%d", albumID)
+	return h.factory.Delete(ctx, key)
+}
+
+// getAlbumListVersion 获取用户相册列表的当前版本号
+func (h *Helper) getAlbumListVersion(ctx context.Context, userID uint) int64 {
+	if h.factory == nil || h.factory.GetProvider() == nil {
+		return 0
+	}
+
+	versionKey := fmt.Sprintf("%s%d", AlbumListVersionPrefix, userID)
+	var version int64
+	if err := h.factory.Get(ctx, versionKey, &version); err != nil {
+		return 0
+	}
+	return version
+}
+
+// incrementAlbumListVersion 递增用户相册列表版本号（使旧缓存失效）
+func (h *Helper) incrementAlbumListVersion(ctx context.Context, userID uint) error {
+	if h.factory == nil || h.factory.GetProvider() == nil {
+		return nil
+	}
+
+	versionKey := fmt.Sprintf("%s%d", AlbumListVersionPrefix, userID)
+	version := h.getAlbumListVersion(ctx, userID)
+	version++
+	return h.factory.Set(ctx, versionKey, version, DefaultAlbumListVersionExpiration)
+}
+
+// CacheAlbumList 缓存用户相册列表（包含版本号）
+func (h *Helper) CacheAlbumList(ctx context.Context, userID uint, page, limit int, data interface{}) error {
+	if h.factory == nil || h.factory.GetProvider() == nil {
+		return fmt.Errorf("cache provider not initialized")
+	}
+
+	version := h.getAlbumListVersion(ctx, userID)
+	key := fmt.Sprintf("%suser:%d:v%d:page:%d:limit:%d", AlbumListCachePrefix, userID, version, page, limit)
+	return h.factory.Set(ctx, key, data, DefaultAlbumListCacheExpiration)
+}
+
+// GetCachedAlbumList 获取缓存的用户相册列表（检查版本号）
+func (h *Helper) GetCachedAlbumList(ctx context.Context, userID uint, page, limit int, dest interface{}) error {
+	if h.factory == nil || h.factory.GetProvider() == nil {
+		return ErrCacheMiss
+	}
+
+	version := h.getAlbumListVersion(ctx, userID)
+	key := fmt.Sprintf("%suser:%d:v%d:page:%d:limit:%d", AlbumListCachePrefix, userID, version, page, limit)
+	return h.factory.Get(ctx, key, dest)
+}
+
+// DeleteCachedAlbumList 删除用户的所有相册列表缓存（通过递增版本号）
+func (h *Helper) DeleteCachedAlbumList(ctx context.Context, userID uint) error {
+	if h.factory == nil || h.factory.GetProvider() == nil {
+		return nil
+	}
+
+	// 使用版本号机制使所有旧缓存失效
+	// 无需遍历删除，旧版本号的缓存会自动过期
+	return h.incrementAlbumListVersion(ctx, userID)
 }

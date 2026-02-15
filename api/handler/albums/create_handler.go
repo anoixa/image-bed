@@ -1,6 +1,8 @@
 package albums
 
 import (
+	"context"
+	"log"
 	"net/http"
 
 	"github.com/anoixa/image-bed/api/common"
@@ -32,6 +34,14 @@ func (h *Handler) CreateAlbumHandler(c *gin.Context) {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to create albums.")
 		return
 	}
+
+	// 清除用户相册列表缓存
+	go func() {
+		ctx := context.Background()
+		if err := h.cacheHelper.DeleteCachedAlbumList(ctx, userID); err != nil {
+			log.Printf("Failed to delete album list cache for user %d: %v", userID, err)
+		}
+	}()
 
 	common.RespondSuccess(c, album)
 }
