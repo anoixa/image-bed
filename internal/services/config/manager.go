@@ -23,6 +23,13 @@ type Manager struct {
 	dataPath   string
 }
 
+// JWTConfig JWT 配置结构
+type JWTConfig struct {
+	Secret           string
+	AccessTokenTTL   string
+	RefreshTokenTTL  string
+}
+
 // NewManager 创建配置管理器
 func NewManager(db *gorm.DB, dataPath string) *Manager {
 	return &Manager{
@@ -405,4 +412,127 @@ func (m *Manager) GetEncryptor() *cryptoutils.ConfigEncryptor {
 // GetRepo 获取仓库（用于其他服务）
 func (m *Manager) GetRepo() configs.Repository {
 	return m.repo
+}
+
+// GetJWTConfig 获取 JWT 配置
+// 如果不存在，会自动创建默认配置
+func (m *Manager) GetJWTConfig(ctx context.Context) (*JWTConfig, error) {
+	// 尝试获取默认 JWT 配置
+	config, err := m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryJWT)
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			// 不存在，创建默认配置
+			if err := m.EnsureDefaultJWTConfig(ctx); err != nil {
+				return nil, fmt.Errorf("failed to create default JWT config: %w", err)
+			}
+			// 重新获取
+			config, err = m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryJWT)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get JWT config after creation: %w", err)
+			}
+		} else {
+			return nil, fmt.Errorf("failed to get JWT config: %w", err)
+		}
+	}
+
+	// 解密配置
+	configMap, err := m.DecryptConfig(config.ConfigJSON)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt JWT config: %w", err)
+	}
+
+	return &JWTConfig{
+		Secret:          getStringFromMap(configMap, "secret", ""),
+		AccessTokenTTL:  getStringFromMap(configMap, "access_token_ttl", "15m"),
+		RefreshTokenTTL: getStringFromMap(configMap, "refresh_token_ttl", "168h"),
+	}, nil
+}
+
+// EnsureDefaultJWTConfig 确保默认 JWT 配置存在
+func (m *Manager) EnsureDefaultJWTConfig(ctx context.Context) error {
+	// 检查是否已存在 JWT 配置
+	count, err := m.repo.CountByCategory(ctx, models.ConfigCategoryJWT)
+	if err != nil {
+		return err
+	}
+
+	if count > 0 {
+		return nil // 已存在
+	}
+
+	// 生成随机密钥
+	secret := cryptoutils.GenerateRandomKey(32)
+
+	configData := map[string]interface{}{
+		"secret":            secret,
+		"access_token_ttl":  "15m",
+		"refresh_token_ttl": "168h",
+	}
+
+	req := &models.SystemConfigStoreRequest{
+		Category:    models.ConfigCategoryJWT,
+		Name:        "JWT Settings",
+		Config:      configData,
+		IsEnabled:   boolPtr(true),
+		IsDefault:   boolPtr(true),
+		Description: "JWT authentication configuration",
+	}
+
+	_, err = m.CreateConfig(ctx, req, 0)
+	if err != nil {
+		return fmt.Errorf("failed to create default JWT config: %w", err)
+	}
+
+	log.Println("[ConfigManager] Default JWT config created successfully")
+	return nil
+}
+
+// UpdateJWTConfig 更新 JWT 配置
+func (m *Manager) UpdateJWTConfig(ctx context.Context, jwtConfig *JWTConfig) error {
+	// 获取现有配置
+	config, err := m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryJWT)
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			// 不存在，创建新配置
+			return m.EnsureDefaultJWTConfig(ctx)
+		}
+		return fmt.Errorf("failed to get JWT config: %w", err)
+	}
+
+	// 构建新配置
+	configData := map[string]interface{}{
+		"secret":            jwtConfig.Secret,
+		"access_token_ttl":  jwtConfig.AccessTokenTTL,
+		"refresh_token_ttl": jwtConfig.RefreshTokenTTL,
+	}
+
+	req := &models.SystemConfigStoreRequest{
+		Category:    models.ConfigCategoryJWT,
+		Name:        config.Name,
+		Config:      configData,
+		IsEnabled:   boolPtr(true),
+		Description: config.Description,
+	}
+
+	_, err = m.UpdateConfig(ctx, config.ID, req)
+	if err != nil {
+		return fmt.Errorf("failed to update JWT config: %w", err)
+	}
+
+	return nil
+}
+
+// getStringFromMap 从 map 中获取字符串值，提供默认值
+func getStringFromMap(m map[string]interface{}, key, defaultValue string) string {
+	if val, ok := m[key]; ok {
+		if str, ok := val.(string); ok {
+			return str
+		}
+	}
+	return defaultValue
+}
+
+// boolPtr 返回 bool 指针
+func boolPtr(b bool) *bool {
+	return &b
 }

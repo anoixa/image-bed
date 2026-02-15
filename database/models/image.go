@@ -8,7 +8,7 @@ type Image struct {
 	OriginalName  string `gorm:"not null"`
 	FileSize      int64  `gorm:"not null"`
 	MimeType      string `gorm:"not null"`
-	StorageDriver string `gorm:"not null"`
+	StorageConfigID uint `gorm:"column:storage_config_id;not null"`
 
 	FileHash string `gorm:"uniqueIndex:idx_filehash;not null"`
 	Width    int

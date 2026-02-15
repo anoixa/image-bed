@@ -6,7 +6,6 @@ import (
 	"errors"
 	"time"
 
-	"github.com/anoixa/image-bed/config"
 	"github.com/go-redis/redis/v8"
 )
 
@@ -16,50 +15,6 @@ var ErrCacheMiss = errors.New("cache miss")
 // Redis 实现接口
 type Redis struct {
 	client *redis.Client
-}
-
-// NewRedis 创建一个新的 Redis 缓存提供者
-func NewRedis(cfg *config.Config) (*Redis, error) {
-	redisCfg := cfg.Server.CacheConfig.Redis
-
-	// 解析时间配置
-	var maxConnAge, poolTimeout, idleTimeout, idleCheckFrequency time.Duration
-
-	if redisCfg.MaxConnAge != "" {
-		maxConnAge, _ = time.ParseDuration(redisCfg.MaxConnAge)
-	}
-	if redisCfg.PoolTimeout != "" {
-		poolTimeout, _ = time.ParseDuration(redisCfg.PoolTimeout)
-	}
-	if redisCfg.IdleTimeout != "" {
-		idleTimeout, _ = time.ParseDuration(redisCfg.IdleTimeout)
-	}
-	if redisCfg.IdleCheckFrequency != "" {
-		idleCheckFrequency, _ = time.ParseDuration(redisCfg.IdleCheckFrequency)
-	}
-
-	client := redis.NewClient(&redis.Options{
-		Addr:               redisCfg.Address,
-		Password:           redisCfg.Password,
-		DB:                 redisCfg.DB,
-		PoolSize:           redisCfg.PoolSize,
-		MinIdleConns:       redisCfg.MinIdleConns,
-		MaxConnAge:         maxConnAge,
-		PoolTimeout:        poolTimeout,
-		IdleTimeout:        idleTimeout,
-		IdleCheckFrequency: idleCheckFrequency,
-	})
-
-	// 测试连接
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if _, err := client.Ping(ctx).Result(); err != nil {
-		return nil, err
-	}
-
-	return &Redis{
-		client: client,
-	}, nil
 }
 
 // Set 设置缓存项
@@ -116,4 +71,65 @@ func (r *Redis) Close() error {
 // Name 返回缓存名称
 func (r *Redis) Name() string {
 	return "redis"
+}
+
+// Health 检查 Redis 健康状态
+func (r *Redis) Health(ctx context.Context) error {
+	return r.client.Ping(ctx).Err()
+}
+
+// Config 是 redis 包公开的 Redis 配置结构
+// 用于从数据库配置创建 Redis 客户端
+type Config struct {
+	Address            string
+	Password           string
+	DB                 int
+	PoolSize           int
+	MinIdleConns       int
+	MaxConnAge         string
+	PoolTimeout        string
+	IdleTimeout        string
+	IdleCheckFrequency string
+}
+
+// NewRedisFromConfig 使用 Config 创建 Redis 客户端（用于测试配置）
+func NewRedisFromConfig(cfg *Config) (*Redis, error) {
+	// 解析时间配置
+	var maxConnAge, poolTimeout, idleTimeout, idleCheckFrequency time.Duration
+
+	if cfg.MaxConnAge != "" {
+		maxConnAge, _ = time.ParseDuration(cfg.MaxConnAge)
+	}
+	if cfg.PoolTimeout != "" {
+		poolTimeout, _ = time.ParseDuration(cfg.PoolTimeout)
+	}
+	if cfg.IdleTimeout != "" {
+		idleTimeout, _ = time.ParseDuration(cfg.IdleTimeout)
+	}
+	if cfg.IdleCheckFrequency != "" {
+		idleCheckFrequency, _ = time.ParseDuration(cfg.IdleCheckFrequency)
+	}
+
+	client := redis.NewClient(&redis.Options{
+		Addr:               cfg.Address,
+		Password:           cfg.Password,
+		DB:                 cfg.DB,
+		PoolSize:           cfg.PoolSize,
+		MinIdleConns:       cfg.MinIdleConns,
+		MaxConnAge:         maxConnAge,
+		PoolTimeout:        poolTimeout,
+		IdleTimeout:        idleTimeout,
+		IdleCheckFrequency: idleCheckFrequency,
+	})
+
+	// 测试连接
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := client.Ping(ctx).Result(); err != nil {
+		return nil, err
+	}
+
+	return &Redis{
+		client: client,
+	}, nil
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/internal/di"
+	"github.com/anoixa/image-bed/storage"
 	"github.com/spf13/cobra"
 )
 
@@ -109,9 +110,9 @@ func cleanOrphanDBRecords(container *di.Container, stats *cleanStats, dryRun boo
 
 	var orphanIDs []uint
 	for _, img := range images {
-		provider, err := storageFactory.Get(img.StorageDriver)
+		provider, err := storageFactory.GetByID(img.StorageConfigID)
 		if err != nil {
-			log.Printf("Warning: unknown storage driver '%s' for image %s", img.StorageDriver, img.Identifier)
+			log.Printf("Warning: unknown storage config ID '%d' for image %s", img.StorageConfigID, img.Identifier)
 			continue
 		}
 
@@ -151,10 +152,21 @@ func cleanOrphanDBRecords(container *di.Container, stats *cleanStats, dryRun boo
 func cleanOrphanStorageFiles(container *di.Container, stats *cleanStats, dryRun bool) error {
 	log.Println("Checking for orphan storage files...")
 
-	cfg := container.GetConfig()
+	storageFactory := container.GetStorageFactory()
+	if storageFactory == nil {
+		return fmt.Errorf("storage factory not initialized")
+	}
 
-	if cfg.Server.StorageConfig.Type != "local" {
-		log.Printf("Storage type '%s' does not support orphan file detection yet", cfg.Server.StorageConfig.Type)
+	// 获取默认存储提供者
+	provider := storageFactory.GetDefault()
+	if provider == nil {
+		return fmt.Errorf("no default storage provider")
+	}
+
+	// 检查是否为本地存储
+	localStorage, ok := provider.(*storage.LocalStorage)
+	if !ok {
+		log.Printf("Storage type '%s' does not support orphan file detection yet", provider.Name())
 		return nil
 	}
 
@@ -170,10 +182,7 @@ func cleanOrphanStorageFiles(container *di.Container, stats *cleanStats, dryRun 
 		identifierMap[id] = true
 	}
 
-	basePath := cfg.Server.StorageConfig.Local.Path
-	if basePath == "" {
-		basePath = "./data/upload"
-	}
+	basePath := localStorage.BasePath()
 
 	err := filepath.Walk(basePath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
