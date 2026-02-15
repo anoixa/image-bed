@@ -1,6 +1,8 @@
 package albums
 
 import (
+	"context"
+	"log"
 	"math"
 	"net/http"
 
@@ -8,6 +10,12 @@ import (
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/gin-gonic/gin"
 )
+
+// CachedAlbumList 缓存的相册列表数据结构
+type CachedAlbumList struct {
+	Albums []*AlbumDTO `json:"albums"`
+	Total  int64       `json:"total"`
+}
 
 // AlbumDTO 相册响应数据
 type AlbumDTO struct {
@@ -45,6 +53,19 @@ func (h *Handler) ListAlbumsHandler(c *gin.Context) {
 
 	userID := c.GetUint(middleware.ContextUserIDKey)
 
+	// 尝试从缓存获取
+	var cachedList CachedAlbumList
+	if err := h.cacheHelper.GetCachedAlbumList(c.Request.Context(), userID, req.Page, req.Limit, &cachedList); err == nil {
+		common.RespondSuccess(c, ListAlbumsResponse{
+			Albums:     cachedList.Albums,
+			Total:      cachedList.Total,
+			Page:       req.Page,
+			Limit:      req.Limit,
+			TotalPages: int(math.Ceil(float64(cachedList.Total) / float64(req.Limit))),
+		})
+		return
+	}
+
 	albums, total, err := h.repo.GetUserAlbums(userID, req.Page, req.Limit)
 	if err != nil {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to get albums")
@@ -63,6 +84,18 @@ func (h *Handler) ListAlbumsHandler(c *gin.Context) {
 			UpdatedAt:   info.Album.UpdatedAt.Unix(),
 		}
 	}
+
+	// 异步写入缓存
+	go func() {
+		ctx := context.Background()
+		cacheData := CachedAlbumList{
+			Albums: albumDTOs,
+			Total:  total,
+		}
+		if err := h.cacheHelper.CacheAlbumList(ctx, userID, req.Page, req.Limit, cacheData); err != nil {
+			log.Printf("Failed to cache album list for user %d: %v", userID, err)
+		}
+	}()
 
 	common.RespondSuccess(c, ListAlbumsResponse{
 		Albums:     albumDTOs,

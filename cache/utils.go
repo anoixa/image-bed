@@ -39,6 +39,18 @@ const (
 
 	// DefaultEmptyValueCacheExpiration 空值缓存过期时间
 	DefaultEmptyValueCacheExpiration = 5 * time.Minute
+
+	// AlbumCachePrefix 相册缓存前缀
+	AlbumCachePrefix = "album:"
+
+	// AlbumListCachePrefix 相册列表缓存前缀
+	AlbumListCachePrefix = "album_list:"
+
+	// DefaultAlbumCacheExpiration 相册缓存过期时间
+	DefaultAlbumCacheExpiration = 30 * time.Minute
+
+	// DefaultAlbumListCacheExpiration 相册列表缓存过期时间
+	DefaultAlbumListCacheExpiration = 10 * time.Minute
 )
 
 // Helper 缓存辅助工具结构
@@ -268,5 +280,67 @@ func (h *Helper) DeleteCachedImageData(ctx context.Context, identifier string) e
 	}
 
 	key := "image_data:" + identifier
+	return h.factory.Delete(ctx, key)
+}
+
+// CacheAlbum 缓存相册信息
+func (h *Helper) CacheAlbum(ctx context.Context, album *models.Album) error {
+	if h.factory == nil || h.factory.GetProvider() == nil {
+		return fmt.Errorf("cache provider not initialized")
+	}
+
+	key := AlbumCachePrefix + fmt.Sprintf("%d", album.ID)
+	return h.factory.Set(ctx, key, album, DefaultAlbumCacheExpiration)
+}
+
+// GetCachedAlbum 获取缓存的相册信息
+func (h *Helper) GetCachedAlbum(ctx context.Context, albumID uint, album *models.Album) error {
+	if h.factory == nil || h.factory.GetProvider() == nil {
+		return ErrCacheMiss
+	}
+
+	key := AlbumCachePrefix + fmt.Sprintf("%d", albumID)
+	return h.factory.Get(ctx, key, album)
+}
+
+// DeleteCachedAlbum 删除缓存的相册
+func (h *Helper) DeleteCachedAlbum(ctx context.Context, albumID uint) error {
+	if h.factory == nil || h.factory.GetProvider() == nil {
+		return nil
+	}
+
+	key := AlbumCachePrefix + fmt.Sprintf("%d", albumID)
+	return h.factory.Delete(ctx, key)
+}
+
+// CacheAlbumList 缓存用户相册列表
+func (h *Helper) CacheAlbumList(ctx context.Context, userID uint, page, limit int, data interface{}) error {
+	if h.factory == nil || h.factory.GetProvider() == nil {
+		return fmt.Errorf("cache provider not initialized")
+	}
+
+	key := fmt.Sprintf("%suser:%d:page:%d:limit:%d", AlbumListCachePrefix, userID, page, limit)
+	return h.factory.Set(ctx, key, data, DefaultAlbumListCacheExpiration)
+}
+
+// GetCachedAlbumList 获取缓存的用户相册列表
+func (h *Helper) GetCachedAlbumList(ctx context.Context, userID uint, page, limit int, dest interface{}) error {
+	if h.factory == nil || h.factory.GetProvider() == nil {
+		return ErrCacheMiss
+	}
+
+	key := fmt.Sprintf("%suser:%d:page:%d:limit:%d", AlbumListCachePrefix, userID, page, limit)
+	return h.factory.Get(ctx, key, dest)
+}
+
+// DeleteCachedAlbumList 删除用户的所有相册列表缓存
+func (h *Helper) DeleteCachedAlbumList(ctx context.Context, userID uint) error {
+	if h.factory == nil || h.factory.GetProvider() == nil {
+		return nil
+	}
+
+	// 使用通配符删除该用户的所有列表缓存
+	// 注意：Redis 支持通配符删除，内存缓存需要遍历
+	key := fmt.Sprintf("%suser:%d:*", AlbumListCachePrefix, userID)
 	return h.factory.Delete(ctx, key)
 }

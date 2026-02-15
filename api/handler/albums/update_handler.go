@@ -1,6 +1,8 @@
 package albums
 
 import (
+	"context"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -61,6 +63,17 @@ func (h *Handler) UpdateAlbumHandler(c *gin.Context) {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to update album")
 		return
 	}
+
+	// 清除相册缓存和用户的相册列表缓存
+	go func() {
+		ctx := context.Background()
+		if err := h.cacheHelper.DeleteCachedAlbum(ctx, uint(albumID)); err != nil {
+			log.Printf("Failed to delete album cache for %d: %v", albumID, err)
+		}
+		if err := h.cacheHelper.DeleteCachedAlbumList(ctx, userID); err != nil {
+			log.Printf("Failed to delete album list cache for user %d: %v", userID, err)
+		}
+	}()
 
 	common.RespondSuccess(c, UpdateAlbumResponse{
 		ID:          album.ID,
