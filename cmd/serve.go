@@ -34,11 +34,9 @@ func init() {
 }
 
 func RunServer() {
-	// 加载配置
 	config.InitConfig()
 	cfg := config.Get()
 
-	// 创建资源目录
 	if err := os.MkdirAll("./data", os.ModePerm); err != nil {
 		log.Fatalf("Failed to create data directory: %v", err)
 	}
@@ -46,14 +44,17 @@ func RunServer() {
 		log.Fatalf("Failed to create temp directory: %v", err)
 	}
 
-	// 简陋的DI
 	container := di.NewContainer(cfg)
-	if err := container.Init(); err != nil {
-		log.Fatalf("Failed to initialize DI container: %v", err)
+
+	if err := container.InitDatabase(); err != nil {
+		log.Fatalf("Failed to initialize database: %v", err)
 	}
 
-	// 初始化数据库
 	InitDatabase(container)
+
+	if err := container.InitServices(); err != nil {
+		log.Fatalf("Failed to initialize services: %v", err)
+	}
 
 	// 初始化异步任务协程池
 	async.InitGlobalPool(cfg.Server.WorkerCount, 1000)
