@@ -46,11 +46,17 @@ const (
 	// AlbumListCachePrefix 相册列表缓存前缀
 	AlbumListCachePrefix = "album_list:"
 
+	// AlbumListVersionPrefix 相册列表版本号缓存前缀
+	AlbumListVersionPrefix = "album_list_version:"
+
 	// DefaultAlbumCacheExpiration 相册缓存过期时间
 	DefaultAlbumCacheExpiration = 30 * time.Minute
 
 	// DefaultAlbumListCacheExpiration 相册列表缓存过期时间
 	DefaultAlbumListCacheExpiration = 10 * time.Minute
+
+	// DefaultAlbumListVersionExpiration 相册列表版本号过期时间
+	DefaultAlbumListVersionExpiration = 30 * time.Minute
 )
 
 // Helper 缓存辅助工具结构
@@ -313,34 +319,61 @@ func (h *Helper) DeleteCachedAlbum(ctx context.Context, albumID uint) error {
 	return h.factory.Delete(ctx, key)
 }
 
-// CacheAlbumList 缓存用户相册列表
+// getAlbumListVersion 获取用户相册列表的当前版本号
+func (h *Helper) getAlbumListVersion(ctx context.Context, userID uint) int64 {
+	if h.factory == nil || h.factory.GetProvider() == nil {
+		return 0
+	}
+
+	versionKey := fmt.Sprintf("%s%d", AlbumListVersionPrefix, userID)
+	var version int64
+	if err := h.factory.Get(ctx, versionKey, &version); err != nil {
+		return 0
+	}
+	return version
+}
+
+// incrementAlbumListVersion 递增用户相册列表版本号（使旧缓存失效）
+func (h *Helper) incrementAlbumListVersion(ctx context.Context, userID uint) error {
+	if h.factory == nil || h.factory.GetProvider() == nil {
+		return nil
+	}
+
+	versionKey := fmt.Sprintf("%s%d", AlbumListVersionPrefix, userID)
+	version := h.getAlbumListVersion(ctx, userID)
+	version++
+	return h.factory.Set(ctx, versionKey, version, DefaultAlbumListVersionExpiration)
+}
+
+// CacheAlbumList 缓存用户相册列表（包含版本号）
 func (h *Helper) CacheAlbumList(ctx context.Context, userID uint, page, limit int, data interface{}) error {
 	if h.factory == nil || h.factory.GetProvider() == nil {
 		return fmt.Errorf("cache provider not initialized")
 	}
 
-	key := fmt.Sprintf("%suser:%d:page:%d:limit:%d", AlbumListCachePrefix, userID, page, limit)
+	version := h.getAlbumListVersion(ctx, userID)
+	key := fmt.Sprintf("%suser:%d:v%d:page:%d:limit:%d", AlbumListCachePrefix, userID, version, page, limit)
 	return h.factory.Set(ctx, key, data, DefaultAlbumListCacheExpiration)
 }
 
-// GetCachedAlbumList 获取缓存的用户相册列表
+// GetCachedAlbumList 获取缓存的用户相册列表（检查版本号）
 func (h *Helper) GetCachedAlbumList(ctx context.Context, userID uint, page, limit int, dest interface{}) error {
 	if h.factory == nil || h.factory.GetProvider() == nil {
 		return ErrCacheMiss
 	}
 
-	key := fmt.Sprintf("%suser:%d:page:%d:limit:%d", AlbumListCachePrefix, userID, page, limit)
+	version := h.getAlbumListVersion(ctx, userID)
+	key := fmt.Sprintf("%suser:%d:v%d:page:%d:limit:%d", AlbumListCachePrefix, userID, version, page, limit)
 	return h.factory.Get(ctx, key, dest)
 }
 
-// DeleteCachedAlbumList 删除用户的所有相册列表缓存
+// DeleteCachedAlbumList 删除用户的所有相册列表缓存（通过递增版本号）
 func (h *Helper) DeleteCachedAlbumList(ctx context.Context, userID uint) error {
 	if h.factory == nil || h.factory.GetProvider() == nil {
 		return nil
 	}
 
-	// 使用通配符删除该用户的所有列表缓存
-	// 注意：Redis 支持通配符删除，内存缓存需要遍历
-	key := fmt.Sprintf("%suser:%d:*", AlbumListCachePrefix, userID)
-	return h.factory.Delete(ctx, key)
+	// 使用版本号机制使所有旧缓存失效
+	// 无需遍历删除，旧版本号的缓存会自动过期
+	return h.incrementAlbumListVersion(ctx, userID)
 }
