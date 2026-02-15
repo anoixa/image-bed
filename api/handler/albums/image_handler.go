@@ -1,11 +1,14 @@
 package albums
 
 import (
+	"context"
+	"log"
 	"net/http"
 	"strconv"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
+	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/database/repo/albums"
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/internal/repositories"
@@ -20,15 +23,17 @@ type AddImagesToAlbumRequest struct {
 
 // AlbumImageHandler 相册图片处理器
 type AlbumImageHandler struct {
-	repo      *albums.Repository
-	imageRepo *images.Repository
+	repo        *albums.Repository
+	imageRepo   *images.Repository
+	cacheHelper *cache.Helper
 }
 
 // NewAlbumImageHandler 创建相册图片处理器
-func NewAlbumImageHandler(repos *repositories.Repositories) *AlbumImageHandler {
+func NewAlbumImageHandler(repos *repositories.Repositories, cacheFactory *cache.Factory) *AlbumImageHandler {
 	return &AlbumImageHandler{
-		repo:      repos.Albums,
-		imageRepo: repos.Images,
+		repo:        repos.Albums,
+		imageRepo:   repos.Images,
+		cacheHelper: cache.NewHelper(cacheFactory),
 	}
 }
 
@@ -86,6 +91,19 @@ func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 		"added_count": addedCount,
 		"failed_ids":  failedIDs,
 	})
+
+	// 如果成功添加了图片，清除相关缓存
+	if addedCount > 0 {
+		go func() {
+			ctx := context.Background()
+			if err := h.cacheHelper.DeleteCachedAlbum(ctx, uint(albumID)); err != nil {
+				log.Printf("Failed to delete album cache for %d: %v", albumID, err)
+			}
+			if err := h.cacheHelper.DeleteCachedAlbumList(ctx, userID); err != nil {
+				log.Printf("Failed to delete album list cache for user %d: %v", userID, err)
+			}
+		}()
+	}
 }
 
 // RemoveImageFromAlbumHandler 从相册移除图片
@@ -130,4 +148,15 @@ func (h *AlbumImageHandler) RemoveImageFromAlbumHandler(c *gin.Context) {
 	}
 
 	common.RespondSuccessMessage(c, "Image removed from album successfully", nil)
+
+	// 清除相关缓存
+	go func() {
+		ctx := context.Background()
+		if err := h.cacheHelper.DeleteCachedAlbum(ctx, uint(albumID)); err != nil {
+			log.Printf("Failed to delete album cache for %d: %v", albumID, err)
+		}
+		if err := h.cacheHelper.DeleteCachedAlbumList(ctx, userID); err != nil {
+			log.Printf("Failed to delete album list cache for user %d: %v", userID, err)
+		}
+	}()
 }
