@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 	configSvc "github.com/anoixa/image-bed/internal/services/config"
 	"gorm.io/gorm"
@@ -114,7 +115,7 @@ func (f *Factory) loadProvider(cfg *models.SystemConfig) error {
 		provider = p
 
 	case "minio":
-		minioCfg := MinioConfig{
+		minioCfg := config.MinioConfig{
 			Endpoint:        getString(configMap, "endpoint"),
 			AccessKeyID:     getString(configMap, "access_key_id"),
 			SecretAccessKey: getString(configMap, "secret_access_key"),
@@ -233,7 +234,7 @@ func (f *Factory) createProvider(cfg *models.SystemConfig) (Provider, error) {
 		path, _ := configMap["local_path"].(string)
 		return NewLocalStorage(path)
 	case "minio":
-		minioCfg := MinioConfig{
+		minioCfg := config.MinioConfig{
 			Endpoint:        getString(configMap, "endpoint"),
 			AccessKeyID:     getString(configMap, "access_key_id"),
 			SecretAccessKey: getString(configMap, "secret_access_key"),
@@ -328,6 +329,12 @@ func (f *Factory) ListInfo() []map[string]interface{} {
 	}
 	return result
 }
+
+// Get 获取 provider（向后兼容，使用 GetByName）
+func (f *Factory) Get(name string) (Provider, error) {
+return f.GetByName(name)
+}
+
 
 // 辅助函数
 func getString(m map[string]interface{}, key string) string {
