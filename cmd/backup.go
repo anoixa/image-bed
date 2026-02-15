@@ -25,7 +25,7 @@ var backupCmd = &cobra.Command{
 	Long: `Backup database to JSONL format and pack into tar.gz archive.
 
 Example:
-  # Backup to default file (./backups/backup_YYYYMMDD_HHMMSS.tar.gz)
+  # Backup to default file (./data/backups/backup_YYYYMMDD_HHMMSS.tar.gz)
   image-bed backup
 
   # Backup to specific file
