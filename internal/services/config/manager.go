@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -41,24 +42,27 @@ func NewManager(db *gorm.DB, dataPath string) *Manager {
 	}
 }
 
-// Initialize 初始化配置系统
-// 1. 初始化主密钥
-// 2. 验证/创建 Canary
+// Initialize 初始化配置
 func (m *Manager) Initialize() error {
-	// 1. 初始化主密钥
 	checkDataExists := func() (bool, error) {
 		count, err := m.repo.Count(context.Background())
-		return count > 0, err
+		if err != nil {
+			if strings.Contains(err.Error(), "no such table") ||
+				errors.Is(err, gorm.ErrRecordNotFound) {
+				return false, nil
+			}
+			return false, err
+		}
+		return count > 0, nil
 	}
 
 	if err := m.keyManager.Initialize(checkDataExists); err != nil {
 		return fmt.Errorf("failed to initialize master key: %w", err)
 	}
 
-	// 2. 创建加密器
 	m.encryptor = cryptoutils.NewConfigEncryptor(m.keyManager.GetKey())
 
-	// 3. 验证/创建 Canary
+	// 验证/创建 Canary
 	if err := m.ensureCanary(); err != nil {
 		return fmt.Errorf("failed to ensure canary: %w", err)
 	}
@@ -67,15 +71,13 @@ func (m *Manager) Initialize() error {
 	return nil
 }
 
-// ensureCanary 确保 Canary 记录存在且可解密
 func (m *Manager) ensureCanary() error {
 	ctx := context.Background()
 
-	// 尝试获取 Canary
 	canary, err := m.repo.GetByKey(ctx, "system:encryption_canary")
 	if err != nil {
-		// 不存在，创建新的 Canary
-		if err == gorm.ErrRecordNotFound {
+		if err == gorm.ErrRecordNotFound ||
+			strings.Contains(err.Error(), "no such table") {
 			return m.createCanary(ctx)
 		}
 		return err

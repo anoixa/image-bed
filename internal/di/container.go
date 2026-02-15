@@ -29,34 +29,42 @@ func NewContainer(cfg *config.Config) *Container {
 	}
 }
 
-// Init 初始化所有服务
 func (c *Container) Init() error {
+	if err := c.InitDatabase(); err != nil {
+		return err
+	}
+	if err := c.InitServices(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Container) InitDatabase() error {
 	log.Println("Initializing DI container...")
 
-	// 初始化数据库工厂
 	if err := c.initDatabaseFactory(); err != nil {
 		return fmt.Errorf("failed to initialize database factory: %w", err)
 	}
 
-	// 初始化配置管理器（需要数据库）
+	c.initRepositories()
+
+	log.Println("DI container initialized successfully")
+	return nil
+}
+
+func (c *Container) InitServices() error {
 	if err := c.initConfigManager(); err != nil {
 		return fmt.Errorf("failed to initialize config manager: %w", err)
 	}
 
-	// 初始化存储工厂（需要数据库和配置管理器）
 	if err := c.initStorageFactory(); err != nil {
 		return fmt.Errorf("failed to initialize storage factory: %w", err)
 	}
 
-	// 初始化缓存工厂
 	if err := c.initCacheFactory(); err != nil {
 		return fmt.Errorf("failed to initialize cache factory: %w", err)
 	}
 
-	// 初始化 Repositories
-	c.initRepositories()
-
-	log.Println("DI container initialized successfully")
 	return nil
 }
 

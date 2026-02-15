@@ -63,6 +63,7 @@ func (f *Factory) AutoMigrate() error {
 		&models.Image{},
 		&models.ApiToken{},
 		&models.Album{},
+		&models.SystemConfig{},
 	}
 
 	log.Println("Running database auto migration...")
