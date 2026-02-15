@@ -137,6 +137,11 @@ func (s *LocalStorage) Name() string {
 	return "local"
 }
 
+// BasePath 返回存储的基础路径
+func (s *LocalStorage) BasePath() string {
+	return s.absBasePath
+}
+
 // isValidIdentifier 校验 identifier 是否合法
 func isValidIdentifier(identifier string) bool {
 	if identifier == "" {

@@ -1,13 +1,16 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/internal/repositories"
+	configSvc "github.com/anoixa/image-bed/internal/services/config"
 	"github.com/anoixa/image-bed/utils"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -18,6 +21,10 @@ var (
 	jwtExpiresIn        time.Duration
 	jwtRefreshExpiresIn time.Duration
 	authRepos           *repositories.Repositories
+	
+	// jwtConfigManager 配置管理器引用（用于热重载）
+	jwtConfigManager *configSvc.Manager
+	jwtConfigMutex   sync.RWMutex
 )
 
 // SetAuthRepositories 设置认证相关的仓库（在服务器启动时调用）
@@ -25,11 +32,49 @@ func SetAuthRepositories(repos *repositories.Repositories) {
 	authRepos = repos
 }
 
-// TokenInit Initialize JWT configuration
+// TokenInitFromManager 从配置管理器初始化 JWT
+func TokenInitFromManager(manager *configSvc.Manager) error {
+	jwtConfigManager = manager
+	
+	// 获取 JWT 配置
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	
+	jwtConfig, err := manager.GetJWTConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get JWT config from database: %w", err)
+	}
+	
+	// 应用配置
+	if err := applyJWTConfig(jwtConfig); err != nil {
+		return err
+	}
+	
+	// 订阅配置变更事件（热重载）
+	manager.Subscribe(configSvc.EventConfigUpdated, func(event *configSvc.Event) {
+		if event.Config.Category == models.ConfigCategoryJWT {
+			log.Println("[JWT] Configuration updated, reloading...")
+			if err := reloadJWTConfig(); err != nil {
+				log.Printf("[JWT] Failed to reload config: %v", err)
+			} else {
+				log.Println("[JWT] Configuration reloaded successfully")
+			}
+		}
+	})
+	
+	return nil
+}
+
+// TokenInit 初始化 JWT 配置（传统方式，用于向后兼容）
+// Deprecated: 使用 TokenInitFromManager 代替
 func TokenInit(secret, expiresIn, refreshExpiresIn string) error {
 	if len(secret) < 32 {
 		return fmt.Errorf("JWT secret must be at least 32 characters long, got %d", len(secret))
 	}
+	
+	jwtConfigMutex.Lock()
+	defer jwtConfigMutex.Unlock()
+	
 	jwtSecret = []byte(secret)
 
 	duration, err := time.ParseDuration(expiresIn)
@@ -49,15 +94,71 @@ func TokenInit(secret, expiresIn, refreshExpiresIn string) error {
 	return nil
 }
 
+// applyJWTConfig 应用 JWT 配置
+func applyJWTConfig(jwtConfig *configSvc.JWTConfig) error {
+	if len(jwtConfig.Secret) < 32 {
+		return fmt.Errorf("JWT secret must be at least 32 characters long, got %d", len(jwtConfig.Secret))
+	}
+	
+	duration, err := time.ParseDuration(jwtConfig.AccessTokenTTL)
+	if err != nil {
+		return fmt.Errorf("invalid JWT access token TTL: %s", jwtConfig.AccessTokenTTL)
+	}
+	
+	refreshDuration, err := time.ParseDuration(jwtConfig.RefreshTokenTTL)
+	if err != nil {
+		return fmt.Errorf("invalid JWT refresh token TTL: %s", jwtConfig.RefreshTokenTTL)
+	}
+	
+	jwtConfigMutex.Lock()
+	defer jwtConfigMutex.Unlock()
+	
+	jwtSecret = []byte(jwtConfig.Secret)
+	jwtExpiresIn = duration
+	jwtRefreshExpiresIn = refreshDuration
+	
+	log.Printf("[JWT] Config loaded from database - Access: %v, Refresh: %v\n", jwtExpiresIn, jwtRefreshExpiresIn)
+	return nil
+}
+
+// reloadJWTConfig 重新加载 JWT 配置（热重载）
+func reloadJWTConfig() error {
+	if jwtConfigManager == nil {
+		return errors.New("config manager not initialized")
+	}
+	
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	
+	jwtConfig, err := jwtConfigManager.GetJWTConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get JWT config: %w", err)
+	}
+	
+	return applyJWTConfig(jwtConfig)
+}
+
+// GetJWTConfig 获取当前 JWT 配置（只读）
+func GetJWTConfig() (secret []byte, expiresIn, refreshExpiresIn time.Duration) {
+	jwtConfigMutex.RLock()
+	defer jwtConfigMutex.RUnlock()
+	return jwtSecret, jwtExpiresIn, jwtRefreshExpiresIn
+}
+
 // GenerateTokens Generate access token and refresh token
 func GenerateTokens(username string, userID uint) (accessToken string, accessTokenExpiry time.Time, err error) {
-	if len(jwtSecret) == 0 {
+	jwtConfigMutex.RLock()
+	secret := jwtSecret
+	expiresIn := jwtExpiresIn
+	jwtConfigMutex.RUnlock()
+	
+	if len(secret) == 0 {
 		err = errors.New("JWT secret is not initialized")
 		return
 	}
 
 	// 生成access token (JWT)
-	accessTokenExpiry = time.Now().Add(jwtExpiresIn)
+	accessTokenExpiry = time.Now().Add(expiresIn)
 	accessClaims := jwt.MapClaims{
 		"username": username,
 		"user_id":  userID,
@@ -66,7 +167,7 @@ func GenerateTokens(username string, userID uint) (accessToken string, accessTok
 		"iat":      time.Now().Unix(),
 	}
 
-	accessToken, err = jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims).SignedString(jwtSecret)
+	accessToken, err = jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims).SignedString(secret)
 	if err != nil {
 		err = fmt.Errorf("failed to generate access token: %w", err)
 		// 重置返回值
@@ -80,9 +181,13 @@ func GenerateTokens(username string, userID uint) (accessToken string, accessTok
 
 // GenerateRefreshToken Generate refresh token
 func GenerateRefreshToken() (refreshToken string, refreshTokenExpiry time.Time, err error) {
+	jwtConfigMutex.RLock()
+	refreshExpiresIn := jwtRefreshExpiresIn
+	jwtConfigMutex.RUnlock()
+	
 	refreshToken, err = utils.GenerateRandomToken(64)
 
-	refreshTokenExpiry = time.Now().Add(jwtRefreshExpiresIn)
+	refreshTokenExpiry = time.Now().Add(refreshExpiresIn)
 	return
 }
 
@@ -95,7 +200,11 @@ func GenerateStaticToken() (refreshToken string, err error) {
 
 // Parse Parse and validate JWT token
 func Parse(tokenString string) (jwt.MapClaims, error) {
-	if len(jwtSecret) == 0 {
+	jwtConfigMutex.RLock()
+	secret := jwtSecret
+	jwtConfigMutex.RUnlock()
+	
+	if len(secret) == 0 {
 		return nil, errors.New("JWT secret is not initialized")
 	}
 
@@ -106,7 +215,7 @@ func Parse(tokenString string) (jwt.MapClaims, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
-		return jwtSecret, nil
+		return secret, nil
 	})
 
 	if err != nil {

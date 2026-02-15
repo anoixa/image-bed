@@ -9,11 +9,8 @@ import (
 	_ "image/png"
 	"io"
 	"log"
-	"os"
-	"path/filepath"
 	"time"
 
-	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/storage"
 	"gorm.io/gorm"
@@ -37,17 +34,8 @@ func (t *ImageDimensionsTask) Execute() {
 		return
 	}
 
-	// 根据存储类型选择提取方式
-	var width, height int
-	var err error
-
-	if t.Storage != nil {
-		// 使用存储提供者读取文件（支持 MinIO/S3 等）
-		width, height, err = t.extractFromStorage()
-	} else {
-		// 回退到本地文件读取
-		width, height, err = t.extractFromLocalFile()
-	}
+	// 使用存储提供者读取文件
+	width, height, err := t.extractFromStorage()
 
 	if err != nil {
 		log.Printf("Failed to extract image dimensions for %s: %v", t.Identifier, err)
@@ -104,34 +92,6 @@ func (t *ImageDimensionsTask) extractFromStorage() (int, int, error) {
 	return decodeImageDimensions(data)
 }
 
-// extractFromLocalFile 从本地文件提取尺寸
-func (t *ImageDimensionsTask) extractFromLocalFile() (int, int, error) {
-	basePath := config.Get().Server.StorageConfig.Local.Path
-	if basePath == "" {
-		basePath = "./data/upload"
-	}
-
-	filePath := filepath.Join(basePath, t.Identifier)
-
-	// 检查文件大小
-	fileInfo, err := os.Stat(filePath)
-	if err != nil {
-		return 0, 0, err
-	}
-
-	// 跳过过大的文件
-	if fileInfo.Size() > MaxFileSizeForDimensions {
-		return 0, 0, nil // 静默跳过
-	}
-
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return 0, 0, err
-	}
-
-	return decodeImageDimensions(data)
-}
-
 // decodeImageDimensions 解码图片并提取尺寸
 func decodeImageDimensions(data []byte) (int, int, error) {
 	img, _, err := image.Decode(bytes.NewReader(data))
@@ -144,10 +104,10 @@ func decodeImageDimensions(data []byte) (int, int, error) {
 }
 
 // ExtractImageDimensionsAsync 异步提取图片尺寸
-func ExtractImageDimensionsAsync(identifier, storageKey string, db *gorm.DB, storage storage.Provider) {
+func ExtractImageDimensionsAsync(identifier string, storageConfigID uint, db *gorm.DB, storage storage.Provider) {
 	task := &ImageDimensionsTask{
 		Identifier: identifier,
-		StorageKey: storageKey,
+		StorageKey: "",
 		DB:         db,
 		Storage:    storage,
 	}

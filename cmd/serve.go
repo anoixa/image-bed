@@ -58,9 +58,14 @@ func RunServer() {
 	// 初始化异步任务协程池
 	async.InitGlobalPool(cfg.Server.WorkerCount, 1000)
 
-	// 初始化 JWT
-	if err := api.TokenInit(cfg.Server.Jwt.Secret, cfg.Server.Jwt.ExpiresIn, cfg.Server.Jwt.RefreshExpiresIn); err != nil {
-		log.Fatalf("Failed to initialize JWT %s", err)
+	// 初始化 JWT（从数据库加载配置）
+	if err := api.TokenInitFromManager(container.GetConfigManager()); err != nil {
+		log.Printf("[Warning] Failed to initialize JWT from database: %v", err)
+		log.Println("[Warning] Falling back to config file JWT settings")
+		// 回退到配置文件
+		if err := api.TokenInit(cfg.Server.Jwt.Secret, cfg.Server.Jwt.ExpiresIn, cfg.Server.Jwt.RefreshExpiresIn); err != nil {
+			log.Fatalf("Failed to initialize JWT: %s", err)
+		}
 	}
 
 	// 创建服务器依赖
@@ -68,6 +73,7 @@ func RunServer() {
 		StorageFactory: container.GetStorageFactory(),
 		CacheFactory:   container.GetCacheFactory(),
 		Repositories:   container.GetRepositories(),
+		ConfigManager:  container.GetConfigManager(),
 	}
 
 	// 启动gin
