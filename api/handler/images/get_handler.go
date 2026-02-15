@@ -120,9 +120,9 @@ func (h *Handler) fetchImageMetadata(ctx context.Context, identifier string) (*m
 
 // streamAndCacheImage 流式处理
 func (h *Handler) streamAndCacheImage(c *gin.Context, image *models.Image) {
-	storageProvider, err := h.storageFactory.Get(image.StorageDriver)
+	storageProvider, err := h.storageFactory.GetByID(image.StorageConfigID)
 	if err != nil {
-		log.Printf("Failed to get storage provider for driver '%s': %v", image.StorageDriver, err)
+		log.Printf("Failed to get storage provider for config ID '%d': %v", image.StorageConfigID, err)
 		common.RespondError(c, http.StatusInternalServerError, "Error retrieving storage provider")
 		return
 	}

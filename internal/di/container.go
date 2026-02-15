@@ -115,7 +115,8 @@ func (c *Container) initStorageFactory() error {
 
 // initCacheFactory 初始化缓存工厂
 func (c *Container) initCacheFactory() error {
-	factory, err := cache.NewFactory(c.config)
+	db := c.databaseFactory.GetProvider().DB()
+	factory, err := cache.NewFactory(db, c.configManager)
 	if err != nil {
 		return err
 	}

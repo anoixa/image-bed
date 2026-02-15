@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -63,15 +64,16 @@ func (h *Handler) UploadImage(c *gin.Context) {
 		common.RespondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	driverToSave := storageName
-	if driverToSave == "" {
-		driverToSave = config.Get().Server.StorageConfig.Type
+	storageConfigID, err := h.getStorageConfigID(c, storageName)
+	if err != nil {
+		common.RespondError(c, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	userID := c.GetUint(middleware.ContextUserIDKey)
 	// 读取公开/私有参数，默认为公开
 	isPublic := c.PostForm("is_public") != "false"
-	image, _, err := h.processAndSaveImage(c.Request.Context(), userID, fileHeader, storageProvider, driverToSave, isPublic)
+	image, _, err := h.processAndSaveImage(c.Request.Context(), userID, fileHeader, storageProvider, storageConfigID, isPublic)
 	if err != nil {
 		if !c.IsAborted() {
 			common.RespondError(c, http.StatusInternalServerError, err.Error())
@@ -119,19 +121,36 @@ func (h *Handler) UploadImages(c *gin.Context) {
 		return
 	}
 
-	storageName := c.PostForm("storage")
-	if storageName == "" {
-		storageName = c.Query("storage")
+	// 使用 storage_id 选择存储配置
+	var storageProvider storage.Provider
+	var storageConfigID uint
+
+	storageIDStr := c.PostForm("storage_id")
+	if storageIDStr == "" {
+		storageIDStr = c.Query("storage_id")
 	}
 
-	storageProvider, err := h.storageFactory.Get(storageName)
-	if err != nil {
-		common.RespondError(c, http.StatusBadRequest, err.Error())
-		return
-	}
-	driverToSave := storageName
-	if driverToSave == "" {
-		driverToSave = config.Get().Server.StorageConfig.Type
+	if storageIDStr != "" {
+		// 按 ID 获取存储
+		id, parseErr := strconv.ParseUint(storageIDStr, 10, 32)
+		if parseErr != nil {
+			common.RespondError(c, http.StatusBadRequest, "Invalid storage_id")
+			return
+		}
+		storageConfigID = uint(id)
+		storageProvider, err = h.storageFactory.GetByID(storageConfigID)
+		if err != nil {
+			common.RespondError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+	} else {
+		// 使用默认存储
+		storageProvider = h.storageFactory.GetDefault()
+		if storageProvider == nil {
+			common.RespondError(c, http.StatusInternalServerError, "No default storage configured")
+			return
+		}
+		storageConfigID = h.storageFactory.GetDefaultID()
 	}
 
 	type uploadResult struct {
@@ -159,7 +178,7 @@ func (h *Handler) UploadImages(c *gin.Context) {
 				return ctx.Err()
 			default:
 				result := uploadResult{FileName: fileHeader.Filename}
-				image, _, err := h.processAndSaveImage(ctx, userID, fileHeader, storageProvider, driverToSave, isPublic)
+				image, _, err := h.processAndSaveImage(ctx, userID, fileHeader, storageProvider, storageConfigID, isPublic)
 
 				if err != nil {
 					// 如果客户端断开，不记录错误
@@ -212,7 +231,7 @@ func (h *Handler) UploadImages(c *gin.Context) {
 }
 
 // processAndSaveImage 保存图片
-func (h *Handler) processAndSaveImage(ctx context.Context, userID uint, fileHeader *multipart.FileHeader, storageProvider storage.Provider, driverToSave string, isPublic bool) (*models.Image, bool, error) {
+func (h *Handler) processAndSaveImage(ctx context.Context, userID uint, fileHeader *multipart.FileHeader, storageProvider storage.Provider, storageConfigID uint, isPublic bool) (*models.Image, bool, error) {
 	file, err := fileHeader.Open()
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to open file: %w", err)
@@ -257,10 +276,10 @@ func (h *Handler) processAndSaveImage(ctx context.Context, userID uint, fileHead
 	softDeletedImage, err := h.repo.GetSoftDeletedImageByHash(fileHash)
 	if err == nil {
 		updateData := map[string]interface{}{
-			"deleted_at":     nil,
-			"original_name":  fileHeader.Filename,
-			"user_id":        userID,
-			"storage_driver": driverToSave,
+			"deleted_at":        nil,
+			"original_name":     fileHeader.Filename,
+			"user_id":           userID,
+			"storage_config_id": storageConfigID,
 		}
 
 		restoredImage, err := h.repo.UpdateImageByIdentifier(softDeletedImage.Identifier, updateData)
@@ -304,14 +323,14 @@ func (h *Handler) processAndSaveImage(ctx context.Context, userID uint, fileHead
 
 	// 创建数据库记录
 	newImage := &models.Image{
-		Identifier:    identifier,
-		OriginalName:  fileHeader.Filename,
-		FileSize:      fileHeader.Size,
-		MimeType:      mimeType,
-		StorageDriver: driverToSave,
-		FileHash:      fileHash,
-		IsPublic:      isPublic,
-		UserID:        userID,
+		Identifier:      identifier,
+		OriginalName:    fileHeader.Filename,
+		FileSize:        fileHeader.Size,
+		MimeType:        mimeType,
+		StorageConfigID: storageConfigID,
+		FileHash:        fileHash,
+		IsPublic:        isPublic,
+		UserID:          userID,
 	}
 
 	if err := h.repo.SaveImage(newImage); err != nil {
@@ -320,7 +339,7 @@ func (h *Handler) processAndSaveImage(ctx context.Context, userID uint, fileHead
 	}
 
 	// 异步提取图片尺寸
-	async.ExtractImageDimensionsAsync(identifier, driverToSave, h.repo.DB(), storageProvider)
+	async.ExtractImageDimensionsAsync(identifier, storageConfigID, h.repo.DB(), storageProvider)
 	go h.warmCache(newImage)
 
 	return newImage, false, nil

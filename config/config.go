@@ -28,9 +28,9 @@ type ServerConfig struct {
 	WriteTimeout time.Duration `yaml:"writeTimeout"`
 	IdleTimeout  time.Duration `yaml:"idleTimeout"`
 
+	// Deprecated: 使用数据库配置管理代替配置文件
 	Jwt            Jwt             `mapstructure:"jwt"`
 	DatabaseConfig DatabaseConfig  `mapstructure:"database"`
-	StorageConfig  StorageConfig   `mapstructure:"storage"`
 	CacheConfig    CacheConfig     `mapstructure:"cache"`
 	RateLimit      RateLimitConfig `mapstructure:"rate_limit"`
 	Upload         UploadConfig    `mapstructure:"upload"`
@@ -97,18 +97,16 @@ type DatabaseConfig struct {
 	ConnMaxLifetime int `mapstructure:"conn_max_lifetime"`
 }
 
-type StorageConfig struct {
-	Type  string             `mapstructure:"type"`
-	Minio MinioConfig        `mapstructure:"minio"`
-	Local LocalStorageConfig `mapstructure:"local"`
-}
-
+// Jwt JWT 配置结构
+// Deprecated: 使用数据库配置管理代替配置文件
 type Jwt struct {
 	Secret           string `mapstructure:"secret"`
 	ExpiresIn        string `mapstructure:"expires_in"`
 	RefreshExpiresIn string `mapstructure:"refresh_expires_in"`
 }
 
+// MinioConfig MinIO 配置结构 - 保留用于数据库配置迁移
+// Deprecated: 使用数据库配置管理代替配置文件
 type MinioConfig struct {
 	Endpoint        string `mapstructure:"endpoint"`
 	AccessKeyID     string `mapstructure:"access_key_id"`
@@ -117,40 +115,13 @@ type MinioConfig struct {
 	BucketName      string `mapstructure:"bucket_name"`
 }
 
-type LocalStorageConfig struct {
-	Path string `mapstructure:"path"` // 本地文件存储路径
-}
-
+// CacheConfig 缓存配置 
 type CacheConfig struct {
-	Provider           string       `mapstructure:"provider"`
-	Redis              RedisConfig  `mapstructure:"redis"`
-	Memory             MemoryConfig `mapstructure:"memory"`
-	MaxImageCacheSize  int64        `mapstructure:"max_image_cache_size_mb"` // 最大图片缓存大小（MB），0表示无限制
-	EnableImageCaching bool         `mapstructure:"enable_image_caching"`    // 是否启用图片缓存
+	MaxImageCacheSize  int64 `mapstructure:"max_image_cache_size_mb"` // 最大图片缓存大小（MB），0表示无限制
+	EnableImageCaching bool  `mapstructure:"enable_image_caching"`    // 是否启用图片缓存
 
 	ImageCacheTTL     int `mapstructure:"image_cache_ttl"`      // 图片元数据缓存时间（秒）
 	ImageDataCacheTTL int `mapstructure:"image_data_cache_ttl"` // 图片数据缓存时间（秒）
-}
-
-type RedisConfig struct {
-	Address  string `mapstructure:"address"`
-	Password string `mapstructure:"password"`
-	DB       int    `mapstructure:"db"`
-
-	// 连接池配置
-	PoolSize           int    `mapstructure:"pool_size"`
-	MinIdleConns       int    `mapstructure:"min_idle_conns"`
-	MaxConnAge         string `mapstructure:"max_conn_age"`
-	PoolTimeout        string `mapstructure:"pool_timeout"`
-	IdleTimeout        string `mapstructure:"idle_timeout"`
-	IdleCheckFrequency string `mapstructure:"idle_check_frequency"`
-}
-
-type MemoryConfig struct {
-	NumCounters int64 `mapstructure:"num_counters"`
-	MaxCost     int64 `mapstructure:"max_cost"`
-	BufferItems int64 `mapstructure:"buffer_items"`
-	Metrics     bool  `mapstructure:"metrics"`
 }
 
 // InitConfig Initialize configuration

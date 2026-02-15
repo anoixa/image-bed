@@ -299,6 +299,27 @@ func (f *Factory) GetDefaultName() string {
 	return f.defaultName
 }
 
+// GetIDByName 按名称获取 provider ID
+func (f *Factory) GetIDByName(name string) (uint, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	if name == "" {
+		if f.defaultProvider == nil {
+			return 0, fmt.Errorf("no default storage provider")
+		}
+		return f.defaultID, nil
+	}
+
+	for id, provider := range f.providers {
+		if provider.Name() == name {
+			return id, nil
+		}
+	}
+
+	return 0, fmt.Errorf("storage provider '%s' not found", name)
+}
+
 // List 列出所有 provider 名称
 func (f *Factory) List() []string {
 	f.mu.RLock()

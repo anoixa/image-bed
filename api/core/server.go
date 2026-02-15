@@ -6,12 +6,14 @@ import (
 
 	"github.com/anoixa/image-bed/api"
 	"github.com/anoixa/image-bed/api/common"
+	"github.com/anoixa/image-bed/api/handler/admin"
 	"github.com/anoixa/image-bed/api/handler/albums"
 	"github.com/anoixa/image-bed/api/handler/images"
 	"github.com/anoixa/image-bed/api/handler/key"
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
+	configSvc "github.com/anoixa/image-bed/internal/services/config"
 	"github.com/anoixa/image-bed/internal/repositories"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/gin-contrib/cors"
@@ -25,6 +27,7 @@ type ServerDependencies struct {
 	StorageFactory *storage.Factory
 	CacheFactory   *cache.Factory
 	Repositories   *repositories.Repositories
+	ConfigManager  *configSvc.Manager
 }
 
 // 启动gin
@@ -187,6 +190,32 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 				// 相册图片管理
 				albumsGroup.POST("/:id/images", albumImageHandler.AddImagesToAlbumHandler)         // POST /api/v1/albums/{id}/images
 				albumsGroup.DELETE("/:id/images/:imageId", albumImageHandler.RemoveImageFromAlbumHandler) // DELETE /api/v1/albums/{id}/images/{imageId}
+			}
+
+			// admin - 配置管理
+			if deps.ConfigManager != nil {
+				configHandler := admin.NewConfigHandler(deps.ConfigManager, deps.StorageFactory)
+				adminGroup := v1.Group("/admin")
+				adminGroup.Use(middleware.Authorize("jwt"))
+				{
+					// 配置管理
+					configsGroup := adminGroup.Group("/configs")
+					{
+						configsGroup.GET("", configHandler.ListConfigs)                              // GET /api/v1/admin/configs
+						configsGroup.POST("", configHandler.CreateConfig)                            // POST /api/v1/admin/configs
+						configsGroup.GET("/:id", configHandler.GetConfig)                            // GET /api/v1/admin/configs/:id
+						configsGroup.PUT("/:id", configHandler.UpdateConfig)                         // PUT /api/v1/admin/configs/:id
+						configsGroup.DELETE("/:id", configHandler.DeleteConfig)                      // DELETE /api/v1/admin/configs/:id
+						configsGroup.POST("/:id/test", configHandler.TestConfig)                     // POST /api/v1/admin/configs/:id/test
+						configsGroup.POST("/:id/default", configHandler.SetDefaultConfig)            // POST /api/v1/admin/configs/:id/default
+						configsGroup.POST("/:id/enable", configHandler.EnableConfig)                 // POST /api/v1/admin/configs/:id/enable
+						configsGroup.POST("/:id/disable", configHandler.DisableConfig)               // POST /api/v1/admin/configs/:id/disable
+					}
+
+					// 存储提供者管理
+					adminGroup.GET("/storage/providers", configHandler.ListStorageProviders)          // GET /api/v1/admin/storage/providers
+					adminGroup.POST("/storage/reload/:id", configHandler.ReloadStorageConfig)         // POST /api/v1/admin/storage/reload/:id
+				}
 			}
 		}
 	}
