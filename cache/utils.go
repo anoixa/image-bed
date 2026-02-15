@@ -53,7 +53,7 @@ func NewHelper(factory *Factory) *Helper {
 
 // CacheImage 缓存图片元数据
 func (h *Helper) CacheImage(ctx context.Context, image *models.Image) error {
-	if h.factory == nil || h.factory.provider == nil {
+	if h.factory == nil || h.factory.GetProvider() == nil {
 		return fmt.Errorf("cache provider not initialized")
 	}
 
@@ -68,7 +68,7 @@ func (h *Helper) CacheImage(ctx context.Context, image *models.Image) error {
 
 // GetCachedImage 获取缓存的图片元数据
 func (h *Helper) GetCachedImage(ctx context.Context, identifier string, image *models.Image) error {
-	if h.factory == nil || h.factory.provider == nil {
+	if h.factory == nil || h.factory.GetProvider() == nil {
 		return ErrCacheMiss
 	}
 
@@ -78,7 +78,7 @@ func (h *Helper) GetCachedImage(ctx context.Context, identifier string, image *m
 
 // CacheUser 缓存用户信息
 func (h *Helper) CacheUser(ctx context.Context, user *models.User) error {
-	if h.factory == nil || h.factory.provider == nil {
+	if h.factory == nil || h.factory.GetProvider() == nil {
 		return fmt.Errorf("cache provider not initialized")
 	}
 
@@ -88,7 +88,7 @@ func (h *Helper) CacheUser(ctx context.Context, user *models.User) error {
 
 // GetCachedUser 获取缓存的用户信息
 func (h *Helper) GetCachedUser(ctx context.Context, userID uint, user *models.User) error {
-	if h.factory == nil || h.factory.provider == nil {
+	if h.factory == nil || h.factory.GetProvider() == nil {
 		return ErrCacheMiss
 	}
 
@@ -104,7 +104,7 @@ func (h *Helper) GetCachedUser(ctx context.Context, userID uint, user *models.Us
 
 // CacheDevice 缓存设备信息
 func (h *Helper) CacheDevice(ctx context.Context, device *models.Device) error {
-	if h.factory == nil || h.factory.provider == nil {
+	if h.factory == nil || h.factory.GetProvider() == nil {
 		return fmt.Errorf("cache provider not initialized")
 	}
 
@@ -114,7 +114,7 @@ func (h *Helper) CacheDevice(ctx context.Context, device *models.Device) error {
 
 // GetCachedDevice 获取缓存的设备信息
 func (h *Helper) GetCachedDevice(ctx context.Context, deviceID string, device *models.Device) error {
-	if h.factory == nil || h.factory.provider == nil {
+	if h.factory == nil || h.factory.GetProvider() == nil {
 		return ErrCacheMiss
 	}
 
@@ -130,7 +130,7 @@ func (h *Helper) GetCachedDevice(ctx context.Context, deviceID string, device *m
 
 // DeleteCachedImage 删除缓存的图片
 func (h *Helper) DeleteCachedImage(ctx context.Context, identifier string) error {
-	if h.factory == nil || h.factory.provider == nil {
+	if h.factory == nil || h.factory.GetProvider() == nil {
 		return nil
 	}
 
@@ -140,7 +140,7 @@ func (h *Helper) DeleteCachedImage(ctx context.Context, identifier string) error
 
 // DeleteCachedUser 删除缓存的用户
 func (h *Helper) DeleteCachedUser(ctx context.Context, userID uint) error {
-	if h.factory == nil || h.factory.provider == nil {
+	if h.factory == nil || h.factory.GetProvider() == nil {
 		return nil
 	}
 
@@ -150,7 +150,7 @@ func (h *Helper) DeleteCachedUser(ctx context.Context, userID uint) error {
 
 // DeleteCachedDevice 删除缓存的设备
 func (h *Helper) DeleteCachedDevice(ctx context.Context, deviceID string) error {
-	if h.factory == nil || h.factory.provider == nil {
+	if h.factory == nil || h.factory.GetProvider() == nil {
 		return nil
 	}
 
@@ -160,7 +160,7 @@ func (h *Helper) DeleteCachedDevice(ctx context.Context, deviceID string) error 
 
 // CacheStaticToken 缓存 static_token 和用户信息
 func (h *Helper) CacheStaticToken(ctx context.Context, token string, user *models.User) error {
-	if h.factory == nil || h.factory.provider == nil {
+	if h.factory == nil || h.factory.GetProvider() == nil {
 		return fmt.Errorf("cache provider not initialized")
 	}
 
@@ -170,7 +170,7 @@ func (h *Helper) CacheStaticToken(ctx context.Context, token string, user *model
 
 // GetCachedStaticToken 获取缓存的 static_token 用户信息
 func (h *Helper) GetCachedStaticToken(ctx context.Context, token string, user *models.User) error {
-	if h.factory == nil || h.factory.provider == nil {
+	if h.factory == nil || h.factory.GetProvider() == nil {
 		return ErrCacheMiss
 	}
 
@@ -186,7 +186,7 @@ func (h *Helper) GetCachedStaticToken(ctx context.Context, token string, user *m
 
 // DeleteCachedStaticToken 删除缓存的 static_token
 func (h *Helper) DeleteCachedStaticToken(ctx context.Context, token string) error {
-	if h.factory == nil || h.factory.provider == nil {
+	if h.factory == nil || h.factory.GetProvider() == nil {
 		return nil
 	}
 
@@ -196,7 +196,7 @@ func (h *Helper) DeleteCachedStaticToken(ctx context.Context, token string) erro
 
 // CacheEmptyValue 缓存空值标记
 func (h *Helper) CacheEmptyValue(ctx context.Context, key string) error {
-	if h.factory == nil || h.factory.provider == nil {
+	if h.factory == nil || h.factory.GetProvider() == nil {
 		return fmt.Errorf("cache provider not initialized")
 	}
 
@@ -206,7 +206,7 @@ func (h *Helper) CacheEmptyValue(ctx context.Context, key string) error {
 
 // IsEmptyValue 检查是否为空值标记
 func (h *Helper) IsEmptyValue(ctx context.Context, key string) (bool, error) {
-	if h.factory == nil || h.factory.provider == nil {
+	if h.factory == nil || h.factory.GetProvider() == nil {
 		return false, fmt.Errorf("cache provider not initialized")
 	}
 
@@ -222,7 +222,7 @@ func (h *Helper) IsEmptyValue(ctx context.Context, key string) (bool, error) {
 
 // DeleteEmptyValue 删除空值标记
 func (h *Helper) DeleteEmptyValue(ctx context.Context, key string) error {
-	if h.factory == nil || h.factory.provider == nil {
+	if h.factory == nil || h.factory.GetProvider() == nil {
 		return nil
 	}
 
@@ -232,7 +232,7 @@ func (h *Helper) DeleteEmptyValue(ctx context.Context, key string) error {
 
 // CacheImageData 缓存图片数据
 func (h *Helper) CacheImageData(ctx context.Context, identifier string, imageData []byte) error {
-	if h.factory == nil || h.factory.provider == nil {
+	if h.factory == nil || h.factory.GetProvider() == nil {
 		return fmt.Errorf("cache provider not initialized")
 	}
 
@@ -247,7 +247,7 @@ func (h *Helper) CacheImageData(ctx context.Context, identifier string, imageDat
 
 // GetCachedImageData 获取缓存的图片数据
 func (h *Helper) GetCachedImageData(ctx context.Context, identifier string) ([]byte, error) {
-	if h.factory == nil || h.factory.provider == nil {
+	if h.factory == nil || h.factory.GetProvider() == nil {
 		return nil, ErrCacheMiss
 	}
 
@@ -263,7 +263,7 @@ func (h *Helper) GetCachedImageData(ctx context.Context, identifier string) ([]b
 
 // DeleteCachedImageData 删除缓存的图片数据
 func (h *Helper) DeleteCachedImageData(ctx context.Context, identifier string) error {
-	if h.factory == nil || h.factory.provider == nil {
+	if h.factory == nil || h.factory.GetProvider() == nil {
 		return nil
 	}
 

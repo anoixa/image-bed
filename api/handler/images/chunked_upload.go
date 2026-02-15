@@ -17,7 +17,6 @@ import (
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
-	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/anoixa/image-bed/utils/async"
@@ -37,17 +36,17 @@ const (
 
 // ChunkedUploadSession 分片上传会话
 type ChunkedUploadSession struct {
-	SessionID      string
-	FileName       string
-	FileHash       string
-	TotalSize      int64
-	ChunkSize      int64
-	TotalChunks    int
-	ReceivedChunks map[int]bool
-	StorageDriver  string
-	UserID         uint
-	TempDir        string
-	CreatedAt      time.Time
+	SessionID       string
+	FileName        string
+	FileHash        string
+	TotalSize       int64
+	ChunkSize       int64
+	TotalChunks     int
+	ReceivedChunks  map[int]bool
+	StorageConfigID uint
+	UserID          uint
+	TempDir         string
+	CreatedAt       time.Time
 }
 
 var (
@@ -316,8 +315,8 @@ func (h *Handler) processChunkedUpload(ctx context.Context, session *ChunkedUplo
 		return fmt.Errorf("failed to get storage: %w", err)
 	}
 
-	cfg := config.Get()
-	driverToSave := cfg.Server.StorageConfig.Type
+	// 获取存储配置ID
+	storageConfigID := h.storageFactory.GetDefaultID()
 
 	// 生成唯一标识符
 	ext := filepath.Ext(session.FileName)
@@ -330,13 +329,13 @@ func (h *Handler) processChunkedUpload(ctx context.Context, session *ChunkedUplo
 
 	// 创建数据库记录
 	newImage := &models.Image{
-		Identifier:    identifier,
-		OriginalName:  session.FileName,
-		FileSize:      int64(len(fileBytes)),
-		MimeType:      mimeType,
-		StorageDriver: driverToSave,
-		FileHash:      fileHash,
-		UserID:        session.UserID,
+		Identifier:      identifier,
+		OriginalName:    session.FileName,
+		FileSize:        int64(len(fileBytes)),
+		MimeType:        mimeType,
+		StorageConfigID: storageConfigID,
+		FileHash:        fileHash,
+		UserID:          session.UserID,
 	}
 
 	if err := h.repo.SaveImage(newImage); err != nil {
@@ -345,7 +344,7 @@ func (h *Handler) processChunkedUpload(ctx context.Context, session *ChunkedUplo
 	}
 
 	// 异步提取图片尺寸
-	async.ExtractImageDimensionsAsync(identifier, driverToSave, h.repo.DB(), storageProvider)
+	async.ExtractImageDimensionsAsync(identifier, storageConfigID, h.repo.DB(), storageProvider)
 
 	log.Printf("Chunked upload completed: %s -> %s", session.FileName, identifier)
 	return nil

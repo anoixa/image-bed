@@ -11,36 +11,21 @@ server:
     password: "root"
     database: "image-dev"
 
-  storage:
-    type: "local"       # local / minio
-    local:
-      path: "./data/upload"
-    minio:
-      endpoint: ""
-      access_key_id: ""
-      secret_access_key: ""
-      use_ssl: false
-      bucket_name: ""
-
   cache:
-    provider: "memory"  # memory / redis
     max_image_cache_size_mb: 10
     enable_image_caching: true
-    redis:
-      address: "localhost:6379"
-      password: ""
-      db: 0
-    memory:
-      num_counters: 1000000
-      max_cost: 1073741824
-      buffer_items: 64
-      metrics: true
+    image_cache_ttl: 3600
+    image_data_cache_ttl: 3600
 
+  # JWT 配置已移至数据库管理
+  # 首次启动时会自动创建默认配置
+  # 可通过 Admin API 管理：/api/v1/admin/configs?category=jwt
   jwt:
+    # 保留此配置作为回退，优先使用数据库配置
     # openssl rand -base64 32
     secret: "your-very-long-secret-key-at-least-32-characters-long"
-    expires_in: "30m"
-    refresh_expires_in: "10080m"
+    expires_in: "15m"
+    refresh_expires_in: "168h"
 
   rate_limit:
     # API接口限流 (上传/管理等操作)

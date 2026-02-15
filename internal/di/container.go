@@ -7,6 +7,7 @@ import (
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database"
+	configSvc "github.com/anoixa/image-bed/internal/services/config"
 	"github.com/anoixa/image-bed/internal/repositories"
 	"github.com/anoixa/image-bed/storage"
 )
@@ -17,6 +18,7 @@ type Container struct {
 	storageFactory  *storage.Factory
 	cacheFactory    *cache.Factory
 	databaseFactory *database.Factory
+	configManager   *configSvc.Manager
 	repositories    *repositories.Repositories
 }
 
@@ -36,7 +38,12 @@ func (c *Container) Init() error {
 		return fmt.Errorf("failed to initialize database factory: %w", err)
 	}
 
-	// 初始化存储工厂
+	// 初始化配置管理器（需要数据库）
+	if err := c.initConfigManager(); err != nil {
+		return fmt.Errorf("failed to initialize config manager: %w", err)
+	}
+
+	// 初始化存储工厂（需要数据库和配置管理器）
 	if err := c.initStorageFactory(); err != nil {
 		return fmt.Errorf("failed to initialize storage factory: %w", err)
 	}
@@ -50,6 +57,17 @@ func (c *Container) Init() error {
 	c.initRepositories()
 
 	log.Println("DI container initialized successfully")
+	return nil
+}
+
+// initConfigManager 初始化配置管理器
+func (c *Container) initConfigManager() error {
+	manager := configSvc.NewManager(c.databaseFactory.GetProvider().DB(), "./data")
+	if err := manager.Initialize(); err != nil {
+		return fmt.Errorf("failed to initialize config manager: %w", err)
+	}
+	c.configManager = manager
+	log.Println("Config manager initialized")
 	return nil
 }
 
@@ -85,7 +103,8 @@ func (c *Container) initDatabaseFactory() error {
 
 // initStorageFactory 初始化存储工厂
 func (c *Container) initStorageFactory() error {
-	factory, err := storage.NewFactory(c.config)
+	db := c.databaseFactory.GetProvider().DB()
+	factory, err := storage.NewFactory(db, c.configManager)
 	if err != nil {
 		return err
 	}
@@ -96,7 +115,8 @@ func (c *Container) initStorageFactory() error {
 
 // initCacheFactory 初始化缓存工厂
 func (c *Container) initCacheFactory() error {
-	factory, err := cache.NewFactory(c.config)
+	db := c.databaseFactory.GetProvider().DB()
+	factory, err := cache.NewFactory(db, c.configManager)
 	if err != nil {
 		return err
 	}
@@ -118,6 +138,11 @@ func (c *Container) GetStorageFactory() *storage.Factory {
 // GetCacheFactory 获取缓存工厂
 func (c *Container) GetCacheFactory() *cache.Factory {
 	return c.cacheFactory
+}
+
+// GetConfigManager 获取配置管理器
+func (c *Container) GetConfigManager() *configSvc.Manager {
+	return c.configManager
 }
 
 // GetConfig 获取配置

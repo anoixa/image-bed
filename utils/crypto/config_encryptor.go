@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
@@ -242,4 +243,17 @@ func (e *ConfigEncryptor) Decrypt(ciphertext string) (string, error) {
 // IsEncrypted 检查字符串是否已加密
 func IsEncrypted(s string) bool {
 	return strings.HasPrefix(s, EncPrefixV1) || strings.HasPrefix(s, EncPrefixV2)
+}
+
+// GenerateRandomKey 生成指定字节长度的随机密钥，返回 base64 编码的字符串
+func GenerateRandomKey(length int) string {
+	key := make([]byte, length)
+	if _, err := io.ReadFull(rand.Reader, key); err != nil {
+		// 如果加密随机源失败，使用较简单的方法（不推荐但保险）
+		for i := range key {
+			key[i] = byte(time.Now().UnixNano() % 256)
+			time.Sleep(time.Nanosecond)
+		}
+	}
+	return base64.StdEncoding.EncodeToString(key)
 }

@@ -1,5 +1,7 @@
 /data/
 
+plans/
+
 config.yaml
 image-bed
 *.exe

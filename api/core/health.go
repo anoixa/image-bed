@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/anoixa/image-bed/cache"
-	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/internal/repositories"
 	"github.com/anoixa/image-bed/storage"
 )
@@ -43,9 +42,9 @@ func checkStorageHealth(storageFactory *storage.Factory) string {
 		return "not initialized"
 	}
 
-	provider, err := storageFactory.Get(config.Get().Server.StorageConfig.Type)
-	if err != nil {
-		return "error: " + err.Error()
+	provider := storageFactory.GetDefault()
+	if provider == nil {
+		return "error: no default storage provider"
 	}
 
 	ctx := context.Background()
