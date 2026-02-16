@@ -197,6 +197,7 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 				configHandler := admin.NewConfigHandler(deps.ConfigManager, deps.StorageFactory)
 				adminGroup := v1.Group("/admin")
 				adminGroup.Use(middleware.Authorize("jwt"))
+				adminGroup.Use(middleware.RequireRole("admin"))
 				{
 					// 配置管理
 					configsGroup := adminGroup.Group("/configs")

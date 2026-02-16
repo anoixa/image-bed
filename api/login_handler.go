@@ -63,7 +63,7 @@ func (h *LoginHandler) LoginHandlerFunc(context *gin.Context) {
 	}
 
 	// 生成 JWT access tokens
-	accessToken, accessTokenExpiry, err := GenerateTokens(user.Username, user.ID)
+	accessToken, accessTokenExpiry, err := GenerateTokens(user.Username, user.ID, user.Role)
 	if err != nil {
 		common.RespondError(context, http.StatusInternalServerError, "Failed to generate authentication tokens")
 		return
@@ -131,7 +131,7 @@ func (h *LoginHandler) RefreshTokenHandlerFunc(context *gin.Context) {
 		return
 	}
 
-	accessToken, accessTokenExpiry, err := GenerateTokens(user.Username, user.ID)
+	accessToken, accessTokenExpiry, err := GenerateTokens(user.Username, user.ID, user.Role)
 	if err != nil {
 		common.RespondError(context, http.StatusInternalServerError, "Failed to generate new access tokens")
 		return

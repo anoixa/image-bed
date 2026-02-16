@@ -139,7 +139,7 @@ func TestTokenGeneration(t *testing.T) {
 	assert.NoError(t, err)
 
 	// 生成 Token
-	accessToken, expiry, err := GenerateTokens("testuser", 1)
+	accessToken, expiry, err := GenerateTokens("testuser", 1, "user")
 	assert.NoError(t, err)
 	assert.NotEmpty(t, accessToken)
 	assert.True(t, expiry.After(time.Now()))
@@ -149,6 +149,7 @@ func TestTokenGeneration(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "testuser", claims["username"])
 	assert.Equal(t, float64(1), claims["user_id"])
+	assert.Equal(t, "user", claims["role"])
 	assert.Equal(t, "access", claims["type"])
 }
 
@@ -157,7 +158,7 @@ func TestTokenGeneration_InvalidSecret(t *testing.T) {
 	// 重置密钥
 	jwtSecret = []byte{}
 
-	_, _, err := GenerateTokens("testuser", 1)
+	_, _, err := GenerateTokens("testuser", 1, "user")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not initialized")
 }
