@@ -21,7 +21,7 @@ var (
 	jwtExpiresIn        time.Duration
 	jwtRefreshExpiresIn time.Duration
 	authRepos           *repositories.Repositories
-	
+
 	// jwtConfigManager 配置管理器引用（用于热重载）
 	jwtConfigManager *configSvc.Manager
 	jwtConfigMutex   sync.RWMutex
@@ -35,21 +35,21 @@ func SetAuthRepositories(repos *repositories.Repositories) {
 // TokenInitFromManager 从配置管理器初始化 JWT
 func TokenInitFromManager(manager *configSvc.Manager) error {
 	jwtConfigManager = manager
-	
+
 	// 获取 JWT 配置
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	
+
 	jwtConfig, err := manager.GetJWTConfig(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get JWT config from database: %w", err)
 	}
-	
+
 	// 应用配置
 	if err := applyJWTConfig(jwtConfig); err != nil {
 		return err
 	}
-	
+
 	// 订阅配置变更事件（热重载）
 	manager.Subscribe(configSvc.EventConfigUpdated, func(event *configSvc.Event) {
 		if event.Config.Category == models.ConfigCategoryJWT {
@@ -61,7 +61,7 @@ func TokenInitFromManager(manager *configSvc.Manager) error {
 			}
 		}
 	})
-	
+
 	return nil
 }
 
@@ -71,10 +71,10 @@ func TokenInit(secret, expiresIn, refreshExpiresIn string) error {
 	if len(secret) < 32 {
 		return fmt.Errorf("JWT secret must be at least 32 characters long, got %d", len(secret))
 	}
-	
+
 	jwtConfigMutex.Lock()
 	defer jwtConfigMutex.Unlock()
-	
+
 	jwtSecret = []byte(secret)
 
 	duration, err := time.ParseDuration(expiresIn)
@@ -99,24 +99,24 @@ func applyJWTConfig(jwtConfig *configSvc.JWTConfig) error {
 	if len(jwtConfig.Secret) < 32 {
 		return fmt.Errorf("JWT secret must be at least 32 characters long, got %d", len(jwtConfig.Secret))
 	}
-	
+
 	duration, err := time.ParseDuration(jwtConfig.AccessTokenTTL)
 	if err != nil {
 		return fmt.Errorf("invalid JWT access token TTL: %s", jwtConfig.AccessTokenTTL)
 	}
-	
+
 	refreshDuration, err := time.ParseDuration(jwtConfig.RefreshTokenTTL)
 	if err != nil {
 		return fmt.Errorf("invalid JWT refresh token TTL: %s", jwtConfig.RefreshTokenTTL)
 	}
-	
+
 	jwtConfigMutex.Lock()
 	defer jwtConfigMutex.Unlock()
-	
+
 	jwtSecret = []byte(jwtConfig.Secret)
 	jwtExpiresIn = duration
 	jwtRefreshExpiresIn = refreshDuration
-	
+
 	log.Printf("[JWT] Config loaded from database - Access: %v, Refresh: %v\n", jwtExpiresIn, jwtRefreshExpiresIn)
 	return nil
 }
@@ -126,15 +126,15 @@ func reloadJWTConfig() error {
 	if jwtConfigManager == nil {
 		return errors.New("config manager not initialized")
 	}
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	
+
 	jwtConfig, err := jwtConfigManager.GetJWTConfig(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get JWT config: %w", err)
 	}
-	
+
 	return applyJWTConfig(jwtConfig)
 }
 
@@ -146,12 +146,12 @@ func GetJWTConfig() (secret []byte, expiresIn, refreshExpiresIn time.Duration) {
 }
 
 // GenerateTokens Generate access token and refresh token
-func GenerateTokens(username string, userID uint) (accessToken string, accessTokenExpiry time.Time, err error) {
+func GenerateTokens(username string, userID uint, role string) (accessToken string, accessTokenExpiry time.Time, err error) {
 	jwtConfigMutex.RLock()
 	secret := jwtSecret
 	expiresIn := jwtExpiresIn
 	jwtConfigMutex.RUnlock()
-	
+
 	if len(secret) == 0 {
 		err = errors.New("JWT secret is not initialized")
 		return
@@ -162,6 +162,7 @@ func GenerateTokens(username string, userID uint) (accessToken string, accessTok
 	accessClaims := jwt.MapClaims{
 		"username": username,
 		"user_id":  userID,
+		"role":     role,
 		"type":     "access",
 		"exp":      accessTokenExpiry.Unix(),
 		"iat":      time.Now().Unix(),
@@ -184,7 +185,7 @@ func GenerateRefreshToken() (refreshToken string, refreshTokenExpiry time.Time, 
 	jwtConfigMutex.RLock()
 	refreshExpiresIn := jwtRefreshExpiresIn
 	jwtConfigMutex.RUnlock()
-	
+
 	refreshToken, err = utils.GenerateRandomToken(64)
 
 	refreshTokenExpiry = time.Now().Add(refreshExpiresIn)
@@ -203,7 +204,7 @@ func Parse(tokenString string) (jwt.MapClaims, error) {
 	jwtConfigMutex.RLock()
 	secret := jwtSecret
 	jwtConfigMutex.RUnlock()
-	
+
 	if len(secret) == 0 {
 		return nil, errors.New("JWT secret is not initialized")
 	}
