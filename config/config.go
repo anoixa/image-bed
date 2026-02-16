@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -58,30 +59,6 @@ type RateLimitConfig struct {
 	ExpireTime time.Duration `mapstructure:"expire_time"`
 }
 
-// Addr 返回监听地址，格式为 "host:port"
-func (s ServerConfig) Addr() string {
-	if s.Host == "" {
-		s.Host = "0.0.0.0"
-	}
-	if s.Port == 0 {
-		s.Port = 8080
-	}
-	return fmt.Sprintf("%s:%d", s.Host, s.Port)
-}
-
-// BaseURL 返回基础 URL，用于生成图片链接
-func (s ServerConfig) BaseURL() string {
-	if s.Domain != "" {
-		return s.Domain
-	}
-	// 默认使用 localhost
-	host := s.Host
-	if host == "0.0.0.0" {
-		host = "localhost"
-	}
-	return fmt.Sprintf("http://%s:%d", host, s.Port)
-}
-
 type DatabaseConfig struct {
 	Type     string `mapstructure:"type"`
 	Host     string `mapstructure:"host"`
@@ -115,7 +92,7 @@ type MinioConfig struct {
 	BucketName      string `mapstructure:"bucket_name"`
 }
 
-// CacheConfig 缓存配置 
+// CacheConfig 缓存配置
 type CacheConfig struct {
 	MaxImageCacheSize  int64 `mapstructure:"max_image_cache_size_mb"` // 最大图片缓存大小（MB），0表示无限制
 	EnableImageCaching bool  `mapstructure:"enable_image_caching"`    // 是否启用图片缓存
@@ -187,7 +164,7 @@ func loadConfig() {
 	viper.SetDefault("server.upload.max_batch_total_mb", 500) // 批量上传总限制 500MB
 
 	// Worker pool defaults
-	viper.SetDefault("server.worker_count", 12) // 异步任务协程池worker数量，默认12
+	viper.SetDefault("server.worker_count", getCpus()) // 异步任务协程池worker数量
 
 	configFileFromFlag := viper.GetString("config_file_path")
 
@@ -214,9 +191,8 @@ func loadConfig() {
 			if configFileFromFlag != "" {
 				fmt.Fprintf(os.Stderr, "Error: Configuration file not found at specified path: %s\n", configFileFromFlag)
 				os.Exit(1)
-			} else {
-				fmt.Fprintln(os.Stderr, "Warning: Configuration file not found. Using defaults and environment variables.")
 			}
+			fmt.Fprintln(os.Stderr, "Warning: Configuration file not found. Using defaults and environment variables.")
 		} else {
 			fmt.Fprintf(os.Stderr, "Error reading configuration file: %v\n", err)
 			os.Exit(1)
@@ -229,4 +205,37 @@ func loadConfig() {
 		fmt.Fprintf(os.Stderr, "Fatal error: Unable to unmarshal config into struct, %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// Addr 返回监听地址，格式为 "host:port"
+func (s ServerConfig) Addr() string {
+	if s.Host == "" {
+		s.Host = "0.0.0.0"
+	}
+	if s.Port == 0 {
+		s.Port = 8080
+	}
+	return fmt.Sprintf("%s:%d", s.Host, s.Port)
+}
+
+// BaseURL 返回基础 URL，用于生成图片链接
+func (s ServerConfig) BaseURL() string {
+	if s.Domain != "" {
+		return s.Domain
+	}
+	// 默认使用 localhost
+	host := s.Host
+	if host == "0.0.0.0" {
+		host = "localhost"
+	}
+	return fmt.Sprintf("http://%s:%d", host, s.Port)
+}
+
+// getCpus 给定默认线程数量
+func getCpus() int {
+	workerCount := runtime.NumCPU()
+	if workerCount < 2 {
+		workerCount = 2
+	}
+	return workerCount
 }
