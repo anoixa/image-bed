@@ -11,7 +11,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -29,6 +28,16 @@ import (
 	"golang.org/x/sync/errgroup"
 	"gorm.io/gorm"
 )
+
+// getSafeFileExtension 根据MIME类型获取安全的文件扩展名
+func getSafeFileExtension(mimeType string) string {
+	ext := utils.GetSafeExtension(mimeType)
+	if ext == "" {
+		// 默认使用 .bin 表示未知类型
+		return ".bin"
+	}
+	return ext
+}
 
 // UploadImage 处理单图片上传
 func (h *Handler) UploadImage(c *gin.Context) {
@@ -309,7 +318,7 @@ func (h *Handler) processAndSaveImage(ctx context.Context, userID uint, fileHead
 	}
 
 	// 生成唯一标识符
-	ext := filepath.Ext(fileHeader.Filename)
+	ext := getSafeFileExtension(mimeType)
 	identifier := fmt.Sprintf("%d-%s%s", time.Now().UnixNano(), fileHash[:16], ext)
 
 	// 保存到存储

@@ -2,7 +2,6 @@ package di
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
@@ -10,6 +9,7 @@ import (
 	configSvc "github.com/anoixa/image-bed/internal/services/config"
 	"github.com/anoixa/image-bed/internal/repositories"
 	"github.com/anoixa/image-bed/storage"
+	"github.com/anoixa/image-bed/utils"
 )
 
 // Container 依赖注入容器 - 管理所有服务的生命周期
@@ -40,7 +40,7 @@ func (c *Container) Init() error {
 }
 
 func (c *Container) InitDatabase() error {
-	log.Println("Initializing DI container...")
+	utils.LogIfDev("Initializing DI container...")
 
 	if err := c.initDatabaseFactory(); err != nil {
 		return fmt.Errorf("failed to initialize database factory: %w", err)
@@ -48,7 +48,7 @@ func (c *Container) InitDatabase() error {
 
 	c.initRepositories()
 
-	log.Println("DI container initialized successfully")
+	utils.LogIfDev("DI container initialized successfully")
 	return nil
 }
 
@@ -75,14 +75,14 @@ func (c *Container) initConfigManager() error {
 		return fmt.Errorf("failed to initialize config manager: %w", err)
 	}
 	c.configManager = manager
-	log.Println("Config manager initialized")
+	utils.LogIfDev("Config manager initialized")
 	return nil
 }
 
 // initRepositories 初始化所有仓库
 func (c *Container) initRepositories() {
 	c.repositories = repositories.NewRepositories(c.databaseFactory.GetProvider())
-	log.Println("Repositories initialized")
+	utils.LogIfDev("Repositories initialized")
 }
 
 // GetRepositories 获取所有仓库
@@ -105,7 +105,7 @@ func (c *Container) initDatabaseFactory() error {
 		return err
 	}
 	c.databaseFactory = factory
-	log.Println("Database factory initialized")
+	utils.LogIfDev("Database factory initialized")
 	return nil
 }
 
@@ -117,7 +117,7 @@ func (c *Container) initStorageFactory() error {
 		return err
 	}
 	c.storageFactory = factory
-	log.Println("Storage factory initialized")
+	utils.LogIfDev("Storage factory initialized")
 	return nil
 }
 
@@ -129,7 +129,7 @@ func (c *Container) initCacheFactory() error {
 		return err
 	}
 	c.cacheFactory = factory
-	log.Println("Cache factory initialized")
+	utils.LogIfDev("Cache factory initialized")
 	return nil
 }
 
@@ -160,20 +160,20 @@ func (c *Container) GetConfig() *config.Config {
 
 // Close 关闭所有服务
 func (c *Container) Close() error {
-	log.Println("Closing DI container...")
+	utils.LogIfDev("Closing DI container...")
 
 	if c.cacheFactory != nil {
 		if err := c.cacheFactory.Close(); err != nil {
-			log.Printf("Error closing cache factory: %v", err)
+			utils.LogIfDevf("Error closing cache factory: %v", err)
 		}
 	}
 
 	if c.databaseFactory != nil {
 		if err := c.databaseFactory.Close(); err != nil {
-			log.Printf("Error closing database factory: %v", err)
+			utils.LogIfDevf("Error closing database factory: %v", err)
 		}
 	}
 
-	log.Println("DI container closed")
+	utils.LogIfDev("DI container closed")
 	return nil
 }
