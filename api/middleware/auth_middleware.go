@@ -13,6 +13,7 @@ import (
 const (
 	ContextUserIDKey   = "user_id"
 	ContextUsernameKey = "username"
+	ContextRoleKey     = "role"
 	AuthTypeKey        = "auth_type"
 
 	AuthTypeJWT         = "jwt"
@@ -78,9 +79,15 @@ func handleJwtAuth(c *gin.Context, token string) error {
 		return errors.New("invalid user ID in token")
 	}
 
+	role, _ := claims["role"].(string)
+	if role == "" {
+		role = "user" // 默认角色为普通用户
+	}
+
 	// 验证成功，将用户信息存入上下文
 	c.Set(ContextUserIDKey, uint(userID))
 	c.Set(ContextUsernameKey, username)
+	c.Set(ContextRoleKey, role)
 	c.Set(AuthTypeKey, AuthTypeJWT)
 
 	return nil

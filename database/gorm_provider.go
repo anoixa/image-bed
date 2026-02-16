@@ -55,6 +55,7 @@ func NewGormProvider(cfg *config.Config) (*GormProvider, error) {
 
 	switch dbType {
 	case "sqlite", "sqlite3", "":
+		dbType = "sqlite"
 		path := cfg.Server.DatabaseConfig.DatabaseFilePath
 		if path == "" {
 			path = "./data/images.db"
