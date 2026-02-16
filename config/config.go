@@ -149,7 +149,7 @@ func loadConfig() {
 
 	// Database connection pool defaults
 	viper.SetDefault("server.database.max_open_conns", 100)
-	viper.SetDefault("server.database.max_idle_conns", 10)
+	viper.SetDefault("server.database.max_idle_conns", 25) // 25% of max_open_conns for better performance
 	viper.SetDefault("server.database.conn_max_lifetime", 3600)
 	viper.SetDefault("server.storage.minio.max_idle_conns", 256)
 	viper.SetDefault("server.storage.minio.max_idle_conns_per_host", 16)

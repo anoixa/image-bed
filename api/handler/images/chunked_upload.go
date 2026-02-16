@@ -32,6 +32,8 @@ const (
 	MaxChunks = 1000
 	// UploadSessionExpiry 上传会话过期时间
 	UploadSessionExpiry = 24 * time.Hour
+	// MaxUploadSessions 最大上传会话数
+	MaxUploadSessions = 1000
 )
 
 // ChunkedUploadSession 分片上传会话
@@ -134,6 +136,13 @@ func (h *Handler) InitChunkedUpload(c *gin.Context) {
 	}
 
 	sessionsMu.Lock()
+	// 检查会话数量限制，防止内存耗尽
+	if len(sessions) >= MaxUploadSessions {
+		sessionsMu.Unlock()
+		os.RemoveAll(tempDir) // 清理已创建的临时目录
+		common.RespondError(c, http.StatusServiceUnavailable, "Server is busy, too many upload sessions")
+		return
+	}
 	sessions[sessionID] = session
 	sessionsMu.Unlock()
 
@@ -318,8 +327,8 @@ func (h *Handler) processChunkedUpload(ctx context.Context, session *ChunkedUplo
 	// 获取存储配置ID
 	storageConfigID := h.storageFactory.GetDefaultID()
 
-	// 生成唯一标识符
-	ext := filepath.Ext(session.FileName)
+	// 生成唯一标识符 - 使用安全的扩展名
+	ext := getSafeFileExtension(mimeType)
 	identifier := fmt.Sprintf("%d-%s%s", time.Now().UnixNano(), fileHash[:16], ext)
 
 	// 保存到存储

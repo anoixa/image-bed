@@ -3,11 +3,21 @@ package cache
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"time"
 
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 )
+
+// addJitter 添加随机抖动（±10%），防止缓存雪崩
+func addJitter(duration time.Duration) time.Duration {
+	if duration <= 0 {
+		return duration
+	}
+	jitter := time.Duration(rand.Int63n(int64(duration) / 10))
+	return duration + jitter
+}
 
 const (
 	// ImageCachePrefix 图片缓存前缀
@@ -81,7 +91,7 @@ func (h *Helper) CacheImage(ctx context.Context, image *models.Image) error {
 	if cfg != nil && cfg.Server.CacheConfig.ImageCacheTTL > 0 {
 		ttl = time.Duration(cfg.Server.CacheConfig.ImageCacheTTL) * time.Second
 	}
-	return h.factory.Set(ctx, key, image, ttl)
+	return h.factory.Set(ctx, key, image, addJitter(ttl))
 }
 
 // GetCachedImage 获取缓存的图片元数据
@@ -101,7 +111,7 @@ func (h *Helper) CacheUser(ctx context.Context, user *models.User) error {
 	}
 
 	key := UserCachePrefix + fmt.Sprintf("%d", user.ID)
-	return h.factory.Set(ctx, key, user, DefaultUserCacheExpiration)
+	return h.factory.Set(ctx, key, user, addJitter(DefaultUserCacheExpiration))
 }
 
 // GetCachedUser 获取缓存的用户信息
@@ -127,7 +137,7 @@ func (h *Helper) CacheDevice(ctx context.Context, device *models.Device) error {
 	}
 
 	key := DeviceCachePrefix + device.DeviceID
-	return h.factory.Set(ctx, key, device, DefaultDeviceCacheExpiration)
+	return h.factory.Set(ctx, key, device, addJitter(DefaultDeviceCacheExpiration))
 }
 
 // GetCachedDevice 获取缓存的设备信息
@@ -183,7 +193,7 @@ func (h *Helper) CacheStaticToken(ctx context.Context, token string, user *model
 	}
 
 	key := StaticTokenCachePrefix + token
-	return h.factory.Set(ctx, key, user, DefaultStaticTokenCacheExpiration)
+	return h.factory.Set(ctx, key, user, addJitter(DefaultStaticTokenCacheExpiration))
 }
 
 // GetCachedStaticToken 获取缓存的 static_token 用户信息
@@ -219,7 +229,7 @@ func (h *Helper) CacheEmptyValue(ctx context.Context, key string) error {
 	}
 
 	cacheKey := EmptyValueCachePrefix + key
-	return h.factory.Set(ctx, cacheKey, "EMPTY", DefaultEmptyValueCacheExpiration)
+	return h.factory.Set(ctx, cacheKey, "EMPTY", addJitter(DefaultEmptyValueCacheExpiration))
 }
 
 // IsEmptyValue 检查是否为空值标记
@@ -260,7 +270,7 @@ func (h *Helper) CacheImageData(ctx context.Context, identifier string, imageDat
 	if cfg != nil && cfg.Server.CacheConfig.ImageDataCacheTTL > 0 {
 		expiration = time.Duration(cfg.Server.CacheConfig.ImageDataCacheTTL) * time.Second
 	}
-	return h.factory.Set(ctx, key, imageData, expiration)
+	return h.factory.Set(ctx, key, imageData, addJitter(expiration))
 }
 
 // GetCachedImageData 获取缓存的图片数据
@@ -296,7 +306,7 @@ func (h *Helper) CacheAlbum(ctx context.Context, album *models.Album) error {
 	}
 
 	key := AlbumCachePrefix + fmt.Sprintf("%d", album.ID)
-	return h.factory.Set(ctx, key, album, DefaultAlbumCacheExpiration)
+	return h.factory.Set(ctx, key, album, addJitter(DefaultAlbumCacheExpiration))
 }
 
 // GetCachedAlbum 获取缓存的相册信息
@@ -342,7 +352,7 @@ func (h *Helper) incrementAlbumListVersion(ctx context.Context, userID uint) err
 	versionKey := fmt.Sprintf("%s%d", AlbumListVersionPrefix, userID)
 	version := h.getAlbumListVersion(ctx, userID)
 	version++
-	return h.factory.Set(ctx, versionKey, version, DefaultAlbumListVersionExpiration)
+	return h.factory.Set(ctx, versionKey, version, addJitter(DefaultAlbumListVersionExpiration))
 }
 
 // CacheAlbumList 缓存用户相册列表（包含版本号）
@@ -353,7 +363,7 @@ func (h *Helper) CacheAlbumList(ctx context.Context, userID uint, page, limit in
 
 	version := h.getAlbumListVersion(ctx, userID)
 	key := fmt.Sprintf("%suser:%d:v%d:page:%d:limit:%d", AlbumListCachePrefix, userID, version, page, limit)
-	return h.factory.Set(ctx, key, data, DefaultAlbumListCacheExpiration)
+	return h.factory.Set(ctx, key, data, addJitter(DefaultAlbumListCacheExpiration))
 }
 
 // GetCachedAlbumList 获取缓存的用户相册列表（检查版本号）
