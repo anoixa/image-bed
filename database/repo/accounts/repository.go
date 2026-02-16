@@ -57,6 +57,7 @@ func (r *Repository) CreateDefaultAdminUser() {
 			user := &models.User{
 				Username: "admin",
 				Password: hashedPassword,
+				Role:     models.RoleAdmin,
 			}
 
 			if err := tx.Create(user).Error; err != nil {

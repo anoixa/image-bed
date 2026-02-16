@@ -47,7 +47,16 @@ func NewFactory(db *gorm.DB, manager *configSvc.Manager) (*Factory, error) {
 	}
 
 	if len(factory.providers) == 0 {
-		return nil, fmt.Errorf("no storage providers were successfully initialized")
+		log.Println("[StorageFactory] No storage providers found in database, using default local storage")
+		provider, err := NewLocalStorage("./data/upload")
+		if err != nil {
+			return nil, fmt.Errorf("failed to create default storage: %w", err)
+		}
+		factory.providers[0] = provider
+		factory.providersByName["default"] = provider
+		factory.defaultProvider = provider
+		factory.defaultID = 0
+		factory.defaultName = "default"
 	}
 
 	return factory, nil
