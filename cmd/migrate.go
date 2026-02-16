@@ -314,9 +314,7 @@ func migrateUsers(ctx context.Context, sourceDB, targetDB *gorm.DB, stats *migra
 		}
 
 		if shouldCreate {
-			// 清除自增ID，让数据库重新分配（如果需要）
-			user.CreatedAt = user.CreatedAt
-			user.UpdatedAt = user.UpdatedAt
+			// 处理软删除时间
 			if user.DeletedAt.Valid {
 				user.DeletedAt = gorm.DeletedAt{Valid: true, Time: user.DeletedAt.Time}
 			}
