@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anoixa/image-bed/config"
+	"github.com/anoixa/image-bed/utils"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -72,7 +73,7 @@ func NewGormProvider(cfg *config.Config) (*GormProvider, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to connect to SQLite3 database: %w", err)
 		}
-		log.Printf("Using SQLite database file: %s", path)
+		utils.LogIfDevf("Using SQLite database file: %s", path)
 
 	case "postgres", "postgresql":
 		dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
@@ -92,7 +93,7 @@ func NewGormProvider(cfg *config.Config) (*GormProvider, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to connect to PostgreSQL database: %w", err)
 		}
-		log.Printf("Connected to PostgreSQL database on %s:%d", host, port)
+		utils.LogIfDevf("Connected to PostgreSQL database on %s:%d", host, port)
 
 	default:
 		return nil, fmt.Errorf("unsupported database type: %s", dbType)

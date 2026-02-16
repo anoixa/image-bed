@@ -99,9 +99,15 @@ func handleStaticTokenAuth(c *gin.Context, token string) error {
 		return errors.New("invalid token")
 	}
 
+	role := user.Role
+	if role == "" {
+		role = "user" // 默认角色为普通用户
+	}
+
 	//将用户信息存入上下文
 	c.Set(ContextUserIDKey, user.ID)
 	c.Set(ContextUsernameKey, user.Username)
+	c.Set(ContextRoleKey, role)
 	c.Set(AuthTypeKey, AuthTypeStaticToken)
 
 	return nil

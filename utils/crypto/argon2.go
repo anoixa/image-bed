@@ -20,8 +20,8 @@ const (
 	argon2Memory uint32 = 65536 // 64 MB
 
 	// iterations 是迭代次数（时间成本）
-	// 通常推荐 2 到 4 次，更高的迭代次数会增加计算时间，降低暴力破解速度。
-	argon2Iterations uint32 = 2
+	// OWASP 2023 推荐至少 3 次
+	argon2Iterations uint32 = 3
 
 	// parallelism 是并行度（线程数）
 	// 通常设置为 CPU 核心数或其一半。

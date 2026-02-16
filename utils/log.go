@@ -1,8 +1,11 @@
 package utils
 
 import (
+	"log"
 	"strings"
 	"unicode"
+
+	"github.com/anoixa/image-bed/config"
 )
 
 // maxLogMessageLen 日志消息最大长度，防止日志过大
@@ -32,4 +35,20 @@ func SanitizeLogUsername(username string) string {
 		username = username[:50] + "..."
 	}
 	return SanitizeLogMessage(username)
+}
+
+// LogIfDev 仅在开发版本时输出日志
+// 生产版本(CommitHash != "n/a")不输出任何日志
+func LogIfDev(msg string) {
+	if config.CommitHash == "n/a" {
+		log.Println(msg)
+	}
+}
+
+// LogIfDevf 仅在开发版本时格式化输出日志
+// 生产版本(CommitHash != "n/a")不输出任何日志
+func LogIfDevf(format string, v ...interface{}) {
+	if config.CommitHash == "n/a" {
+		log.Printf(format, v...)
+	}
 }
