@@ -33,14 +33,14 @@ type ServerDependencies struct {
 // 启动gin
 func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	cfg := config.Get()
-	if config.CommitHash != "n/a" {
-		gin.SetMode(gin.ReleaseMode)
-	}
-
 	router := gin.New()
 
 	// 全局中间件
-	router.Use(gin.Logger())
+	// 仅在开发版本时启用 gin 日志
+	if config.CommitHash == "n/a" {
+		gin.SetMode(gin.ReleaseMode)
+		router.Use(gin.Logger())
+	}
 	router.Use(gin.Recovery())
 	router.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{cfg.Server.BaseURL()},
