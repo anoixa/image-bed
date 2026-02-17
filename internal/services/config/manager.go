@@ -10,18 +10,18 @@ import (
 
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/configs"
+	cryptoservice "github.com/anoixa/image-bed/internal/services/crypto"
 	cryptoutils "github.com/anoixa/image-bed/utils/crypto"
 	"gorm.io/gorm"
 )
 
 // Manager 配置管理器
 type Manager struct {
-	db         *gorm.DB
-	repo       configs.Repository
-	keyManager *cryptoutils.MasterKeyManager
-	encryptor  *cryptoutils.ConfigEncryptor
-	eventBus   *EventBus
-	dataPath   string
+	db        *gorm.DB
+	repo      configs.Repository
+	crypto    *cryptoservice.Service
+	eventBus  *EventBus
+	dataPath  string
 }
 
 // JWTConfig JWT 配置结构
@@ -34,11 +34,11 @@ type JWTConfig struct {
 // NewManager 创建配置管理器
 func NewManager(db *gorm.DB, dataPath string) *Manager {
 	return &Manager{
-		db:         db,
-		repo:       configs.NewRepository(db),
-		keyManager: cryptoutils.NewMasterKeyManager(dataPath),
-		eventBus:   NewEventBus(),
-		dataPath:   dataPath,
+		db:       db,
+		repo:     configs.NewRepository(db),
+		crypto:   cryptoservice.NewService(dataPath),
+		eventBus: NewEventBus(),
+		dataPath: dataPath,
 	}
 }
 
@@ -56,11 +56,9 @@ func (m *Manager) Initialize() error {
 		return count > 0, nil
 	}
 
-	if err := m.keyManager.Initialize(checkDataExists); err != nil {
-		return fmt.Errorf("failed to initialize master key: %w", err)
+	if err := m.crypto.Initialize(checkDataExists); err != nil {
+		return fmt.Errorf("failed to initialize crypto service: %w", err)
 	}
-
-	m.encryptor = cryptoutils.NewConfigEncryptor(m.keyManager.GetKey())
 
 	// 验证/创建 Canary
 	if err := m.ensureCanary(); err != nil {
@@ -137,7 +135,7 @@ func (m *Manager) ensureCanary() error {
 	}
 
 	// 存在，验证能否解密
-	_, err = m.encryptor.Decrypt(canary.ConfigJSON)
+	_, err = m.crypto.DecryptString(canary.ConfigJSON)
 	if err != nil {
 		return fmt.Errorf("failed to decrypt canary, master key may be incorrect: %w", err)
 	}
@@ -155,7 +153,7 @@ func (m *Manager) createCanary(ctx context.Context) error {
 	}
 
 	jsonData, _ := json.Marshal(canaryData)
-	encrypted := m.encryptor.Encrypt(string(jsonData))
+	encrypted := m.crypto.EncryptString(string(jsonData))
 
 	canary := &models.SystemConfig{
 		Category:    models.ConfigCategorySystem,
@@ -177,28 +175,12 @@ func (m *Manager) createCanary(ctx context.Context) error {
 
 // EncryptConfig 加密配置
 func (m *Manager) EncryptConfig(config map[string]interface{}) (string, error) {
-	jsonData, err := json.Marshal(config)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal config: %w", err)
-	}
-
-	encrypted := m.encryptor.Encrypt(string(jsonData))
-	return encrypted, nil
+	return m.crypto.EncryptJSON(config)
 }
 
 // DecryptConfig 解密配置
 func (m *Manager) DecryptConfig(encrypted string) (map[string]interface{}, error) {
-	decrypted, err := m.encryptor.Decrypt(encrypted)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decrypt config: %w", err)
-	}
-
-	var config map[string]interface{}
-	if err := json.Unmarshal([]byte(decrypted), &config); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
-	}
-
-	return config, nil
+	return m.crypto.DecryptJSON(encrypted)
 }
 
 // CreateConfig 创建配置
@@ -459,9 +441,27 @@ func MaskSensitiveData(config map[string]interface{}) map[string]interface{} {
 	return result
 }
 
-// GetEncryptor 获取加密器（用于其他服务）
-func (m *Manager) GetEncryptor() *cryptoutils.ConfigEncryptor {
-	return m.encryptor
+// GetCrypto 获取加密服务（用于其他服务）
+func (m *Manager) GetCrypto() *cryptoservice.Service {
+	return m.crypto
+}
+
+// GetEncryptor 获取加密器（用于其他服务）- 向后兼容
+// Deprecated: 使用 GetCrypto() 代替
+func (m *Manager) GetEncryptor() interface{ Encrypt(string) string; Decrypt(string) (string, error) } {
+	return &encryptorAdapter{m.crypto}
+}
+
+type encryptorAdapter struct {
+	crypto *cryptoservice.Service
+}
+
+func (a *encryptorAdapter) Encrypt(s string) string {
+	return a.crypto.EncryptString(s)
+}
+
+func (a *encryptorAdapter) Decrypt(s string) (string, error) {
+	return a.crypto.DecryptString(s)
 }
 
 // GetRepo 获取仓库（用于其他服务）

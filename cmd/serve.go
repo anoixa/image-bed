@@ -16,7 +16,7 @@ import (
 	handlerImages "github.com/anoixa/image-bed/api/handler/images"
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/repo/images"
-	"github.com/anoixa/image-bed/internal/di"
+	"github.com/anoixa/image-bed/internal/app"
 	imageSvc "github.com/anoixa/image-bed/internal/services/image"
 	"github.com/anoixa/image-bed/utils/async"
 	"github.com/spf13/cobra"
@@ -46,7 +46,7 @@ func RunServer() {
 		log.Fatalf("Failed to create temp directory: %v", err)
 	}
 
-	container := di.NewContainer(cfg)
+	container := app.NewContainer(cfg)
 
 	if err := container.InitDatabase(); err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
@@ -136,7 +136,7 @@ func RunServer() {
 }
 
 // InitDatabase init database using DI container
-func InitDatabase(container *di.Container) {
+func InitDatabase(container *app.Container) {
 	factory := container.GetDatabaseFactory()
 	log.Printf("Initializing database, database type: %s", factory.GetProvider().Name())
 
