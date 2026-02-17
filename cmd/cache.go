@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/anoixa/image-bed/config"
-	"github.com/anoixa/image-bed/internal/di"
+	"github.com/anoixa/image-bed/internal/app"
 	"github.com/spf13/cobra"
 )
 
@@ -48,7 +48,7 @@ func runCacheClear(imageOnly, all bool, pattern string) error {
 	config.InitConfig()
 	cfg := config.Get()
 
-	container := di.NewContainer(cfg)
+	container := app.NewContainer(cfg)
 	if err := container.Init(); err != nil {
 		return fmt.Errorf("failed to initialize container: %w", err)
 	}

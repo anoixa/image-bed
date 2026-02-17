@@ -218,6 +218,11 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 					// 存储提供者管理
 					adminGroup.GET("/storage/providers", configHandler.ListStorageProviders)  // GET /api/v1/admin/storage/providers
 					adminGroup.POST("/storage/reload/:id", configHandler.ReloadStorageConfig) // POST /api/v1/admin/storage/reload/:id
+
+					// 转换配置管理
+					conversionHandler := admin.NewConversionHandler(deps.ConfigManager)
+					adminGroup.GET("/conversion", conversionHandler.GetConfig)  // GET /api/v1/admin/conversion
+					adminGroup.PUT("/conversion", conversionHandler.UpdateConfig) // PUT /api/v1/admin/conversion
 				}
 			}
 		}

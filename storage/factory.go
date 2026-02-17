@@ -11,7 +11,7 @@ import (
 
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
-	configSvc "github.com/anoixa/image-bed/internal/services/config"
+	cryptoservice "github.com/anoixa/image-bed/internal/services/crypto"
 	"gorm.io/gorm"
 )
 
@@ -25,20 +25,17 @@ type Factory struct {
 
 	mu sync.RWMutex // 保护上述字段
 
-	db        *gorm.DB
-	encryptor interface{ Decrypt(string) (string, error) }
+	db     *gorm.DB
+	crypto *cryptoservice.Service
 }
 
 // NewFactory 创建存储工厂
-func NewFactory(db *gorm.DB, manager *configSvc.Manager) (*Factory, error) {
+func NewFactory(db *gorm.DB, crypto *cryptoservice.Service) (*Factory, error) {
 	factory := &Factory{
 		providers:       make(map[uint]Provider),
 		providersByName: make(map[string]Provider),
 		db:              db,
-	}
-
-	if manager != nil {
-		factory.encryptor = manager.GetEncryptor()
+		crypto:          crypto,
 	}
 
 	if db != nil {
@@ -92,8 +89,8 @@ func (f *Factory) loadProvider(cfg *models.SystemConfig) error {
 	// 解密配置
 	var configJSON string
 	var err error
-	if f.encryptor != nil {
-		configJSON, err = f.encryptor.Decrypt(cfg.ConfigJSON)
+	if f.crypto != nil {
+		configJSON, err = f.crypto.DecryptString(cfg.ConfigJSON)
 		if err != nil {
 			return fmt.Errorf("failed to decrypt config: %w", err)
 		}
@@ -224,8 +221,8 @@ func (f *Factory) ReloadConfig(configID uint) error {
 func (f *Factory) createProvider(cfg *models.SystemConfig) (Provider, error) {
 	var configJSON string
 	var err error
-	if f.encryptor != nil {
-		configJSON, err = f.encryptor.Decrypt(cfg.ConfigJSON)
+	if f.crypto != nil {
+		configJSON, err = f.crypto.DecryptString(cfg.ConfigJSON)
 		if err != nil {
 			return nil, err
 		}
