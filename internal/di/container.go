@@ -6,8 +6,10 @@ import (
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database"
+	"github.com/anoixa/image-bed/database/repo/images"
 	configSvc "github.com/anoixa/image-bed/internal/services/config"
 	"github.com/anoixa/image-bed/internal/repositories"
+	"github.com/anoixa/image-bed/internal/services/image"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
 )
@@ -20,6 +22,17 @@ type Container struct {
 	databaseFactory *database.Factory
 	configManager   *configSvc.Manager
 	repositories    *repositories.Repositories
+	converter       *image.Converter
+}
+
+// GetConverter 获取图片转换器
+func (c *Container) GetConverter() *image.Converter {
+	if c.converter == nil {
+		db := c.databaseFactory.GetProvider().DB()
+		variantRepo := images.NewVariantRepository(db)
+		c.converter = image.NewConverter(c.configManager, variantRepo, c.storageFactory.GetDefault())
+	}
+	return c.converter
 }
 
 // NewContainer 创建新的依赖注入容器

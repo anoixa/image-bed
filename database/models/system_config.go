@@ -24,6 +24,8 @@ const (
 	ConfigCategoryRateLimit ConfigCategory = "rate_limit"
 	// ConfigCategorySystem 系统内部配置
 	ConfigCategorySystem ConfigCategory = "system"
+	// ConfigCategoryConversion 格式转换配置
+	ConfigCategoryConversion ConfigCategory = "conversion"
 )
 
 // SystemConfig 通用系统配置表

@@ -67,7 +67,60 @@ func (m *Manager) Initialize() error {
 		return fmt.Errorf("failed to ensure canary: %w", err)
 	}
 
+	// 创建默认转换配置（如果不存在）
+	if err := m.ensureDefaultConversionConfig(); err != nil {
+		return fmt.Errorf("failed to ensure conversion config: %w", err)
+	}
+
 	log.Println("[ConfigManager] Initialized successfully")
+	return nil
+}
+
+// ensureDefaultConversionConfig 确保存在默认的图片转换配置
+func (m *Manager) ensureDefaultConversionConfig() error {
+	ctx := context.Background()
+
+	// 检查是否已有转换配置
+	count, err := m.repo.CountByCategory(ctx, models.ConfigCategoryConversion)
+	if err != nil {
+		if strings.Contains(err.Error(), "no such table") {
+			return nil // 表不存在，跳过
+		}
+		return err
+	}
+
+	// 如果已有转换配置，跳过
+	if count > 0 {
+		return nil
+	}
+
+	// 创建默认配置
+	configData := map[string]interface{}{
+		"enabled_formats":     []string{"webp"},
+		"webp_quality":        85,
+		"avif_quality":        80,
+		"avif_effort":         4,
+		"max_dimension":       0,
+		"skip_smaller_than":   0,
+		"max_retries":         3,
+		"retry_base_interval": 300,
+	}
+
+	req := &models.SystemConfigStoreRequest{
+		Category:    models.ConfigCategoryConversion,
+		Name:        "Image Conversion Settings",
+		Config:      configData,
+		IsEnabled:   BoolPtr(true),
+		IsDefault:   BoolPtr(true),
+		Description: "Default image format conversion settings (WebP enabled by default)",
+	}
+
+	_, err = m.CreateConfig(ctx, req, 0)
+	if err != nil {
+		return err
+	}
+
+	log.Println("[ConfigManager] Default conversion config created (WebP enabled)")
 	return nil
 }
 
@@ -475,8 +528,8 @@ func (m *Manager) EnsureDefaultJWTConfig(ctx context.Context) error {
 		Category:    models.ConfigCategoryJWT,
 		Name:        "JWT Settings",
 		Config:      configData,
-		IsEnabled:   boolPtr(true),
-		IsDefault:   boolPtr(true),
+		IsEnabled:   BoolPtr(true),
+		IsDefault:   BoolPtr(true),
 		Description: "JWT authentication configuration",
 	}
 
@@ -512,7 +565,7 @@ func (m *Manager) UpdateJWTConfig(ctx context.Context, jwtConfig *JWTConfig) err
 		Category:    models.ConfigCategoryJWT,
 		Name:        config.Name,
 		Config:      configData,
-		IsEnabled:   boolPtr(true),
+		IsEnabled:   BoolPtr(true),
 		Description: config.Description,
 	}
 
@@ -534,7 +587,7 @@ func getStringFromMap(m map[string]interface{}, key, defaultValue string) string
 	return defaultValue
 }
 
-// boolPtr 返回 bool 指针
-func boolPtr(b bool) *bool {
+// BoolPtr 返回 bool 指针
+func BoolPtr(b bool) *bool {
 	return &b
 }
