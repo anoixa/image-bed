@@ -15,7 +15,9 @@ import (
 	"github.com/anoixa/image-bed/api/core"
 	handlerImages "github.com/anoixa/image-bed/api/handler/images"
 	"github.com/anoixa/image-bed/config"
+	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/internal/di"
+	imageSvc "github.com/anoixa/image-bed/internal/services/image"
 	"github.com/anoixa/image-bed/utils/async"
 	"github.com/spf13/cobra"
 )
@@ -59,6 +61,16 @@ func RunServer() {
 	// 初始化异步任务协程池
 	async.InitGlobalPool(cfg.Server.WorkerCount, 1000)
 
+	// 初始化图片转换器和重试扫描器
+	converter := container.GetConverter()
+	variantRepo := images.NewVariantRepository(container.GetDatabaseFactory().GetProvider().DB())
+	retryScanner := imageSvc.NewRetryScanner(
+		variantRepo,
+		converter,
+		5*time.Minute,
+	)
+	retryScanner.Start()
+
 	// 初始化 JWT（从数据库加载配置）
 	if err := api.TokenInitFromManager(container.GetConfigManager()); err != nil {
 		log.Printf("[Warning] Failed to initialize JWT from database: %v", err)
@@ -75,6 +87,7 @@ func RunServer() {
 		CacheFactory:   container.GetCacheFactory(),
 		Repositories:   container.GetRepositories(),
 		ConfigManager:  container.GetConfigManager(),
+		Converter:      converter,
 	}
 
 	// 启动gin
@@ -103,6 +116,9 @@ func RunServer() {
 		cleanup()
 		log.Println("Cleanup tasks finished.")
 	}
+
+	// 停止重试扫描器
+	retryScanner.Stop()
 
 	// 关闭异步任务池
 	async.StopGlobalPool()
@@ -155,32 +171,24 @@ func cleanOldTempFiles() {
 	}
 
 	cutoff := time.Now().Add(-24 * time.Hour)
-	var cleaned int
-
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if entry.IsDir() {
 			continue
 		}
-
 		info, err := entry.Info()
 		if err != nil {
 			continue
 		}
-
 		if info.ModTime().Before(cutoff) {
-			sessionDir := filepath.Join(tempDir, entry.Name())
-			if err := os.RemoveAll(sessionDir); err == nil {
-				cleaned++
+			path := filepath.Join(tempDir, entry.Name())
+			if err := os.Remove(path); err != nil {
+				log.Printf("Failed to remove old temp file %s: %v", path, err)
 			}
 		}
 	}
-
-	if cleaned > 0 {
-		log.Printf("Cleaned %d expired temp directories on startup", cleaned)
-	}
 }
 
-// startChunkedUploadCleanup 启动分片上传会话定期清理
+// startChunkedUploadCleanup 定期清理过期的分片上传会话
 func startChunkedUploadCleanup() {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()

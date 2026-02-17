@@ -84,8 +84,8 @@ func (m *Manager) migrateJWT(ctx context.Context, secret, expiresIn, refreshExpi
 		Category:    models.ConfigCategoryJWT,
 		Name:        "JWT Settings",
 		Config:      configData,
-		IsEnabled:   boolPtr(true),
-		IsDefault:   boolPtr(true),
+		IsEnabled:   BoolPtr(true),
+		IsDefault:   BoolPtr(true),
 		Description: "Migrated from config.yaml",
 	}
 
@@ -130,8 +130,8 @@ func (m *Manager) migrateStorage(ctx context.Context, legacy map[string]interfac
 		Category:    models.ConfigCategoryStorage,
 		Name:        "Default Storage",
 		Config:      configData,
-		IsEnabled:   boolPtr(true),
-		IsDefault:   boolPtr(true),
+		IsEnabled:   BoolPtr(true),
+		IsDefault:   BoolPtr(true),
 		Description: "Migrated from config.yaml",
 	}
 
@@ -182,8 +182,8 @@ func (m *Manager) migrateCache(ctx context.Context, legacy map[string]interface{
 		Category:    models.ConfigCategoryCache,
 		Name:        "Default Cache",
 		Config:      configData,
-		IsEnabled:   boolPtr(true),
-		IsDefault:   boolPtr(true),
+		IsEnabled:   BoolPtr(true),
+		IsDefault:   BoolPtr(true),
 		Description: "Migrated from config.yaml",
 	}
 
@@ -253,8 +253,8 @@ func (m *Manager) createDefaultStorage(ctx context.Context) error {
 		Category:    models.ConfigCategoryStorage,
 		Name:        "Local Storage",
 		Config:      configData,
-		IsEnabled:   boolPtr(true),
-		IsDefault:   boolPtr(true),
+		IsEnabled:   BoolPtr(true),
+		IsDefault:   BoolPtr(true),
 		Description: "Default local file storage",
 	}
 
@@ -281,8 +281,8 @@ func (m *Manager) createDefaultCache(ctx context.Context) error {
 		Category:    models.ConfigCategoryCache,
 		Name:        "Memory Cache",
 		Config:      configData,
-		IsEnabled:   boolPtr(true),
-		IsDefault:   boolPtr(true),
+		IsEnabled:   BoolPtr(true),
+		IsDefault:   BoolPtr(true),
 		Description: "Default in-memory cache",
 	}
 
@@ -329,4 +329,4 @@ func getInt64FromMap(m map[string]interface{}, key string, defaultVal int64) int
 	}
 }
 
-// 注意：getStringFromMap 和 boolPtr 函数定义在 manager.go 中
+// 注意：getStringFromMap 和 BoolPtr 函数定义在 manager.go 中

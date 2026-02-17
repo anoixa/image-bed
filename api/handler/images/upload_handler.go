@@ -13,7 +13,6 @@ import (
 	"os"
 	"strconv"
 	"sync"
-	"time"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
@@ -275,6 +274,9 @@ func (h *Handler) processAndSaveImage(ctx context.Context, userID uint, fileHead
 	image, err := h.repo.GetImageByHash(fileHash)
 	if err == nil {
 		go h.warmCache(image)
+
+		// 触发 WebP 转换（幂等，如果已有变体不会重复创建）
+		go h.converter.TriggerWebPConversion(image)
 		return image, true, nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -297,6 +299,9 @@ func (h *Handler) processAndSaveImage(ctx context.Context, userID uint, fileHead
 		}
 
 		go h.warmCache(restoredImage)
+
+		// 触发 WebP 转换（幂等，如果已有变体不会重复创建）
+		go h.converter.TriggerWebPConversion(restoredImage)
 		return restoredImage, true, nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -318,8 +323,7 @@ func (h *Handler) processAndSaveImage(ctx context.Context, userID uint, fileHead
 	}
 
 	// 生成唯一标识符
-	ext := getSafeFileExtension(mimeType)
-	identifier := fmt.Sprintf("%d-%s%s", time.Now().UnixNano(), fileHash[:16], ext)
+	identifier := fileHash[:12]
 
 	// 保存到存储
 	if _, err := tempFile.Seek(0, io.SeekStart); err != nil {
@@ -350,6 +354,9 @@ func (h *Handler) processAndSaveImage(ctx context.Context, userID uint, fileHead
 	// 异步提取图片尺寸
 	async.ExtractImageDimensionsAsync(identifier, storageConfigID, h.repo.DB(), storageProvider)
 	go h.warmCache(newImage)
+
+	// 触发 WebP 转换
+	go h.converter.TriggerWebPConversion(newImage)
 
 	return newImage, false, nil
 }

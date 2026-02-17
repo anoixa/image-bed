@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
 	"sync"
 	"time"
 
@@ -268,7 +269,7 @@ func (f *Factory) GetByID(id uint) (Provider, error) {
 	return provider, nil
 }
 
-// GetByName 按名称获取 provider
+// GetByName 按 ID 或名称获取 provider（优先按 ID）
 func (f *Factory) GetByName(name string) (Provider, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
@@ -280,11 +281,21 @@ func (f *Factory) GetByName(name string) (Provider, error) {
 		return f.defaultProvider, nil
 	}
 
-	provider, ok := f.providersByName[name]
-	if !ok {
-		return nil, fmt.Errorf("storage provider '%s' not found", name)
+	// 优先尝试按 ID 查找（传入的是数字 ID）
+	if id, err := strconv.ParseUint(name, 10, 32); err == nil {
+		provider, ok := f.providers[uint(id)]
+		if ok {
+			return provider, nil
+		}
 	}
-	return provider, nil
+
+	// 按名称查找
+	provider, ok := f.providersByName[name]
+	if ok {
+		return provider, nil
+	}
+
+	return nil, fmt.Errorf("storage provider '%s' not found", name)
 }
 
 // GetDefault 获取默认 provider
@@ -308,7 +319,7 @@ func (f *Factory) GetDefaultName() string {
 	return f.defaultName
 }
 
-// GetIDByName 按名称获取 provider ID
+// GetIDByName 按 ID 或名称获取 provider ID（优先按 ID）
 func (f *Factory) GetIDByName(name string) (uint, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
@@ -320,6 +331,14 @@ func (f *Factory) GetIDByName(name string) (uint, error) {
 		return f.defaultID, nil
 	}
 
+	// 优先尝试按 ID 查找（传入的是数字 ID）
+	if id, err := strconv.ParseUint(name, 10, 32); err == nil {
+		if _, ok := f.providers[uint(id)]; ok {
+			return uint(id), nil
+		}
+	}
+
+	// 按名称查找
 	for id, provider := range f.providers {
 		if provider.Name() == name {
 			return id, nil

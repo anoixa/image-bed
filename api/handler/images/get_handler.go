@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -23,6 +22,7 @@ import (
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
+	"github.com/anoixa/image-bed/internal/services/image"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/anoixa/image-bed/utils/pool"
 	"github.com/gin-gonic/gin"
@@ -39,7 +39,7 @@ var (
 	ErrTemporaryFailure = errors.New("temporary failure, should be retried")
 )
 
-// GetImage 获取图片
+// GetImage 获取图片（支持格式协商）
 func (h *Handler) GetImage(c *gin.Context) {
 	identifier := c.Param("identifier")
 	if identifier == "" {
@@ -62,13 +62,158 @@ func (h *Handler) GetImage(c *gin.Context) {
 		}
 	}
 
-	imageData, err := h.cacheHelper.GetCachedImageData(c.Request.Context(), identifier)
+	// 格式协商：选择最佳格式
+	// 使用后台 context，避免客户端断开导致查询失败
+	acceptHeader := c.GetHeader("Accept")
+	variantResult, err := h.variantService.SelectBestVariant(context.Background(), image, acceptHeader)
+	if err != nil {
+		// 协商失败，回退到原图
+		log.Printf("[GetImage] Format negotiation failed for %s: %v", identifier, err)
+		h.serveOriginalImage(c, image)
+		return
+	}
+
+	// 如果需要 WebP/AVIF 但变体不存在，触发后台转换
+	if !variantResult.IsOriginal && variantResult.Variant == nil {
+		// 异步触发转换
+		go h.converter.TriggerWebPConversion(image)
+		// 返回原图
+		h.serveOriginalImage(c, image)
+		return
+	}
+
+	// 使用协商后的格式
+	if variantResult.IsOriginal {
+		h.serveOriginalImage(c, image)
+	} else {
+		h.serveVariantImage(c, image, variantResult)
+	}
+}
+
+// serveOriginalImage 提供原图
+func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
+	// 先尝试缓存
+	imageData, err := h.cacheHelper.GetCachedImageData(c.Request.Context(), image.Identifier)
 	if err == nil {
 		h.serveImageData(c, image, imageData)
 		return
 	}
 
+	// 流式传输
 	h.streamAndCacheImage(c, image)
+}
+
+// serveVariantImage 提供格式变体
+func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *image.VariantResult) {
+	variant := result.Variant
+	identifier := variant.Identifier
+
+	// 尝试从缓存获取
+	// 使用后台 context，避免客户端断开导致读取失败
+	imageData, err := h.cacheHelper.GetCachedImageData(context.Background(), identifier)
+	if err == nil {
+		h.serveVariantData(c, img, result, imageData)
+		return
+	}
+
+	// 从存储获取
+	storageProvider, err := h.storageFactory.GetByID(img.StorageConfigID)
+	if err != nil {
+		log.Printf("[serveVariant] Failed to get storage for variant %s: %v", identifier, err)
+		// 回退到原图
+		h.serveOriginalImage(c, img)
+		return
+	}
+
+	// 使用后台 context，避免客户端断开导致存储读取失败
+	imageStream, err := storageProvider.GetWithContext(context.Background(), identifier)
+	if err != nil {
+		log.Printf("[serveVariant] Failed to get variant %s: %v", identifier, err)
+		// 回退到原图
+		h.serveOriginalImage(c, img)
+		return
+	}
+	defer func() {
+		if closer, ok := imageStream.(io.Closer); ok {
+			_ = closer.Close()
+		}
+	}()
+
+	rs, isSeeker := imageStream.(io.ReadSeeker)
+	if isSeeker {
+		data, readErr := io.ReadAll(rs)
+		if readErr != nil {
+			log.Printf("[serveVariant] Failed to read variant %s: %v", identifier, readErr)
+			h.serveOriginalImage(c, img)
+			return
+		}
+
+		// 异步缓存
+		go func(id string, d []byte) {
+			if h.cacheHelper == nil {
+				return
+			}
+			ctx := context.Background()
+			if cacheErr := h.cacheHelper.CacheImageData(ctx, id, d); cacheErr != nil {
+				log.Printf("[serveVariant] Failed to cache variant %s: %v", id, cacheErr)
+			}
+		}(identifier, data)
+
+		h.serveVariantData(c, img, result, data)
+		return
+	}
+
+	// 非 seeker，直接流式传输
+	c.Header("Content-Type", result.MIMEType)
+	c.Header("Cache-Control", "public, max-age=2592000, immutable")
+	c.Header("Vary", "Accept")
+	c.DataFromReader(http.StatusOK, variant.FileSize, result.MIMEType, imageStream, nil)
+}
+
+// serveVariantData 提供变体数据
+func (h *Handler) serveVariantData(c *gin.Context, img *models.Image, result *image.VariantResult, data []byte) {
+	reader := bytes.NewReader(data)
+
+	contentType := result.MIMEType
+	if contentType == "" {
+		contentType = "image/webp"
+	}
+
+	c.Header("Content-Type", contentType)
+	c.Header("Cache-Control", "public, max-age=2592000, immutable")
+	c.Header("Vary", "Accept")
+
+	// 处理 range 请求
+	c.Writer.Header().Set("Accept-Ranges", "bytes")
+	c.Writer.Header().Set("Content-Length", strconv.Itoa(len(data)))
+
+	if c.Request.Method == http.MethodHead {
+		c.Status(http.StatusOK)
+		return
+	}
+
+	rangeHeader := c.GetHeader("Range")
+	if rangeHeader == "" {
+		reader.Seek(0, io.SeekStart)
+		c.DataFromReader(http.StatusOK, int64(len(data)), contentType, reader, nil)
+		return
+	}
+
+	// 解析 range 请求
+	ranges := h.parseRangeHeader(rangeHeader, int64(len(data)))
+	if len(ranges) == 0 {
+		reader.Seek(0, io.SeekStart)
+		c.DataFromReader(http.StatusOK, int64(len(data)), contentType, reader, nil)
+		return
+	}
+
+	// 支持单 range
+	r := ranges[0]
+	reader.Seek(r.start, io.SeekStart)
+	c.Header("Content-Range", fmt.Sprintf("bytes %d-%d/%d", r.start, r.end, len(data)))
+	c.Header("Content-Length", strconv.FormatInt(r.length, 10))
+	c.Status(http.StatusPartialContent)
+	io.CopyN(c.Writer, reader, r.length)
 }
 
 // fetchImageMetadata 查询图片信息
@@ -116,6 +261,52 @@ func (h *Handler) fetchImageMetadata(ctx context.Context, identifier string) (*m
 		imageGroup.Forget(identifier)
 		return nil, ErrTemporaryFailure
 	}
+}
+
+// handleMetadataError 处理元数据查询错误
+func (h *Handler) handleMetadataError(c *gin.Context, identifier string, err error) {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		log.Printf("Image not found: %s", identifier)
+		common.RespondError(c, http.StatusNotFound, "Image not found")
+		return
+	}
+
+	if errors.Is(err, ErrTemporaryFailure) {
+		log.Printf("Temporary failure fetching image metadata for '%s': %v", identifier, err)
+		common.RespondError(c, http.StatusServiceUnavailable, "Service temporarily unavailable, please retry")
+		return
+	}
+
+	log.Printf("Failed to fetch image metadata for '%s': %v", identifier, err)
+	common.RespondError(c, http.StatusInternalServerError, "Error retrieving image")
+}
+
+// isTransientError 检查是否为临时错误
+func isTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errStr := err.Error()
+	timeoutPatterns := []string{
+		"timeout",
+		"deadline exceeded",
+		"connection refused",
+		"connection reset",
+		"temporary",
+		"i/o timeout",
+		"context deadline exceeded",
+		"connection timed out",
+		"no such host",
+		"network is unreachable",
+	}
+
+	for _, pattern := range timeoutPatterns {
+		if strings.Contains(strings.ToLower(errStr), pattern) {
+			return true
+		}
+	}
+	return false
 }
 
 // streamAndCacheImage 流式处理
@@ -240,163 +431,243 @@ func (h *Handler) serveImageData(c *gin.Context, image *models.Image, data []byt
 	_ = h.serveImageStream(c, image, reader)
 }
 
-// serveImageStream 流式处理
-func (h *Handler) serveImageStream(c *gin.Context, image *models.Image, stream io.Reader) error {
-	h.setCommonHeaders(c, image)
+// serveImageStream 流式提供图片（支持 Range 请求）
+func (h *Handler) serveImageStream(c *gin.Context, image *models.Image, reader io.ReadSeeker) error {
+	contentType := image.MimeType
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
 
-	if c.Writer.Status() == http.StatusNotModified {
+	c.Header("Content-Type", contentType)
+	c.Header("Cache-Control", "public, max-age=2592000, immutable")
+
+	// 如果原图有原始文件名，添加 Content-Disposition
+	if image.OriginalName != "" {
+		asciiName := toASCII(image.OriginalName)
+		rfc5987Name := url.QueryEscape(image.OriginalName)
+		if asciiName == image.OriginalName {
+			c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, asciiName))
+		} else {
+			c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s"; filename*=UTF-8''%s`, asciiName, rfc5987Name))
+		}
+	}
+
+	// 处理 range 请求
+	c.Writer.Header().Set("Accept-Ranges", "bytes")
+	c.Writer.Header().Set("Content-Length", strconv.FormatInt(image.FileSize, 10))
+
+	if c.Request.Method == http.MethodHead {
+		c.Status(http.StatusOK)
 		return nil
 	}
 
-	if rs, ok := stream.(io.ReadSeeker); ok {
-		http.ServeContent(c.Writer, c.Request, image.OriginalName, image.UpdatedAt, rs)
-		return nil
+	rangeHeader := c.GetHeader("Range")
+	if rangeHeader == "" {
+		reader.Seek(0, io.SeekStart)
+		_, err := io.Copy(c.Writer, reader)
+		return err
 	}
 
-	return h.serveImageStreamManualCopy(c, image, stream)
-}
-
-// serveImageStreamManualCopy 使用缓冲池优化传输
-func (h *Handler) serveImageStreamManualCopy(c *gin.Context, image *models.Image, stream io.Reader) error {
-	h.setCommonHeaders(c, image)
-	if c.Writer.Status() == http.StatusNotModified {
-		return nil
+	ranges := h.parseRangeHeader(rangeHeader, image.FileSize)
+	if len(ranges) == 0 {
+		reader.Seek(0, io.SeekStart)
+		_, err := io.Copy(c.Writer, reader)
+		return err
 	}
 
-	if c.Writer.Header().Get("Content-Length") == "" && image.FileSize > 0 {
-		c.Header("Content-Length", strconv.FormatInt(image.FileSize, 10))
-	}
-
-	c.Writer.WriteHeader(http.StatusOK)
-
-	// 使用共享缓冲池优化传输
-	buf := pool.SharedBufferPool.Get().([]byte)
-	defer pool.SharedBufferPool.Put(buf)
-
-	_, err := io.CopyBuffer(c.Writer, stream, buf)
+	// 支持单 range
+	r := ranges[0]
+	reader.Seek(r.start, io.SeekStart)
+	c.Header("Content-Range", fmt.Sprintf("bytes %d-%d/%d", r.start, r.end, image.FileSize))
+	c.Header("Content-Length", strconv.FormatInt(r.length, 10))
+	c.Status(http.StatusPartialContent)
+	_, err := io.CopyN(c.Writer, reader, r.length)
 	return err
 }
 
-// setCommonHeaders 响应头处理
-func (h *Handler) setCommonHeaders(c *gin.Context, image *models.Image) {
-	if _, ok := c.GetQuery("download"); ok {
-		safeName := sanitizeFilename(image.OriginalName)
-		asciiName := toASCII(safeName)
-		utf8Name := url.PathEscape(safeName)
-
-		contentDisposition := fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, asciiName, utf8Name)
-		c.Header("Content-Disposition", contentDisposition)
+// serveImageStreamManualCopy 手动拷贝流式图片
+func (h *Handler) serveImageStreamManualCopy(c *gin.Context, image *models.Image, reader io.Reader) error {
+	contentType := image.MimeType
+	if contentType == "" {
+		contentType = "application/octet-stream"
 	}
 
-	etag := fmt.Sprintf("W/\"%x\"", image.UpdatedAt.UnixNano())
+	c.Header("Content-Type", contentType)
+	c.Header("Cache-Control", "public, max-age=2592000, immutable")
 
-	// If-None-Match 处理
-	if inm := c.GetHeader("If-None-Match"); inm != "" {
-		if matchETag(inm, etag) {
-			c.Header("ETag", etag)
-			c.Header("Last-Modified", image.UpdatedAt.UTC().Format(http.TimeFormat))
-			c.Status(http.StatusNotModified)
-			c.Abort()
-			return
+	if image.OriginalName != "" {
+		asciiName := toASCII(image.OriginalName)
+		rfc5987Name := url.QueryEscape(image.OriginalName)
+		if asciiName == image.OriginalName {
+			c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, asciiName))
+		} else {
+			c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s"; filename*=UTF-8''%s`, asciiName, rfc5987Name))
 		}
 	}
 
-	// 只有在没有 ETag 的情况下才检查 If-Modified-Since
-	if c.GetHeader("If-None-Match") == "" {
-		ifModifiedSince := c.GetHeader("If-Modified-Since")
-		if ifModifiedSince != "" {
-			t, err := time.Parse(http.TimeFormat, ifModifiedSince)
-			if err == nil && !image.UpdatedAt.After(t) {
-				c.Header("ETag", etag)
-				c.Header("Last-Modified", image.UpdatedAt.UTC().Format(http.TimeFormat))
-				c.Status(http.StatusNotModified)
-				c.Abort()
-				return
+	buf := pool.SharedBufferPool.Get().([]byte)
+	defer pool.SharedBufferPool.Put(buf)
+
+	_, err := io.CopyBuffer(c.Writer, reader, buf)
+	if err != nil {
+		if isBrokenPipe(err) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+// rangeInfo 表示一个 range 请求的信息
+type rangeInfo struct {
+	start  int64
+	end    int64
+	length int64
+}
+
+// parseRangeHeader 解析 HTTP Range 请求头
+func (h *Handler) parseRangeHeader(rangeHeader string, fileSize int64) []rangeInfo {
+	const prefix = "bytes="
+	if !strings.HasPrefix(rangeHeader, prefix) {
+		return nil
+	}
+
+	ranges := strings.Split(rangeHeader[len(prefix):], ",")
+	var result []rangeInfo
+
+	for _, r := range ranges {
+		r = strings.TrimSpace(r)
+		if r == "" {
+			continue
+		}
+
+		parts := strings.Split(r, "-")
+		if len(parts) != 2 {
+			continue
+		}
+
+		var start, end int64
+		var err error
+
+		if parts[0] == "" {
+			// 后缀范围：-500 表示最后500字节
+			length, err := strconv.ParseInt(parts[1], 10, 64)
+			if err != nil || length <= 0 {
+				continue
+			}
+			start = fileSize - length
+			if start < 0 {
+				start = 0
+			}
+			end = fileSize - 1
+		} else {
+			start, err = strconv.ParseInt(parts[0], 10, 64)
+			if err != nil || start < 0 || start >= fileSize {
+				continue
+			}
+
+			if parts[1] == "" {
+				// 从start到文件末尾
+				end = fileSize - 1
+			} else {
+				end, err = strconv.ParseInt(parts[1], 10, 64)
+				if err != nil || end < start || end >= fileSize {
+					continue
+				}
 			}
 		}
+
+		result = append(result, rangeInfo{
+			start:  start,
+			end:    end,
+			length: end - start + 1,
+		})
 	}
 
-	c.Header("Content-Type", image.MimeType)
-	c.Header("Cache-Control", "public, max-age=2592000, immutable")
-	c.Header("X-Content-Type-Options", "nosniff")
-	c.Header("ETag", etag)
-	c.Header("Last-Modified", image.UpdatedAt.UTC().Format(http.TimeFormat))
+	return result
 }
 
-func (h *Handler) handleMetadataError(c *gin.Context, identifier string, err error) {
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		common.RespondError(c, http.StatusNotFound, "Image not found")
-	} else if errors.Is(err, ErrTemporaryFailure) {
-		log.Printf("Transient error for identifier '%s'. Client should retry.", identifier)
-		common.RespondError(c, http.StatusServiceUnavailable, "Service is temporarily busy, please try again.")
-	} else {
-		log.Printf("Database error when fetching identifier '%s': %v", utils.SanitizeLogMessage(identifier), err)
-		common.RespondError(c, http.StatusInternalServerError, "Error retrieving image information")
+// isBrokenPipe 检查是否为断开的连接错误
+func isBrokenPipe(err error) bool {
+	if err == nil {
+		return false
 	}
+	// 检查常见的连接断开错误
+	if errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) {
+		return true
+	}
+	errStr := strings.ToLower(err.Error())
+	return strings.Contains(errStr, "broken pipe") ||
+		strings.Contains(errStr, "connection reset by peer") ||
+		strings.Contains(errStr, "write tcp") && strings.Contains(errStr, "reset")
 }
 
+// toASCII 将字符串转换为 ASCII 表示（非 ASCII 字符转为下划线）
 func toASCII(s string) string {
-	var sb strings.Builder
+	var result []rune
 	for _, r := range s {
 		if r > unicode.MaxASCII {
-			sb.WriteRune('_')
+			result = append(result, '_')
 		} else {
-			sb.WriteRune(r)
+			result = append(result, r)
 		}
 	}
-	return sb.String()
+	return string(result)
 }
 
-// sanitizeFilename 文件名判断
-func sanitizeFilename(name string) string {
-	name = filepath.Base(name)
-	re := regexp.MustCompile(`[^\w\-.]`)
-	safe := re.ReplaceAllString(name, "_")
-	if safe == "" {
-		safe = "file"
+var svgMagicRegex = regexp.MustCompile(`(?i)^\s*(?:<\?xml[^>]*>\s*)?<svg`)
+
+// isSVG 检查文件是否为 SVG 格式
+func isSVG(data []byte) bool {
+	return svgMagicRegex.Match(data)
+}
+
+// isSafeFileName 检查文件名是否安全
+func isSafeFileName(name string) bool {
+	// 检查是否包含路径分隔符
+	if strings.Contains(name, "..") || strings.Contains(name, "/") || strings.Contains(name, "\\") {
+		return false
 	}
-	return safe
+	// 检查是否为隐藏文件
+	if strings.HasPrefix(name, ".") {
+		return false
+	}
+	return true
 }
 
-// isTransientError 错误检查
-func isTransientError(err error) bool {
+// isClientDisconnected 检查客户端是否已断开连接
+func isClientDisconnected(err error) bool {
 	if err == nil {
 		return false
 	}
 
+	// 检查网络错误
 	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
-		return true
-	}
-
-	if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ECONNABORTED) {
-		return true
-	}
-
-	return false
-}
-
-// isBrokenPipe 跳过 BrokenPipe 错误
-func isBrokenPipe(err error) bool {
-	return err != nil && (errors.Is(err, io.ErrClosedPipe) || errors.Is(err, os.ErrClosed) ||
-		errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET))
-}
-
-// matchETag 比较 If-None-Match header 与生成的 etag
-func matchETag(headerVal, etag string) bool {
-	headerVal = strings.TrimSpace(headerVal)
-	if headerVal == "*" {
-		return true
-	}
-	parts := strings.Split(headerVal, ",")
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p == etag {
-			return true
-		}
-		if p == strings.TrimPrefix(etag, "W/") {
+	if errors.As(err, &netErr) {
+		if netErr.Timeout() || !netErr.Temporary() {
 			return true
 		}
 	}
+
+	errStr := strings.ToLower(err.Error())
+	disconnectedPatterns := []string{
+		"broken pipe",
+		"connection reset by peer",
+		"client disconnected",
+		"context canceled",
+		"write tcp",
+	}
+
+	for _, pattern := range disconnectedPatterns {
+		if strings.Contains(errStr, pattern) {
+			return true
+		}
+	}
+
+	// 检查文件系统错误
+	if errors.Is(err, os.ErrClosed) {
+		return true
+	}
+
 	return false
 }

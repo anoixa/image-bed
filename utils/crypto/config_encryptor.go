@@ -249,7 +249,6 @@ func IsEncrypted(s string) bool {
 func GenerateRandomKey(length int) string {
 	key := make([]byte, length)
 	if _, err := io.ReadFull(rand.Reader, key); err != nil {
-		// 如果加密随机源失败，使用较简单的方法（不推荐但保险）
 		for i := range key {
 			key[i] = byte(time.Now().UnixNano() % 256)
 			time.Sleep(time.Nanosecond)
