@@ -109,15 +109,15 @@ func TestIsCacheMiss(t *testing.T) {
 
 func TestFactory_New(t *testing.T) {
 	mock := newMockProvider("mock")
-	factory := &Factory{provider: mock}
+	factory := &Factory{providers: map[uint]Provider{1: mock}, defaultProvider: mock}
 
 	assert.NotNil(t, factory)
-	assert.Equal(t, mock, factory.provider)
+	assert.Equal(t, mock, factory.GetProvider())
 }
 
 func TestFactory_Set(t *testing.T) {
 	mock := newMockProvider("mock")
-	factory := &Factory{provider: mock}
+	factory := &Factory{providers: map[uint]Provider{1: mock}, defaultProvider: mock}
 
 	ctx := context.Background()
 	err := factory.Set(ctx, "key1", "value1", time.Minute)
@@ -126,7 +126,7 @@ func TestFactory_Set(t *testing.T) {
 }
 
 func TestFactory_Set_NilProvider(t *testing.T) {
-	factory := &Factory{provider: nil}
+	factory := &Factory{defaultProvider: nil}
 
 	ctx := context.Background()
 	err := factory.Set(ctx, "key1", "value1", time.Minute)
@@ -136,7 +136,7 @@ func TestFactory_Set_NilProvider(t *testing.T) {
 
 func TestFactory_Get(t *testing.T) {
 	mock := newMockProvider("mock")
-	factory := &Factory{provider: mock}
+	factory := &Factory{providers: map[uint]Provider{1: mock}, defaultProvider: mock}
 	mock.data["key1"] = []byte("value1")
 
 	ctx := context.Background()
@@ -148,7 +148,7 @@ func TestFactory_Get(t *testing.T) {
 
 func TestFactory_Get_CacheMiss(t *testing.T) {
 	mock := newMockProvider("mock")
-	factory := &Factory{provider: mock}
+	factory := &Factory{providers: map[uint]Provider{1: mock}, defaultProvider: mock}
 
 	ctx := context.Background()
 	var value string
@@ -158,7 +158,7 @@ func TestFactory_Get_CacheMiss(t *testing.T) {
 }
 
 func TestFactory_Get_NilProvider(t *testing.T) {
-	factory := &Factory{provider: nil}
+	factory := &Factory{defaultProvider: nil}
 
 	ctx := context.Background()
 	var value string
@@ -169,7 +169,7 @@ func TestFactory_Get_NilProvider(t *testing.T) {
 
 func TestFactory_Delete(t *testing.T) {
 	mock := newMockProvider("mock")
-	factory := &Factory{provider: mock}
+	factory := &Factory{providers: map[uint]Provider{1: mock}, defaultProvider: mock}
 	mock.data["key1"] = []byte("value1")
 
 	ctx := context.Background()
@@ -180,7 +180,7 @@ func TestFactory_Delete(t *testing.T) {
 }
 
 func TestFactory_Delete_NilProvider(t *testing.T) {
-	factory := &Factory{provider: nil}
+	factory := &Factory{defaultProvider: nil}
 
 	ctx := context.Background()
 	err := factory.Delete(ctx, "key1")
@@ -190,7 +190,7 @@ func TestFactory_Delete_NilProvider(t *testing.T) {
 
 func TestFactory_Exists(t *testing.T) {
 	mock := newMockProvider("mock")
-	factory := &Factory{provider: mock}
+	factory := &Factory{providers: map[uint]Provider{1: mock}, defaultProvider: mock}
 	mock.data["key1"] = []byte("value1")
 
 	ctx := context.Background()
@@ -204,7 +204,7 @@ func TestFactory_Exists(t *testing.T) {
 }
 
 func TestFactory_Exists_NilProvider(t *testing.T) {
-	factory := &Factory{provider: nil}
+	factory := &Factory{defaultProvider: nil}
 
 	ctx := context.Background()
 	exists, err := factory.Exists(ctx, "key1")
@@ -215,7 +215,7 @@ func TestFactory_Exists_NilProvider(t *testing.T) {
 
 func TestFactory_Close(t *testing.T) {
 	mock := newMockProvider("mock")
-	factory := &Factory{provider: mock}
+	factory := &Factory{providers: map[uint]Provider{1: mock}, defaultProvider: mock}
 
 	err := factory.Close()
 	assert.NoError(t, err)
@@ -223,7 +223,7 @@ func TestFactory_Close(t *testing.T) {
 }
 
 func TestFactory_Close_NilProvider(t *testing.T) {
-	factory := &Factory{provider: nil}
+	factory := &Factory{defaultProvider: nil}
 
 	err := factory.Close()
 	assert.NoError(t, err)
@@ -231,7 +231,7 @@ func TestFactory_Close_NilProvider(t *testing.T) {
 
 func TestFactory_GetProvider(t *testing.T) {
 	mock := newMockProvider("mock")
-	factory := &Factory{provider: mock}
+	factory := &Factory{providers: map[uint]Provider{1: mock}, defaultProvider: mock}
 
 	assert.Equal(t, mock, factory.GetProvider())
 }
@@ -240,7 +240,7 @@ func TestFactory_GetProvider(t *testing.T) {
 
 func TestHelper_New(t *testing.T) {
 	mock := newMockProvider("mock")
-	factory := &Factory{provider: mock}
+	factory := &Factory{providers: map[uint]Provider{1: mock}, defaultProvider: mock}
 	helper := NewHelper(factory)
 
 	assert.NotNil(t, helper)
@@ -249,7 +249,7 @@ func TestHelper_New(t *testing.T) {
 
 func TestHelper_CacheImage(t *testing.T) {
 	mock := newMockProvider("mock")
-	factory := &Factory{provider: mock}
+	factory := &Factory{providers: map[uint]Provider{1: mock}, defaultProvider: mock}
 	helper := NewHelper(factory)
 
 	ctx := context.Background()
@@ -276,7 +276,7 @@ func TestHelper_CacheImage_NilFactory(t *testing.T) {
 }
 
 func TestHelper_CacheImage_NilProvider(t *testing.T) {
-	factory := &Factory{provider: nil}
+	factory := &Factory{defaultProvider: nil}
 	helper := NewHelper(factory)
 
 	ctx := context.Background()
@@ -290,7 +290,7 @@ func TestHelper_CacheImage_NilProvider(t *testing.T) {
 
 func TestHelper_GetCachedImage(t *testing.T) {
 	mock := newMockProvider("mock")
-	factory := &Factory{provider: mock}
+	factory := &Factory{providers: map[uint]Provider{1: mock}, defaultProvider: mock}
 	helper := NewHelper(factory)
 
 	ctx := context.Background()
@@ -305,7 +305,7 @@ func TestHelper_GetCachedImage(t *testing.T) {
 }
 
 func TestHelper_GetCachedImage_NilProvider(t *testing.T) {
-	factory := &Factory{provider: nil}
+	factory := &Factory{defaultProvider: nil}
 	helper := NewHelper(factory)
 
 	ctx := context.Background()
@@ -317,7 +317,7 @@ func TestHelper_GetCachedImage_NilProvider(t *testing.T) {
 
 func TestHelper_CacheUser(t *testing.T) {
 	mock := newMockProvider("mock")
-	factory := &Factory{provider: mock}
+	factory := &Factory{providers: map[uint]Provider{1: mock}, defaultProvider: mock}
 	helper := NewHelper(factory)
 
 	ctx := context.Background()
@@ -342,7 +342,7 @@ func TestHelper_CacheUser_NilFactory(t *testing.T) {
 }
 
 func TestHelper_GetCachedUser_NilProvider(t *testing.T) {
-	factory := &Factory{provider: nil}
+	factory := &Factory{defaultProvider: nil}
 	helper := NewHelper(factory)
 
 	ctx := context.Background()
@@ -354,7 +354,7 @@ func TestHelper_GetCachedUser_NilProvider(t *testing.T) {
 
 func TestHelper_CacheDevice(t *testing.T) {
 	mock := newMockProvider("mock")
-	factory := &Factory{provider: mock}
+	factory := &Factory{providers: map[uint]Provider{1: mock}, defaultProvider: mock}
 	helper := NewHelper(factory)
 
 	ctx := context.Background()
@@ -379,7 +379,7 @@ func TestHelper_CacheDevice_NilFactory(t *testing.T) {
 }
 
 func TestHelper_GetCachedDevice_NilProvider(t *testing.T) {
-	factory := &Factory{provider: nil}
+	factory := &Factory{defaultProvider: nil}
 	helper := NewHelper(factory)
 
 	ctx := context.Background()
@@ -391,7 +391,7 @@ func TestHelper_GetCachedDevice_NilProvider(t *testing.T) {
 
 func TestHelper_DeleteCachedImage(t *testing.T) {
 	mock := newMockProvider("mock")
-	factory := &Factory{provider: mock}
+	factory := &Factory{providers: map[uint]Provider{1: mock}, defaultProvider: mock}
 	helper := NewHelper(factory)
 
 	ctx := context.Background()
@@ -400,7 +400,7 @@ func TestHelper_DeleteCachedImage(t *testing.T) {
 }
 
 func TestHelper_DeleteCachedImage_NilProvider(t *testing.T) {
-	factory := &Factory{provider: nil}
+	factory := &Factory{defaultProvider: nil}
 	helper := NewHelper(factory)
 
 	ctx := context.Background()
@@ -410,7 +410,7 @@ func TestHelper_DeleteCachedImage_NilProvider(t *testing.T) {
 
 func TestHelper_DeleteCachedUser(t *testing.T) {
 	mock := newMockProvider("mock")
-	factory := &Factory{provider: mock}
+	factory := &Factory{providers: map[uint]Provider{1: mock}, defaultProvider: mock}
 	helper := NewHelper(factory)
 
 	ctx := context.Background()
@@ -419,7 +419,7 @@ func TestHelper_DeleteCachedUser(t *testing.T) {
 }
 
 func TestHelper_DeleteCachedUser_NilProvider(t *testing.T) {
-	factory := &Factory{provider: nil}
+	factory := &Factory{defaultProvider: nil}
 	helper := NewHelper(factory)
 
 	ctx := context.Background()
@@ -429,7 +429,7 @@ func TestHelper_DeleteCachedUser_NilProvider(t *testing.T) {
 
 func TestHelper_DeleteCachedDevice(t *testing.T) {
 	mock := newMockProvider("mock")
-	factory := &Factory{provider: mock}
+	factory := &Factory{providers: map[uint]Provider{1: mock}, defaultProvider: mock}
 	helper := NewHelper(factory)
 
 	ctx := context.Background()
@@ -438,7 +438,7 @@ func TestHelper_DeleteCachedDevice(t *testing.T) {
 }
 
 func TestHelper_DeleteCachedDevice_NilProvider(t *testing.T) {
-	factory := &Factory{provider: nil}
+	factory := &Factory{defaultProvider: nil}
 	helper := NewHelper(factory)
 
 	ctx := context.Background()
@@ -468,7 +468,7 @@ func TestCacheExpirations(t *testing.T) {
 
 func TestMockProvider_Concurrent(t *testing.T) {
 	mock := newMockProvider("mock")
-	factory := &Factory{provider: mock}
+	factory := &Factory{providers: map[uint]Provider{1: mock}, defaultProvider: mock}
 	ctx := context.Background()
 
 	// 并发写入

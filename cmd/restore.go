@@ -15,7 +15,7 @@ import (
 
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
-	"github.com/anoixa/image-bed/internal/di"
+	"github.com/anoixa/image-bed/internal/app"
 	"github.com/spf13/cobra"
 	"gorm.io/gorm"
 )
@@ -92,7 +92,7 @@ func runRestore(inputFile string, tables []string, dryRun, truncate bool) error 
 	config.InitConfig()
 	cfg := config.Get()
 
-	container := di.NewContainer(cfg)
+	container := app.NewContainer(cfg)
 	if err := container.Init(); err != nil {
 		return fmt.Errorf("failed to initialize container: %w", err)
 	}

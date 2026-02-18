@@ -10,18 +10,18 @@ import (
 
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/configs"
+	cryptoservice "github.com/anoixa/image-bed/internal/services/crypto"
 	cryptoutils "github.com/anoixa/image-bed/utils/crypto"
 	"gorm.io/gorm"
 )
 
 // Manager 配置管理器
 type Manager struct {
-	db         *gorm.DB
-	repo       configs.Repository
-	keyManager *cryptoutils.MasterKeyManager
-	encryptor  *cryptoutils.ConfigEncryptor
-	eventBus   *EventBus
-	dataPath   string
+	db        *gorm.DB
+	repo      configs.Repository
+	crypto    *cryptoservice.Service
+	eventBus  *EventBus
+	dataPath  string
 }
 
 // JWTConfig JWT 配置结构
@@ -34,11 +34,11 @@ type JWTConfig struct {
 // NewManager 创建配置管理器
 func NewManager(db *gorm.DB, dataPath string) *Manager {
 	return &Manager{
-		db:         db,
-		repo:       configs.NewRepository(db),
-		keyManager: cryptoutils.NewMasterKeyManager(dataPath),
-		eventBus:   NewEventBus(),
-		dataPath:   dataPath,
+		db:       db,
+		repo:     configs.NewRepository(db),
+		crypto:   cryptoservice.NewService(dataPath),
+		eventBus: NewEventBus(),
+		dataPath: dataPath,
 	}
 }
 
@@ -56,18 +56,69 @@ func (m *Manager) Initialize() error {
 		return count > 0, nil
 	}
 
-	if err := m.keyManager.Initialize(checkDataExists); err != nil {
-		return fmt.Errorf("failed to initialize master key: %w", err)
+	if err := m.crypto.Initialize(checkDataExists); err != nil {
+		return fmt.Errorf("failed to initialize crypto service: %w", err)
 	}
-
-	m.encryptor = cryptoutils.NewConfigEncryptor(m.keyManager.GetKey())
 
 	// 验证/创建 Canary
 	if err := m.ensureCanary(); err != nil {
 		return fmt.Errorf("failed to ensure canary: %w", err)
 	}
 
+	// 创建默认转换配置（如果不存在）
+	if err := m.ensureDefaultConversionConfig(); err != nil {
+		return fmt.Errorf("failed to ensure conversion config: %w", err)
+	}
+
 	log.Println("[ConfigManager] Initialized successfully")
+	return nil
+}
+
+// ensureDefaultConversionConfig 确保存在默认的图片转换配置
+func (m *Manager) ensureDefaultConversionConfig() error {
+	ctx := context.Background()
+
+	// 检查是否已有转换配置
+	count, err := m.repo.CountByCategory(ctx, models.ConfigCategoryConversion)
+	if err != nil {
+		if strings.Contains(err.Error(), "no such table") {
+			return nil // 表不存在，跳过
+		}
+		return err
+	}
+
+	// 如果已有转换配置，跳过
+	if count > 0 {
+		return nil
+	}
+
+	// 创建默认配置
+	configData := map[string]interface{}{
+		"enabled_formats":     []string{"webp"},
+		"webp_quality":        85,
+		"avif_quality":        80,
+		"avif_effort":         4,
+		"max_dimension":       0,
+		"skip_smaller_than":   0,
+		"max_retries":         3,
+		"retry_base_interval": 300,
+	}
+
+	req := &models.SystemConfigStoreRequest{
+		Category:    models.ConfigCategoryConversion,
+		Name:        "Image Conversion Settings",
+		Config:      configData,
+		IsEnabled:   BoolPtr(true),
+		IsDefault:   BoolPtr(true),
+		Description: "Default image format conversion settings (WebP enabled by default)",
+	}
+
+	_, err = m.CreateConfig(ctx, req, 0)
+	if err != nil {
+		return err
+	}
+
+	log.Println("[ConfigManager] Default conversion config created (WebP enabled)")
 	return nil
 }
 
@@ -84,7 +135,7 @@ func (m *Manager) ensureCanary() error {
 	}
 
 	// 存在，验证能否解密
-	_, err = m.encryptor.Decrypt(canary.ConfigJSON)
+	_, err = m.crypto.DecryptString(canary.ConfigJSON)
 	if err != nil {
 		return fmt.Errorf("failed to decrypt canary, master key may be incorrect: %w", err)
 	}
@@ -102,7 +153,7 @@ func (m *Manager) createCanary(ctx context.Context) error {
 	}
 
 	jsonData, _ := json.Marshal(canaryData)
-	encrypted := m.encryptor.Encrypt(string(jsonData))
+	encrypted := m.crypto.EncryptString(string(jsonData))
 
 	canary := &models.SystemConfig{
 		Category:    models.ConfigCategorySystem,
@@ -124,28 +175,12 @@ func (m *Manager) createCanary(ctx context.Context) error {
 
 // EncryptConfig 加密配置
 func (m *Manager) EncryptConfig(config map[string]interface{}) (string, error) {
-	jsonData, err := json.Marshal(config)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal config: %w", err)
-	}
-
-	encrypted := m.encryptor.Encrypt(string(jsonData))
-	return encrypted, nil
+	return m.crypto.EncryptJSON(config)
 }
 
 // DecryptConfig 解密配置
 func (m *Manager) DecryptConfig(encrypted string) (map[string]interface{}, error) {
-	decrypted, err := m.encryptor.Decrypt(encrypted)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decrypt config: %w", err)
-	}
-
-	var config map[string]interface{}
-	if err := json.Unmarshal([]byte(decrypted), &config); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
-	}
-
-	return config, nil
+	return m.crypto.DecryptJSON(encrypted)
 }
 
 // CreateConfig 创建配置
@@ -406,9 +441,27 @@ func MaskSensitiveData(config map[string]interface{}) map[string]interface{} {
 	return result
 }
 
-// GetEncryptor 获取加密器（用于其他服务）
-func (m *Manager) GetEncryptor() *cryptoutils.ConfigEncryptor {
-	return m.encryptor
+// GetCrypto 获取加密服务（用于其他服务）
+func (m *Manager) GetCrypto() *cryptoservice.Service {
+	return m.crypto
+}
+
+// GetEncryptor 获取加密器（用于其他服务）- 向后兼容
+// Deprecated: 使用 GetCrypto() 代替
+func (m *Manager) GetEncryptor() interface{ Encrypt(string) string; Decrypt(string) (string, error) } {
+	return &encryptorAdapter{m.crypto}
+}
+
+type encryptorAdapter struct {
+	crypto *cryptoservice.Service
+}
+
+func (a *encryptorAdapter) Encrypt(s string) string {
+	return a.crypto.EncryptString(s)
+}
+
+func (a *encryptorAdapter) Decrypt(s string) (string, error) {
+	return a.crypto.DecryptString(s)
 }
 
 // GetRepo 获取仓库（用于其他服务）
@@ -475,8 +528,8 @@ func (m *Manager) EnsureDefaultJWTConfig(ctx context.Context) error {
 		Category:    models.ConfigCategoryJWT,
 		Name:        "JWT Settings",
 		Config:      configData,
-		IsEnabled:   boolPtr(true),
-		IsDefault:   boolPtr(true),
+		IsEnabled:   BoolPtr(true),
+		IsDefault:   BoolPtr(true),
 		Description: "JWT authentication configuration",
 	}
 
@@ -512,7 +565,7 @@ func (m *Manager) UpdateJWTConfig(ctx context.Context, jwtConfig *JWTConfig) err
 		Category:    models.ConfigCategoryJWT,
 		Name:        config.Name,
 		Config:      configData,
-		IsEnabled:   boolPtr(true),
+		IsEnabled:   BoolPtr(true),
 		Description: config.Description,
 	}
 
@@ -534,7 +587,7 @@ func getStringFromMap(m map[string]interface{}, key, defaultValue string) string
 	return defaultValue
 }
 
-// boolPtr 返回 bool 指针
-func boolPtr(b bool) *bool {
+// BoolPtr 返回 bool 指针
+func BoolPtr(b bool) *bool {
 	return &b
 }
