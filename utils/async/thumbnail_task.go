@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"log"
 
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/internal/services/config"
 	"github.com/anoixa/image-bed/storage"
+	"github.com/anoixa/image-bed/utils"
 	"github.com/h2non/bimg"
 )
 
@@ -33,18 +33,18 @@ func (t *ThumbnailTask) Execute() {
 	// 读取配置
 	settings, err := t.ConfigManager.GetThumbnailSettings(ctx)
 	if err != nil {
-		log.Printf("[ThumbnailTask] Failed to get config: %v", err)
+		utils.LogIfDevf("[ThumbnailTask] Failed to get config: %v", err)
 		return
 	}
 
 	// 检查缩略图功能是否启用
 	if !settings.Enabled {
-		log.Printf("[ThumbnailTask] Thumbnail disabled, skipping variant %d", t.VariantID)
+		utils.LogIfDevf("[ThumbnailTask] Thumbnail disabled, skipping variant %d", t.VariantID)
 		return
 	}
 
 	// CAS 获取 processing 状态
-	log.Printf("[ThumbnailTask] Attempting CAS: variant %d pending->processing", t.VariantID)
+	utils.LogIfDevf("[ThumbnailTask] Attempting CAS: variant %d pending->processing", t.VariantID)
 	acquired, err := t.VariantRepo.UpdateStatusCAS(
 		t.VariantID,
 		models.VariantStatusPending,
@@ -52,15 +52,15 @@ func (t *ThumbnailTask) Execute() {
 		"",
 	)
 	if err != nil {
-		log.Printf("[ThumbnailTask] CAS error for variant %d: %v", t.VariantID, err)
+		utils.LogIfDevf("[ThumbnailTask] CAS error for variant %d: %v", t.VariantID, err)
 		return
 	}
 	if !acquired {
-		log.Printf("[ThumbnailTask] CAS failed for variant %d, already processing", t.VariantID)
+		utils.LogIfDevf("[ThumbnailTask] CAS failed for variant %d, already processing", t.VariantID)
 		return
 	}
 
-	log.Printf("[ThumbnailTask] Processing variant %d: %s -> %s (width: %d)",
+	utils.LogIfDevf("[ThumbnailTask] Processing variant %d: %s -> %s (width: %d)",
 		t.VariantID, t.SourceIdentifier, t.TargetIdentifier, t.TargetWidth)
 
 	// 执行转换
@@ -169,17 +169,17 @@ func (t *ThumbnailTask) generateThumbnail(data []byte, targetWidth int) ([]byte,
 
 // handleSuccess 处理成功
 func (t *ThumbnailTask) handleSuccess(result *thumbnailResult) {
-	log.Printf("[ThumbnailTask] Success: variant %d (%dx%d, %d bytes)",
+	utils.LogIfDevf("[ThumbnailTask] Success: variant %d (%dx%d, %d bytes)",
 		t.VariantID, result.Width, result.Height, result.FileSize)
 
 	if err := t.VariantRepo.UpdateCompleted(t.VariantID, t.TargetIdentifier, result.FileSize, result.Width, result.Height); err != nil {
-		log.Printf("[ThumbnailTask] Failed to update status: %v", err)
+		utils.LogIfDevf("[ThumbnailTask] Failed to update status: %v", err)
 	}
 }
 
 // handleError 处理错误
 func (t *ThumbnailTask) handleError(err error, maxRetries int) {
-	log.Printf("[ThumbnailTask] Error: variant %d - %v", t.VariantID, err)
+	utils.LogIfDevf("[ThumbnailTask] Error: variant %d - %v", t.VariantID, err)
 
 	errorType := ClassifyError(err)
 	shouldRetry := errorType == ErrorTransient && t.VariantID > 0
@@ -187,10 +187,10 @@ func (t *ThumbnailTask) handleError(err error, maxRetries int) {
 	if shouldRetry {
 		variant, getErr := t.VariantRepo.GetByID(t.VariantID)
 		if getErr != nil {
-			log.Printf("[ThumbnailTask] Failed to get variant for retry check: %v", getErr)
+			utils.LogIfDevf("[ThumbnailTask] Failed to get variant for retry check: %v", getErr)
 			shouldRetry = false
 		} else if variant.RetryCount >= maxRetries {
-			log.Printf("[ThumbnailTask] Max retries reached for variant %d", t.VariantID)
+			utils.LogIfDevf("[ThumbnailTask] Max retries reached for variant %d", t.VariantID)
 			shouldRetry = false
 		}
 	}
@@ -205,7 +205,7 @@ func (t *ThumbnailTask) handleError(err error, maxRetries int) {
 // recovery 异常恢复
 func (t *ThumbnailTask) recovery() {
 	if r := recover(); r != nil {
-		log.Printf("[ThumbnailTask] Panic recovered: %v", r)
+		utils.LogIfDevf("[ThumbnailTask] Panic recovered: %v", r)
 		if t.VariantID > 0 {
 			t.VariantRepo.UpdateFailed(t.VariantID, fmt.Sprintf("panic: %v", r), true)
 		}

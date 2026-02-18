@@ -56,7 +56,7 @@ func (h *Handler) GetThumbnail(c *gin.Context) {
 	// 检查是否为有效尺寸
 	if !models.IsValidThumbnailWidth(width, settings.Sizes) {
 		// 使用默认尺寸
-		width = 300
+		width = 600
 	}
 
 	// 获取或生成缩略图

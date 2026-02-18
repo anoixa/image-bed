@@ -1,10 +1,10 @@
 package image
 
 import (
-	"log"
 	"time"
 
 	"github.com/anoixa/image-bed/database/repo/images"
+	"github.com/anoixa/image-bed/utils"
 )
 
 // RetryScanner 重试扫描器
@@ -41,7 +41,7 @@ func (s *RetryScanner) Start() {
 			}
 		}
 	}()
-	log.Printf("[RetryScanner] Started with interval %v", s.interval)
+	utils.LogIfDevf("[RetryScanner] Started with interval %v", s.interval)
 }
 
 // Stop 停止扫描器
@@ -56,7 +56,7 @@ func (s *RetryScanner) scanAndRetry() {
 	// 查询可重试的变体
 	variants, err := s.variantRepo.GetRetryableVariants(now, s.batchSize)
 	if err != nil {
-		log.Printf("[RetryScanner] Failed to get retryable variants: %v", err)
+		utils.LogIfDevf("[RetryScanner] Failed to get retryable variants: %v", err)
 		return
 	}
 
@@ -64,29 +64,29 @@ func (s *RetryScanner) scanAndRetry() {
 		return
 	}
 
-	log.Printf("[RetryScanner] Found %d retryable variants", len(variants))
+	utils.LogIfDevf("[RetryScanner] Found %d retryable variants", len(variants))
 
 	for _, variant := range variants {
-		log.Printf("[RetryScanner] Processing variant %d: status=%s, retry_count=%d",
+		utils.LogIfDevf("[RetryScanner] Processing variant %d: status=%s, retry_count=%d",
 			variant.ID, variant.Status, variant.RetryCount)
 
 		// 使用 ResetForRetry: failed → pending，同时增加 retry_count 和设置 next_retry_at
 		err := s.variantRepo.ResetForRetry(variant.ID, s.interval)
 		if err != nil {
-			log.Printf("[RetryScanner] ResetForRetry failed for variant %d: %v", variant.ID, err)
+			utils.LogIfDevf("[RetryScanner] ResetForRetry failed for variant %d: %v", variant.ID, err)
 			continue
 		}
-		log.Printf("[RetryScanner] ResetForRetry success: variant %d status changed from failed to pending, retry_count incremented", variant.ID)
+		utils.LogIfDevf("[RetryScanner] ResetForRetry success: variant %d status changed from failed to pending, retry_count incremented", variant.ID)
 
 		// 获取图片信息
 		img, err := s.variantRepo.GetImageByID(variant.ImageID)
 		if err != nil {
-			log.Printf("[RetryScanner] Failed to get image %d: %v", variant.ImageID, err)
+			utils.LogIfDevf("[RetryScanner] Failed to get image %d: %v", variant.ImageID, err)
 			continue
 		}
 
 		// 触发转换
-		log.Printf("[RetryScanner] Triggering conversion for variant %d (image: %s)",
+		utils.LogIfDevf("[RetryScanner] Triggering conversion for variant %d (image: %s)",
 			variant.ID, img.Identifier)
 		s.converter.TriggerWebPConversion(img)
 	}

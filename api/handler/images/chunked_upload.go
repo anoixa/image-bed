@@ -106,7 +106,7 @@ func (h *Handler) InitChunkedUpload(c *gin.Context) {
 			"chunk_size":     0,
 			"instant_upload": true,
 			"identifier":     existingImage.Identifier,
-			"url":            utils.BuildImageURL(existingImage.Identifier),
+			"links":          utils.BuildLinkFormats(existingImage.Identifier),
 		})
 		return
 	}

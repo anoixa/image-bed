@@ -2,13 +2,13 @@ package image
 
 import (
 	"context"
-	"log"
 	"time"
 
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/internal/services/config"
 	"github.com/anoixa/image-bed/storage"
+	"github.com/anoixa/image-bed/utils"
 	"github.com/anoixa/image-bed/utils/async"
 )
 
@@ -36,7 +36,7 @@ func (c *Converter) TriggerWebPConversion(image *models.Image) {
 	// 读取配置
 	settings, err := c.configManager.GetConversionSettings(ctx)
 	if err != nil {
-		log.Printf("[Converter] Failed to get settings: %v", err)
+		utils.LogIfDevf("[Converter] Failed to get settings: %v", err)
 		return
 	}
 
@@ -56,13 +56,13 @@ func (c *Converter) TriggerWebPConversion(image *models.Image) {
 	// 创建或获取变体记录
 	variant, err := c.variantRepo.UpsertPending(image.ID, models.FormatWebP)
 	if err != nil {
-		log.Printf("[Converter] Failed to upsert variant: %v", err)
+		utils.LogIfDevf("[Converter] Failed to upsert variant: %v", err)
 		return
 	}
 
 	// 只有 pending 状态才提交任务
 	if variant.Status != models.VariantStatusPending {
-		log.Printf("[Converter] Variant %d status=%s, skip submission (retry_count=%d)",
+		utils.LogIfDevf("[Converter] Variant %d status=%s, skip submission (retry_count=%d)",
 			variant.ID, variant.Status, variant.RetryCount)
 		return
 	}
@@ -70,11 +70,11 @@ func (c *Converter) TriggerWebPConversion(image *models.Image) {
 	// 检查重试次数
 	settings, err = c.configManager.GetConversionSettings(ctx)
 	if err != nil {
-		log.Printf("[Converter] Failed to get settings for retry check: %v", err)
+		utils.LogIfDevf("[Converter] Failed to get settings for retry check: %v", err)
 		return
 	}
 	if variant.RetryCount >= settings.MaxRetries {
-		log.Printf("[Converter] Variant %d reached max retries (%d >= %d), skip submission",
+		utils.LogIfDevf("[Converter] Variant %d reached max retries (%d >= %d), skip submission",
 			variant.ID, variant.RetryCount, settings.MaxRetries)
 		return
 	}
@@ -90,7 +90,7 @@ func (c *Converter) TriggerWebPConversion(image *models.Image) {
 	}
 
 	if !async.TrySubmit(task, 3, 100*time.Millisecond) {
-		log.Printf("[Converter] Failed to submit task for %s", image.Identifier)
+		utils.LogIfDevf("[Converter] Failed to submit task for %s", image.Identifier)
 	}
 }
 
@@ -109,7 +109,7 @@ func (c *Converter) TriggerRetry(variant *models.ImageVariant, image *models.Ima
 
 	// CAS 重置为 pending
 	if err := c.variantRepo.ResetForRetry(variant.ID, 0); err != nil {
-		log.Printf("[Converter] Failed to reset variant %d: %v", variant.ID, err)
+		utils.LogIfDevf("[Converter] Failed to reset variant %d: %v", variant.ID, err)
 		return
 	}
 

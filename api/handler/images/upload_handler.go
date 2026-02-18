@@ -92,7 +92,7 @@ func (h *Handler) UploadImage(c *gin.Context) {
 		"identifier": image.Identifier,
 		"filename":   image.OriginalName,
 		"file_size":  image.FileSize,
-		"url":        utils.BuildImageURL(image.Identifier),
+		"links":      utils.BuildLinkFormats(image.Identifier),
 	})
 }
 
@@ -164,7 +164,7 @@ func (h *Handler) UploadImages(c *gin.Context) {
 		Identifier string
 		FileName   string
 		FileSize   int64
-		URL        string
+		Links      utils.LinkFormats
 		Error      string
 	}
 
@@ -195,7 +195,7 @@ func (h *Handler) UploadImages(c *gin.Context) {
 				} else {
 					result.Identifier = image.Identifier
 					result.FileSize = image.FileSize
-					result.URL = utils.BuildImageURL(image.Identifier)
+					result.Links = utils.BuildLinkFormats(image.Identifier)
 				}
 
 				resultsMutex.Lock()
@@ -222,7 +222,7 @@ func (h *Handler) UploadImages(c *gin.Context) {
 				"identifier": result.Identifier,
 				"filename":   result.FileName,
 				"file_size":  result.FileSize,
-				"url":        result.URL,
+				"links":      result.Links,
 			})
 		}
 	}

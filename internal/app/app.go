@@ -24,7 +24,6 @@ type Container struct {
 	configManager     *configSvc.Manager
 	repositories      *repositories.Repositories
 	converter         *image.Converter
-	thumbnailScanner  *image.ThumbnailScanner
 }
 
 // GetConverter 获取图片转换器
@@ -35,20 +34,6 @@ func (c *Container) GetConverter() *image.Converter {
 		c.converter = image.NewConverter(c.configManager, variantRepo, c.storageFactory.GetDefault())
 	}
 	return c.converter
-}
-
-// GetThumbnailScanner 获取缩略图扫描器
-func (c *Container) GetThumbnailScanner(worker interface{}, thumbnailSvc interface{}) *image.ThumbnailScanner {
-	if c.thumbnailScanner == nil {
-		db := c.databaseFactory.GetProvider().DB()
-		c.thumbnailScanner = image.NewThumbnailScanner(
-			db,
-			c.configManager,
-			nil, // worker will be set by caller
-			nil, // thumbnailService will be set by caller
-		)
-	}
-	return c.thumbnailScanner
 }
 
 // NewContainer 创建新的依赖注入容器
@@ -99,6 +84,7 @@ func (c *Container) InitServices() error {
 
 // initConfigManager 初始化配置管理器
 func (c *Container) initConfigManager() error {
+	// 初始化 ConfigManager
 	manager := configSvc.NewManager(c.databaseFactory.GetProvider().DB(), "./data")
 	if err := manager.Initialize(); err != nil {
 		return fmt.Errorf("failed to initialize config manager: %w", err)
@@ -106,6 +92,20 @@ func (c *Container) initConfigManager() error {
 	c.configManager = manager
 	utils.LogIfDev("Config manager initialized")
 	return nil
+}
+
+// SetupConfigCache 为 ConfigManager 设置缓存
+func (c *Container) SetupConfigCache() {
+	if c.cacheFactory == nil || c.configManager == nil {
+		return
+	}
+
+	// 使用默认缓存提供者
+	cacheProvider := c.cacheFactory.GetProvider()
+	if cacheProvider != nil {
+		c.configManager.SetCache(cacheProvider, 0) // 0 表示使用默认 TTL
+		fmt.Println("[Container] Config cache enabled")
+	}
 }
 
 // initRepositories 初始化所有仓库
@@ -202,6 +202,12 @@ func (c *Container) Close() error {
 	if c.cacheFactory != nil {
 		if err := c.cacheFactory.Close(); err != nil {
 			utils.LogIfDevf("Error closing cache factory: %v", err)
+		}
+	}
+
+	if c.storageFactory != nil {
+		if err := c.storageFactory.Close(); err != nil {
+			utils.LogIfDevf("Error closing storage factory: %v", err)
 		}
 	}
 

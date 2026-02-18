@@ -378,9 +378,23 @@ func (f *Factory) ListInfo() []map[string]interface{} {
 
 // Get 获取 provider（向后兼容，使用 GetByName）
 func (f *Factory) Get(name string) (Provider, error) {
-return f.GetByName(name)
+	return f.GetByName(name)
 }
 
+// Close 关闭存储工厂
+func (f *Factory) Close() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	// 清空所有 provider 引用
+	f.providers = make(map[uint]Provider)
+	f.providersByName = make(map[string]Provider)
+	f.defaultProvider = nil
+	f.defaultID = 0
+	f.defaultName = ""
+
+	return nil
+}
 
 // 辅助函数
 func getString(m map[string]interface{}, key string) string {
