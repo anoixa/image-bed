@@ -137,7 +137,7 @@ func TestPasswordHashRoundTrip(t *testing.T) {
 func TestArgon2Parameters(t *testing.T) {
 	// 验证参数在合理范围内
 	assert.Equal(t, uint32(65536), argon2Memory)      // 64 MB
-	assert.Equal(t, uint32(2), argon2Iterations)      // 2 iterations
+	assert.Equal(t, uint32(3), argon2Iterations)      // 2 iterations
 	assert.Equal(t, uint8(4), argon2Parallelism)      // 4 threads
 	assert.Equal(t, uint32(16), argon2SaltLength)     // 16 bytes
 	assert.Equal(t, uint32(32), argon2KeyLength)      // 32 bytes
