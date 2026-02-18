@@ -2,6 +2,7 @@ package images
 
 import (
 	"errors"
+	"log"
 	"time"
 
 	"github.com/anoixa/image-bed/database/models"
@@ -56,7 +57,11 @@ func (r *variantRepository) UpsertPending(imageID uint, format string) (*models.
 	err := r.db.Where("image_id = ? AND format = ?", imageID, format).First(&variant).Error
 
 	if err == nil {
-		// 记录已存在，直接返回
+		// 记录已存在，记录状态信息用于调试
+		if variant.Status != models.VariantStatusPending {
+			log.Printf("[UpsertPending] Found existing variant %d with status=%s, retry_count=%d, image_id=%d",
+				variant.ID, variant.Status, variant.RetryCount, imageID)
+		}
 		return &variant, nil
 	}
 
@@ -183,6 +188,13 @@ func (r *variantRepository) GetRetryableVariants(now time.Time, limit int) ([]mo
 		3, // maxRetries
 		now,
 	).Limit(limit).Find(&variants).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, v := range variants {
+		log.Printf("[GetRetryableVariants] Found variant %d: status=%s, retry_count=%d, next_retry_at=%v",
+			v.ID, v.Status, v.RetryCount, v.NextRetryAt)
+	}
 	return variants, err
 }
 

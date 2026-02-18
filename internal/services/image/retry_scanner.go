@@ -4,7 +4,6 @@ import (
 	"log"
 	"time"
 
-	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
 )
 
@@ -68,16 +67,16 @@ func (s *RetryScanner) scanAndRetry() {
 	log.Printf("[RetryScanner] Found %d retryable variants", len(variants))
 
 	for _, variant := range variants {
-		// CAS: failed → pending
-		updated, err := s.variantRepo.UpdateStatusCAS(
-			variant.ID,
-			models.VariantStatusFailed,
-			models.VariantStatusPending,
-			"",
-		)
-		if err != nil || !updated {
-			continue // 已被其他进程处理
+		log.Printf("[RetryScanner] Processing variant %d: status=%s, retry_count=%d",
+			variant.ID, variant.Status, variant.RetryCount)
+
+		// 使用 ResetForRetry: failed → pending，同时增加 retry_count 和设置 next_retry_at
+		err := s.variantRepo.ResetForRetry(variant.ID, s.interval)
+		if err != nil {
+			log.Printf("[RetryScanner] ResetForRetry failed for variant %d: %v", variant.ID, err)
+			continue
 		}
+		log.Printf("[RetryScanner] ResetForRetry success: variant %d status changed from failed to pending, retry_count incremented", variant.ID)
 
 		// 获取图片信息
 		img, err := s.variantRepo.GetImageByID(variant.ImageID)
@@ -87,9 +86,9 @@ func (s *RetryScanner) scanAndRetry() {
 		}
 
 		// 触发转换
-		s.converter.TriggerWebPConversion(img)
-		log.Printf("[RetryScanner] Triggered retry for variant %d (image: %s)",
+		log.Printf("[RetryScanner] Triggering conversion for variant %d (image: %s)",
 			variant.ID, img.Identifier)
+		s.converter.TriggerWebPConversion(img)
 	}
 }
 
