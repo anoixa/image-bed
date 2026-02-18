@@ -15,6 +15,7 @@ import (
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/internal/repositories"
 	configSvc "github.com/anoixa/image-bed/internal/services/config"
+	imageSvc "github.com/anoixa/image-bed/internal/services/image"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -28,6 +29,7 @@ type ServerDependencies struct {
 	CacheFactory   *cache.Factory
 	Repositories   *repositories.Repositories
 	ConfigManager  *configSvc.Manager
+	Converter      *imageSvc.Converter
 }
 
 // 启动gin
@@ -117,7 +119,7 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	api.SetAuthRepositories(deps.Repositories)
 
 	// 创建处理器（依赖注入）
-	imageHandler := images.NewHandler(deps.StorageFactory, deps.CacheFactory, deps.Repositories)
+	imageHandler := images.NewHandler(deps.StorageFactory, deps.CacheFactory, deps.Repositories, deps.Converter, deps.ConfigManager)
 	albumHandler := albums.NewHandler(deps.Repositories, deps.CacheFactory)
 	albumImageHandler := albums.NewAlbumImageHandler(deps.Repositories, deps.CacheFactory)
 	keyHandler := key.NewHandler(deps.Repositories)
@@ -216,6 +218,11 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 					// 存储提供者管理
 					adminGroup.GET("/storage/providers", configHandler.ListStorageProviders)  // GET /api/v1/admin/storage/providers
 					adminGroup.POST("/storage/reload/:id", configHandler.ReloadStorageConfig) // POST /api/v1/admin/storage/reload/:id
+
+					// 转换配置管理
+					conversionHandler := admin.NewConversionHandler(deps.ConfigManager)
+					adminGroup.GET("/conversion", conversionHandler.GetConfig)  // GET /api/v1/admin/conversion
+					adminGroup.PUT("/conversion", conversionHandler.UpdateConfig) // PUT /api/v1/admin/conversion
 				}
 			}
 		}

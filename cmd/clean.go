@@ -9,7 +9,7 @@ import (
 
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
-	"github.com/anoixa/image-bed/internal/di"
+	"github.com/anoixa/image-bed/internal/app"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/spf13/cobra"
 )
@@ -58,7 +58,7 @@ func runClean(dryRun, tempOnly, dbOnly, storageOnly bool) error {
 	config.InitConfig()
 	cfg := config.Get()
 
-	container := di.NewContainer(cfg)
+	container := app.NewContainer(cfg)
 	if err := container.Init(); err != nil {
 		return fmt.Errorf("failed to initialize container: %w", err)
 	}
@@ -97,7 +97,7 @@ func runClean(dryRun, tempOnly, dbOnly, storageOnly bool) error {
 }
 
 // cleanOrphanDBRecords 清理数据库中不存在对应文件的记录
-func cleanOrphanDBRecords(container *di.Container, stats *cleanStats, dryRun bool) error {
+func cleanOrphanDBRecords(container *app.Container, stats *cleanStats, dryRun bool) error {
 	log.Println("Checking for orphan database records...")
 
 	db := container.GetDatabaseProvider().DB()
@@ -149,7 +149,7 @@ func cleanOrphanDBRecords(container *di.Container, stats *cleanStats, dryRun boo
 }
 
 // cleanOrphanStorageFiles 清理存储中没有对应数据库记录的文件
-func cleanOrphanStorageFiles(container *di.Container, stats *cleanStats, dryRun bool) error {
+func cleanOrphanStorageFiles(container *app.Container, stats *cleanStats, dryRun bool) error {
 	log.Println("Checking for orphan storage files...")
 
 	storageFactory := container.GetStorageFactory()

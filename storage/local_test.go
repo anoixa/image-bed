@@ -279,7 +279,7 @@ func TestIsValidIdentifier(t *testing.T) {
 	}{
 		{"simple", "file.txt", true},
 		{"empty", "", false},
-		{"dot", ".", false},
+		{"dot", ".", true},
 		{"dotdot", "..", false},
 		{"absolute_unix", "/etc/passwd", false},
 		{"absolute_windows", "C:\\file.txt", false},

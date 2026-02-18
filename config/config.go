@@ -233,9 +233,10 @@ func (s ServerConfig) BaseURL() string {
 
 // getCpus 给定默认线程数量
 func getCpus() int {
-	workerCount := runtime.NumCPU()
-	if workerCount < 2 {
-		workerCount = 2
+	n := runtime.GOMAXPROCS(0)
+
+	if n < 2 {
+		return 2
 	}
-	return workerCount
+	return n
 }
