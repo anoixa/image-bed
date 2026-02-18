@@ -6,7 +6,7 @@ import (
 
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
-	"github.com/anoixa/image-bed/internal/services/config"
+	"github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/utils/format"
 )
 

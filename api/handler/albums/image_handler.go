@@ -11,7 +11,6 @@ import (
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/database/repo/albums"
 	"github.com/anoixa/image-bed/database/repo/images"
-	"github.com/anoixa/image-bed/internal/repositories"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -29,10 +28,10 @@ type AlbumImageHandler struct {
 }
 
 // NewAlbumImageHandler 创建相册图片处理器
-func NewAlbumImageHandler(repos *repositories.Repositories, cacheFactory *cache.Factory) *AlbumImageHandler {
+func NewAlbumImageHandler(albumsRepo *albums.Repository, imagesRepo *images.Repository, cacheFactory *cache.Factory) *AlbumImageHandler {
 	return &AlbumImageHandler{
-		repo:        repos.Albums,
-		imageRepo:   repos.Images,
+		repo:        albumsRepo,
+		imageRepo:   imagesRepo,
 		cacheHelper: cache.NewHelper(cacheFactory),
 	}
 }

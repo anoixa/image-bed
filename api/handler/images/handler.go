@@ -2,9 +2,9 @@ package images
 
 import (
 	"github.com/anoixa/image-bed/cache"
+	"github.com/anoixa/image-bed/database"
 	"github.com/anoixa/image-bed/database/repo/images"
-	"github.com/anoixa/image-bed/internal/repositories"
-	configSvc "github.com/anoixa/image-bed/internal/services/config"
+	configSvc "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/internal/services/image"
 	"github.com/anoixa/image-bed/storage"
 )
@@ -22,9 +22,9 @@ type Handler struct {
 }
 
 // NewHandler 图片处理器
-func NewHandler(storageFactory *storage.Factory, cacheFactory *cache.Factory, repos *repositories.Repositories, converter *image.Converter, configManager *configSvc.Manager) *Handler {
+func NewHandler(storageFactory *storage.Factory, cacheFactory *cache.Factory, imagesRepo *images.Repository, dbProvider database.Provider, converter *image.Converter, configManager *configSvc.Manager) *Handler {
 	// 创建变体仓库和服务
-	variantRepo := images.NewVariantRepository(repos.DB())
+	variantRepo := images.NewVariantRepository(dbProvider.DB())
 	variantService := image.NewVariantService(variantRepo, configManager, converter)
 
 	// 创建缩略图服务
@@ -33,7 +33,7 @@ func NewHandler(storageFactory *storage.Factory, cacheFactory *cache.Factory, re
 	return &Handler{
 		storageFactory:   storageFactory,
 		cacheHelper:      cache.NewHelper(cacheFactory),
-		repo:             repos.Images,
+		repo:             imagesRepo,
 		converter:        converter,
 		configManager:    configManager,
 		variantRepo:      variantRepo,

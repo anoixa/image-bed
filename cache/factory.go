@@ -11,9 +11,16 @@ import (
 	"github.com/anoixa/image-bed/cache/memory"
 	"github.com/anoixa/image-bed/cache/redis"
 	"github.com/anoixa/image-bed/database/models"
-	cryptoservice "github.com/anoixa/image-bed/internal/services/crypto"
 	"gorm.io/gorm"
 )
+
+// CryptoProvider 加密服务接口 - 由上层服务实现
+type CryptoProvider interface {
+	// EncryptString 加密字符串
+	EncryptString(plaintext string) string
+	// DecryptString 解密字符串
+	DecryptString(ciphertext string) (string, error)
+}
 
 // Factory 缓存
 type Factory struct {
@@ -26,11 +33,11 @@ type Factory struct {
 	mu sync.RWMutex // 保护上述字段
 
 	db     *gorm.DB
-	crypto *cryptoservice.Service
+	crypto CryptoProvider
 }
 
 // NewFactory 创建缓存工厂
-func NewFactory(db *gorm.DB, crypto *cryptoservice.Service) (*Factory, error) {
+func NewFactory(db *gorm.DB, crypto CryptoProvider) (*Factory, error) {
 	factory := &Factory{
 		providers:       make(map[uint]Provider),
 		providersByName: make(map[string]Provider),

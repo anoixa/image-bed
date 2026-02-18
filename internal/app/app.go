@@ -6,10 +6,12 @@ import (
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database"
+	"github.com/anoixa/image-bed/database/repo/accounts"
+	"github.com/anoixa/image-bed/database/repo/albums"
 	"github.com/anoixa/image-bed/database/repo/images"
+	"github.com/anoixa/image-bed/database/repo/keys"
 	cryptoservice "github.com/anoixa/image-bed/internal/services/crypto"
-	configSvc "github.com/anoixa/image-bed/internal/services/config"
-	"github.com/anoixa/image-bed/internal/repositories"
+	configSvc "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/internal/services/image"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
@@ -17,13 +19,18 @@ import (
 
 // Container 依赖注入容器 - 管理所有服务的生命周期
 type Container struct {
-	config            *config.Config
-	storageFactory    *storage.Factory
-	cacheFactory      *cache.Factory
-	databaseFactory   *database.Factory
-	configManager     *configSvc.Manager
-	repositories      *repositories.Repositories
-	converter         *image.Converter
+	config          *config.Config
+	storageFactory  *storage.Factory
+	cacheFactory    *cache.Factory
+	databaseFactory *database.Factory
+	configManager   *configSvc.Manager
+	converter       *image.Converter
+
+	AccountsRepo *accounts.Repository
+	DevicesRepo  *accounts.DeviceRepository
+	ImagesRepo   *images.Repository
+	AlbumsRepo   *albums.Repository
+	KeysRepo     *keys.Repository
 }
 
 // GetConverter 获取图片转换器
@@ -110,13 +117,18 @@ func (c *Container) SetupConfigCache() {
 
 // initRepositories 初始化所有仓库
 func (c *Container) initRepositories() {
-	c.repositories = repositories.NewRepositories(c.databaseFactory.GetProvider())
+	provider := c.databaseFactory.GetProvider()
+	c.AccountsRepo = accounts.NewRepository(provider)
+	c.DevicesRepo = accounts.NewDeviceRepository(provider)
+	c.ImagesRepo = images.NewRepository(provider)
+	c.AlbumsRepo = albums.NewRepository(provider)
+	c.KeysRepo = keys.NewRepository(provider)
 	utils.LogIfDev("Repositories initialized")
 }
 
-// GetRepositories 获取所有仓库
-func (c *Container) GetRepositories() *repositories.Repositories {
-	return c.repositories
+// DB 获取数据库连接（兼容旧接口）
+func (c *Container) DB() *database.Factory {
+	return c.databaseFactory
 }
 
 // GetDatabaseProvider 获取数据库提供者

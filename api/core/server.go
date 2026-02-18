@@ -13,8 +13,8 @@ import (
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
-	"github.com/anoixa/image-bed/internal/repositories"
-	configSvc "github.com/anoixa/image-bed/internal/services/config"
+	"github.com/anoixa/image-bed/internal/app"
+	configSvc "github.com/anoixa/image-bed/config/db"
 	imageSvc "github.com/anoixa/image-bed/internal/services/image"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/gin-contrib/cors"
@@ -27,7 +27,7 @@ var startTime = time.Now()
 type ServerDependencies struct {
 	StorageFactory *storage.Factory
 	CacheFactory   *cache.Factory
-	Repositories   *repositories.Repositories
+	Container      *app.Container
 	ConfigManager  *configSvc.Manager
 	Converter      *imageSvc.Converter
 }
@@ -93,7 +93,7 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 			"uptime":  time.Since(startTime).Round(time.Second).String(),
 			"version": config.Version,
 			"checks": gin.H{
-				"database": checkDatabaseHealth(deps.Repositories),
+				"database": checkDatabaseHealth(deps.Container.GetDatabaseProvider()),
 				"cache":    checkCacheHealth(deps.CacheFactory),
 				"storage":  checkStorageHealth(deps.StorageFactory),
 			},
@@ -118,14 +118,14 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	})
 
 	// 设置认证仓库
-	api.SetAuthRepositories(deps.Repositories)
+	api.SetAuthRepositories(deps.Container)
 
 	// 创建处理器（依赖注入）
-	imageHandler := images.NewHandler(deps.StorageFactory, deps.CacheFactory, deps.Repositories, deps.Converter, deps.ConfigManager)
-	albumHandler := albums.NewHandler(deps.Repositories, deps.CacheFactory)
-	albumImageHandler := albums.NewAlbumImageHandler(deps.Repositories, deps.CacheFactory)
-	keyHandler := key.NewHandler(deps.Repositories)
-	loginHandler := api.NewLoginHandler(deps.Repositories)
+	imageHandler := images.NewHandler(deps.StorageFactory, deps.CacheFactory, deps.Container.ImagesRepo, deps.Container.GetDatabaseProvider(), deps.Converter, deps.ConfigManager)
+	albumHandler := albums.NewHandler(deps.Container.AlbumsRepo, deps.CacheFactory)
+	albumImageHandler := albums.NewAlbumImageHandler(deps.Container.AlbumsRepo, deps.Container.ImagesRepo, deps.CacheFactory)
+	keyHandler := key.NewHandler(deps.Container.KeysRepo)
+	loginHandler := api.NewLoginHandler(deps.Container.AccountsRepo, deps.Container.DevicesRepo)
 
 	// 公共接口 - 图片获取（可能涉及大文件）
 	publicGroup := router.Group("/images")

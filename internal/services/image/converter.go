@@ -6,10 +6,10 @@ import (
 
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
-	"github.com/anoixa/image-bed/internal/services/config"
+	"github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
-	"github.com/anoixa/image-bed/utils/async"
+	"github.com/anoixa/image-bed/internal/worker"
 )
 
 // Converter 图片转换器
@@ -80,7 +80,7 @@ func (c *Converter) TriggerWebPConversion(image *models.Image) {
 	}
 
 	// 提交任务
-	task := &async.WebPConversionTask{
+	task := &worker.WebPConversionTask{
 		VariantID:        variant.ID,
 		ImageID:          image.ID,
 		SourceIdentifier: image.Identifier,
@@ -89,7 +89,7 @@ func (c *Converter) TriggerWebPConversion(image *models.Image) {
 		Storage:          c.storage,
 	}
 
-	if !async.TrySubmit(task, 3, 100*time.Millisecond) {
+	if !worker.TrySubmit(task, 3, 100*time.Millisecond) {
 		utils.LogIfDevf("[Converter] Failed to submit task for %s", image.Identifier)
 	}
 }

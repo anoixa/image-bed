@@ -6,7 +6,7 @@ import (
 	"log"
 
 	"github.com/anoixa/image-bed/database/models"
-	configSvc "github.com/anoixa/image-bed/internal/services/config"
+	configSvc "github.com/anoixa/image-bed/config/db"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"gorm.io/driver/postgres"

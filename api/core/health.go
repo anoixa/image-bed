@@ -4,16 +4,16 @@ import (
 	"context"
 
 	"github.com/anoixa/image-bed/cache"
-	"github.com/anoixa/image-bed/internal/repositories"
+	"github.com/anoixa/image-bed/database"
 	"github.com/anoixa/image-bed/storage"
 )
 
-func checkDatabaseHealth(repos *repositories.Repositories) string {
-	if repos == nil {
+func checkDatabaseHealth(provider database.Provider) string {
+	if provider == nil {
 		return "not initialized"
 	}
 
-	db := repos.Accounts.DB()
+	db := provider.DB()
 	if db == nil {
 		return "not initialized"
 	}

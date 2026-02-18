@@ -18,7 +18,7 @@ import (
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/internal/app"
 	imageSvc "github.com/anoixa/image-bed/internal/services/image"
-	"github.com/anoixa/image-bed/utils/async"
+	"github.com/anoixa/image-bed/internal/worker"
 	"github.com/spf13/cobra"
 )
 
@@ -62,7 +62,7 @@ func RunServer() {
 	container.SetupConfigCache()
 
 	// 初始化异步任务协程池
-	async.InitGlobalPool(cfg.Server.WorkerCount, 1000)
+	worker.InitGlobalPool(cfg.Server.WorkerCount, 1000)
 
 	// 初始化图片转换器和重试扫描器
 	converter := container.GetConverter()
@@ -76,12 +76,10 @@ func RunServer() {
 
 	// 初始化缩略图服务
 	thumbnailSvc := imageSvc.NewThumbnailService(variantRepo, container.GetConfigManager(), container.GetStorageFactory().GetDefault(), converter)
-
-	// 初始化并启动缩略图扫描器
 	thumbnailScanner := imageSvc.NewThumbnailScanner(
 		container.GetDatabaseFactory().GetProvider().DB(),
 		container.GetConfigManager(),
-		async.GetGlobalPool(),
+		worker.GetGlobalPool(),
 		thumbnailSvc,
 	)
 	thumbnailScanner.Start()
@@ -100,7 +98,7 @@ func RunServer() {
 	deps := &core.ServerDependencies{
 		StorageFactory: container.GetStorageFactory(),
 		CacheFactory:   container.GetCacheFactory(),
-		Repositories:   container.GetRepositories(),
+		Container:      container,
 		ConfigManager:  container.GetConfigManager(),
 		Converter:      converter,
 	}
@@ -139,7 +137,7 @@ func RunServer() {
 	thumbnailScanner.Stop()
 
 	// 关闭异步任务池
-	async.StopGlobalPool()
+	worker.StopGlobalPool()
 
 	// 关闭 DI 容器
 	if err := container.Close(); err != nil {
@@ -164,9 +162,8 @@ func InitDatabase(container *app.Container) {
 	}
 
 	// 创建默认管理员用户
-	repos := container.GetRepositories()
-	if repos != nil && repos.Accounts != nil {
-		repos.Accounts.CreateDefaultAdminUser()
+	if container.AccountsRepo != nil {
+		container.AccountsRepo.CreateDefaultAdminUser()
 	}
 
 	log.Println("Database initialized successfully")

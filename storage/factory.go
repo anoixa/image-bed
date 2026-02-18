@@ -11,9 +11,18 @@ import (
 
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
-	cryptoservice "github.com/anoixa/image-bed/internal/services/crypto"
+	"github.com/anoixa/image-bed/storage/local"
+	"github.com/anoixa/image-bed/storage/minio"
 	"gorm.io/gorm"
 )
+
+// CryptoProvider 加密服务接口 - 由上层服务实现
+type CryptoProvider interface {
+	// EncryptString 加密字符串
+	EncryptString(plaintext string) string
+	// DecryptString 解密字符串
+	DecryptString(ciphertext string) (string, error)
+}
 
 // Factory 存储工厂 - 支持多存储后端、数据库配置和热重载
 type Factory struct {
@@ -26,11 +35,11 @@ type Factory struct {
 	mu sync.RWMutex // 保护上述字段
 
 	db     *gorm.DB
-	crypto *cryptoservice.Service
+	crypto CryptoProvider
 }
 
 // NewFactory 创建存储工厂
-func NewFactory(db *gorm.DB, crypto *cryptoservice.Service) (*Factory, error) {
+func NewFactory(db *gorm.DB, crypto CryptoProvider) (*Factory, error) {
 	factory := &Factory{
 		providers:       make(map[uint]Provider),
 		providersByName: make(map[string]Provider),
@@ -46,7 +55,7 @@ func NewFactory(db *gorm.DB, crypto *cryptoservice.Service) (*Factory, error) {
 
 	if len(factory.providers) == 0 {
 		log.Println("[StorageFactory] No storage providers found in database, using default local storage")
-		provider, err := NewLocalStorage("./data/upload")
+		provider, err := local.NewStorage("./data/upload")
 		if err != nil {
 			return nil, fmt.Errorf("failed to create default storage: %w", err)
 		}
@@ -115,7 +124,7 @@ func (f *Factory) loadProvider(cfg *models.SystemConfig) error {
 		if path == "" {
 			return fmt.Errorf("local_path is required")
 		}
-		p, err := NewLocalStorage(path)
+		p, err := local.NewStorage(path)
 		if err != nil {
 			return fmt.Errorf("failed to create local storage: %w", err)
 		}
@@ -129,7 +138,7 @@ func (f *Factory) loadProvider(cfg *models.SystemConfig) error {
 			UseSSL:          getBool(configMap, "use_ssl"),
 			BucketName:      getString(configMap, "bucket_name"),
 		}
-		p, err := NewMinioStorage(minioCfg)
+		p, err := minio.NewStorage(minioCfg)
 		if err != nil {
 			return fmt.Errorf("failed to create minio storage: %w", err)
 		}
@@ -239,7 +248,7 @@ func (f *Factory) createProvider(cfg *models.SystemConfig) (Provider, error) {
 	switch storageType {
 	case "local":
 		path, _ := configMap["local_path"].(string)
-		return NewLocalStorage(path)
+		return local.NewStorage(path)
 	case "minio":
 		minioCfg := config.MinioConfig{
 			Endpoint:        getString(configMap, "endpoint"),
@@ -248,7 +257,7 @@ func (f *Factory) createProvider(cfg *models.SystemConfig) (Provider, error) {
 			UseSSL:          getBool(configMap, "use_ssl"),
 			BucketName:      getString(configMap, "bucket_name"),
 		}
-		return NewMinioStorage(minioCfg)
+		return minio.NewStorage(minioCfg)
 	default:
 		return nil, fmt.Errorf("unsupported type: %s", storageType)
 	}

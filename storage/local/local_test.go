@@ -1,4 +1,4 @@
-package storage
+package local
 
 import (
 	"context"
@@ -11,11 +11,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestLocalStorage_PathTraversal_Prevention 测试路径遍历防护
-func TestLocalStorage_PathTraversal_Prevention(t *testing.T) {
+// TestStorage_PathTraversal_Prevention 测试路径遍历防护
+func TestStorage_PathTraversal_Prevention(t *testing.T) {
 	// 创建临时目录作为存储根目录
 	tempDir := t.TempDir()
-	storage, err := NewLocalStorage(tempDir)
+	storage, err := NewStorage(tempDir)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -43,10 +43,10 @@ func TestLocalStorage_PathTraversal_Prevention(t *testing.T) {
 	}
 }
 
-// TestLocalStorage_PathTraversal_Get 测试读取时的路径遍历防护
-func TestLocalStorage_PathTraversal_Get(t *testing.T) {
+// TestStorage_PathTraversal_Get 测试读取时的路径遍历防护
+func TestStorage_PathTraversal_Get(t *testing.T) {
 	tempDir := t.TempDir()
-	storage, err := NewLocalStorage(tempDir)
+	storage, err := NewStorage(tempDir)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -62,10 +62,10 @@ func TestLocalStorage_PathTraversal_Get(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid")
 }
 
-// TestLocalStorage_PathTraversal_Delete 测试删除时的路径遍历防护
-func TestLocalStorage_PathTraversal_Delete(t *testing.T) {
+// TestStorage_PathTraversal_Delete 测试删除时的路径遍历防护
+func TestStorage_PathTraversal_Delete(t *testing.T) {
 	tempDir := t.TempDir()
-	storage, err := NewLocalStorage(tempDir)
+	storage, err := NewStorage(tempDir)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -75,10 +75,10 @@ func TestLocalStorage_PathTraversal_Delete(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid")
 }
 
-// TestLocalStorage_ValidIdentifier 测试有效标识符
-func TestLocalStorage_ValidIdentifier(t *testing.T) {
+// TestStorage_ValidIdentifier 测试有效标识符
+func TestStorage_ValidIdentifier(t *testing.T) {
 	tempDir := t.TempDir()
-	storage, err := NewLocalStorage(tempDir)
+	storage, err := NewStorage(tempDir)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -100,10 +100,10 @@ func TestLocalStorage_ValidIdentifier(t *testing.T) {
 	}
 }
 
-// TestLocalStorage_InvalidIdentifier 测试无效标识符
-func TestLocalStorage_InvalidIdentifier(t *testing.T) {
+// TestStorage_InvalidIdentifier 测试无效标识符
+func TestStorage_InvalidIdentifier(t *testing.T) {
 	tempDir := t.TempDir()
-	storage, err := NewLocalStorage(tempDir)
+	storage, err := NewStorage(tempDir)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -130,10 +130,10 @@ func TestLocalStorage_InvalidIdentifier(t *testing.T) {
 	}
 }
 
-// TestLocalStorage_FileOutsideBasePath 测试文件是否真正保存在基础路径内
-func TestLocalStorage_FileOutsideBasePath(t *testing.T) {
+// TestStorage_FileOutsideBasePath 测试文件是否真正保存在基础路径内
+func TestStorage_FileOutsideBasePath(t *testing.T) {
 	tempDir := t.TempDir()
-	storage, err := NewLocalStorage(tempDir)
+	storage, err := NewStorage(tempDir)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -159,13 +159,13 @@ func TestLocalStorage_FileOutsideBasePath(t *testing.T) {
 	}
 }
 
-// TestLocalStorage_SymlinkAttack 测试符号链接攻击防护
-func TestLocalStorage_SymlinkAttack(t *testing.T) {
+// TestStorage_SymlinkAttack 测试符号链接攻击防护
+func TestStorage_SymlinkAttack(t *testing.T) {
 	// 在某些系统上，攻击者可能创建符号链接指向敏感文件
 	// 这个测试检查是否允许通过符号链接访问外部文件
 
 	tempDir := t.TempDir()
-	storage, err := NewLocalStorage(tempDir)
+	storage, err := NewStorage(tempDir)
 	require.NoError(t, err)
 
 	// 创建一个指向外部文件的路径
@@ -182,14 +182,14 @@ func TestLocalStorage_SymlinkAttack(t *testing.T) {
 	ctx := context.Background()
 	_, err = storage.GetWithContext(ctx, "symlink")
 	// 应该拒绝或返回错误
-	// 注意：实际行为取决于 isValidIdentifier 的实现
+	// 注意：实际行为取决于 IsValidIdentifier 的实现
 	// 如果符号链接被当作有效标识符，这可能是个安全问题
 }
 
-// TestLocalStorage_CaseSensitivity 测试大小写敏感性
-func TestLocalStorage_CaseSensitivity(t *testing.T) {
+// TestStorage_CaseSensitivity 测试大小写敏感性
+func TestStorage_CaseSensitivity(t *testing.T) {
 	tempDir := t.TempDir()
-	storage, err := NewLocalStorage(tempDir)
+	storage, err := NewStorage(tempDir)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -204,10 +204,10 @@ func TestLocalStorage_CaseSensitivity(t *testing.T) {
 	// 在大小写不敏感的系统上可能成功
 }
 
-// TestLocalStorage_ConcurrentAccess 测试并发访问安全性
-func TestLocalStorage_ConcurrentAccess(t *testing.T) {
+// TestStorage_ConcurrentAccess 测试并发访问安全性
+func TestStorage_ConcurrentAccess(t *testing.T) {
 	tempDir := t.TempDir()
-	storage, err := NewLocalStorage(tempDir)
+	storage, err := NewStorage(tempDir)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -223,10 +223,10 @@ func TestLocalStorage_ConcurrentAccess(t *testing.T) {
 	}
 }
 
-// TestLocalStorage_LongIdentifier 测试超长标识符
-func TestLocalStorage_LongIdentifier(t *testing.T) {
+// TestStorage_LongIdentifier 测试超长标识符
+func TestStorage_LongIdentifier(t *testing.T) {
 	tempDir := t.TempDir()
-	storage, err := NewLocalStorage(tempDir)
+	storage, err := NewStorage(tempDir)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -241,10 +241,10 @@ func TestLocalStorage_LongIdentifier(t *testing.T) {
 	}
 }
 
-// TestLocalStorage_SpecialCharacters 测试特殊字符
-func TestLocalStorage_SpecialCharacters(t *testing.T) {
+// TestStorage_SpecialCharacters 测试特殊字符
+func TestStorage_SpecialCharacters(t *testing.T) {
 	tempDir := t.TempDir()
-	storage, err := NewLocalStorage(tempDir)
+	storage, err := NewStorage(tempDir)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -273,9 +273,9 @@ func TestLocalStorage_SpecialCharacters(t *testing.T) {
 // TestIsValidIdentifier 测试标识符验证函数
 func TestIsValidIdentifier(t *testing.T) {
 	tests := []struct {
-		name      string
+		name       string
 		identifier string
-		wantValid bool
+		wantValid  bool
 	}{
 		{"simple", "file.txt", true},
 		{"empty", "", false},
@@ -291,7 +291,7 @@ func TestIsValidIdentifier(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := isValidIdentifier(tt.identifier)
+			got := IsValidIdentifier(tt.identifier)
 			assert.Equal(t, tt.wantValid, got, "identifier: %q", tt.identifier)
 		})
 	}
@@ -308,7 +308,7 @@ func BenchmarkIsValidIdentifier(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		for _, id := range identifiers {
-			isValidIdentifier(id)
+			IsValidIdentifier(id)
 		}
 	}
 }

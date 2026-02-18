@@ -10,8 +10,10 @@ import (
 	"github.com/anoixa/image-bed/cache/redis"
 	cfg "github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
-	configSvc "github.com/anoixa/image-bed/internal/services/config"
+	configSvc "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/storage"
+	"github.com/anoixa/image-bed/storage/local"
+	"github.com/anoixa/image-bed/storage/minio"
 	"github.com/gin-gonic/gin"
 )
 
@@ -248,7 +250,7 @@ func (h *ConfigHandler) testStorageConfig(config map[string]interface{}) *models
 			}
 		}
 		// 测试本地路径是否可写
-		provider, err := storage.NewLocalStorage(path)
+		provider, err := local.NewStorage(path)
 		if err != nil {
 			return &models.TestConfigResponse{
 				Success: false,
@@ -268,20 +270,20 @@ func (h *ConfigHandler) testStorageConfig(config map[string]interface{}) *models
 		}
 
 	case "minio":
-		cfg := cfg.MinioConfig{
+		minioCfg := cfg.MinioConfig{
 			Endpoint:        getString(config, "endpoint"),
 			AccessKeyID:     getString(config, "access_key_id"),
 			SecretAccessKey: getString(config, "secret_access_key"),
 			UseSSL:          getBool(config, "use_ssl"),
 			BucketName:      getString(config, "bucket_name"),
 		}
-		if cfg.Endpoint == "" || cfg.AccessKeyID == "" || cfg.SecretAccessKey == "" {
+		if minioCfg.Endpoint == "" || minioCfg.AccessKeyID == "" || minioCfg.SecretAccessKey == "" {
 			return &models.TestConfigResponse{
 				Success: false,
 				Message: "Endpoint, access_key_id and secret_access_key are required",
 			}
 		}
-		provider, err := storage.NewMinioStorage(cfg)
+		provider, err := minio.NewStorage(minioCfg)
 		if err != nil {
 			return &models.TestConfigResponse{
 				Success: false,
@@ -324,18 +326,18 @@ func (h *ConfigHandler) testCacheConfig(config map[string]interface{}) *models.T
 		}
 
 	case "redis":
-		cfg := &redis.Config{
+		redisCfg := &redis.Config{
 			Address:      getString(config, "address"),
 			Password:     getString(config, "password"),
 			DB:           getInt(config, "db"),
 			PoolSize:     getInt(config, "pool_size"),
 			MinIdleConns: getInt(config, "min_idle_conns"),
 		}
-		if cfg.Address == "" {
-			cfg.Address = "localhost:6379"
+		if redisCfg.Address == "" {
+			redisCfg.Address = "localhost:6379"
 		}
 
-		provider, err := redis.NewRedisFromConfig(cfg)
+		provider, err := redis.NewRedisFromConfig(redisCfg)
 		if err != nil {
 			return &models.TestConfigResponse{
 				Success: false,

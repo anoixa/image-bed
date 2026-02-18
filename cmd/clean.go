@@ -10,7 +10,7 @@ import (
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/internal/app"
-	"github.com/anoixa/image-bed/storage"
+	"github.com/anoixa/image-bed/storage/local"
 	"github.com/spf13/cobra"
 )
 
@@ -164,7 +164,7 @@ func cleanOrphanStorageFiles(container *app.Container, stats *cleanStats, dryRun
 	}
 
 	// 检查是否为本地存储
-	localStorage, ok := provider.(*storage.LocalStorage)
+	localStorage, ok := provider.(*local.Storage)
 	if !ok {
 		log.Printf("Storage type '%s' does not support orphan file detection yet", provider.Name())
 		return nil

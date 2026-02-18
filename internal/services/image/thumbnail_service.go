@@ -9,10 +9,10 @@ import (
 
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
-	"github.com/anoixa/image-bed/internal/services/config"
+	"github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
-	"github.com/anoixa/image-bed/utils/async"
+	"github.com/anoixa/image-bed/internal/worker"
 	"gorm.io/gorm"
 )
 
@@ -125,7 +125,7 @@ func (s *ThumbnailService) TriggerGeneration(image *models.Image, width int) {
 	thumbnailIdentifier := s.GenerateThumbnailIdentifier(image.Identifier, width)
 
 	// 提交任务
-	task := &async.ThumbnailTask{
+	task := &worker.ThumbnailTask{
 		VariantID:        variant.ID,
 		ImageID:          image.ID,
 		SourceIdentifier: image.Identifier,
@@ -136,7 +136,7 @@ func (s *ThumbnailService) TriggerGeneration(image *models.Image, width int) {
 		Storage:          s.storage,
 	}
 
-	if !async.TrySubmit(task, 3, 100*time.Millisecond) {
+	if !worker.TrySubmit(task, 3, 100*time.Millisecond) {
 		utils.LogIfDevf("[Thumbnail] Failed to submit task for %s", image.Identifier)
 	}
 }

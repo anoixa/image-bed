@@ -1,4 +1,4 @@
-package async
+package worker
 
 import (
 	"bytes"
@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/anoixa/image-bed/database/models"
-	"github.com/anoixa/image-bed/internal/services/config"
+	"github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/h2non/bimg"

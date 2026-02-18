@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/anoixa/image-bed/database/models"
-	"github.com/anoixa/image-bed/internal/services/config"
+	"github.com/anoixa/image-bed/config/db"
+	"github.com/anoixa/image-bed/internal/worker"
 	"github.com/anoixa/image-bed/utils"
-	"github.com/anoixa/image-bed/utils/async"
 
 	"gorm.io/gorm"
 )
@@ -17,7 +17,7 @@ import (
 type ThumbnailScanner struct {
 	db            *gorm.DB
 	configManager *config.Manager
-	worker        *async.WorkerPool
+	worker        *worker.WorkerPool
 	thumbnailSvc  *ThumbnailService
 	ticker        *time.Ticker
 	stopChan      chan struct{}
@@ -28,7 +28,7 @@ type ThumbnailScanner struct {
 func NewThumbnailScanner(
 	db *gorm.DB,
 	configManager *config.Manager,
-	worker *async.WorkerPool,
+	worker *worker.WorkerPool,
 	thumbnailSvc *ThumbnailService,
 ) *ThumbnailScanner {
 	return &ThumbnailScanner{
@@ -320,7 +320,7 @@ func (s *ThumbnailScanner) submitThumbnailTask(ctx context.Context, image *model
 		}
 
 		// 创建缩略图任务
-		task := &async.ThumbnailTask{
+		task := &worker.ThumbnailTask{
 			VariantID:        variant.ID,
 			ImageID:          image.ID,
 			SourceIdentifier: image.Identifier,

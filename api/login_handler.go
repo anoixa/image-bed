@@ -9,7 +9,7 @@ import (
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
-	"github.com/anoixa/image-bed/internal/repositories"
+	"github.com/anoixa/image-bed/database/repo/accounts"
 	"github.com/anoixa/image-bed/utils"
 	cryptopackage "github.com/anoixa/image-bed/utils/crypto"
 	"github.com/gin-gonic/gin"
@@ -18,13 +18,15 @@ import (
 
 // LoginHandler 登录处理器
 type LoginHandler struct {
-	accountsRepo *repositories.Repositories
+	accountsRepo *accounts.Repository
+	devicesRepo  *accounts.DeviceRepository
 }
 
 // NewLoginHandler 创建新的登录处理器
-func NewLoginHandler(repos *repositories.Repositories) *LoginHandler {
+func NewLoginHandler(accountsRepo *accounts.Repository, devicesRepo *accounts.DeviceRepository) *LoginHandler {
 	return &LoginHandler{
-		accountsRepo: repos,
+		accountsRepo: accountsRepo,
+		devicesRepo:  devicesRepo,
 	}
 }
 
@@ -77,7 +79,7 @@ func (h *LoginHandler) LoginHandlerFunc(context *gin.Context) {
 	}
 	// 存储设备信息
 	deviceID := uuid.New().String()
-	err = h.accountsRepo.Devices.CreateLoginDevice(user.ID, deviceID, refreshToken, refreshTokenExpiry)
+	err = h.devicesRepo.CreateLoginDevice(user.ID, deviceID, refreshToken, refreshTokenExpiry)
 	if err != nil {
 		common.RespondError(context, http.StatusInternalServerError, "Failed to store device token")
 		return
@@ -108,12 +110,12 @@ func (h *LoginHandler) RefreshTokenHandlerFunc(context *gin.Context) {
 	}
 
 	// 查询设备信息与用户信息
-	device, err := h.accountsRepo.Devices.GetDeviceByRefreshTokenAndDeviceID(refreshToken, deviceID)
+	device, err := h.devicesRepo.GetDeviceByRefreshTokenAndDeviceID(refreshToken, deviceID)
 	if err != nil {
 		common.RespondError(context, http.StatusUnauthorized, "User associated with token not found")
 		return
 	}
-	user, err := h.accountsRepo.Accounts.GetUserByID(device.UserID)
+	user, err := h.accountsRepo.GetUserByID(device.UserID)
 	if err != nil {
 		common.RespondError(context, http.StatusUnauthorized, "Invalid refresh token")
 		return
@@ -125,7 +127,7 @@ func (h *LoginHandler) RefreshTokenHandlerFunc(context *gin.Context) {
 		common.RespondError(context, http.StatusInternalServerError, "Failed to generate refresh tokens")
 		return
 	}
-	err = h.accountsRepo.Devices.RotateRefreshToken(user.ID, device.DeviceID, newRefreshToken, newRefreshTokenExpiry)
+	err = h.devicesRepo.RotateRefreshToken(user.ID, device.DeviceID, newRefreshToken, newRefreshTokenExpiry)
 	if err != nil {
 		common.RespondError(context, http.StatusInternalServerError, "Failed to update device token")
 		return
@@ -156,7 +158,7 @@ func (h *LoginHandler) LogoutHandlerFunc(context *gin.Context) {
 		return
 	}
 
-	_ = h.accountsRepo.Devices.DeleteDeviceByDeviceID(deviceID)
+	_ = h.devicesRepo.DeleteDeviceByDeviceID(deviceID)
 
 	clearAuthCookies(context)
 
@@ -165,7 +167,7 @@ func (h *LoginHandler) LogoutHandlerFunc(context *gin.Context) {
 
 // validateCredentials Verify user credentials
 func (h *LoginHandler) validateCredentials(username, password string) (*models.User, bool, error) {
-	user, err := h.accountsRepo.Accounts.GetUserByUsername(username)
+	user, err := h.accountsRepo.GetUserByUsername(username)
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to get user: %w", err)
 	}

@@ -9,8 +9,9 @@ import (
 	"time"
 
 	"github.com/anoixa/image-bed/database/models"
-	"github.com/anoixa/image-bed/internal/repositories"
-	configSvc "github.com/anoixa/image-bed/internal/services/config"
+	"github.com/anoixa/image-bed/database/repo/keys"
+	"github.com/anoixa/image-bed/internal/app"
+	configSvc "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/utils"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -20,16 +21,16 @@ var (
 	jwtSecret           []byte
 	jwtExpiresIn        time.Duration
 	jwtRefreshExpiresIn time.Duration
-	authRepos           *repositories.Repositories
+	authKeysRepo        *keys.Repository
 
-	// jwtConfigManager 配置管理器引用（用于热重载）
+	// jwtConfigManager 配置管理器
 	jwtConfigManager *configSvc.Manager
 	jwtConfigMutex   sync.RWMutex
 )
 
-// SetAuthRepositories 设置认证相关的仓库（在服务器启动时调用）
-func SetAuthRepositories(repos *repositories.Repositories) {
-	authRepos = repos
+// SetAuthRepositories 认证相关
+func SetAuthRepositories(container *app.Container) {
+	authKeysRepo = container.KeysRepo
 }
 
 // TokenInitFromManager 从配置管理器初始化 JWT
@@ -210,8 +211,6 @@ func Parse(tokenString string) (jwt.MapClaims, error) {
 	}
 
 	// 解析令牌
-	// 注意：调用者（auth_middleware.go）已经处理了 Authorization 头中的 "Bearer " 前缀
-	// 这里不再重复移除
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
@@ -232,12 +231,12 @@ func Parse(tokenString string) (jwt.MapClaims, error) {
 	return claims, nil
 }
 
-// ValidateStaticToken Verify static token (缓存功能已移除)
+// ValidateStaticToken Verify static token
 func ValidateStaticToken(tokenString string) (*models.User, error) {
-	if authRepos == nil {
+	if authKeysRepo == nil {
 		return nil, errors.New("auth repositories not initialized")
 	}
-	user, err := authRepos.Keys.GetUserByApiToken(tokenString)
+	user, err := authKeysRepo.GetUserByApiToken(tokenString)
 	if err != nil {
 		return nil, err
 	}

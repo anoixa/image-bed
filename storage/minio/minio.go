@@ -1,4 +1,4 @@
-package storage
+package minio
 
 import (
 	"context"
@@ -12,24 +12,24 @@ import (
 	"time"
 
 	"github.com/anoixa/image-bed/config"
-	"github.com/minio/minio-go/v7"
+	minio "github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
-// MinioStorage MinIO 存储实现
-type MinioStorage struct {
+// Storage MinIO 存储实现
+type Storage struct {
 	client     *minio.Client
 	bucketName string
 }
 
-// NewMinioStorage 创建 MinIO 存储提供者
-func NewMinioStorage(cfg config.MinioConfig) (*MinioStorage, error) {
+// NewStorage 创建 MinIO 存储提供者
+func NewStorage(cfg config.MinioConfig) (*Storage, error) {
 	opts := &minio.Options{
 		Creds:  credentials.NewStaticV4(cfg.AccessKeyID, cfg.SecretAccessKey, ""),
 		Secure: cfg.UseSSL,
 	}
 
-	// SSL 自定义证书配置（如果需要）
+	// SSL 自定义证书配置
 	if cfg.UseSSL && os.Getenv("SSL_CERT_FILE") != "" {
 		rootCAs := mustGetSystemCertPool()
 		if data, err := os.ReadFile(os.Getenv("SSL_CERT_FILE")); err == nil {
@@ -63,14 +63,14 @@ func NewMinioStorage(cfg config.MinioConfig) (*MinioStorage, error) {
 		log.Printf("Successfully created bucket: %s", cfg.BucketName)
 	}
 
-	return &MinioStorage{
+	return &Storage{
 		client:     client,
 		bucketName: cfg.BucketName,
 	}, nil
 }
 
 // SaveWithContext 保存文件到 MinIO
-func (s *MinioStorage) SaveWithContext(ctx context.Context, identifier string, file io.Reader) error {
+func (s *Storage) SaveWithContext(ctx context.Context, identifier string, file io.Reader) error {
 	contentType := "application/octet-stream"
 
 	_, err := s.client.PutObject(ctx, s.bucketName, identifier, file, -1, minio.PutObjectOptions{
@@ -85,7 +85,7 @@ func (s *MinioStorage) SaveWithContext(ctx context.Context, identifier string, f
 }
 
 // GetWithContext 从 MinIO 获取文件
-func (s *MinioStorage) GetWithContext(ctx context.Context, identifier string) (io.ReadSeeker, error) {
+func (s *Storage) GetWithContext(ctx context.Context, identifier string) (io.ReadSeeker, error) {
 	obj, err := s.client.GetObject(ctx, s.bucketName, identifier, minio.GetObjectOptions{})
 	if err != nil {
 		errResponse := minio.ToErrorResponse(err)
@@ -99,7 +99,7 @@ func (s *MinioStorage) GetWithContext(ctx context.Context, identifier string) (i
 }
 
 // DeleteWithContext 从 MinIO 删除文件
-func (s *MinioStorage) DeleteWithContext(ctx context.Context, identifier string) error {
+func (s *Storage) DeleteWithContext(ctx context.Context, identifier string) error {
 	err := s.client.RemoveObject(ctx, s.bucketName, identifier, minio.RemoveObjectOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to delete object '%s' from minio: %w", identifier, err)
@@ -109,7 +109,7 @@ func (s *MinioStorage) DeleteWithContext(ctx context.Context, identifier string)
 }
 
 // Exists 检查文件是否存在于 MinIO
-func (s *MinioStorage) Exists(ctx context.Context, identifier string) (bool, error) {
+func (s *Storage) Exists(ctx context.Context, identifier string) (bool, error) {
 	_, err := s.client.StatObject(ctx, s.bucketName, identifier, minio.StatObjectOptions{})
 	if err != nil {
 		errResponse := minio.ToErrorResponse(err)
@@ -122,7 +122,7 @@ func (s *MinioStorage) Exists(ctx context.Context, identifier string) (bool, err
 }
 
 // Health 检查 MinIO 健康状态
-func (s *MinioStorage) Health(ctx context.Context) error {
+func (s *Storage) Health(ctx context.Context) error {
 	_, err := s.client.ListBuckets(ctx)
 	if err != nil {
 		return fmt.Errorf("minio storage health check failed: %w", err)
@@ -131,7 +131,7 @@ func (s *MinioStorage) Health(ctx context.Context) error {
 }
 
 // Name 返回存储名称
-func (s *MinioStorage) Name() string {
+func (s *Storage) Name() string {
 	return "minio"
 }
 
