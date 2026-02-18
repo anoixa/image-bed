@@ -5,13 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/internal/services/config"
 	"github.com/anoixa/image-bed/storage"
+	"github.com/anoixa/image-bed/utils"
 	"github.com/anoixa/image-bed/utils/async"
 	"gorm.io/gorm"
 )
@@ -84,19 +84,19 @@ func (s *ThumbnailService) TriggerGeneration(image *models.Image, width int) {
 	// 读取配置，失败时使用默认配置
 	settings, err := s.configManager.GetThumbnailSettings(ctx)
 	if err != nil {
-		log.Printf("[Thumbnail] Failed to get settings, using defaults: %v", err)
+		utils.LogIfDevf("[Thumbnail] Failed to get settings, using defaults: %v", err)
 		settings = config.DefaultThumbnailSettings()
 	}
 
 	// 检查缩略图是否启用
 	if !settings.Enabled {
-		log.Printf("[Thumbnail] Thumbnail generation disabled")
+		utils.LogIfDevf("[Thumbnail] Thumbnail generation disabled")
 		return
 	}
 
 	// 检查是否为有效尺寸
 	if !models.IsValidThumbnailWidth(width, settings.Sizes) {
-		log.Printf("[Thumbnail] Invalid thumbnail width: %d", width)
+		utils.LogIfDevf("[Thumbnail] Invalid thumbnail width: %d", width)
 		return
 	}
 
@@ -105,19 +105,19 @@ func (s *ThumbnailService) TriggerGeneration(image *models.Image, width int) {
 	// 创建或获取变体记录
 	variant, err := s.variantRepo.UpsertPending(image.ID, format)
 	if err != nil {
-		log.Printf("[Thumbnail] Failed to upsert variant: %v", err)
+		utils.LogIfDevf("[Thumbnail] Failed to upsert variant: %v", err)
 		return
 	}
 
 	// 只有 pending 状态才提交任务
 	if variant.Status != models.VariantStatusPending {
-		log.Printf("[Thumbnail] Variant %d status=%s, skip submission", variant.ID, variant.Status)
+		utils.LogIfDevf("[Thumbnail] Variant %d status=%s, skip submission", variant.ID, variant.Status)
 		return
 	}
 
 	// 检查重试次数
 	if variant.RetryCount >= settings.MaxRetries {
-		log.Printf("[Thumbnail] Variant %d reached max retries", variant.ID)
+		utils.LogIfDevf("[Thumbnail] Variant %d reached max retries", variant.ID)
 		return
 	}
 
@@ -137,7 +137,7 @@ func (s *ThumbnailService) TriggerGeneration(image *models.Image, width int) {
 	}
 
 	if !async.TrySubmit(task, 3, 100*time.Millisecond) {
-		log.Printf("[Thumbnail] Failed to submit task for %s", image.Identifier)
+		utils.LogIfDevf("[Thumbnail] Failed to submit task for %s", image.Identifier)
 	}
 }
 
@@ -147,7 +147,7 @@ func (s *ThumbnailService) TriggerGenerationForAllSizes(image *models.Image) {
 
 	settings, err := s.configManager.GetThumbnailSettings(ctx)
 	if err != nil {
-		log.Printf("[Thumbnail] Failed to get settings: %v", err)
+		utils.LogIfDevf("[Thumbnail] Failed to get settings: %v", err)
 		return
 	}
 

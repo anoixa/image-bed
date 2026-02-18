@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"testing"
 
+	imageSvc "github.com/anoixa/image-bed/internal/services/image"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 )
@@ -46,7 +47,7 @@ func TestParseThumbnailWidth(t *testing.T) {
 }
 
 func TestGetThumbnailURL(t *testing.T) {
-	service := &ThumbnailService{}
+	service := &imageSvc.ThumbnailService{}
 
 	tests := []struct {
 		name       string
@@ -58,13 +59,13 @@ func TestGetThumbnailURL(t *testing.T) {
 			name:       "simple",
 			identifier: "abc123.png",
 			width:      300,
-			want:       "thumbnails/abc123.png_300.jpg",
+			want:       "thumbnails/abc123.png_300.webp",
 		},
 		{
 			name:       "with_path",
 			identifier: "2024/01/image.jpg",
 			width:      150,
-			want:       "thumbnails/2024/01/image.jpg_150.jpg",
+			want:       "thumbnails/2024/01/image.jpg_150.webp",
 		},
 	}
 

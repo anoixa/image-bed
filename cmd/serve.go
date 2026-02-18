@@ -58,6 +58,9 @@ func RunServer() {
 		log.Fatalf("Failed to initialize services: %v", err)
 	}
 
+	// 为 ConfigManager 设置缓存
+	container.SetupConfigCache()
+
 	// 初始化异步任务协程池
 	async.InitGlobalPool(cfg.Server.WorkerCount, 1000)
 

@@ -2,10 +2,10 @@ package images
 
 import (
 	"errors"
-	"log"
 	"time"
 
 	"github.com/anoixa/image-bed/database/models"
+	"github.com/anoixa/image-bed/utils"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -89,7 +89,7 @@ func (r *variantRepository) UpsertPending(imageID uint, format string) (*models.
 	if err == nil {
 		// 记录已存在，记录状态信息用于调试
 		if variant.Status != models.VariantStatusPending {
-			log.Printf("[UpsertPending] Found existing variant %d with status=%s, retry_count=%d, image_id=%d",
+			utils.LogIfDevf("[UpsertPending] Found existing variant %d with status=%s, retry_count=%d, image_id=%d",
 				variant.ID, variant.Status, variant.RetryCount, imageID)
 		}
 		return &variant, nil
@@ -238,7 +238,7 @@ func (r *variantRepository) GetRetryableVariants(now time.Time, limit int) ([]mo
 		return nil, err
 	}
 	for _, v := range variants {
-		log.Printf("[GetRetryableVariants] Found variant %d: status=%s, retry_count=%d, next_retry_at=%v",
+		utils.LogIfDevf("[GetRetryableVariants] Found variant %d: status=%s, retry_count=%d, next_retry_at=%v",
 			v.ID, v.Status, v.RetryCount, v.NextRetryAt)
 	}
 	return variants, err

@@ -35,14 +35,6 @@ func (f *Factory) GetProvider() Provider {
 	return f.provider
 }
 
-// GetDB 获取底层 GORM DB 实例
-func (f *Factory) GetDB() interface{} {
-	if f.provider == nil {
-		return nil
-	}
-	return f.provider.DB()
-}
-
 // Close 关闭数据库连接
 func (f *Factory) Close() error {
 	if f.provider != nil {
@@ -77,7 +69,10 @@ func (f *Factory) AutoMigrate() error {
 
 // DB 返回底层 *gorm.DB 实例
 func (f *Factory) DB() interface{} {
-	return f.GetDB()
+	if f.provider == nil {
+		return nil
+	}
+	return f.provider.DB()
 }
 
 // WithContext 返回带上下文的 DB

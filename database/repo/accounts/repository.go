@@ -44,10 +44,6 @@ func (r *Repository) CreateDefaultAdminUser() {
 			log.Fatalf("Failed to generate random password: %v", err)
 		}
 
-		if len(randomPassword) > 16 {
-			randomPassword = randomPassword[:16]
-		}
-
 		hashedPassword, err := cryptopackage.GenerateFromPassword(randomPassword)
 		if err != nil {
 			log.Fatalf("Failed to hash default password: %v", err)
@@ -82,6 +78,9 @@ func (r *Repository) CreateDefaultAdminUser() {
 	}
 }
 
+// ErrUserNotFound 用户不存在错误
+var ErrUserNotFound = errors.New("user not found")
+
 // GetUserByUsername 通过用户名获取用户
 func (r *Repository) GetUserByUsername(username string) (*models.User, error) {
 	var user models.User
@@ -89,7 +88,7 @@ func (r *Repository) GetUserByUsername(username string) (*models.User, error) {
 	err := r.db.DB().Where("username = ?", username).First(&user).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
+			return nil, ErrUserNotFound
 		}
 		return nil, err
 	}
@@ -104,7 +103,7 @@ func (r *Repository) GetUserByID(id uint) (*models.User, error) {
 	err := r.db.DB().Where("id = ?", id).First(&user).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
+			return nil, ErrUserNotFound
 		}
 		return nil, err
 	}

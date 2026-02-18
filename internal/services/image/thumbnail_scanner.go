@@ -3,11 +3,11 @@ package image
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/internal/services/config"
+	"github.com/anoixa/image-bed/utils"
 	"github.com/anoixa/image-bed/utils/async"
 
 	"gorm.io/gorm"
@@ -120,11 +120,11 @@ func (s *ThumbnailScanner) runOnce() {
 	// 查询需要处理的图片
 	images, err := s.queryImagesForThumbnail(settings)
 	if err != nil {
-		log.Printf("[ThumbnailScanner] Failed to query images: %v", err)
+		utils.LogIfDevf("[ThumbnailScanner] Failed to query images: %v", err)
 		return
 	}
 
-	log.Printf("[ThumbnailScanner] Found %d images to process", len(images))
+	utils.LogIfDevf("[ThumbnailScanner] Found %d images to process", len(images))
 
 	if len(images) == 0 {
 		return
@@ -133,14 +133,14 @@ func (s *ThumbnailScanner) runOnce() {
 	// 批量检查所有图片的缩略图生成需求（使用单次查询）
 	imageTasks, err := s.batchCheckNeedsGeneration(ctx, images, settings)
 	if err != nil {
-		log.Printf("[ThumbnailScanner] Error batch checking generation needs: %v", err)
+		utils.LogIfDevf("[ThumbnailScanner] Error batch checking generation needs: %v", err)
 		return
 	}
 
-	log.Printf("[ThumbnailScanner] Found %d images that need thumbnail generation", len(imageTasks))
+	utils.LogIfDevf("[ThumbnailScanner] Found %d images that need thumbnail generation", len(imageTasks))
 
 	if len(imageTasks) == 0 {
-		log.Printf("[ThumbnailScanner] All %d images have complete thumbnails, skipping", len(images))
+		utils.LogIfDevf("[ThumbnailScanner] All %d images have complete thumbnails, skipping", len(images))
 		return
 	}
 
@@ -159,7 +159,7 @@ func (s *ThumbnailScanner) runOnce() {
 
 		// 提交缩略图生成任务
 		if err := s.submitThumbnailTask(ctx, task.Image, task.MissingFormats); err != nil {
-			log.Printf("[ThumbnailScanner] Error submitting task for image %d: %v", task.Image.ID, err)
+			utils.LogIfDevf("[ThumbnailScanner] Error submitting task for image %d: %v", task.Image.ID, err)
 			errors++
 			continue
 		}
@@ -170,7 +170,7 @@ func (s *ThumbnailScanner) runOnce() {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	log.Printf("[ThumbnailScanner] Run completed - Processed: %d, Skipped: %d, Errors: %d", processed, skipped, errors)
+	utils.LogIfDevf("[ThumbnailScanner] Run completed - Processed: %d, Skipped: %d, Errors: %d", processed, skipped, errors)
 }
 
 // ImageTask 图片任务信息
@@ -333,14 +333,14 @@ func (s *ThumbnailScanner) submitThumbnailTask(ctx context.Context, image *model
 
 		ok := s.worker.SubmitBlocking(task, 5*time.Second)
 		if !ok {
-			log.Printf("[ThumbnailScanner] Failed to submit task for variant %d (image %d, format %s)",
+			utils.LogIfDevf("[ThumbnailScanner] Failed to submit task for variant %d (image %d, format %s)",
 				variant.ID, image.ID, format)
 		} else {
 			submitted++
 		}
 	}
 
-	log.Printf("[ThumbnailScanner] Submitted %d tasks for image %d", submitted, image.ID)
+	utils.LogIfDevf("[ThumbnailScanner] Submitted %d tasks for image %d", submitted, image.ID)
 	return nil
 }
 

@@ -5,13 +5,13 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"strings"
 	"time"
 
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/internal/services/config"
 	"github.com/anoixa/image-bed/storage"
+	"github.com/anoixa/image-bed/utils"
 	"github.com/h2non/bimg"
 )
 
@@ -75,18 +75,18 @@ func (t *WebPConversionTask) Execute() {
 	// 读取配置
 	settings, err := t.ConfigManager.GetConversionSettings(ctx)
 	if err != nil {
-		log.Printf("[WebPConversion] Failed to get config: %v", err)
+		utils.LogIfDevf("[WebPConversion] Failed to get config: %v", err)
 		return
 	}
 
 	// 检查 WebP 是否仍启用
 	if !t.isFormatEnabled(settings, models.FormatWebP) {
-		log.Printf("[WebPConversion] WebP format disabled, skipping variant %d", t.VariantID)
+		utils.LogIfDevf("[WebPConversion] WebP format disabled, skipping variant %d", t.VariantID)
 		return
 	}
 
 	// CAS 获取 processing 状态
-	log.Printf("[WebPConversion] Attempting CAS: variant %d pending->processing", t.VariantID)
+	utils.LogIfDevf("[WebPConversion] Attempting CAS: variant %d pending->processing", t.VariantID)
 	acquired, err := t.VariantRepo.UpdateStatusCAS(
 		t.VariantID,
 		models.VariantStatusPending,
@@ -94,25 +94,25 @@ func (t *WebPConversionTask) Execute() {
 		"",
 	)
 	if err != nil {
-		log.Printf("[WebPConversion] CAS error for variant %d: %v", t.VariantID, err)
+		utils.LogIfDevf("[WebPConversion] CAS error for variant %d: %v", t.VariantID, err)
 		return
 	}
 	if !acquired {
-		log.Printf("[WebPConversion] CAS failed for variant %d (not in pending state)", t.VariantID)
+		utils.LogIfDevf("[WebPConversion] CAS failed for variant %d (not in pending state)", t.VariantID)
 		return
 	}
-	log.Printf("[WebPConversion] CAS success: variant %d is now processing", t.VariantID)
+	utils.LogIfDevf("[WebPConversion] CAS success: variant %d is now processing", t.VariantID)
 
 	// 执行转换
-	log.Printf("[WebPConversion] Starting conversion for variant %d, image=%s", t.VariantID, t.SourceIdentifier)
+	utils.LogIfDevf("[WebPConversion] Starting conversion for variant %d, image=%s", t.VariantID, t.SourceIdentifier)
 	err = t.doConversionWithTimeout(ctx, settings)
 
 	// 处理结果
 	if err != nil {
-		log.Printf("[WebPConversion] Conversion failed for variant %d: %v", t.VariantID, err)
+		utils.LogIfDevf("[WebPConversion] Conversion failed for variant %d: %v", t.VariantID, err)
 		t.handleFailure(err)
 	} else {
-		log.Printf("[WebPConversion] Conversion success for variant %d", t.VariantID)
+		utils.LogIfDevf("[WebPConversion] Conversion success for variant %d", t.VariantID)
 		t.handleSuccess()
 	}
 }
@@ -120,7 +120,7 @@ func (t *WebPConversionTask) Execute() {
 // recovery 恢复 panic
 func (t *WebPConversionTask) recovery() {
 	if rec := recover(); rec != nil {
-		log.Printf("[WebPConversion] Panic recovered: %v", rec)
+		utils.LogIfDevf("[WebPConversion] Panic recovered: %v", rec)
 		t.VariantRepo.UpdateStatusCAS(
 			t.VariantID,
 			models.VariantStatusProcessing,
@@ -203,11 +203,11 @@ func (t *WebPConversionTask) doConversion(ctx context.Context, settings *config.
 // handleSuccess 处理成功
 func (t *WebPConversionTask) handleSuccess() {
 	if t.result == nil {
-		log.Printf("[WebPConversion] Result is nil for variant %d", t.VariantID)
+		utils.LogIfDevf("[WebPConversion] Result is nil for variant %d", t.VariantID)
 		return
 	}
 
-	log.Printf("[WebPConversion] Updating completed status for variant %d, identifier=%s",
+	utils.LogIfDevf("[WebPConversion] Updating completed status for variant %d, identifier=%s",
 		t.VariantID, t.result.identifier)
 	err := t.VariantRepo.UpdateCompleted(
 		t.VariantID,
@@ -220,9 +220,9 @@ func (t *WebPConversionTask) handleSuccess() {
 		// 清理已上传的文件
 		ctx := context.Background()
 		t.Storage.DeleteWithContext(ctx, t.result.identifier)
-		log.Printf("[WebPConversion] Failed to update completed status for variant %d: %v", t.VariantID, err)
+		utils.LogIfDevf("[WebPConversion] Failed to update completed status for variant %d: %v", t.VariantID, err)
 	} else {
-		log.Printf("[WebPConversion] Successfully completed variant %d", t.VariantID)
+		utils.LogIfDevf("[WebPConversion] Successfully completed variant %d", t.VariantID)
 	}
 }
 
@@ -241,11 +241,11 @@ func (t *WebPConversionTask) handleFailure(err error) {
 
 	switch errType {
 	case ErrorPermanent:
-		log.Printf("[WebPConversion] Permanent error for variant %d: %s", t.VariantID, errMsg)
+		utils.LogIfDevf("[WebPConversion] Permanent error for variant %d: %s", t.VariantID, errMsg)
 	case ErrorConfig:
-		log.Printf("[WebPConversion] Config error for variant %d: %s", t.VariantID, errMsg)
+		utils.LogIfDevf("[WebPConversion] Config error for variant %d: %s", t.VariantID, errMsg)
 	case ErrorTransient:
-		log.Printf("[WebPConversion] Transient error for variant %d: %s", t.VariantID, errMsg)
+		utils.LogIfDevf("[WebPConversion] Transient error for variant %d: %s", t.VariantID, errMsg)
 	}
 }
 
