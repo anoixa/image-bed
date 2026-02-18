@@ -71,6 +71,18 @@ func RunServer() {
 	)
 	retryScanner.Start()
 
+	// 初始化缩略图服务
+	thumbnailSvc := imageSvc.NewThumbnailService(variantRepo, container.GetConfigManager(), container.GetStorageFactory().GetDefault(), converter)
+
+	// 初始化并启动缩略图扫描器
+	thumbnailScanner := imageSvc.NewThumbnailScanner(
+		container.GetDatabaseFactory().GetProvider().DB(),
+		container.GetConfigManager(),
+		async.GetGlobalPool(),
+		thumbnailSvc,
+	)
+	thumbnailScanner.Start()
+
 	// 初始化 JWT（从数据库加载配置）
 	if err := api.TokenInitFromManager(container.GetConfigManager()); err != nil {
 		log.Printf("[Warning] Failed to initialize JWT from database: %v", err)
@@ -119,6 +131,9 @@ func RunServer() {
 
 	// 停止重试扫描器
 	retryScanner.Stop()
+
+	// 停止缩略图扫描器
+	thumbnailScanner.Stop()
 
 	// 关闭异步任务池
 	async.StopGlobalPool()

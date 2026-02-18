@@ -263,4 +263,6 @@ func (t *WebPConversionTask) isFormatEnabled(settings *config.ConversionSettings
 type VariantRepository interface {
 	UpdateStatusCAS(id uint, expected, newStatus, errMsg string) (bool, error)
 	UpdateCompleted(id uint, identifier string, fileSize int64, width, height int) error
+	UpdateFailed(id uint, errMsg string, allowRetry bool) error
+	GetByID(id uint) (*models.ImageVariant, error)
 }

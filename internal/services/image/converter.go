@@ -3,6 +3,7 @@ package image
 import (
 	"context"
 	"log"
+	"time"
 
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
@@ -88,7 +89,7 @@ func (c *Converter) TriggerWebPConversion(image *models.Image) {
 		Storage:          c.storage,
 	}
 
-	if !async.TrySubmit(task, 3, 100) {
+	if !async.TrySubmit(task, 3, 100*time.Millisecond) {
 		log.Printf("[Converter] Failed to submit task for %s", image.Identifier)
 	}
 }

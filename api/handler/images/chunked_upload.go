@@ -19,7 +19,6 @@ import (
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/utils"
-	"github.com/anoixa/image-bed/utils/async"
 	"github.com/anoixa/image-bed/utils/validator"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -351,9 +350,6 @@ func (h *Handler) processChunkedUpload(ctx context.Context, session *ChunkedUplo
 		storageProvider.DeleteWithContext(ctx, identifier)
 		return fmt.Errorf("failed to save image metadata: %w", err)
 	}
-
-	// 异步提取图片尺寸
-	async.ExtractImageDimensionsAsync(identifier, storageConfigID, h.repo.DB(), storageProvider)
 
 	log.Printf("Chunked upload completed: %s -> %s", session.FileName, identifier)
 	return nil

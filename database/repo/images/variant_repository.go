@@ -14,13 +14,23 @@ import (
 type VariantRepository interface {
 	GetVariantsByImageID(imageID uint) ([]models.ImageVariant, error)
 	GetVariant(imageID uint, format string) (*models.ImageVariant, error)
+	GetVariantByImageIDAndFormat(imageID uint, format string) (*models.ImageVariant, error)
+	GetByID(id uint) (*models.ImageVariant, error)
 	UpsertPending(imageID uint, format string) (*models.ImageVariant, error)
 	UpdateStatusCAS(id uint, expected, newStatus, errMsg string) (bool, error)
 	UpdateCompleted(id uint, identifier string, fileSize int64, width, height int) error
+	UpdateFailed(id uint, errMsg string, allowRetry bool) error
 	ResetForRetry(id uint, baseBackoff time.Duration) error
 	GetRetryableVariants(now time.Time, limit int) ([]models.ImageVariant, error)
 	GetImageByID(imageID uint) (*models.Image, error)
 	DeleteByImageID(imageID uint) error
+	GetMissingThumbnailVariants(imageIDs []uint, formats []string) (map[uint]map[string]bool, error)
+}
+
+// MissingVariantInfo 缺失变体信息
+type MissingVariantInfo struct {
+	ImageID uint
+	Format  string
 }
 
 // variantRepository 实现
@@ -50,6 +60,26 @@ func (r *variantRepository) GetVariant(imageID uint, format string) (*models.Ima
 	return &variant, nil
 }
 
+// GetVariantByImageIDAndFormat 获取指定图片和格式的变体
+func (r *variantRepository) GetVariantByImageIDAndFormat(imageID uint, format string) (*models.ImageVariant, error) {
+	var variant models.ImageVariant
+	err := r.db.Where("image_id = ? AND format = ?", imageID, format).First(&variant).Error
+	if err != nil {
+		return nil, err
+	}
+	return &variant, nil
+}
+
+// GetByID 根据 ID 获取变体
+func (r *variantRepository) GetByID(id uint) (*models.ImageVariant, error) {
+	var variant models.ImageVariant
+	err := r.db.First(&variant, id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &variant, nil
+}
+
 // UpsertPending 创建或获取 pending 状态的变体记录
 func (r *variantRepository) UpsertPending(imageID uint, format string) (*models.ImageVariant, error) {
 	// 先尝试查找现有记录
@@ -71,9 +101,9 @@ func (r *variantRepository) UpsertPending(imageID uint, format string) (*models.
 
 	// 创建新记录
 	variant = models.ImageVariant{
-		ImageID:  imageID,
-		Format:   format,
-		Status:   models.VariantStatusPending,
+		ImageID:    imageID,
+		Format:     format,
+		Status:     models.VariantStatusPending,
 		Identifier: "",
 	}
 
@@ -140,6 +170,22 @@ func (r *variantRepository) UpdateCompleted(id uint, identifier string, fileSize
 	}
 
 	return nil
+}
+
+// UpdateFailed 更新失败状态
+func (r *variantRepository) UpdateFailed(id uint, errMsg string, allowRetry bool) error {
+	updates := map[string]interface{}{
+		"status":        models.VariantStatusFailed,
+		"error_message": errMsg,
+		"updated_at":    time.Now(),
+	}
+
+	if allowRetry {
+		// 允许重试，增加重试计数
+		updates["retry_count"] = gorm.Expr("retry_count + 1")
+	}
+
+	return r.db.Model(&models.ImageVariant{}).Where("id = ?", id).Updates(updates).Error
 }
 
 // calculateBackoff 计算指数退避时间
@@ -211,4 +257,42 @@ func (r *variantRepository) GetImageByID(imageID uint) (*models.Image, error) {
 // DeleteByImageID 根据图片ID删除所有变体
 func (r *variantRepository) DeleteByImageID(imageID uint) error {
 	return r.db.Where("image_id = ?", imageID).Delete(&models.ImageVariant{}).Error
+}
+
+// GetMissingThumbnailVariants 批量查询需要生成缩略图的变体
+// 返回 map[imageID]map[format]exists，其中 exists=false 表示需要生成
+func (r *variantRepository) GetMissingThumbnailVariants(imageIDs []uint, formats []string) (map[uint]map[string]bool, error) {
+	// 初始化结果：假设所有图片都需要所有尺寸
+	result := make(map[uint]map[string]bool, len(imageIDs))
+	for _, imageID := range imageIDs {
+		result[imageID] = make(map[string]bool, len(formats))
+		for _, format := range formats {
+			result[imageID][format] = false // 默认需要生成
+		}
+	}
+
+	if len(imageIDs) == 0 || len(formats) == 0 {
+		return result, nil
+	}
+
+	// 查询数据库中已存在的变体
+	var variants []models.ImageVariant
+	err := r.db.Select("image_id, format, status").
+		Where("image_id IN ? AND format IN ?", imageIDs, formats).
+		Find(&variants).Error
+	if err != nil {
+		return nil, err
+	}
+
+	// 标记已存在的变体
+	for _, v := range variants {
+		// 如果变体状态是 completed，则不需要重新生成
+		if v.Status == models.VariantStatusCompleted {
+			if _, ok := result[v.ImageID]; ok {
+				result[v.ImageID][v.Format] = true
+			}
+		}
+	}
+
+	return result, nil
 }

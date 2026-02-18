@@ -11,13 +11,14 @@ import (
 
 // Handler 图片处理器 - 使用依赖注入接收存储和缓存
 type Handler struct {
-	storageFactory *storage.Factory
-	cacheHelper    *cache.Helper
-	repo           *images.Repository
-	converter      *image.Converter
-	configManager  *configSvc.Manager
-	variantService *image.VariantService
-	variantRepo    images.VariantRepository
+	storageFactory   *storage.Factory
+	cacheHelper      *cache.Helper
+	repo             *images.Repository
+	converter        *image.Converter
+	configManager    *configSvc.Manager
+	variantService   *image.VariantService
+	thumbnailService *image.ThumbnailService
+	variantRepo      images.VariantRepository
 }
 
 // NewHandler 图片处理器
@@ -26,14 +27,18 @@ func NewHandler(storageFactory *storage.Factory, cacheFactory *cache.Factory, re
 	variantRepo := images.NewVariantRepository(repos.DB())
 	variantService := image.NewVariantService(variantRepo, configManager, converter)
 
+	// 创建缩略图服务
+	thumbnailService := image.NewThumbnailService(variantRepo, configManager, storageFactory.GetDefault(), converter)
+
 	return &Handler{
-		storageFactory: storageFactory,
-		cacheHelper:    cache.NewHelper(cacheFactory),
-		repo:           repos.Images,
-		converter:      converter,
-		configManager:  configManager,
-		variantRepo:    variantRepo,
-		variantService: variantService,
+		storageFactory:   storageFactory,
+		cacheHelper:      cache.NewHelper(cacheFactory),
+		repo:             repos.Images,
+		converter:        converter,
+		configManager:    configManager,
+		variantRepo:      variantRepo,
+		variantService:   variantService,
+		thumbnailService: thumbnailService,
 	}
 }
 
