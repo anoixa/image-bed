@@ -26,6 +26,10 @@ const (
 	ConfigCategorySystem ConfigCategory = "system"
 	// ConfigCategoryConversion 格式转换配置
 	ConfigCategoryConversion ConfigCategory = "conversion"
+	// ConfigCategoryThumbnail 缩略图配置
+	ConfigCategoryThumbnail ConfigCategory = "thumbnail"
+	// ConfigCategoryThumbnailScanner 缩略图扫描器配置
+	ConfigCategoryThumbnailScanner ConfigCategory = "thumbnail_scanner"
 )
 
 // SystemConfig 通用系统配置表

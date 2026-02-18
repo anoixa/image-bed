@@ -40,8 +40,10 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	// 全局中间件
 	// 仅在开发版本时启用 gin 日志
 	if config.CommitHash == "n/a" {
-		gin.SetMode(gin.ReleaseMode)
+		gin.SetMode(gin.DebugMode)
 		router.Use(gin.Logger())
+	} else {
+		gin.SetMode(gin.ReleaseMode)
 	}
 	router.Use(gin.Recovery())
 	router.Use(cors.New(cors.Config{
@@ -125,11 +127,18 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	keyHandler := key.NewHandler(deps.Repositories)
 	loginHandler := api.NewLoginHandler(deps.Repositories)
 
-	// 公共接口
+	// 公共接口 - 图片获取（可能涉及大文件）
 	publicGroup := router.Group("/images")
 	publicGroup.Use(imageRateLimiter.Middleware())
 	{
 		publicGroup.GET("/:identifier", imageHandler.GetImage) //GET /images/{photo}
+	}
+
+	// 缩略图公共访问路由 - 缩略图生成可能需要时间
+	thumbnailGroup := router.Group("/thumbnails")
+	thumbnailGroup.Use(imageRateLimiter.Middleware())
+	{
+		thumbnailGroup.GET("/:identifier", imageHandler.GetThumbnail) //GET /thumbnails/{photo}?width=300
 	}
 
 	apiGroup := router.Group("/api")

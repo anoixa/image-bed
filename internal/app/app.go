@@ -17,13 +17,14 @@ import (
 
 // Container 依赖注入容器 - 管理所有服务的生命周期
 type Container struct {
-	config          *config.Config
-	storageFactory  *storage.Factory
-	cacheFactory    *cache.Factory
-	databaseFactory *database.Factory
-	configManager   *configSvc.Manager
-	repositories    *repositories.Repositories
-	converter       *image.Converter
+	config            *config.Config
+	storageFactory    *storage.Factory
+	cacheFactory      *cache.Factory
+	databaseFactory   *database.Factory
+	configManager     *configSvc.Manager
+	repositories      *repositories.Repositories
+	converter         *image.Converter
+	thumbnailScanner  *image.ThumbnailScanner
 }
 
 // GetConverter 获取图片转换器
@@ -34,6 +35,20 @@ func (c *Container) GetConverter() *image.Converter {
 		c.converter = image.NewConverter(c.configManager, variantRepo, c.storageFactory.GetDefault())
 	}
 	return c.converter
+}
+
+// GetThumbnailScanner 获取缩略图扫描器
+func (c *Container) GetThumbnailScanner(worker interface{}, thumbnailSvc interface{}) *image.ThumbnailScanner {
+	if c.thumbnailScanner == nil {
+		db := c.databaseFactory.GetProvider().DB()
+		c.thumbnailScanner = image.NewThumbnailScanner(
+			db,
+			c.configManager,
+			nil, // worker will be set by caller
+			nil, // thumbnailService will be set by caller
+		)
+	}
+	return c.thumbnailScanner
 }
 
 // NewContainer 创建新的依赖注入容器

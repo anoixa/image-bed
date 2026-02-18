@@ -70,6 +70,12 @@ func (m *Manager) Initialize() error {
 		return fmt.Errorf("failed to ensure conversion config: %w", err)
 	}
 
+	// 创建默认缩略图配置（如果不存在）
+	ctx := context.Background()
+	if err := m.ensureDefaultThumbnailConfig(ctx); err != nil {
+		return fmt.Errorf("failed to ensure thumbnail config: %w", err)
+	}
+
 	log.Println("[ConfigManager] Initialized successfully")
 	return nil
 }

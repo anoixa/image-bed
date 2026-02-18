@@ -20,7 +20,6 @@ import (
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
-	"github.com/anoixa/image-bed/utils/async"
 	"github.com/anoixa/image-bed/utils/pool"
 	"github.com/anoixa/image-bed/utils/validator"
 	"github.com/gin-gonic/gin"
@@ -275,8 +274,10 @@ func (h *Handler) processAndSaveImage(ctx context.Context, userID uint, fileHead
 	if err == nil {
 		go h.warmCache(image)
 
-		// 触发 WebP 转换（幂等，如果已有变体不会重复创建）
+		// 触发 WebP 转换
 		go h.converter.TriggerWebPConversion(image)
+		// 触发缩略图生成
+		go h.thumbnailService.TriggerGenerationForAllSizes(image)
 		return image, true, nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -300,8 +301,10 @@ func (h *Handler) processAndSaveImage(ctx context.Context, userID uint, fileHead
 
 		go h.warmCache(restoredImage)
 
-		// 触发 WebP 转换（幂等，如果已有变体不会重复创建）
+		// 触发 WebP 转换
 		go h.converter.TriggerWebPConversion(restoredImage)
+		// 触发缩略图生成
+		go h.thumbnailService.TriggerGenerationForAllSizes(restoredImage)
 		return restoredImage, true, nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -351,12 +354,12 @@ func (h *Handler) processAndSaveImage(ctx context.Context, userID uint, fileHead
 		return nil, false, errors.New("failed to save image metadata")
 	}
 
-	// 异步提取图片尺寸
-	async.ExtractImageDimensionsAsync(identifier, storageConfigID, h.repo.DB(), storageProvider)
 	go h.warmCache(newImage)
 
 	// 触发 WebP 转换
 	go h.converter.TriggerWebPConversion(newImage)
+	// 触发缩略图生成
+	go h.thumbnailService.TriggerGenerationForAllSizes(newImage)
 
 	return newImage, false, nil
 }

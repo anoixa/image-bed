@@ -16,9 +16,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// MaxFileSizeForDimensions 最大支持提取尺寸的文件大小（10MB）
-const MaxFileSizeForDimensions = 10 * 1024 * 1024
-
 // ImageDimensionsTask 图片尺寸提取任务
 type ImageDimensionsTask struct {
 	Identifier string
@@ -32,6 +29,14 @@ func (t *ImageDimensionsTask) Execute() {
 	if t.DB == nil {
 		log.Printf("Database not provided for image dimensions task")
 		return
+	}
+
+	// 检查是否已存在尺寸信息
+	var existing models.Image
+	if err := t.DB.Select("width", "height").Where("identifier = ?", t.Identifier).First(&existing).Error; err == nil {
+		if existing.Width > 0 && existing.Height > 0 {
+			return
+		}
 	}
 
 	// 使用存储提供者读取文件
@@ -75,18 +80,10 @@ func (t *ImageDimensionsTask) extractFromStorage() (int, int, error) {
 		}
 	}()
 
-	// 使用 LimitReader 限制读取大小，避免大文件导致 OOM
-	limitedReader := io.LimitReader(reader, MaxFileSizeForDimensions)
-	
-	// 读取数据到内存
-	data, err := io.ReadAll(limitedReader)
+	// 读取数据到内存（无大小限制，统一处理所有图片）
+	data, err := io.ReadAll(reader)
 	if err != nil {
 		return 0, 0, err
-	}
-
-	// 如果读取了 MaxFileSizeForDimensions 字节，可能是大文件，跳过
-	if len(data) >= MaxFileSizeForDimensions {
-		return 0, 0, nil // 静默跳过，不记录错误
 	}
 
 	return decodeImageDimensions(data)
