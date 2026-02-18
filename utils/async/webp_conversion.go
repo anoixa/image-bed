@@ -81,28 +81,38 @@ func (t *WebPConversionTask) Execute() {
 
 	// 检查 WebP 是否仍启用
 	if !t.isFormatEnabled(settings, models.FormatWebP) {
+		log.Printf("[WebPConversion] WebP format disabled, skipping variant %d", t.VariantID)
 		return
 	}
 
 	// CAS 获取 processing 状态
+	log.Printf("[WebPConversion] Attempting CAS: variant %d pending->processing", t.VariantID)
 	acquired, err := t.VariantRepo.UpdateStatusCAS(
 		t.VariantID,
 		models.VariantStatusPending,
 		models.VariantStatusProcessing,
 		"",
 	)
-	if err != nil || !acquired {
-		log.Printf("[WebPConversion] Variant %d already processed", t.VariantID)
+	if err != nil {
+		log.Printf("[WebPConversion] CAS error for variant %d: %v", t.VariantID, err)
 		return
 	}
+	if !acquired {
+		log.Printf("[WebPConversion] CAS failed for variant %d (not in pending state)", t.VariantID)
+		return
+	}
+	log.Printf("[WebPConversion] CAS success: variant %d is now processing", t.VariantID)
 
-	// 执行转换（带超时）
+	// 执行转换
+	log.Printf("[WebPConversion] Starting conversion for variant %d, image=%s", t.VariantID, t.SourceIdentifier)
 	err = t.doConversionWithTimeout(ctx, settings)
 
 	// 处理结果
 	if err != nil {
+		log.Printf("[WebPConversion] Conversion failed for variant %d: %v", t.VariantID, err)
 		t.handleFailure(err)
 	} else {
+		log.Printf("[WebPConversion] Conversion success for variant %d", t.VariantID)
 		t.handleSuccess()
 	}
 }
@@ -197,6 +207,8 @@ func (t *WebPConversionTask) handleSuccess() {
 		return
 	}
 
+	log.Printf("[WebPConversion] Updating completed status for variant %d, identifier=%s",
+		t.VariantID, t.result.identifier)
 	err := t.VariantRepo.UpdateCompleted(
 		t.VariantID,
 		t.result.identifier,
@@ -208,7 +220,9 @@ func (t *WebPConversionTask) handleSuccess() {
 		// 清理已上传的文件
 		ctx := context.Background()
 		t.Storage.DeleteWithContext(ctx, t.result.identifier)
-		log.Printf("[WebPConversion] Failed to update completed status: %v", err)
+		log.Printf("[WebPConversion] Failed to update completed status for variant %d: %v", t.VariantID, err)
+	} else {
+		log.Printf("[WebPConversion] Successfully completed variant %d", t.VariantID)
 	}
 }
 

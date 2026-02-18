@@ -61,6 +61,20 @@ func (c *Converter) TriggerWebPConversion(image *models.Image) {
 
 	// 只有 pending 状态才提交任务
 	if variant.Status != models.VariantStatusPending {
+		log.Printf("[Converter] Variant %d status=%s, skip submission (retry_count=%d)",
+			variant.ID, variant.Status, variant.RetryCount)
+		return
+	}
+
+	// 检查重试次数
+	settings, err = c.configManager.GetConversionSettings(ctx)
+	if err != nil {
+		log.Printf("[Converter] Failed to get settings for retry check: %v", err)
+		return
+	}
+	if variant.RetryCount >= settings.MaxRetries {
+		log.Printf("[Converter] Variant %d reached max retries (%d >= %d), skip submission",
+			variant.ID, variant.RetryCount, settings.MaxRetries)
 		return
 	}
 
