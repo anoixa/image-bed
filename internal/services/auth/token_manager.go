@@ -132,32 +132,10 @@ func (tm *TokenManager) GetConfig() TokenConfig {
 	}
 }
 
-// Initialize 初始化 JWT 配置（传统方式，用于向后兼容和测试）
-// Deprecated: 使用 NewTokenManager 代替
-func (tm *TokenManager) Initialize(secret, expiresIn, refreshExpiresIn string) error {
-	if len(secret) < 32 {
-		return fmt.Errorf("JWT secret must be at least 32 characters long, got %d", len(secret))
-	}
-
+// SetConfig 设置 JWT 配置（仅用于测试）
+func (tm *TokenManager) SetConfig(config TokenConfig) {
 	tm.mutex.Lock()
 	defer tm.mutex.Unlock()
-
-	duration, err := time.ParseDuration(expiresIn)
-	if err != nil {
-		return fmt.Errorf("invalid JWT expiration duration: %s", expiresIn)
-	}
-
-	refreshDuration, err := time.ParseDuration(refreshExpiresIn)
-	if err != nil {
-		return fmt.Errorf("invalid JWT refresh expiration duration: %s", refreshExpiresIn)
-	}
-
-	tm.config = TokenConfig{
-		Secret:           []byte(secret),
-		ExpiresIn:        duration,
-		RefreshExpiresIn: refreshDuration,
-	}
-
-	log.Printf("JWT Config loaded - Access: %v, Refresh: %v\n", duration, refreshDuration)
-	return nil
+	tm.config = config
 }
+

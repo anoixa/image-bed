@@ -11,10 +11,18 @@ import (
 	"os"
 	"time"
 
-	"github.com/anoixa/image-bed/config"
 	minio "github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
+
+// Config MinIO 配置结构
+type Config struct {
+	Endpoint        string
+	AccessKeyID     string
+	SecretAccessKey string
+	UseSSL          bool
+	BucketName      string
+}
 
 // Storage MinIO 存储实现
 type Storage struct {
@@ -23,7 +31,7 @@ type Storage struct {
 }
 
 // NewStorage 创建 MinIO 存储提供者
-func NewStorage(cfg config.MinioConfig) (*Storage, error) {
+func NewStorage(cfg Config) (*Storage, error) {
 	opts := &minio.Options{
 		Creds:  credentials.NewStaticV4(cfg.AccessKeyID, cfg.SecretAccessKey, ""),
 		Secure: cfg.UseSSL,

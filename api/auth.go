@@ -9,13 +9,13 @@ import (
 )
 
 var (
-	// jwtService JWT 服务实例（包级单例，保持向后兼容）
+	// jwtService JWT 服务实例
 	jwtService *auth.JWTService
 	tokenManager *auth.TokenManager
 	authKeysRepo *keys.Repository
 )
 
-// SetJWTService 设置 JWT 服务（推荐的新方法）
+// SetJWTService 设置 JWT 服务
 func SetJWTService(service *auth.JWTService) {
 	jwtService = service
 }
@@ -36,16 +36,6 @@ func TokenInitFromManager(manager *configSvc.Manager) error {
 	return nil
 }
 
-// TokenInit 初始化 JWT 配置（传统方式，用于向后兼容和测试）
-func TokenInit(secret, expiresIn, refreshExpiresIn string) error {
-	tokenManager = &auth.TokenManager{}
-	if err := tokenManager.Initialize(secret, expiresIn, refreshExpiresIn); err != nil {
-		return err
-	}
-	jwtService = auth.NewJWTService(tokenManager, authKeysRepo)
-	return nil
-}
-
 // GetJWTConfig 获取当前 JWT 配置（只读）
 func GetJWTConfig() (secret []byte, expiresIn, refreshExpiresIn time.Duration) {
 	if tokenManager == nil {
@@ -58,4 +48,25 @@ func GetJWTConfig() (secret []byte, expiresIn, refreshExpiresIn time.Duration) {
 // GetJWTService 获取 JWT 服务实例
 func GetJWTService() *auth.JWTService {
 	return jwtService
+}
+
+// InitTestJWT 初始化测试用的 JWT 配置
+func InitTestJWT(secret, expiresInStr, refreshExpiresInStr string) error {
+	expiresIn, err := time.ParseDuration(expiresInStr)
+	if err != nil {
+		return err
+	}
+	refreshExpiresIn, err := time.ParseDuration(refreshExpiresInStr)
+	if err != nil {
+		return err
+	}
+
+	tokenManager = &auth.TokenManager{}
+	tokenManager.SetConfig(auth.TokenConfig{
+		Secret:           []byte(secret),
+		ExpiresIn:        expiresIn,
+		RefreshExpiresIn: refreshExpiresIn,
+	})
+	jwtService = auth.NewJWTService(tokenManager, authKeysRepo)
+	return nil
 }

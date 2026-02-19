@@ -17,16 +17,6 @@ server:
     image_cache_ttl: 3600
     image_data_cache_ttl: 3600
 
-  # JWT 配置已移至数据库管理
-  # 首次启动时会自动创建默认配置
-  # 可通过 Admin API 管理：/api/v1/admin/configs?category=jwt
-  jwt:
-    # 保留此配置作为回退，优先使用数据库配置
-    # openssl rand -base64 32
-    secret: "your-very-long-secret-key-at-least-32-characters-long"
-    expires_in: "15m"
-    refresh_expires_in: "168h"
-
   rate_limit:
     # API接口限流 (上传/管理等操作)
     api_rps: 30        # 每秒请求数

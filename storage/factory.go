@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/storage/local"
 	"github.com/anoixa/image-bed/storage/minio"
@@ -131,7 +130,7 @@ func (f *Factory) loadProvider(cfg *models.SystemConfig) error {
 		provider = p
 
 	case "minio":
-		minioCfg := config.MinioConfig{
+		minioCfg := minio.Config{
 			Endpoint:        getString(configMap, "endpoint"),
 			AccessKeyID:     getString(configMap, "access_key_id"),
 			SecretAccessKey: getString(configMap, "secret_access_key"),
@@ -250,7 +249,7 @@ func (f *Factory) createProvider(cfg *models.SystemConfig) (Provider, error) {
 		path, _ := configMap["local_path"].(string)
 		return local.NewStorage(path)
 	case "minio":
-		minioCfg := config.MinioConfig{
+		minioCfg := minio.Config{
 			Endpoint:        getString(configMap, "endpoint"),
 			AccessKeyID:     getString(configMap, "access_key_id"),
 			SecretAccessKey: getString(configMap, "secret_access_key"),
