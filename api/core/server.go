@@ -1,6 +1,7 @@
 package core
 
 import (
+	"log"
 	"net/http"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/internal/app"
+	"github.com/anoixa/image-bed/internal/services/auth"
 	configSvc "github.com/anoixa/image-bed/config/db"
 	imageSvc "github.com/anoixa/image-bed/internal/services/image"
 	"github.com/anoixa/image-bed/storage"
@@ -117,15 +119,33 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 		context.JSON(http.StatusOK, middleware.GetMetrics())
 	})
 
-	// 设置认证仓库
-	api.SetAuthRepositories(deps.Container)
+	// 初始化认证服务
+	var tokenManager *auth.TokenManager
+	var jwtService *auth.JWTService
+	var loginService *auth.LoginService
+
+	if deps.ConfigManager != nil {
+		var err error
+		tokenManager, err = auth.NewTokenManager(deps.ConfigManager)
+		if err != nil {
+			// 如果配置管理器初始化失败，使用默认配置
+			log.Printf("[Server] Failed to initialize token manager from config: %v, using defaults", err)
+		}
+	}
+
+	if tokenManager != nil {
+		jwtService = auth.NewJWTService(tokenManager, deps.Container.KeysRepo)
+		loginService = auth.NewLoginService(deps.Container.AccountsRepo, deps.Container.DevicesRepo, jwtService)
+		api.SetTokenManager(tokenManager)
+		api.SetJWTService(jwtService)
+	}
 
 	// 创建处理器（依赖注入）
 	imageHandler := images.NewHandler(deps.StorageFactory, deps.CacheFactory, deps.Container.ImagesRepo, deps.Container.GetDatabaseProvider(), deps.Converter, deps.ConfigManager)
 	albumHandler := albums.NewHandler(deps.Container.AlbumsRepo, deps.CacheFactory)
 	albumImageHandler := albums.NewAlbumImageHandler(deps.Container.AlbumsRepo, deps.Container.ImagesRepo, deps.CacheFactory)
 	keyHandler := key.NewHandler(deps.Container.KeysRepo)
-	loginHandler := api.NewLoginHandler(deps.Container.AccountsRepo, deps.Container.DevicesRepo)
+	loginHandler := api.NewLoginHandlerWithService(loginService)
 
 	// 公共接口 - 图片获取（可能涉及大文件）
 	publicGroup := router.Group("/images")

@@ -7,8 +7,12 @@ import (
 
 	"github.com/anoixa/image-bed/api"
 	"github.com/anoixa/image-bed/api/common"
+	"github.com/anoixa/image-bed/internal/services/auth"
 	"github.com/gin-gonic/gin"
 )
+
+// jwtServiceAccessor 获取 JWT 服务
+var jwtServiceAccessor func() *auth.JWTService = api.GetJWTService
 
 const (
 	ContextUserIDKey   = "user_id"
@@ -64,7 +68,11 @@ func CombinedAuth() gin.HandlerFunc {
 }
 
 func handleJwtAuth(c *gin.Context, token string) error {
-	claims, err := api.Parse(token)
+	jwtService := jwtServiceAccessor()
+	if jwtService == nil {
+		return errors.New("JWT service not initialized")
+	}
+	claims, err := jwtService.ParseToken(token)
 	if err != nil {
 		return errors.New("invalid or expired token")
 	}
@@ -94,7 +102,11 @@ func handleJwtAuth(c *gin.Context, token string) error {
 }
 
 func handleStaticTokenAuth(c *gin.Context, token string) error {
-	user, err := api.ValidateStaticToken(token)
+	jwtService := jwtServiceAccessor()
+	if jwtService == nil {
+		return errors.New("JWT service not initialized")
+	}
+	user, err := jwtService.ValidateStaticToken(token)
 	if err != nil {
 		return errors.New("invalid token")
 	}

@@ -138,14 +138,17 @@ func TestTokenGeneration(t *testing.T) {
 	err := TokenInit("test-secret-key-at-least-32-characters-long", "30m", "10080m")
 	assert.NoError(t, err)
 
+	jwtService := GetJWTService()
+	assert.NotNil(t, jwtService)
+
 	// 生成 Token
-	accessToken, expiry, err := GenerateTokens("testuser", 1, "user")
+	tokenPair, err := jwtService.GenerateTokens("testuser", 1, "user")
 	assert.NoError(t, err)
-	assert.NotEmpty(t, accessToken)
-	assert.True(t, expiry.After(time.Now()))
+	assert.NotEmpty(t, tokenPair.AccessToken)
+	assert.True(t, tokenPair.AccessTokenExpiry.After(time.Now()))
 
 	// 解析 Token
-	claims, err := Parse(accessToken)
+	claims, err := jwtService.ParseToken(tokenPair.AccessToken)
 	assert.NoError(t, err)
 	assert.Equal(t, "testuser", claims["username"])
 	assert.Equal(t, float64(1), claims["user_id"])
@@ -155,17 +158,21 @@ func TestTokenGeneration(t *testing.T) {
 
 // TestTokenGeneration_InvalidSecret 测试无效密钥
 func TestTokenGeneration_InvalidSecret(t *testing.T) {
-	// 重置密钥
-	jwtSecret = []byte{}
-
-	_, _, err := GenerateTokens("testuser", 1, "user")
+	// 测试 TokenInit 会拒绝过短的密钥
+	err := TokenInit("short", "30m", "10080m")
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "not initialized")
+	assert.Contains(t, err.Error(), "at least 32 characters")
 }
 
 // TestTokenParse_InvalidToken 测试无效 Token
 func TestTokenParse_InvalidToken(t *testing.T) {
-	_, err := Parse("invalid.token.here")
+	jwtService := GetJWTService()
+	if jwtService == nil {
+		err := TokenInit("test-secret-key-at-least-32-characters-long", "30m", "10080m")
+		assert.NoError(t, err)
+		jwtService = GetJWTService()
+	}
+	_, err := jwtService.ParseToken("invalid.token.here")
 	assert.Error(t, err)
 }
 
@@ -175,17 +182,22 @@ func TestTokenParse_MalformedToken(t *testing.T) {
 	err := TokenInit("test-secret-key-at-least-32-characters-long", "30m", "10080m")
 	assert.NoError(t, err)
 
+	jwtService := GetJWTService()
+
 	// 测试错误格式的 token
-	_, err = Parse("not.a.valid.jwt")
+	_, err = jwtService.ParseToken("not.a.valid.jwt")
 	assert.Error(t, err)
 }
 
 // TestGenerateRefreshToken 测试刷新令牌生成
 func TestGenerateRefreshToken(t *testing.T) {
-	// 初始化过期时间
-	jwtRefreshExpiresIn = 7 * 24 * time.Hour
+	// 初始化
+	err := TokenInit("test-secret-key-at-least-32-characters-long", "30m", "10080m")
+	assert.NoError(t, err)
 
-	token, expiry, err := GenerateRefreshToken()
+	jwtService := GetJWTService()
+
+	token, expiry, err := jwtService.GenerateRefreshToken()
 	assert.NoError(t, err)
 	assert.NotEmpty(t, token)
 	assert.True(t, expiry.After(time.Now()))
@@ -194,7 +206,12 @@ func TestGenerateRefreshToken(t *testing.T) {
 
 // TestGenerateStaticToken 测试静态令牌生成
 func TestGenerateStaticToken(t *testing.T) {
-	token, err := GenerateStaticToken()
+	err := TokenInit("test-secret-key-at-least-32-characters-long", "30m", "10080m")
+	assert.NoError(t, err)
+
+	jwtService := GetJWTService()
+
+	token, err := jwtService.GenerateStaticToken()
 	assert.NoError(t, err)
 	assert.NotEmpty(t, token)
 	assert.True(t, len(token) >= 64)
