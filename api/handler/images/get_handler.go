@@ -332,9 +332,9 @@ func (h *Handler) streamAndCacheImage(c *gin.Context, image *models.Image) {
 	}()
 
 	cfg := config.Get()
-	enableImageCaching := cfg.Server.CacheConfig.EnableImageCaching
+	enableImageCaching := cfg.CacheEnableImageCaching
 	// MaxImageCacheSize 单位是 MB，转换为字节
-	maxCacheSizeMB := cfg.Server.CacheConfig.MaxImageCacheSize
+	maxCacheSizeMB := cfg.CacheMaxImageCacheSizeMB
 	maxCacheSize := maxCacheSizeMB * 1024 * 1024
 	shouldCache := enableImageCaching && image.FileSize > 0 && (maxCacheSizeMB == 0 || image.FileSize <= maxCacheSize)
 

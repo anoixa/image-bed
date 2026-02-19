@@ -77,14 +77,22 @@ func handleJwtAuth(c *gin.Context, token string) error {
 		return errors.New("invalid or expired token")
 	}
 
-	userID, ok := claims["user_id"].(float64)
+	userIDValue, ok := claims["user_id"]
 	if !ok {
-		return errors.New("user ID in token is invalid")
+		return errors.New("user_id not found in token claims")
+	}
+	userID, ok := userIDValue.(float64)
+	if !ok {
+		return errors.New("user_id in token is not a valid number")
 	}
 
-	username, ok := claims["username"].(string)
+	usernameValue, ok := claims["username"]
 	if !ok {
-		return errors.New("invalid user ID in token")
+		return errors.New("username not found in token claims")
+	}
+	username, ok := usernameValue.(string)
+	if !ok {
+		return errors.New("username in token is not a valid string")
 	}
 
 	role, _ := claims["role"].(string)

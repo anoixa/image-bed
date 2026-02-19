@@ -59,7 +59,7 @@ func (r *Repository) DeleteImage(image *models.Image) error {
 		if err != nil {
 			return fmt.Errorf("failed to delete image in transaction: %w", err)
 		}
-		return err
+		return nil
 	})
 }
 

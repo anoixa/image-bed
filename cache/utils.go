@@ -88,8 +88,8 @@ func (h *Helper) CacheImage(ctx context.Context, image *models.Image) error {
 	key := ImageCachePrefix + image.Identifier
 	cfg := config.Get()
 	ttl := DefaultImageCacheExpiration
-	if cfg != nil && cfg.Server.CacheConfig.ImageCacheTTL > 0 {
-		ttl = time.Duration(cfg.Server.CacheConfig.ImageCacheTTL) * time.Second
+	if cfg != nil && cfg.CacheImageCacheTTL > 0 {
+		ttl = time.Duration(cfg.CacheImageCacheTTL) * time.Second
 	}
 	return h.factory.Set(ctx, key, image, addJitter(ttl))
 }
@@ -267,8 +267,8 @@ func (h *Helper) CacheImageData(ctx context.Context, identifier string, imageDat
 	key := "image_data:" + identifier
 	cfg := config.Get()
 	expiration := 1 * time.Hour
-	if cfg != nil && cfg.Server.CacheConfig.ImageDataCacheTTL > 0 {
-		expiration = time.Duration(cfg.Server.CacheConfig.ImageDataCacheTTL) * time.Second
+	if cfg != nil && cfg.CacheImageDataCacheTTL > 0 {
+		expiration = time.Duration(cfg.CacheImageDataCacheTTL) * time.Second
 	}
 	return h.factory.Set(ctx, key, imageData, addJitter(expiration))
 }

@@ -68,11 +68,6 @@ func (c *Converter) TriggerWebPConversion(image *models.Image) {
 	}
 
 	// 检查重试次数
-	settings, err = c.configManager.GetConversionSettings(ctx)
-	if err != nil {
-		utils.LogIfDevf("[Converter] Failed to get settings for retry check: %v", err)
-		return
-	}
 	if variant.RetryCount >= settings.MaxRetries {
 		utils.LogIfDevf("[Converter] Variant %d reached max retries (%d >= %d), skip submission",
 			variant.ID, variant.RetryCount, settings.MaxRetries)

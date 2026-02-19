@@ -24,9 +24,9 @@ type GormProvider struct {
 
 // NewGormProvider 创建新的 GORM 数据库提供者
 func NewGormProvider(cfg *config.Config) (*GormProvider, error) {
-	dbType := cfg.Server.DatabaseConfig.Type
-	host := cfg.Server.DatabaseConfig.Host
-	port := cfg.Server.DatabaseConfig.Port
+	dbType := cfg.DBType
+	host := cfg.DBHost
+	port := cfg.DBPort
 
 	var gormLogger logger.Interface
 	if config.CommitHash != "n/a" {
@@ -57,7 +57,7 @@ func NewGormProvider(cfg *config.Config) (*GormProvider, error) {
 	switch dbType {
 	case "sqlite", "sqlite3", "":
 		dbType = "sqlite"
-		path := cfg.Server.DatabaseConfig.DatabaseFilePath
+		path := cfg.DBFilePath
 		if path == "" {
 			path = "./data/images.db"
 		}
@@ -77,11 +77,11 @@ func NewGormProvider(cfg *config.Config) (*GormProvider, error) {
 
 	case "postgres", "postgresql":
 		dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
-			cfg.Server.DatabaseConfig.Host,
-			cfg.Server.DatabaseConfig.Port,
-			cfg.Server.DatabaseConfig.Username,
-			cfg.Server.DatabaseConfig.Password,
-			cfg.Server.DatabaseConfig.Database,
+			cfg.DBHost,
+			cfg.DBPort,
+			cfg.DBUsername,
+			cfg.DBPassword,
+			cfg.DBName,
 		)
 
 		db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
@@ -105,40 +105,55 @@ func NewGormProvider(cfg *config.Config) (*GormProvider, error) {
 	}
 
 	// 使用配置文件中的连接池参数
-	maxOpenConns := cfg.Server.DatabaseConfig.MaxOpenConns
+	maxOpenConns := cfg.DBMaxOpenConns
 	if maxOpenConns <= 0 {
 		maxOpenConns = 100
 	}
-	maxIdleConns := cfg.Server.DatabaseConfig.MaxIdleConns
+	maxIdleConns := cfg.DBMaxIdleConns
 	if maxIdleConns <= 0 {
 		maxIdleConns = 10
 	}
-	connMaxLifetime := cfg.Server.DatabaseConfig.ConnMaxLifetime
+	connMaxLifetime := cfg.DBConnMaxLifetime
 	if connMaxLifetime <= 0 {
 		connMaxLifetime = 3600
 	}
 
-	sqlDB.SetConnMaxLifetime(time.Duration(connMaxLifetime) * time.Second)
-	sqlDB.SetMaxIdleConns(maxIdleConns)
 	sqlDB.SetMaxOpenConns(maxOpenConns)
+	sqlDB.SetMaxIdleConns(maxIdleConns)
+	sqlDB.SetConnMaxLifetime(time.Duration(connMaxLifetime) * time.Second)
 
-	return &GormProvider{
-		db:     db,
-		dbType: dbType,
-	}, nil
+	return &GormProvider{db: db, dbType: dbType}, nil
 }
 
-// DB 返回底层 *gorm.DB 实例
+// DB 返回 GORM 数据库实例
 func (p *GormProvider) DB() *gorm.DB {
 	return p.db
 }
 
-// WithContext 返回带上下文的 *gorm.DB
-func (p *GormProvider) WithContext(ctx context.Context) *gorm.DB {
-	return p.db.WithContext(ctx)
+// Close 关闭数据库连接
+func (p *GormProvider) Close() error {
+	sqlDB, err := p.db.DB()
+	if err != nil {
+		return fmt.Errorf("failed to get underlying DB instance: %w", err)
+	}
+	return sqlDB.Close()
 }
 
-// Transaction 在事务中执行函数
+// Ping 检查数据库连接
+func (p *GormProvider) Ping() error {
+	sqlDB, err := p.db.DB()
+	if err != nil {
+		return fmt.Errorf("failed to get underlying DB instance: %w", err)
+	}
+	return sqlDB.Ping()
+}
+
+// Name 返回数据库名称
+func (p *GormProvider) Name() string {
+	return p.dbType
+}
+
+// Transaction 执行事务
 func (p *GormProvider) Transaction(fn TxFunc) error {
 	return p.db.Transaction(fn)
 }
@@ -155,7 +170,12 @@ func (p *GormProvider) BeginTransaction() *gorm.DB {
 
 // WithTransaction 获取支持手动事务的会话
 func (p *GormProvider) WithTransaction() *gorm.DB {
-	return p.db.Session(&gorm.Session{SkipDefaultTransaction: true})
+	return p.db.Begin()
+}
+
+// WithContext 返回带有上下文的 DB 实例
+func (p *GormProvider) WithContext(ctx context.Context) *gorm.DB {
+	return p.db.WithContext(ctx)
 }
 
 // AutoMigrate 自动迁移数据库结构
@@ -163,31 +183,27 @@ func (p *GormProvider) AutoMigrate(models ...interface{}) error {
 	return p.db.AutoMigrate(models...)
 }
 
-// SQLDB 返回底层 sql.DB
+// SQLDB 返回底层的 *sql.DB
 func (p *GormProvider) SQLDB() (*sql.DB, error) {
 	return p.db.DB()
 }
 
-// Ping 检查数据库连接
-func (p *GormProvider) Ping() error {
-	sqlDB, err := p.db.DB()
-	if err != nil {
-		return err
-	}
-	return sqlDB.Ping()
+// Raw 执行原始 SQL 查询
+func (p *GormProvider) Raw(sql string, values ...interface{}) *gorm.DB {
+	return p.db.Raw(sql, values...)
 }
 
-// Close 关闭数据库连接
-func (p *GormProvider) Close() error {
-	sqlDB, err := p.db.DB()
-	if err != nil {
-		return err
-	}
-	log.Println("Closing database connection...")
-	return sqlDB.Close()
+// Exec 执行原始 SQL
+func (p *GormProvider) Exec(sql string, values ...interface{}) *gorm.DB {
+	return p.db.Exec(sql, values...)
 }
 
-// Name 返回数据库名称
-func (p *GormProvider) Name() string {
+// GetSQLDB 返回底层的 *sql.DB
+func (p *GormProvider) GetSQLDB() (*sql.DB, error) {
+	return p.db.DB()
+}
+
+// GetDBType 返回数据库类型
+func (p *GormProvider) GetDBType() string {
 	return p.dbType
 }

@@ -49,7 +49,7 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	}
 	router.Use(gin.Recovery())
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{cfg.Server.BaseURL()},
+		AllowOrigins:     []string{cfg.BaseURL()},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Length", "Content-Type", "Authorization"},
 		AllowCredentials: true,
@@ -59,14 +59,14 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	router.SetTrustedProxies(nil)
 
 	// 限制上传文件大小
-	router.MaxMultipartMemory = int64(cfg.Server.Upload.MaxSizeMB) << 20
+	router.MaxMultipartMemory = int64(cfg.UploadMaxSizeMB) << 20
 
 	// 并发限制（100并发，避免内存过载）
 	concurrencyLimiter := middleware.NewConcurrencyLimiter(100)
 	router.Use(concurrencyLimiter.Middleware())
 
 	// 请求体大小限制（批量上传总限制的2倍，确保能容纳批量请求）
-	requestBodyLimit := int64(cfg.Server.Upload.MaxBatchTotalMB) * 2 << 20
+	requestBodyLimit := int64(cfg.UploadMaxBatchTotalMB) * 2 << 20
 	if requestBodyLimit < 100<<20 {
 		requestBodyLimit = 100 << 20 // 最小 100MB
 	}
@@ -79,10 +79,10 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	router.Use(middleware.Metrics())
 
 	// 速率限制
-	rl := cfg.Server.RateLimit
-	authRateLimiter := middleware.NewIPRateLimiter(rl.AuthRPS, rl.AuthBurst, rl.ExpireTime)
-	apiRateLimiter := middleware.NewIPRateLimiter(rl.ApiRPS, rl.ApiBurst, rl.ExpireTime)
-	imageRateLimiter := middleware.NewIPRateLimiter(rl.ImageRPS, rl.ImageBurst, rl.ExpireTime)
+	rl := cfg
+	authRateLimiter := middleware.NewIPRateLimiter(rl.RateLimitAuthRPS, rl.RateLimitAuthBurst, rl.RateLimitExpireTime)
+	apiRateLimiter := middleware.NewIPRateLimiter(rl.RateLimitApiRPS, rl.RateLimitApiBurst, rl.RateLimitExpireTime)
+	imageRateLimiter := middleware.NewIPRateLimiter(rl.RateLimitImageRPS, rl.RateLimitImageBurst, rl.RateLimitExpireTime)
 	cleanup := func() {
 		authRateLimiter.StopCleanup()
 		apiRateLimiter.StopCleanup()
@@ -266,11 +266,11 @@ func StartServer(deps *ServerDependencies) (*http.Server, func()) {
 	router, clean := setupRouter(deps)
 
 	srv := &http.Server{
-		Addr:         cfg.Server.Addr(),
+		Addr:         cfg.Addr(),
 		Handler:      router,
-		ReadTimeout:  cfg.Server.ReadTimeout,
-		WriteTimeout: cfg.Server.WriteTimeout,
-		IdleTimeout:  cfg.Server.IdleTimeout,
+		ReadTimeout:  cfg.ServerReadTimeout,
+		WriteTimeout: cfg.ServerWriteTimeout,
+		IdleTimeout:  cfg.ServerIdleTimeout,
 	}
 
 	return srv, clean

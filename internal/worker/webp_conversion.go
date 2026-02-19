@@ -231,21 +231,29 @@ func (t *WebPConversionTask) handleFailure(err error) {
 	errType := ClassifyError(err)
 	errMsg := err.Error()
 
-	// 更新为 failed 状态
-	t.VariantRepo.UpdateStatusCAS(
-		t.VariantID,
-		models.VariantStatusProcessing,
-		models.VariantStatusFailed,
-		errMsg,
-	)
-
 	switch errType {
 	case ErrorPermanent:
 		utils.LogIfDevf("[WebPConversion] Permanent error for variant %d: %s", t.VariantID, errMsg)
+		// 永久错误，直接标记为失败
+		t.VariantRepo.UpdateStatusCAS(
+			t.VariantID,
+			models.VariantStatusProcessing,
+			models.VariantStatusFailed,
+			errMsg,
+		)
 	case ErrorConfig:
 		utils.LogIfDevf("[WebPConversion] Config error for variant %d: %s", t.VariantID, errMsg)
+		// 配置错误，直接标记为失败
+		t.VariantRepo.UpdateStatusCAS(
+			t.VariantID,
+			models.VariantStatusProcessing,
+			models.VariantStatusFailed,
+			errMsg,
+		)
 	case ErrorTransient:
 		utils.LogIfDevf("[WebPConversion] Transient error for variant %d: %s", t.VariantID, errMsg)
+		// 临时错误，允许重试
+		t.VariantRepo.UpdateFailed(t.VariantID, errMsg, true)
 	}
 }
 

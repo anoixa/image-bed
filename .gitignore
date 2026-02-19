@@ -2,7 +2,7 @@
 
 plans/
 
-config.yaml
+.env
 image-bed
 *.exe
 # Go test coverage files

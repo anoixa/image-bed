@@ -25,6 +25,8 @@ type VariantRepository interface {
 	GetImageByID(imageID uint) (*models.Image, error)
 	DeleteByImageID(imageID uint) error
 	GetMissingThumbnailVariants(imageIDs []uint, formats []string) (map[uint]map[string]bool, error)
+	GetOrphanVariants(threshold time.Duration, limit int) ([]models.ImageVariant, error)
+	ResetProcessingToPending(id uint) error
 }
 
 // MissingVariantInfo 缺失变体信息
@@ -181,8 +183,8 @@ func (r *variantRepository) UpdateFailed(id uint, errMsg string, allowRetry bool
 	}
 
 	if allowRetry {
-		// 允许重试，增加重试计数
 		updates["retry_count"] = gorm.Expr("retry_count + 1")
+		updates["next_retry_at"] = time.Now().Add(5 * time.Minute)
 	}
 
 	return r.db.Model(&models.ImageVariant{}).Where("id = ?", id).Updates(updates).Error
@@ -295,4 +297,25 @@ func (r *variantRepository) GetMissingThumbnailVariants(imageIDs []uint, formats
 	}
 
 	return result, nil
+}
+
+// GetOrphanVariants 获取长时间处于 processing 状态的孤儿任务
+func (r *variantRepository) GetOrphanVariants(threshold time.Duration, limit int) ([]models.ImageVariant, error) {
+	cutoff := time.Now().Add(-threshold)
+	var variants []models.ImageVariant
+	err := r.db.Where("status = ? AND updated_at < ?",
+		models.VariantStatusProcessing,
+		cutoff,
+	).Limit(limit).Find(&variants).Error
+	return variants, err
+}
+
+// ResetProcessingToPending 将 processing 状态重置为 pending
+func (r *variantRepository) ResetProcessingToPending(id uint) error {
+	return r.db.Model(&models.ImageVariant{}).
+		Where("id = ? AND status = ?", id, models.VariantStatusProcessing).
+		Updates(map[string]interface{}{
+			"status":     models.VariantStatusPending,
+			"updated_at": time.Now(),
+		}).Error
 }

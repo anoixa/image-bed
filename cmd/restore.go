@@ -179,7 +179,7 @@ func runRestore(inputFile string, tables []string, dryRun, truncate bool) error 
 	// 更新自增序列
 	if !dryRun {
 		log.Println("Updating auto-increment sequences...")
-		if err := updateAutoIncrementSequences(db, cfg.Server.DatabaseConfig.Type, stats); err != nil {
+		if err := updateAutoIncrementSequences(db, cfg.DBType, stats); err != nil {
 			log.Printf("Warning: failed to update auto-increment sequences: %v", err)
 		}
 	}

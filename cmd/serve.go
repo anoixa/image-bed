@@ -62,7 +62,7 @@ func RunServer() {
 	container.SetupConfigCache()
 
 	// 初始化异步任务协程池
-	worker.InitGlobalPool(cfg.Server.WorkerCount, 1000)
+	worker.InitGlobalPool(cfg.WorkerCount, 1000)
 
 	// 初始化图片转换器和重试扫描器
 	converter := container.GetConverter()
@@ -83,6 +83,16 @@ func RunServer() {
 		thumbnailSvc,
 	)
 	thumbnailScanner.Start()
+// 启动孤儿任务扫描器（处理卡在 processing 状态的任务）
+orphanScanner := imageSvc.NewOrphanScanner(
+variantRepo,
+converter,
+thumbnailSvc,
+10*time.Minute, // 10分钟视为孤儿任务
+5*time.Minute,  // 每5分钟扫描一次
+)
+orphanScanner.Start()
+
 
 	// 初始化 JWT（从数据库加载配置）
 	if err := api.TokenInitFromManager(container.GetConfigManager()); err != nil {
@@ -101,7 +111,7 @@ func RunServer() {
 	// 启动gin
 	server, cleanup := core.StartServer(deps)
 	go func() {
-		log.Printf("Server started on %s", cfg.Server.Addr())
+		log.Printf("Server started on %s", cfg.Addr())
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("Server failed to start: %v", err)
 		}

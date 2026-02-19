@@ -52,7 +52,9 @@ func (r *Repository) GetUserAlbums(userID uint, page, pageSize int) ([]*AlbumInf
 
 		// 获取图片数量
 		var count int64
-		r.db.DB().Table("album_images").Where("album_id = ?", album.ID).Count(&count)
+		if err := r.db.DB().Table("album_images").Where("album_id = ?", album.ID).Count(&count).Error; err != nil {
+			continue
+		}
 		info.ImageCount = count
 
 		// 获取最近一张图片作为封面
