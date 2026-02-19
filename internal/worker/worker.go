@@ -4,6 +4,7 @@ import (
 	"log"
 	"runtime"
 	"sync"
+	"time"
 )
 
 // Task 异步任务接口
@@ -77,4 +78,50 @@ func StopGlobalPool() {
 		}
 		log.Println("Worker pool stopped")
 	})
+}
+
+// TrySubmit 带重试的任务提交
+// 尝试提交任务到队列，如果失败则重试指定次数
+func TrySubmit(task Task, retries int, delay time.Duration) bool {
+	if taskCh == nil {
+		task.Execute()
+		return true
+	}
+
+	for i := 0; i < retries; i++ {
+		select {
+		case taskCh <- task:
+			return true
+		default:
+			if i < retries-1 {
+				time.Sleep(delay)
+			}
+		}
+	}
+
+	// 重试都失败后，异步执行
+	go task.Execute()
+	return true
+}
+
+// SubmitBlocking 阻塞式提交任务，带超时
+// 返回 true 表示成功提交，false 表示超时
+func SubmitBlocking(task Task, timeout time.Duration) bool {
+	if taskCh == nil {
+		task.Execute()
+		return true
+	}
+
+	done := make(chan struct{})
+	go func() {
+		taskCh <- task
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
 }

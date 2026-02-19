@@ -15,7 +15,6 @@ import (
 
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
-	"github.com/anoixa/image-bed/internal/app"
 	"github.com/spf13/cobra"
 	"gorm.io/gorm"
 )
@@ -92,13 +91,11 @@ func runRestore(inputFile string, tables []string, dryRun, truncate bool) error 
 	config.InitConfig()
 	cfg := config.Get()
 
-	container := app.NewContainer(cfg)
-	if err := container.Init(); err != nil {
-		return fmt.Errorf("failed to initialize container: %w", err)
+	dbFactory, db, err := initDB()
+	if err != nil {
+		return err
 	}
-	defer container.Close()
-
-	db := container.GetDatabaseProvider().DB()
+	defer dbFactory.Close()
 
 	// 创建临时目录解压备份
 	tempDir := filepath.Join(os.TempDir(), fmt.Sprintf("image-bed-restore-%d", time.Now().Unix()))

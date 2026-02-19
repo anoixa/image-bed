@@ -14,9 +14,14 @@ import (
 	"github.com/anoixa/image-bed/api"
 	"github.com/anoixa/image-bed/api/core"
 	handlerImages "github.com/anoixa/image-bed/api/handler/images"
+	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
+	"github.com/anoixa/image-bed/database"
+	"github.com/anoixa/image-bed/database/repo/accounts"
+	"github.com/anoixa/image-bed/database/repo/albums"
 	"github.com/anoixa/image-bed/database/repo/images"
-	"github.com/anoixa/image-bed/internal/app"
+	"github.com/anoixa/image-bed/database/repo/keys"
+	configSvc "github.com/anoixa/image-bed/config/db"
 	imageSvc "github.com/anoixa/image-bed/internal/services/image"
 	"github.com/anoixa/image-bed/internal/worker"
 	"github.com/anoixa/image-bed/storage"
@@ -36,6 +41,71 @@ func init() {
 	rootCmd.AddCommand(serveCmd)
 }
 
+// Dependencies 服务器依赖项
+type Dependencies struct {
+	DBFactory      *database.Factory
+	DB             *database.GormProvider
+	Repositories   *core.Repositories
+	ConfigManager  *configSvc.Manager
+	Converter      *imageSvc.Converter
+}
+
+// InitDependencies 初始化所有依赖
+func InitDependencies(cfg *config.Config) (*Dependencies, error) {
+	// 初始化数据库工厂
+	dbFactory, err := database.NewFactory(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	// 获取数据库提供者
+	gormProvider := dbFactory.GetProvider().(*database.GormProvider)
+	db := gormProvider.DB()
+
+	// 初始化仓库
+	repos := &core.Repositories{
+		AccountsRepo: accounts.NewRepository(db),
+		DevicesRepo:  accounts.NewDeviceRepository(db),
+		ImagesRepo:   images.NewRepository(db),
+		AlbumsRepo:   albums.NewRepository(db),
+		KeysRepo:     keys.NewRepository(db),
+	}
+
+	// 初始化配置管理器
+	configManager := configSvc.NewManager(db, "./data")
+	if err := configManager.Initialize(); err != nil {
+		dbFactory.Close()
+		return nil, err
+	}
+
+	// 设置缓存
+	cacheProvider := cache.GetDefault()
+	if cacheProvider != nil {
+		configManager.SetCache(cacheProvider, 0)
+		log.Println("[Dependencies] Config cache enabled")
+	}
+
+	// 初始化变体仓库和转换器
+	variantRepo := images.NewVariantRepository(db)
+	converter := imageSvc.NewConverter(configManager, variantRepo, storage.GetDefault())
+
+	return &Dependencies{
+		DBFactory:     dbFactory,
+		DB:            gormProvider,
+		Repositories:  repos,
+		ConfigManager: configManager,
+		Converter:     converter,
+	}, nil
+}
+
+// Close 关闭所有依赖
+func (d *Dependencies) Close() error {
+	if d.DBFactory != nil {
+		return d.DBFactory.Close()
+	}
+	return nil
+}
+
 func RunServer() {
 	config.InitConfig()
 	cfg := config.Get()
@@ -47,68 +117,64 @@ func RunServer() {
 		log.Fatalf("Failed to create temp directory: %v", err)
 	}
 
-	container := app.NewContainer(cfg)
-
-	if err := container.InitDatabase(); err != nil {
-		log.Fatalf("Failed to initialize database: %v", err)
+	// 显式初始化依赖
+	deps, err := InitDependencies(cfg)
+	if err != nil {
+		log.Fatalf("Failed to initialize dependencies: %v", err)
 	}
+	defer deps.Close()
 
-	InitDatabase(container)
-
-	if err := container.InitServices(); err != nil {
-		log.Fatalf("Failed to initialize services: %v", err)
-	}
-
-	// 为 ConfigManager 设置缓存
-	container.SetupConfigCache()
+	// 初始化数据库
+	InitDatabase(deps)
 
 	// 初始化异步任务协程池
 	worker.InitGlobalPool(cfg.WorkerCount, 1000)
 
-	// 初始化图片转换器和重试扫描器
-	converter := container.GetConverter()
-	variantRepo := images.NewVariantRepository(container.GetDatabaseFactory().GetProvider().DB())
+	// 初始化变体仓库和服务
+	variantRepo := images.NewVariantRepository(deps.DB.DB())
+
+	// 初始化重试扫描器
 	retryScanner := imageSvc.NewRetryScanner(
 		variantRepo,
-		converter,
+		deps.Converter,
 		5*time.Minute,
 	)
 	retryScanner.Start()
 
 	// 初始化缩略图服务
-	thumbnailSvc := imageSvc.NewThumbnailService(variantRepo, container.GetConfigManager(), storage.GetDefault(), converter)
+	thumbnailSvc := imageSvc.NewThumbnailService(variantRepo, deps.ConfigManager, storage.GetDefault(), deps.Converter)
 	thumbnailScanner := imageSvc.NewThumbnailScanner(
-		container.GetDatabaseFactory().GetProvider().DB(),
-		container.GetConfigManager(),
-		worker.GetGlobalPool(),
+		deps.DB.DB(),
+		deps.ConfigManager,
 		thumbnailSvc,
 	)
 	thumbnailScanner.Start()
+
 	// 启动孤儿任务扫描器（处理卡在 processing 状态的任务）
 	orphanScanner := imageSvc.NewOrphanScanner(
 		variantRepo,
-		converter,
+		deps.Converter,
 		thumbnailSvc,
 		10*time.Minute, // 10分钟视为孤儿任务
 		5*time.Minute,  // 每5分钟扫描一次
 	)
 	orphanScanner.Start()
 
-
 	// 初始化 JWT（从数据库加载配置）
-	if err := api.TokenInitFromManager(container.GetConfigManager()); err != nil {
+	if err := api.TokenInitFromManager(deps.ConfigManager); err != nil {
 		log.Fatalf("Failed to initialize JWT: %s", err)
 	}
 
 	// 创建服务器依赖
-	deps := &core.ServerDependencies{
-		Container:      container,
-		ConfigManager:  container.GetConfigManager(),
-		Converter:      converter,
+	serverDeps := &core.ServerDependencies{
+		DB:            deps.DB.DB(),
+		Repositories:  deps.Repositories,
+		ConfigManager: deps.ConfigManager,
+		Converter:     deps.Converter,
 	}
 
 	// 启动gin
-	server, cleanup := core.StartServer(deps)
+	server, cleanup := core.StartServer(serverDeps)
 	go func() {
 		log.Printf("Server started on %s", cfg.Addr())
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -140,13 +206,11 @@ func RunServer() {
 	// 停止缩略图扫描器
 	thumbnailScanner.Stop()
 
+	// 停止孤儿任务扫描器
+	orphanScanner.Stop()
+
 	// 关闭异步任务池
 	worker.StopGlobalPool()
-
-	// 关闭 DI 容器
-	if err := container.Close(); err != nil {
-		log.Printf("Error closing container: %v", err)
-	}
 
 	if err := server.Shutdown(ctx); err != nil {
 		log.Fatalf("Server forced to shutdown: %v", err)
@@ -155,19 +219,18 @@ func RunServer() {
 	log.Println("Server exited successfully")
 }
 
-// InitDatabase init database using DI container
-func InitDatabase(container *app.Container) {
-	factory := container.GetDatabaseFactory()
-	log.Printf("Initializing database, database type: %s", factory.GetProvider().Name())
+// InitDatabase init database
+func InitDatabase(deps *Dependencies) {
+	log.Printf("Initializing database, database type: %s", deps.DB.Name())
 
 	// 自动DDL
-	if err := factory.AutoMigrate(); err != nil {
+	if err := deps.DBFactory.AutoMigrate(); err != nil {
 		log.Fatalf("Failed to auto migrate database: %v", err)
 	}
 
 	// 创建默认管理员用户
-	if container.AccountsRepo != nil {
-		container.AccountsRepo.CreateDefaultAdminUser()
+	if deps.Repositories.AccountsRepo != nil {
+		deps.Repositories.AccountsRepo.CreateDefaultAdminUser()
 	}
 
 	log.Println("Database initialized successfully")

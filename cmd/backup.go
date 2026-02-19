@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/anoixa/image-bed/config"
+	"github.com/anoixa/image-bed/database"
 	"github.com/anoixa/image-bed/database/models"
-	"github.com/anoixa/image-bed/internal/app"
 	"github.com/spf13/cobra"
 	"gorm.io/gorm"
 )
@@ -60,18 +60,28 @@ type backupMetadata struct {
 	RecordCount map[string]int64 `json:"record_count"`
 }
 
+// initDB 初始化数据库连接
+func initDB() (*database.Factory, *gorm.DB, error) {
+	cfg := config.Get()
+
+	dbFactory, err := database.NewFactory(cfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to initialize database: %w", err)
+	}
+
+	return dbFactory, dbFactory.GetProvider().DB(), nil
+}
+
 // runBackup 执行备份
 func runBackup(outputFile string, tables []string, keepDir bool) error {
 	config.InitConfig()
 	cfg := config.Get()
 
-	container := app.NewContainer(cfg)
-	if err := container.Init(); err != nil {
-		return fmt.Errorf("failed to initialize container: %w", err)
+	dbFactory, db, err := initDB()
+	if err != nil {
+		return err
 	}
-	defer container.Close()
-
-	db := container.GetDatabaseProvider().DB()
+	defer dbFactory.Close()
 
 	// 确定输出文件路径
 	if outputFile == "" {

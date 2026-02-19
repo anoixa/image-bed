@@ -9,10 +9,10 @@ import (
 
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
-	"github.com/anoixa/image-bed/internal/app"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/storage/local"
 	"github.com/spf13/cobra"
+	"gorm.io/gorm"
 )
 
 // cleanCmd 清理数据库孤儿记录和临时文件
@@ -59,24 +59,24 @@ func runClean(dryRun, tempOnly, dbOnly, storageOnly bool) error {
 	config.InitConfig()
 	cfg := config.Get()
 
-	container := app.NewContainer(cfg)
-	if err := container.Init(); err != nil {
-		return fmt.Errorf("failed to initialize container: %w", err)
+	dbFactory, db, err := initDB()
+	if err != nil {
+		return err
 	}
-	defer container.Close()
+	defer dbFactory.Close()
 
 	stats := &cleanStats{}
 
 	// 数据库清理
 	if !tempOnly && !storageOnly {
-		if err := cleanOrphanDBRecords(container, stats, dryRun); err != nil {
+		if err := cleanOrphanDBRecords(db, stats, dryRun); err != nil {
 			stats.errors = append(stats.errors, fmt.Sprintf("clean orphan DB records failed: %v", err))
 		}
 	}
 
 	// 存储清理
 	if !tempOnly && !dbOnly {
-		if err := cleanOrphanStorageFiles(container, stats, dryRun); err != nil {
+		if err := cleanOrphanStorageFiles(db, stats, dryRun); err != nil {
 			stats.errors = append(stats.errors, fmt.Sprintf("clean orphan storage files failed: %v", err))
 		}
 	}
@@ -98,10 +98,8 @@ func runClean(dryRun, tempOnly, dbOnly, storageOnly bool) error {
 }
 
 // cleanOrphanDBRecords 清理数据库中不存在对应文件的记录
-func cleanOrphanDBRecords(container *app.Container, stats *cleanStats, dryRun bool) error {
+func cleanOrphanDBRecords(db *gorm.DB, stats *cleanStats, dryRun bool) error {
 	log.Println("Checking for orphan database records...")
-
-	db := container.GetDatabaseProvider().DB()
 
 	var images []models.Image
 	if err := db.Find(&images).Error; err != nil {
@@ -143,7 +141,7 @@ func cleanOrphanDBRecords(container *app.Container, stats *cleanStats, dryRun bo
 }
 
 // cleanOrphanStorageFiles 清理存储中没有对应数据库记录的文件
-func cleanOrphanStorageFiles(container *app.Container, stats *cleanStats, dryRun bool) error {
+func cleanOrphanStorageFiles(db *gorm.DB, stats *cleanStats, dryRun bool) error {
 	log.Println("Checking for orphan storage files...")
 
 	// 获取默认存储提供者
@@ -158,8 +156,6 @@ func cleanOrphanStorageFiles(container *app.Container, stats *cleanStats, dryRun
 		log.Printf("Storage type '%s' does not support orphan file detection yet", provider.Name())
 		return nil
 	}
-
-	db := container.GetDatabaseProvider().DB()
 
 	var identifiers []string
 	if err := db.Model(&models.Image{}).Pluck("identifier", &identifiers).Error; err != nil {

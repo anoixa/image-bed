@@ -396,3 +396,27 @@ func (h *Handler) GetChunkedUploadStatus(c *gin.Context) {
 		"is_processing":   session.IsProcessing,
 	})
 }
+
+// CleanupExpiredSessions 清理过期的分片上传会话
+func CleanupExpiredSessions() {
+	sessionsMu.Lock()
+	defer sessionsMu.Unlock()
+
+	now := time.Now()
+	expiredCount := 0
+
+	for sessionID, session := range sessions {
+		if now.Sub(session.CreatedAt) > UploadSessionExpiry {
+			// 清理临时文件
+			if session.TempDir != "" {
+				os.RemoveAll(session.TempDir)
+			}
+			delete(sessions, sessionID)
+			expiredCount++
+		}
+	}
+
+	if expiredCount > 0 {
+		log.Printf("[Cleanup] Cleaned up %d expired upload sessions", expiredCount)
+	}
+}

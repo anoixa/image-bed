@@ -1,6 +1,8 @@
 package core
 
 import (
+	"context"
+	"database/sql"
 	"log"
 	"net/http"
 	"time"
@@ -8,25 +10,71 @@ import (
 	"github.com/anoixa/image-bed/api"
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/handler/admin"
-	"github.com/anoixa/image-bed/api/handler/albums"
-	"github.com/anoixa/image-bed/api/handler/images"
+	handlerAlbums "github.com/anoixa/image-bed/api/handler/albums"
+	handlerImages "github.com/anoixa/image-bed/api/handler/images"
 	"github.com/anoixa/image-bed/api/handler/key"
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
-	"github.com/anoixa/image-bed/internal/app"
+	"github.com/anoixa/image-bed/database"
+	"github.com/anoixa/image-bed/database/repo/accounts"
+	"github.com/anoixa/image-bed/database/repo/albums"
+	"github.com/anoixa/image-bed/database/repo/images"
+	"github.com/anoixa/image-bed/database/repo/keys"
 	"github.com/anoixa/image-bed/internal/services/auth"
 	configSvc "github.com/anoixa/image-bed/config/db"
 	imageSvc "github.com/anoixa/image-bed/internal/services/image"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 var startTime = time.Now()
 
+// simpleProvider 简单的数据库提供者实现
+type simpleProvider struct {
+	db *gorm.DB
+}
+
+func (p *simpleProvider) DB() *gorm.DB { return p.db }
+func (p *simpleProvider) WithContext(ctx context.Context) *gorm.DB { return p.db.WithContext(ctx) }
+func (p *simpleProvider) Transaction(fn database.TxFunc) error { return p.db.Transaction(fn) }
+func (p *simpleProvider) TransactionWithContext(ctx context.Context, fn database.TxFunc) error {
+	return p.db.WithContext(ctx).Transaction(fn)
+}
+func (p *simpleProvider) BeginTransaction() *gorm.DB { return p.db.Begin() }
+func (p *simpleProvider) WithTransaction() *gorm.DB { return p.db.Begin() }
+func (p *simpleProvider) AutoMigrate(models ...interface{}) error { return p.db.AutoMigrate(models...) }
+func (p *simpleProvider) SQLDB() (*sql.DB, error) { return p.db.DB() }
+func (p *simpleProvider) Ping() error {
+	sqlDB, err := p.db.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.Ping()
+}
+func (p *simpleProvider) Close() error {
+	sqlDB, err := p.db.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.Close()
+}
+func (p *simpleProvider) Name() string { return "gorm" }
+
+// Repositories 所有数据库仓库
+type Repositories struct {
+	AccountsRepo *accounts.Repository
+	DevicesRepo  *accounts.DeviceRepository
+	ImagesRepo   *images.Repository
+	AlbumsRepo   *albums.Repository
+	KeysRepo     *keys.Repository
+}
+
 // ServerDependencies 服务器依赖项
 type ServerDependencies struct {
-	Container     *app.Container
+	DB            *gorm.DB
+	Repositories  *Repositories
 	ConfigManager *configSvc.Manager
 	Converter     *imageSvc.Converter
 }
@@ -87,12 +135,13 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	}
 
 	router.GET("/health", func(context *gin.Context) {
+		dbProvider := &simpleProvider{db: deps.DB}
 		health := gin.H{
 			"status":  "ok",
 			"uptime":  time.Since(startTime).Round(time.Second).String(),
 			"version": config.Version,
 			"checks": gin.H{
-				"database": checkDatabaseHealth(deps.Container.GetDatabaseProvider()),
+				"database": checkDatabaseHealth(dbProvider),
 				"cache":    checkCacheHealth(),
 				"storage":  checkStorageHealth(),
 			},
@@ -131,18 +180,19 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	}
 
 	if tokenManager != nil {
-		jwtService = auth.NewJWTService(tokenManager, deps.Container.KeysRepo)
-		loginService = auth.NewLoginService(deps.Container.AccountsRepo, deps.Container.DevicesRepo, jwtService)
+		jwtService = auth.NewJWTService(tokenManager, deps.Repositories.KeysRepo)
+		loginService = auth.NewLoginService(deps.Repositories.AccountsRepo, deps.Repositories.DevicesRepo, jwtService)
 		api.SetTokenManager(tokenManager)
 		api.SetJWTService(jwtService)
 	}
 
 	// 创建处理器（依赖注入）
 	cacheProvider := cache.GetDefault()
-	imageHandler := images.NewHandler(cacheProvider, deps.Container.ImagesRepo, deps.Container.GetDatabaseProvider(), deps.Converter, deps.ConfigManager)
-	albumHandler := albums.NewHandler(deps.Container.AlbumsRepo, cacheProvider)
-	albumImageHandler := albums.NewAlbumImageHandler(deps.Container.AlbumsRepo, deps.Container.ImagesRepo, cacheProvider)
-	keyHandler := key.NewHandler(deps.Container.KeysRepo)
+	dbProvider := &simpleProvider{db: deps.DB}
+	imageHandler := handlerImages.NewHandler(cacheProvider, deps.Repositories.ImagesRepo, dbProvider, deps.Converter, deps.ConfigManager)
+	albumHandler := handlerAlbums.NewHandler(deps.Repositories.AlbumsRepo, cacheProvider)
+	albumImageHandler := handlerAlbums.NewAlbumImageHandler(deps.Repositories.AlbumsRepo, deps.Repositories.ImagesRepo, cacheProvider)
+	keyHandler := key.NewHandler(deps.Repositories.KeysRepo)
 	loginHandler := api.NewLoginHandlerWithService(loginService)
 
 	// 公共接口 - 图片获取（可能涉及大文件）

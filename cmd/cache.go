@@ -6,8 +6,8 @@ import (
 	"log"
 	"strings"
 
+	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
-	"github.com/anoixa/image-bed/internal/app"
 	"github.com/spf13/cobra"
 )
 
@@ -46,20 +46,13 @@ func init() {
 // runCacheClear 执行缓存清理
 func runCacheClear(imageOnly, all bool, pattern string) error {
 	config.InitConfig()
-	cfg := config.Get()
 
-	container := app.NewContainer(cfg)
-	if err := container.Init(); err != nil {
-		return fmt.Errorf("failed to initialize container: %w", err)
-	}
-	defer container.Close()
-
-	cacheFactory := container.GetCacheFactory()
-	if cacheFactory == nil {
-		return fmt.Errorf("cache factory not initialized")
+	// 初始化缓存
+	if err := cache.InitCache(nil); err != nil {
+		return fmt.Errorf("failed to initialize cache: %w", err)
 	}
 
-	provider := cacheFactory.GetProvider()
+	provider := cache.GetDefault()
 	if provider == nil {
 		return fmt.Errorf("cache provider not initialized")
 	}

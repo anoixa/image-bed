@@ -249,7 +249,6 @@ func (s *ThumbnailService) GetThumbnailURL(identifier string, width int) string 
 type ThumbnailScanner struct {
 	db            *gorm.DB
 	configManager *config.Manager
-	worker        *worker.WorkerPool
 	thumbnailSvc  *ThumbnailService
 	ticker        *time.Ticker
 	stopChan      chan struct{}
@@ -260,13 +259,11 @@ type ThumbnailScanner struct {
 func NewThumbnailScanner(
 	db *gorm.DB,
 	configManager *config.Manager,
-	worker *worker.WorkerPool,
 	thumbnailSvc *ThumbnailService,
 ) *ThumbnailScanner {
 	return &ThumbnailScanner{
 		db:            db,
 		configManager: configManager,
-		worker:        worker,
 		thumbnailSvc:  thumbnailSvc,
 		stopChan:      make(chan struct{}),
 	}
@@ -288,10 +285,6 @@ func (s *ThumbnailScanner) Start() error {
 		return nil
 	}
 
-	// 检查依赖
-	if s.worker == nil {
-		return fmt.Errorf("worker is nil")
-	}
 	if s.thumbnailSvc == nil {
 		return fmt.Errorf("thumbnailSvc is nil")
 	}
@@ -563,7 +556,7 @@ func (s *ThumbnailScanner) submitThumbnailTask(ctx context.Context, image *model
 			Storage:          s.thumbnailSvc.storage,
 		}
 
-		ok := s.worker.SubmitBlocking(task, 5*time.Second)
+		ok := worker.SubmitBlocking(task, 5*time.Second)
 		if !ok {
 			utils.LogIfDevf("[ThumbnailScanner] Failed to submit task for variant %d (image %d, format %s)",
 				variant.ID, image.ID, format)
