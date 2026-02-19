@@ -9,6 +9,7 @@ import (
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/database/models"
+	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -127,14 +128,6 @@ func (h *Handler) deleteVariantsForImage(ctx context.Context, img *models.Image)
 		return
 	}
 
-	// 获取存储 provider
-	provider, err := h.storageFactory.GetByID(img.StorageConfigID)
-	if err != nil {
-		log.Printf("Failed to get storage provider for image %d: %v", img.ID, err)
-		// 继续删除数据库记录，即使文件删除失败
-		provider = nil
-	}
-
 	// 删除每个变体的文件和缓存
 	for _, variant := range variants {
 		// 跳过未完成的变体（没有实际文件）
@@ -143,10 +136,8 @@ func (h *Handler) deleteVariantsForImage(ctx context.Context, img *models.Image)
 		}
 
 		// 删除文件
-		if provider != nil {
-			if err := provider.DeleteWithContext(ctx, variant.Identifier); err != nil {
-				log.Printf("Failed to delete variant file %s: %v", variant.Identifier, err)
-			}
+		if err := storage.GetDefault().DeleteWithContext(ctx, variant.Identifier); err != nil {
+			log.Printf("Failed to delete variant file %s: %v", variant.Identifier, err)
 		}
 
 		// 清除变体缓存

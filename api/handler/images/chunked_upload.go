@@ -18,6 +18,7 @@ import (
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/database/models"
+	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/anoixa/image-bed/utils/validator"
 	"github.com/gin-gonic/gin"
@@ -331,21 +332,15 @@ func (h *Handler) processChunkedUpload(ctx context.Context, session *ChunkedUplo
 		return fmt.Errorf("uploaded file is not a valid image")
 	}
 
-	// 获取存储提供者
-	storageProvider, err := h.storageFactory.Get("")
-	if err != nil {
-		return fmt.Errorf("failed to get storage: %w", err)
-	}
-
 	// 获取存储配置ID
-	storageConfigID := h.storageFactory.GetDefaultID()
+	storageConfigID := storage.GetDefaultID()
 
 	// 生成唯一标识符 - 使用安全的扩展名
 	ext := getSafeFileExtension(mimeType)
 	identifier := fmt.Sprintf("%d-%s%s", time.Now().UnixNano(), fileHash[:16], ext)
 
 	// 保存到存储
-	if err := storageProvider.SaveWithContext(ctx, identifier, bytes.NewReader(fileBytes)); err != nil {
+	if err := storage.GetDefault().SaveWithContext(ctx, identifier, bytes.NewReader(fileBytes)); err != nil {
 		return fmt.Errorf("failed to save file to storage: %w", err)
 	}
 
@@ -361,7 +356,7 @@ func (h *Handler) processChunkedUpload(ctx context.Context, session *ChunkedUplo
 	}
 
 	if err := h.repo.SaveImage(newImage); err != nil {
-		storageProvider.DeleteWithContext(ctx, identifier)
+		storage.GetDefault().DeleteWithContext(ctx, identifier)
 		return fmt.Errorf("failed to save image metadata: %w", err)
 	}
 
@@ -398,20 +393,6 @@ func (h *Handler) GetChunkedUploadStatus(c *gin.Context) {
 		"total_chunks":    session.TotalChunks,
 		"received_chunks": len(session.ReceivedChunks),
 		"received_list":   receivedChunks,
+		"is_processing":   session.IsProcessing,
 	})
-}
-
-// CleanupExpiredSessions 清理过期会话
-func CleanupExpiredSessions() {
-	sessionsMu.Lock()
-	defer sessionsMu.Unlock()
-
-	now := time.Now()
-	for id, session := range sessions {
-		if now.Sub(session.CreatedAt) > UploadSessionExpiry {
-			delete(sessions, id)
-			os.RemoveAll(session.TempDir)
-			log.Printf("Cleaned up expired upload session: %s", id)
-		}
-	}
 }

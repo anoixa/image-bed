@@ -22,13 +22,13 @@ type VariantResult struct {
 
 // VariantService 变体服务
 type VariantService struct {
-	variantRepo   images.VariantRepository
+	variantRepo   *images.VariantRepository
 	configManager *config.Manager
 	converter     *Converter
 }
 
 // NewVariantService 创建服务
-func NewVariantService(repo images.VariantRepository, cm *config.Manager, converter *Converter) *VariantService {
+func NewVariantService(repo *images.VariantRepository, cm *config.Manager, converter *Converter) *VariantService {
 	return &VariantService{
 		variantRepo:   repo,
 		configManager: cm,

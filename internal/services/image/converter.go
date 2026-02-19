@@ -15,12 +15,12 @@ import (
 // Converter 图片转换器
 type Converter struct {
 	configManager *config.Manager
-	variantRepo   images.VariantRepository
+	variantRepo   *images.VariantRepository
 	storage       storage.Provider
 }
 
 // NewConverter 创建转换器
-func NewConverter(cm *config.Manager, repo images.VariantRepository, storage storage.Provider) *Converter {
+func NewConverter(cm *config.Manager, repo *images.VariantRepository, storage storage.Provider) *Converter {
 	return &Converter{
 		configManager: cm,
 		variantRepo:   repo,

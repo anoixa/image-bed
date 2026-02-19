@@ -11,7 +11,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
-	"strconv"
 	"sync"
 
 	"github.com/anoixa/image-bed/api/common"
@@ -61,27 +60,13 @@ func (h *Handler) UploadImage(c *gin.Context) {
 
 	fileHeader := files[0]
 
-	storageName := c.PostForm("storage")
-	if storageName == "" {
-		storageName = c.Query("storage")
-	}
-
-	storageProvider, err := h.storageFactory.Get(storageName)
-	if err != nil {
-		log.Printf("Failed to get storage provider '%s': %v", storageName, err)
-		common.RespondError(c, http.StatusBadRequest, "Invalid storage configuration")
-		return
-	}
-	storageConfigID, err := h.getStorageConfigID(c, storageName)
-	if err != nil {
-		common.RespondError(c, http.StatusBadRequest, err.Error())
-		return
-	}
+	// 简化后只使用默认存储
+	storageConfigID := storage.GetDefaultID()
 
 	userID := c.GetUint(middleware.ContextUserIDKey)
 	// 读取公开/私有参数，默认为公开
 	isPublic := c.PostForm("is_public") != "false"
-	image, _, err := h.processAndSaveImage(c.Request.Context(), userID, fileHeader, storageProvider, storageConfigID, isPublic)
+	image, _, err := h.processAndSaveImage(c.Request.Context(), userID, fileHeader, storage.GetDefault(), storageConfigID, isPublic)
 	if err != nil {
 		if !c.IsAborted() {
 			common.RespondError(c, http.StatusInternalServerError, err.Error())
@@ -139,26 +124,17 @@ func (h *Handler) UploadImages(c *gin.Context) {
 	}
 
 	if storageIDStr != "" {
-		// 按 ID 获取存储
-		id, parseErr := strconv.ParseUint(storageIDStr, 10, 32)
-		if parseErr != nil {
-			common.RespondError(c, http.StatusBadRequest, "Invalid storage_id")
-			return
-		}
-		storageConfigID = uint(id)
-		storageProvider, err = h.storageFactory.GetByID(storageConfigID)
-		if err != nil {
-			common.RespondError(c, http.StatusBadRequest, err.Error())
-			return
-		}
+		// 简化后只使用默认存储
+		storageConfigID = storage.GetDefaultID()
+		storageProvider = storage.GetDefault()
 	} else {
 		// 使用默认存储
-		storageProvider = h.storageFactory.GetDefault()
+		storageConfigID = storage.GetDefaultID()
+		storageProvider = storage.GetDefault()
 		if storageProvider == nil {
 			common.RespondError(c, http.StatusInternalServerError, "No default storage configured")
 			return
 		}
-		storageConfigID = h.storageFactory.GetDefaultID()
 	}
 
 	type uploadResult struct {

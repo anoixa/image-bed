@@ -19,6 +19,7 @@ import (
 	"github.com/anoixa/image-bed/internal/app"
 	imageSvc "github.com/anoixa/image-bed/internal/services/image"
 	"github.com/anoixa/image-bed/internal/worker"
+	"github.com/anoixa/image-bed/storage"
 	"github.com/spf13/cobra"
 )
 
@@ -75,7 +76,7 @@ func RunServer() {
 	retryScanner.Start()
 
 	// 初始化缩略图服务
-	thumbnailSvc := imageSvc.NewThumbnailService(variantRepo, container.GetConfigManager(), container.GetStorageFactory().GetDefault(), converter)
+	thumbnailSvc := imageSvc.NewThumbnailService(variantRepo, container.GetConfigManager(), storage.GetDefault(), converter)
 	thumbnailScanner := imageSvc.NewThumbnailScanner(
 		container.GetDatabaseFactory().GetProvider().DB(),
 		container.GetConfigManager(),
@@ -83,15 +84,15 @@ func RunServer() {
 		thumbnailSvc,
 	)
 	thumbnailScanner.Start()
-// 启动孤儿任务扫描器（处理卡在 processing 状态的任务）
-orphanScanner := imageSvc.NewOrphanScanner(
-variantRepo,
-converter,
-thumbnailSvc,
-10*time.Minute, // 10分钟视为孤儿任务
-5*time.Minute,  // 每5分钟扫描一次
-)
-orphanScanner.Start()
+	// 启动孤儿任务扫描器（处理卡在 processing 状态的任务）
+	orphanScanner := imageSvc.NewOrphanScanner(
+		variantRepo,
+		converter,
+		thumbnailSvc,
+		10*time.Minute, // 10分钟视为孤儿任务
+		5*time.Minute,  // 每5分钟扫描一次
+	)
+	orphanScanner.Start()
 
 
 	// 初始化 JWT（从数据库加载配置）
@@ -101,8 +102,6 @@ orphanScanner.Start()
 
 	// 创建服务器依赖
 	deps := &core.ServerDependencies{
-		StorageFactory: container.GetStorageFactory(),
-		CacheFactory:   container.GetCacheFactory(),
 		Container:      container,
 		ConfigManager:  container.GetConfigManager(),
 		Converter:      converter,

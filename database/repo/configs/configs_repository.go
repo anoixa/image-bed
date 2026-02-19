@@ -3,38 +3,62 @@ package configs
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/anoixa/image-bed/database/models"
 	"gorm.io/gorm"
 )
 
-// Repository 配置仓库
-type Repository struct {
+// DefaultCacheTTL 默认缓存过期时间
+const DefaultCacheTTL = 5 * time.Minute
+
+// Repository 配置仓库接口
+type Repository interface {
+	Create(ctx context.Context, config *models.SystemConfig) error
+	Update(ctx context.Context, config *models.SystemConfig) error
+	Delete(ctx context.Context, id uint) error
+	GetByID(ctx context.Context, id uint) (*models.SystemConfig, error)
+	GetByKey(ctx context.Context, key string) (*models.SystemConfig, error)
+	List(ctx context.Context, category models.ConfigCategory, enabledOnly bool) ([]models.SystemConfig, error)
+	ListAll(ctx context.Context) ([]models.SystemConfig, error)
+	GetDefaultByCategory(ctx context.Context, category models.ConfigCategory) (*models.SystemConfig, error)
+	SetDefault(ctx context.Context, id uint, category models.ConfigCategory) error
+	Enable(ctx context.Context, id uint) error
+	Disable(ctx context.Context, id uint) error
+	Count(ctx context.Context) (int64, error)
+	CountByCategory(ctx context.Context, category models.ConfigCategory) (int64, error)
+	Exists(ctx context.Context, key string) (bool, error)
+	Transaction(ctx context.Context, fn func(tx *gorm.DB) error) error
+	EnsureKeyUnique(ctx context.Context, baseKey string) (string, error)
+}
+
+// ConfigRepository 配置仓库实现
+type ConfigRepository struct {
 	db *gorm.DB
 }
 
 // NewRepository 创建配置仓库
-func NewRepository(db *gorm.DB) *Repository {
-	return &Repository{db: db}
+func NewRepository(db *gorm.DB) *ConfigRepository {
+	return &ConfigRepository{db: db}
 }
 
 // Create 创建配置
-func (r *Repository) Create(ctx context.Context, config *models.SystemConfig) error {
+func (r *ConfigRepository) Create(ctx context.Context, config *models.SystemConfig) error {
 	return r.db.WithContext(ctx).Create(config).Error
 }
 
 // Update 更新配置
-func (r *Repository) Update(ctx context.Context, config *models.SystemConfig) error {
+func (r *ConfigRepository) Update(ctx context.Context, config *models.SystemConfig) error {
 	return r.db.WithContext(ctx).Save(config).Error
 }
 
 // Delete 删除配置
-func (r *Repository) Delete(ctx context.Context, id uint) error {
+func (r *ConfigRepository) Delete(ctx context.Context, id uint) error {
 	return r.db.WithContext(ctx).Delete(&models.SystemConfig{}, id).Error
 }
 
 // GetByID 根据ID获取配置
-func (r *Repository) GetByID(ctx context.Context, id uint) (*models.SystemConfig, error) {
+func (r *ConfigRepository) GetByID(ctx context.Context, id uint) (*models.SystemConfig, error) {
 	var config models.SystemConfig
 	if err := r.db.WithContext(ctx).First(&config, id).Error; err != nil {
 		return nil, err
@@ -43,7 +67,7 @@ func (r *Repository) GetByID(ctx context.Context, id uint) (*models.SystemConfig
 }
 
 // GetByKey 根据Key获取配置
-func (r *Repository) GetByKey(ctx context.Context, key string) (*models.SystemConfig, error) {
+func (r *ConfigRepository) GetByKey(ctx context.Context, key string) (*models.SystemConfig, error) {
 	var config models.SystemConfig
 	if err := r.db.WithContext(ctx).Where("key = ?", key).First(&config).Error; err != nil {
 		return nil, err
@@ -52,7 +76,7 @@ func (r *Repository) GetByKey(ctx context.Context, key string) (*models.SystemCo
 }
 
 // List 列出配置（支持分类过滤）
-func (r *Repository) List(ctx context.Context, category models.ConfigCategory, enabledOnly bool) ([]models.SystemConfig, error) {
+func (r *ConfigRepository) List(ctx context.Context, category models.ConfigCategory, enabledOnly bool) ([]models.SystemConfig, error) {
 	var configs []models.SystemConfig
 	query := r.db.WithContext(ctx).Order("priority DESC, id ASC")
 
@@ -70,12 +94,12 @@ func (r *Repository) List(ctx context.Context, category models.ConfigCategory, e
 }
 
 // ListAll 列出所有配置
-func (r *Repository) ListAll(ctx context.Context) ([]models.SystemConfig, error) {
+func (r *ConfigRepository) ListAll(ctx context.Context) ([]models.SystemConfig, error) {
 	return r.List(ctx, "", false)
 }
 
 // GetDefaultByCategory 获取默认配置
-func (r *Repository) GetDefaultByCategory(ctx context.Context, category models.ConfigCategory) (*models.SystemConfig, error) {
+func (r *ConfigRepository) GetDefaultByCategory(ctx context.Context, category models.ConfigCategory) (*models.SystemConfig, error) {
 	var config models.SystemConfig
 	if err := r.db.WithContext(ctx).
 		Where("category = ? AND is_default = ? AND is_enabled = ?", category, true, true).
@@ -86,7 +110,7 @@ func (r *Repository) GetDefaultByCategory(ctx context.Context, category models.C
 }
 
 // SetDefault 设置默认配置
-func (r *Repository) SetDefault(ctx context.Context, id uint, category models.ConfigCategory) error {
+func (r *ConfigRepository) SetDefault(ctx context.Context, id uint, category models.ConfigCategory) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&models.SystemConfig{}).Where("category = ?", category).Update("is_default", false).Error; err != nil {
 			return err
@@ -96,48 +120,43 @@ func (r *Repository) SetDefault(ctx context.Context, id uint, category models.Co
 }
 
 // Enable 启用配置
-func (r *Repository) Enable(ctx context.Context, id uint) error {
+func (r *ConfigRepository) Enable(ctx context.Context, id uint) error {
 	return r.db.WithContext(ctx).Model(&models.SystemConfig{}).Where("id = ?", id).Update("is_enabled", true).Error
 }
 
 // Disable 禁用配置
-func (r *Repository) Disable(ctx context.Context, id uint) error {
+func (r *ConfigRepository) Disable(ctx context.Context, id uint) error {
 	return r.db.WithContext(ctx).Model(&models.SystemConfig{}).Where("id = ?", id).Update("is_enabled", false).Error
 }
 
 // Count 统计配置数量
-func (r *Repository) Count(ctx context.Context) (int64, error) {
+func (r *ConfigRepository) Count(ctx context.Context) (int64, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Model(&models.SystemConfig{}).Count(&count).Error
 	return count, err
 }
 
 // CountByCategory 按分类统计
-func (r *Repository) CountByCategory(ctx context.Context, category models.ConfigCategory) (int64, error) {
+func (r *ConfigRepository) CountByCategory(ctx context.Context, category models.ConfigCategory) (int64, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Model(&models.SystemConfig{}).Where("category = ?", category).Count(&count).Error
 	return count, err
 }
 
 // Exists 检查Key是否已存在
-func (r *Repository) Exists(ctx context.Context, key string) (bool, error) {
+func (r *ConfigRepository) Exists(ctx context.Context, key string) (bool, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Model(&models.SystemConfig{}).Where("key = ?", key).Count(&count).Error
 	return count > 0, err
 }
 
 // Transaction 事务支持
-func (r *Repository) Transaction(ctx context.Context, fn func(tx *gorm.DB) error) error {
+func (r *ConfigRepository) Transaction(ctx context.Context, fn func(tx *gorm.DB) error) error {
 	return r.db.WithContext(ctx).Transaction(fn)
 }
 
-// GormDB 获取原始 GORM DB 实例
-func (r *Repository) GormDB() *gorm.DB {
-	return r.db
-}
-
 // EnsureKeyUnique 确保 Key 唯一，如果不唯一则添加序号
-func (r *Repository) EnsureKeyUnique(ctx context.Context, baseKey string) (string, error) {
+func (r *ConfigRepository) EnsureKeyUnique(ctx context.Context, baseKey string) (string, error) {
 	key := baseKey
 	for i := 1; i < 1000; i++ {
 		exists, err := r.Exists(ctx, key)

@@ -7,9 +7,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// TxFunc 事务函数类型
-type TxFunc func(tx *gorm.DB) error
-
 // Provider 数据库提供者接口 - 依赖倒置的核心抽象
 // 定义了数据库访问的基本操作，所有数据库实现必须遵循此接口
 type Provider interface {

@@ -20,8 +20,6 @@ import (
 // Container 依赖注入容器 - 管理所有服务的生命周期
 type Container struct {
 	config          *config.Config
-	storageFactory  *storage.Factory
-	cacheFactory    *cache.Factory
 	databaseFactory *database.Factory
 	configManager   *configSvc.Manager
 	converter       *image.Converter
@@ -38,7 +36,7 @@ func (c *Container) GetConverter() *image.Converter {
 	if c.converter == nil {
 		db := c.databaseFactory.GetProvider().DB()
 		variantRepo := images.NewVariantRepository(db)
-		c.converter = image.NewConverter(c.configManager, variantRepo, c.storageFactory.GetDefault())
+		c.converter = image.NewConverter(c.configManager, variantRepo, storage.GetDefault())
 	}
 	return c.converter
 }
@@ -78,14 +76,6 @@ func (c *Container) InitServices() error {
 		return fmt.Errorf("failed to initialize config manager: %w", err)
 	}
 
-	if err := c.initStorageFactory(); err != nil {
-		return fmt.Errorf("failed to initialize storage factory: %w", err)
-	}
-
-	if err := c.initCacheFactory(); err != nil {
-		return fmt.Errorf("failed to initialize cache factory: %w", err)
-	}
-
 	return nil
 }
 
@@ -103,12 +93,12 @@ func (c *Container) initConfigManager() error {
 
 // SetupConfigCache 为 ConfigManager 设置缓存
 func (c *Container) SetupConfigCache() {
-	if c.cacheFactory == nil || c.configManager == nil {
+	if c.configManager == nil {
 		return
 	}
 
 	// 使用默认缓存提供者
-	cacheProvider := c.cacheFactory.GetProvider()
+	cacheProvider := cache.GetDefault()
 	if cacheProvider != nil {
 		c.configManager.SetCache(cacheProvider, 0) // 0 表示使用默认 TTL
 		fmt.Println("[Container] Config cache enabled")
@@ -117,12 +107,12 @@ func (c *Container) SetupConfigCache() {
 
 // initRepositories 初始化所有仓库
 func (c *Container) initRepositories() {
-	provider := c.databaseFactory.GetProvider()
-	c.AccountsRepo = accounts.NewRepository(provider)
-	c.DevicesRepo = accounts.NewDeviceRepository(provider)
-	c.ImagesRepo = images.NewRepository(provider)
-	c.AlbumsRepo = albums.NewRepository(provider)
-	c.KeysRepo = keys.NewRepository(provider)
+	db := c.databaseFactory.GetProvider().DB()
+	c.AccountsRepo = accounts.NewRepository(db)
+	c.DevicesRepo = accounts.NewDeviceRepository(db)
+	c.ImagesRepo = images.NewRepository(db)
+	c.AlbumsRepo = albums.NewRepository(db)
+	c.KeysRepo = keys.NewRepository(db)
 	utils.LogIfDev("Repositories initialized")
 }
 
@@ -150,43 +140,10 @@ func (c *Container) initDatabaseFactory() error {
 	return nil
 }
 
-// initStorageFactory 初始化存储工厂
-func (c *Container) initStorageFactory() error {
-	db := c.databaseFactory.GetProvider().DB()
-	factory, err := storage.NewFactory(db, c.GetCryptoService())
-	if err != nil {
-		return err
-	}
-	c.storageFactory = factory
-	utils.LogIfDev("Storage factory initialized")
-	return nil
-}
-
-// initCacheFactory 初始化缓存工厂
-func (c *Container) initCacheFactory() error {
-	db := c.databaseFactory.GetProvider().DB()
-	factory, err := cache.NewFactory(db, c.GetCryptoService())
-	if err != nil {
-		return err
-	}
-	c.cacheFactory = factory
-	utils.LogIfDev("Cache factory initialized")
-	return nil
-}
 
 // GetDatabaseFactory 获取数据库工厂
 func (c *Container) GetDatabaseFactory() *database.Factory {
 	return c.databaseFactory
-}
-
-// GetStorageFactory 获取存储工厂
-func (c *Container) GetStorageFactory() *storage.Factory {
-	return c.storageFactory
-}
-
-// GetCacheFactory 获取缓存工厂
-func (c *Container) GetCacheFactory() *cache.Factory {
-	return c.cacheFactory
 }
 
 // GetConfigManager 获取配置管理器
@@ -211,17 +168,8 @@ func (c *Container) GetConfig() *config.Config {
 func (c *Container) Close() error {
 	utils.LogIfDev("Closing DI container...")
 
-	if c.cacheFactory != nil {
-		if err := c.cacheFactory.Close(); err != nil {
-			utils.LogIfDevf("Error closing cache factory: %v", err)
-		}
-	}
-
-	if c.storageFactory != nil {
-		if err := c.storageFactory.Close(); err != nil {
-			utils.LogIfDevf("Error closing storage factory: %v", err)
-		}
-	}
+	// 关闭所有缓存提供者
+	// TODO: 如果有需要，在这里关闭缓存
 
 	if c.databaseFactory != nil {
 		if err := c.databaseFactory.Close(); err != nil {

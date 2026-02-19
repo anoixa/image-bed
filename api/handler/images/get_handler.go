@@ -23,6 +23,7 @@ import (
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/internal/services/image"
+	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/anoixa/image-bed/utils/pool"
 	"github.com/gin-gonic/gin"
@@ -117,16 +118,8 @@ func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *i
 	}
 
 	// 从存储获取
-	storageProvider, err := h.storageFactory.GetByID(img.StorageConfigID)
-	if err != nil {
-		log.Printf("[serveVariant] Failed to get storage for variant %s: %v", identifier, err)
-		// 回退到原图
-		h.serveOriginalImage(c, img)
-		return
-	}
-
 	// 使用后台 context，避免客户端断开导致存储读取失败
-	imageStream, err := storageProvider.GetWithContext(context.Background(), identifier)
+	imageStream, err := storage.GetDefault().GetWithContext(context.Background(), identifier)
 	if err != nil {
 		log.Printf("[serveVariant] Failed to get variant %s: %v", identifier, err)
 		// 回退到原图
@@ -311,14 +304,7 @@ func isTransientError(err error) bool {
 
 // streamAndCacheImage 流式处理
 func (h *Handler) streamAndCacheImage(c *gin.Context, image *models.Image) {
-	storageProvider, err := h.storageFactory.GetByID(image.StorageConfigID)
-	if err != nil {
-		log.Printf("Failed to get storage provider for config ID '%d': %v", image.StorageConfigID, err)
-		common.RespondError(c, http.StatusInternalServerError, "Error retrieving storage provider")
-		return
-	}
-
-	imageStream, err := storageProvider.GetWithContext(c.Request.Context(), image.Identifier)
+	imageStream, err := storage.GetDefault().GetWithContext(c.Request.Context(), image.Identifier)
 	if err != nil {
 		log.Printf("WARN: File for identifier '%s' not found in storage, but exists in DB. Error: %v", utils.SanitizeLogMessage(image.Identifier), err)
 		common.RespondError(c, http.StatusNotFound, "Image file not found in storage")

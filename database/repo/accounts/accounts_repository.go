@@ -3,7 +3,6 @@ package accounts
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 
 	"github.com/anoixa/image-bed/database/models"

@@ -48,21 +48,15 @@ func NewManager(db *gorm.DB, dataPath string) *Manager {
 }
 
 // NewManagerWithCache 创建带缓存的配置管理器
+// 简化版本：不再使用装饰器模式，缓存逻辑由调用者处理
 func NewManagerWithCache(db *gorm.DB, dataPath string, cacheProvider cache.Provider, cacheTTL time.Duration) *Manager {
-	repo := configs.NewRepository(db)
-
-	// 如果提供了缓存，使用装饰器包装仓库
-	if cacheProvider != nil {
-		repo = configs.NewCachedRepository(repo, cacheProvider, cacheTTL)
-	}
-
 	if cacheTTL == 0 {
 		cacheTTL = configs.DefaultCacheTTL
 	}
 
 	return &Manager{
 		db:       db,
-		repo:     repo,
+		repo:     configs.NewRepository(db),
 		crypto:   cryptoservice.NewService(dataPath),
 		eventBus: NewEventBus(),
 		dataPath: dataPath,
@@ -71,7 +65,7 @@ func NewManagerWithCache(db *gorm.DB, dataPath string, cacheProvider cache.Provi
 	}
 }
 
-// SetCache 设置缓存（用于初始化后注入缓存）
+// SetCache 设置缓存（简化版本，仅存储缓存提供者供外部使用）
 func (m *Manager) SetCache(cacheProvider cache.Provider, cacheTTL time.Duration) {
 	if cacheProvider == nil {
 		return
@@ -82,64 +76,12 @@ func (m *Manager) SetCache(cacheProvider cache.Provider, cacheTTL time.Duration)
 		m.cacheTTL = cacheTTL
 	}
 
-	// 使用装饰器包装当前仓库
-	m.repo = configs.NewCachedRepository(m.repo, cacheProvider, m.cacheTTL)
-
-	// 设置缓存失效监听
-	m.setupCacheInvalidation()
-
 	log.Println("[ConfigManager] Cache enabled with TTL:", m.cacheTTL)
 }
 
-// setupCacheInvalidation 设置缓存失效监听
-func (m *Manager) setupCacheInvalidation() {
-	cachedRepo, ok := m.repo.(*configs.CachedRepository)
-	if !ok {
-		return
-	}
-
-	// 监听配置变更事件，自动失效缓存
-	m.Subscribe(EventConfigUpdated, func(event *Event) {
-		ctx := context.Background()
-		cachedRepo.InvalidateByCategory(ctx, event.Config.Category)
-		log.Printf("[ConfigManager] Cache invalidated for category: %s", event.Config.Category)
-	})
-
-	m.Subscribe(EventConfigCreated, func(event *Event) {
-		ctx := context.Background()
-		cachedRepo.InvalidateByCategory(ctx, event.Config.Category)
-	})
-
-	m.Subscribe(EventConfigDeleted, func(event *Event) {
-		ctx := context.Background()
-		cachedRepo.InvalidateByID(ctx, event.Config.ID)
-		cachedRepo.InvalidateByKey(ctx, event.Config.Key)
-		cachedRepo.InvalidateByCategory(ctx, event.Config.Category)
-	})
-}
-
-// InvalidateCache 手动失效缓存（公开方法）
-func (m *Manager) InvalidateCache(category models.ConfigCategory) {
-	cachedRepo, ok := m.repo.(*configs.CachedRepository)
-	if !ok {
-		return
-	}
-
-	ctx := context.Background()
-	cachedRepo.InvalidateByCategory(ctx, category)
-	log.Printf("[ConfigManager] Manual cache invalidation for category: %s", category)
-}
-
-// InvalidateAllCache 失效所有配置缓存
-func (m *Manager) InvalidateAllCache() {
-	cachedRepo, ok := m.repo.(*configs.CachedRepository)
-	if !ok {
-		return
-	}
-
-	ctx := context.Background()
-	cachedRepo.InvalidateAll(ctx)
-	log.Println("[ConfigManager] All config cache invalidated")
+// GetCache 获取缓存提供者
+func (m *Manager) GetCache() cache.Provider {
+	return m.cache
 }
 
 // Initialize 初始化配置

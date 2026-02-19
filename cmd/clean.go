@@ -10,6 +10,7 @@ import (
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/internal/app"
+	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/storage/local"
 	"github.com/spf13/cobra"
 )
@@ -101,7 +102,6 @@ func cleanOrphanDBRecords(container *app.Container, stats *cleanStats, dryRun bo
 	log.Println("Checking for orphan database records...")
 
 	db := container.GetDatabaseProvider().DB()
-	storageFactory := container.GetStorageFactory()
 
 	var images []models.Image
 	if err := db.Find(&images).Error; err != nil {
@@ -110,13 +110,7 @@ func cleanOrphanDBRecords(container *app.Container, stats *cleanStats, dryRun bo
 
 	var orphanIDs []uint
 	for _, img := range images {
-		provider, err := storageFactory.GetByID(img.StorageConfigID)
-		if err != nil {
-			log.Printf("Warning: unknown storage config ID '%d' for image %s", img.StorageConfigID, img.Identifier)
-			continue
-		}
-
-		exists, err := provider.Exists(context.Background(), img.Identifier)
+		exists, err := storage.GetDefault().Exists(context.Background(), img.Identifier)
 		if err != nil {
 			log.Printf("Warning: failed to check existence of %s: %v", img.Identifier, err)
 			continue
@@ -152,13 +146,8 @@ func cleanOrphanDBRecords(container *app.Container, stats *cleanStats, dryRun bo
 func cleanOrphanStorageFiles(container *app.Container, stats *cleanStats, dryRun bool) error {
 	log.Println("Checking for orphan storage files...")
 
-	storageFactory := container.GetStorageFactory()
-	if storageFactory == nil {
-		return fmt.Errorf("storage factory not initialized")
-	}
-
 	// 获取默认存储提供者
-	provider := storageFactory.GetDefault()
+	provider := storage.GetDefault()
 	if provider == nil {
 		return fmt.Errorf("no default storage provider")
 	}

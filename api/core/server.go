@@ -18,7 +18,6 @@ import (
 	"github.com/anoixa/image-bed/internal/services/auth"
 	configSvc "github.com/anoixa/image-bed/config/db"
 	imageSvc "github.com/anoixa/image-bed/internal/services/image"
-	"github.com/anoixa/image-bed/storage"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
@@ -27,11 +26,9 @@ var startTime = time.Now()
 
 // ServerDependencies 服务器依赖项
 type ServerDependencies struct {
-	StorageFactory *storage.Factory
-	CacheFactory   *cache.Factory
-	Container      *app.Container
-	ConfigManager  *configSvc.Manager
-	Converter      *imageSvc.Converter
+	Container     *app.Container
+	ConfigManager *configSvc.Manager
+	Converter     *imageSvc.Converter
 }
 
 // 启动gin
@@ -96,8 +93,8 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 			"version": config.Version,
 			"checks": gin.H{
 				"database": checkDatabaseHealth(deps.Container.GetDatabaseProvider()),
-				"cache":    checkCacheHealth(deps.CacheFactory),
-				"storage":  checkStorageHealth(deps.StorageFactory),
+				"cache":    checkCacheHealth(),
+				"storage":  checkStorageHealth(),
 			},
 		}
 		httpStatus := http.StatusOK
@@ -141,9 +138,10 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	}
 
 	// 创建处理器（依赖注入）
-	imageHandler := images.NewHandler(deps.StorageFactory, deps.CacheFactory, deps.Container.ImagesRepo, deps.Container.GetDatabaseProvider(), deps.Converter, deps.ConfigManager)
-	albumHandler := albums.NewHandler(deps.Container.AlbumsRepo, deps.CacheFactory)
-	albumImageHandler := albums.NewAlbumImageHandler(deps.Container.AlbumsRepo, deps.Container.ImagesRepo, deps.CacheFactory)
+	cacheProvider := cache.GetDefault()
+	imageHandler := images.NewHandler(cacheProvider, deps.Container.ImagesRepo, deps.Container.GetDatabaseProvider(), deps.Converter, deps.ConfigManager)
+	albumHandler := albums.NewHandler(deps.Container.AlbumsRepo, cacheProvider)
+	albumImageHandler := albums.NewAlbumImageHandler(deps.Container.AlbumsRepo, deps.Container.ImagesRepo, cacheProvider)
 	keyHandler := key.NewHandler(deps.Container.KeysRepo)
 	loginHandler := api.NewLoginHandlerWithService(loginService)
 
@@ -225,7 +223,7 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 
 			// admin - 配置管理
 			if deps.ConfigManager != nil {
-				configHandler := admin.NewConfigHandler(deps.ConfigManager, deps.StorageFactory)
+				configHandler := admin.NewConfigHandler(deps.ConfigManager)
 				adminGroup := v1.Group("/admin")
 				adminGroup.Use(middleware.Authorize("jwt"))
 				adminGroup.Use(middleware.RequireRole("admin"))

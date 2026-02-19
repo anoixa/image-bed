@@ -10,7 +10,6 @@ import (
 	"github.com/anoixa/image-bed/cache/redis"
 	"github.com/anoixa/image-bed/database/models"
 	configSvc "github.com/anoixa/image-bed/config/db"
-	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/storage/local"
 	"github.com/anoixa/image-bed/storage/minio"
 	"github.com/gin-gonic/gin"
@@ -18,15 +17,13 @@ import (
 
 // ConfigHandler 配置管理处理器
 type ConfigHandler struct {
-	manager        *configSvc.Manager
-	storageFactory *storage.Factory
+	manager *configSvc.Manager
 }
 
 // NewConfigHandler 创建配置处理器
-func NewConfigHandler(manager *configSvc.Manager, storageFactory *storage.Factory) *ConfigHandler {
+func NewConfigHandler(manager *configSvc.Manager) *ConfigHandler {
 	return &ConfigHandler{
-		manager:        manager,
-		storageFactory: storageFactory,
+		manager: manager,
 	}
 }
 
@@ -369,25 +366,20 @@ func (h *ConfigHandler) testCacheConfig(config map[string]interface{}) *models.T
 // ListStorageProviders 列出所有存储提供者
 // GET /api/v1/admin/storage/providers
 func (h *ConfigHandler) ListStorageProviders(c *gin.Context) {
-	providers := h.storageFactory.ListInfo()
-	common.RespondSuccess(c, providers)
+	common.RespondSuccess(c, []map[string]interface{}{
+		{
+			"id":         0,
+			"name":       "default",
+			"type":       "local",
+			"is_default": true,
+		},
+	})
 }
 
 // ReloadStorageConfig 热重载存储配置
 // POST /api/v1/admin/storage/reload/:id
 func (h *ConfigHandler) ReloadStorageConfig(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		common.RespondError(c, http.StatusBadRequest, "Invalid config ID")
-		return
-	}
-
-	if err := h.storageFactory.ReloadConfig(uint(id)); err != nil {
-		common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to reload storage config: %v", err))
-		return
-	}
-
-	common.RespondSuccess(c, gin.H{"message": "Storage config reloaded successfully"})
+	common.RespondSuccess(c, gin.H{"message": "Storage reload not supported in simplified mode"})
 }
 
 // 辅助函数

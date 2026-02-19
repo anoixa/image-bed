@@ -27,22 +27,15 @@ func checkDatabaseHealth(provider database.Provider) string {
 	return "ok"
 }
 
-func checkCacheHealth(cacheFactory *cache.Factory) string {
-	if cacheFactory == nil {
-		return "not initialized"
-	}
-	if cacheFactory.GetProvider() != nil {
+func checkCacheHealth() string {
+	if cache.GetDefault() != nil {
 		return "ok"
 	}
 	return "not initialized"
 }
 
-func checkStorageHealth(storageFactory *storage.Factory) string {
-	if storageFactory == nil {
-		return "not initialized"
-	}
-
-	provider := storageFactory.GetDefault()
+func checkStorageHealth() string {
+	provider := storage.GetDefault()
 	if provider == nil {
 		return "error: no default storage provider"
 	}

@@ -9,6 +9,7 @@ import (
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/internal/services/image"
+	"github.com/anoixa/image-bed/storage"
 	"github.com/gin-gonic/gin"
 )
 
@@ -96,7 +97,7 @@ func (h *Handler) serveThumbnailImage(c *gin.Context, image *models.Image, resul
 
 	// 获取缩略图数据
 	ctx := c.Request.Context()
-	reader, err := h.storageFactory.GetDefault().GetWithContext(ctx, result.Identifier)
+	reader, err := storage.GetDefault().GetWithContext(ctx, result.Identifier)
 	if err != nil {
 		// 存储获取失败，返回原图
 		h.serveOriginalImage(c, image)
