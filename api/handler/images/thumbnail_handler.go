@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/anoixa/image-bed/api/common"
+	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/internal/services/image"
 	"github.com/gin-gonic/gin"
@@ -31,7 +32,7 @@ func (h *Handler) GetThumbnail(c *gin.Context) {
 
 	// 检查私有图片权限
 	if !image.IsPublic {
-		userID := c.GetUint("userID")
+		userID := c.GetUint(middleware.ContextUserIDKey)
 		if userID == 0 || userID != image.UserID {
 			common.RespondError(c, http.StatusForbidden, "This image is private")
 			return

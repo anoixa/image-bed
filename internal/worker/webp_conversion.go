@@ -60,6 +60,8 @@ type WebPConversionTask struct {
 	VariantID        uint
 	ImageID          uint
 	SourceIdentifier string
+	SourceWidth      int
+	SourceHeight     int
 	ConfigManager    *config.Manager
 	VariantRepo      VariantRepository
 	Storage          storage.Provider
@@ -163,11 +165,16 @@ func (t *WebPConversionTask) doConversion(ctx context.Context, settings *config.
 
 	// 检查尺寸限制
 	if settings.MaxDimension > 0 {
-		size, err := bimg.NewImage(data).Size()
-		if err == nil {
-			if size.Width > settings.MaxDimension || size.Height > settings.MaxDimension {
-				return fmt.Errorf("image exceeds max dimension: %dx%d", size.Width, size.Height)
+		width, height := t.SourceWidth, t.SourceHeight
+		if width == 0 || height == 0 {
+			// fallback: 从数据中解析
+			size, err := bimg.NewImage(data).Size()
+			if err == nil {
+				width, height = size.Width, size.Height
 			}
+		}
+		if width > settings.MaxDimension || height > settings.MaxDimension {
+			return fmt.Errorf("image exceeds max dimension: %dx%d", width, height)
 		}
 	}
 

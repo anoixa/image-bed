@@ -68,7 +68,8 @@ func (h *Handler) UploadImage(c *gin.Context) {
 
 	storageProvider, err := h.storageFactory.Get(storageName)
 	if err != nil {
-		common.RespondError(c, http.StatusBadRequest, err.Error())
+		log.Printf("Failed to get storage provider '%s': %v", storageName, err)
+		common.RespondError(c, http.StatusBadRequest, "Invalid storage configuration")
 		return
 	}
 	storageConfigID, err := h.getStorageConfigID(c, storageName)
@@ -325,6 +326,12 @@ func (h *Handler) processAndSaveImage(ctx context.Context, userID uint, fileHead
 		return nil, false, errors.New("the uploaded file type is not supported")
 	}
 
+	// 获取图片尺寸
+	if _, err := tempFile.Seek(0, io.SeekStart); err != nil {
+		return nil, false, fmt.Errorf("failed to seek temp file: %w", err)
+	}
+	imgWidth, imgHeight := utils.GetImageDimensions(tempFile)
+
 	// 生成唯一标识符
 	identifier := fileHash[:12]
 
@@ -345,6 +352,8 @@ func (h *Handler) processAndSaveImage(ctx context.Context, userID uint, fileHead
 		MimeType:        mimeType,
 		StorageConfigID: storageConfigID,
 		FileHash:        fileHash,
+		Width:           imgWidth,
+		Height:          imgHeight,
 		IsPublic:        isPublic,
 		UserID:          userID,
 	}

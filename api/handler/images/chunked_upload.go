@@ -48,6 +48,7 @@ type ChunkedUploadSession struct {
 	UserID          uint
 	TempDir         string
 	CreatedAt       time.Time
+	IsProcessing    bool
 }
 
 var (
@@ -237,6 +238,13 @@ func (h *Handler) CompleteChunkedUpload(c *gin.Context) {
 		return
 	}
 
+	// 检查是否正在处理中，防止重复处理
+	if session.IsProcessing {
+		sessionsMu.Unlock()
+		common.RespondError(c, http.StatusConflict, "Upload session is already being processed")
+		return
+	}
+
 	// 检查是否所有分片都已上传
 	if len(session.ReceivedChunks) != session.TotalChunks {
 		missingChunks := make([]int, 0)
@@ -250,18 +258,24 @@ func (h *Handler) CompleteChunkedUpload(c *gin.Context) {
 		return
 	}
 
-	// 从 map 中移除会话
-	delete(sessions, req.SessionID)
+	session.IsProcessing = true
 	sessionsMu.Unlock()
 
 	// 异步合并分片并保存
 	go func() {
+		defer func() {
+			// 处理完成后从map中移除
+			sessionsMu.Lock()
+			delete(sessions, req.SessionID)
+			sessionsMu.Unlock()
+			// 清理临时目录
+			os.RemoveAll(session.TempDir)
+		}()
+
 		ctx := context.Background()
 		if err := h.processChunkedUpload(ctx, session); err != nil {
 			log.Printf("Failed to process chunked upload: %v", err)
 		}
-		// 清理临时目录
-		os.RemoveAll(session.TempDir)
 	}()
 
 	common.RespondSuccess(c, gin.H{

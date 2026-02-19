@@ -12,12 +12,12 @@ import (
 
 // ThumbnailScannerConfig 缩略图扫描器配置
 type ThumbnailScannerConfig struct {
-	Enabled          bool          `json:"enabled" mapstructure:"enabled"`                        // 是否启用扫描器
-	Interval         time.Duration `json:"interval" mapstructure:"interval"`                      // 扫描间隔
-	BatchSize        int           `json:"batch_size" mapstructure:"batch_size"`                  // 每批处理数量
-	MaxFileSizeMB    int           `json:"max_file_size_mb" mapstructure:"max_file_size_mb"`      // 最大文件大小(MB)
-	MaxAgeDays       int           `json:"max_age_days" mapstructure:"max_age_days"`              // 最大图片年龄(天)
-	OnlyPublicImages bool          `json:"only_public_images" mapstructure:"only_public_images"`  // 仅处理公开图片
+	Enabled          bool          `json:"enabled" mapstructure:"enabled"`                       // 是否启用扫描器
+	Interval         time.Duration `json:"interval" mapstructure:"interval"`                     // 扫描间隔
+	BatchSize        int           `json:"batch_size" mapstructure:"batch_size"`                 // 每批处理数量
+	MaxFileSizeMB    int           `json:"max_file_size_mb" mapstructure:"max_file_size_mb"`     // 最大文件大小(MB)
+	MaxAgeDays       int           `json:"max_age_days" mapstructure:"max_age_days"`             // 最大图片年龄(天)
+	OnlyPublicImages bool          `json:"only_public_images" mapstructure:"only_public_images"` // 仅处理公开图片
 }
 
 // Validate 验证配置有效性
@@ -43,12 +43,12 @@ func (c *ThumbnailScannerConfig) Validate() error {
 // GetDefaultThumbnailScannerSettings 获取默认缩略图扫描器配置
 func GetDefaultThumbnailScannerSettings() *ThumbnailScannerConfig {
 	return &ThumbnailScannerConfig{
-		Enabled:          true,                 // 默认启用
-		Interval:         2 * time.Hour,        // 默认2小时扫描一次（减少数据库压力）
-		BatchSize:        50,                   // 每批处理50张图片
-		MaxFileSizeMB:    50,                   // 默认只处理小于50MB的图片
-		MaxAgeDays:       30,                   // 默认只处理30天内的图片(避免冷数据)
-		OnlyPublicImages: true,                 // 默认只处理公开图片
+		Enabled:          true,          // 默认启用
+		Interval:         2 * time.Hour, // 默认2小时扫描一次（减少数据库压力）
+		BatchSize:        50,            // 每批处理50张图片
+		MaxFileSizeMB:    100,           // 默认只处理小于100MB的图片
+		MaxAgeDays:       30,            // 默认只处理30天内的图片
+		OnlyPublicImages: false,         // 默认只处理公开图片
 	}
 }
 
