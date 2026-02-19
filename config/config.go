@@ -29,8 +29,6 @@ type ServerConfig struct {
 	WriteTimeout time.Duration `yaml:"writeTimeout"`
 	IdleTimeout  time.Duration `yaml:"idleTimeout"`
 
-	// Deprecated: 使用数据库配置管理代替配置文件
-	Jwt            Jwt             `mapstructure:"jwt"`
 	DatabaseConfig DatabaseConfig  `mapstructure:"database"`
 	CacheConfig    CacheConfig     `mapstructure:"cache"`
 	RateLimit      RateLimitConfig `mapstructure:"rate_limit"`
@@ -72,24 +70,6 @@ type DatabaseConfig struct {
 	MaxOpenConns    int `mapstructure:"max_open_conns"`
 	MaxIdleConns    int `mapstructure:"max_idle_conns"`
 	ConnMaxLifetime int `mapstructure:"conn_max_lifetime"`
-}
-
-// Jwt JWT 配置结构
-// Deprecated: 使用数据库配置管理代替配置文件
-type Jwt struct {
-	Secret           string `mapstructure:"secret"`
-	ExpiresIn        string `mapstructure:"expires_in"`
-	RefreshExpiresIn string `mapstructure:"refresh_expires_in"`
-}
-
-// MinioConfig MinIO 配置结构 - 保留用于数据库配置迁移
-// Deprecated: 使用数据库配置管理代替配置文件
-type MinioConfig struct {
-	Endpoint        string `mapstructure:"endpoint"`
-	AccessKeyID     string `mapstructure:"access_key_id"`
-	SecretAccessKey string `mapstructure:"secret_access_key"`
-	UseSSL          bool   `mapstructure:"use_ssl"`
-	BucketName      string `mapstructure:"bucket_name"`
 }
 
 // CacheConfig 缓存配置

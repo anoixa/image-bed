@@ -552,24 +552,6 @@ func (m *Manager) GetCrypto() *cryptoservice.Service {
 	return m.crypto
 }
 
-// GetEncryptor 获取加密器（用于其他服务）- 向后兼容
-// Deprecated: 使用 GetCrypto() 代替
-func (m *Manager) GetEncryptor() interface{ Encrypt(string) string; Decrypt(string) (string, error) } {
-	return &encryptorAdapter{m.crypto}
-}
-
-type encryptorAdapter struct {
-	crypto *cryptoservice.Service
-}
-
-func (a *encryptorAdapter) Encrypt(s string) string {
-	return a.crypto.EncryptString(s)
-}
-
-func (a *encryptorAdapter) Decrypt(s string) (string, error) {
-	return a.crypto.DecryptString(s)
-}
-
 // GetRepo 获取仓库（用于其他服务）
 func (m *Manager) GetRepo() configs.Repository {
 	return m.repo

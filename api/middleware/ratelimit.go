@@ -173,12 +173,6 @@ func MaxBytesReader(maxSize int64) gin.HandlerFunc {
 	}
 }
 
-// RequestSizeLimit 请求体大小限制中间件（已废弃，使用 MaxBytesReader）
-// Deprecated: Use MaxBytesReader instead
-func RequestSizeLimit(maxSize int64) gin.HandlerFunc {
-	return MaxBytesReader(maxSize)
-}
-
 // getClientIP 获取客户端真实 IP
 func getClientIP(c *gin.Context) string {
 	return c.ClientIP()

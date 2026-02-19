@@ -8,7 +8,6 @@ import (
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/cache/redis"
-	cfg "github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 	configSvc "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/storage"
@@ -270,7 +269,7 @@ func (h *ConfigHandler) testStorageConfig(config map[string]interface{}) *models
 		}
 
 	case "minio":
-		minioCfg := cfg.MinioConfig{
+		minioCfg := minio.Config{
 			Endpoint:        getString(config, "endpoint"),
 			AccessKeyID:     getString(config, "access_key_id"),
 			SecretAccessKey: getString(config, "secret_access_key"),

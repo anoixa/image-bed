@@ -1,33 +1,31 @@
 package api
 
 import (
-	"fmt"
-	"log"
 	"net/http"
 	"time"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/config"
-	"github.com/anoixa/image-bed/database/models"
-	"github.com/anoixa/image-bed/database/repo/accounts"
-	"github.com/anoixa/image-bed/utils"
-	cryptopackage "github.com/anoixa/image-bed/utils/crypto"
+	"github.com/anoixa/image-bed/internal/services/auth"
+
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 )
 
 // LoginHandler 登录处理器
 type LoginHandler struct {
-	accountsRepo *accounts.Repository
-	devicesRepo  *accounts.DeviceRepository
+	loginService *auth.LoginService
 }
 
-// NewLoginHandler 创建新的登录处理器
-func NewLoginHandler(accountsRepo *accounts.Repository, devicesRepo *accounts.DeviceRepository) *LoginHandler {
+// NewLoginHandlerWithService 使用 LoginService 创建登录处理器
+func NewLoginHandlerWithService(loginService *auth.LoginService) *LoginHandler {
 	return &LoginHandler{
-		accountsRepo: accountsRepo,
-		devicesRepo:  devicesRepo,
+		loginService: loginService,
 	}
+}
+
+// SetLoginService 设置登录服务（用于依赖注入）
+func (h *LoginHandler) SetLoginService(loginService *auth.LoginService) {
+	h.loginService = loginService
 }
 
 type userAuthRequestBody struct {
@@ -46,57 +44,46 @@ type logoutResponse struct {
 
 // LoginHandlerFunc user login
 func (h *LoginHandler) LoginHandlerFunc(context *gin.Context) {
+	if h.loginService == nil {
+		common.RespondError(context, http.StatusInternalServerError, "Login service not initialized")
+		return
+	}
+
 	var req userAuthRequestBody
 	if err := context.ShouldBindJSON(&req); err != nil {
 		common.RespondError(context, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	// 验证用户凭据
-	user, valid, err := h.validateCredentials(req.Username, req.Password)
+	// 执行登录
+	result, err := h.loginService.Login(req.Username, req.Password)
 	if err != nil {
-		log.Printf("LoginHandler error for user %s: %v\n", utils.SanitizeLogUsername(req.Username), err)
+		// 检查是否是凭据错误
+		if err.Error() == "invalid credentials" {
+			common.RespondError(context, http.StatusUnauthorized, "Invalid credentials")
+			return
+		}
 		common.RespondError(context, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-	if !valid {
-		common.RespondError(context, http.StatusUnauthorized, "Invalid credentials")
-		return
-	}
-
-	// 生成 JWT access tokens
-	accessToken, accessTokenExpiry, err := GenerateTokens(user.Username, user.ID, user.Role)
-	if err != nil {
-		common.RespondError(context, http.StatusInternalServerError, "Failed to generate authentication tokens")
-		return
-	}
-
-	//生成Refresh Token
-	refreshToken, refreshTokenExpiry, err := GenerateRefreshToken()
-	if err != nil {
-		common.RespondError(context, http.StatusInternalServerError, "Failed to generate refresh tokens")
-		return
-	}
-	// 存储设备信息
-	deviceID := uuid.New().String()
-	err = h.devicesRepo.CreateLoginDevice(user.ID, deviceID, refreshToken, refreshTokenExpiry)
-	if err != nil {
-		common.RespondError(context, http.StatusInternalServerError, "Failed to store device token")
 		return
 	}
 
 	// 设置 HttpOnly Cookie
-	refreshTokenMaxAge := int(time.Until(refreshTokenExpiry).Seconds())
-	setAuthCookies(context, refreshToken, deviceID, refreshTokenMaxAge)
+	refreshTokenMaxAge := int(time.Until(result.RefreshTokenExpiry).Seconds())
+	setAuthCookies(context, result.RefreshToken, result.DeviceID, refreshTokenMaxAge)
 
 	common.RespondSuccessMessage(context, "Login successful", loginResponse{
-		AccessToken:       "Bearer " + accessToken,
-		AccessTokenExpiry: accessTokenExpiry.Unix(),
+		AccessToken:       "Bearer " + result.AccessToken,
+		AccessTokenExpiry: result.AccessTokenExpiry.Unix(),
 	})
 }
 
 // RefreshTokenHandlerFunc Refresh token authentication
 func (h *LoginHandler) RefreshTokenHandlerFunc(context *gin.Context) {
+	if h.loginService == nil {
+		common.RespondError(context, http.StatusInternalServerError, "Login service not initialized")
+		return
+	}
+
 	refreshToken, err := context.Cookie("refresh_token")
 	if err != nil {
 		common.RespondError(context, http.StatusUnauthorized, "Refresh token not found")
@@ -109,45 +96,21 @@ func (h *LoginHandler) RefreshTokenHandlerFunc(context *gin.Context) {
 		return
 	}
 
-	// 查询设备信息与用户信息
-	device, err := h.devicesRepo.GetDeviceByRefreshTokenAndDeviceID(refreshToken, deviceID)
-	if err != nil {
-		common.RespondError(context, http.StatusUnauthorized, "User associated with token not found")
-		return
-	}
-	user, err := h.accountsRepo.GetUserByID(device.UserID)
+	// 刷新令牌
+	result, err := h.loginService.RefreshToken(refreshToken, deviceID)
 	if err != nil {
 		common.RespondError(context, http.StatusUnauthorized, "Invalid refresh token")
 		return
 	}
 
-	// 存储设备信息
-	newRefreshToken, newRefreshTokenExpiry, err := GenerateRefreshToken()
-	if err != nil {
-		common.RespondError(context, http.StatusInternalServerError, "Failed to generate refresh tokens")
-		return
-	}
-	err = h.devicesRepo.RotateRefreshToken(user.ID, device.DeviceID, newRefreshToken, newRefreshTokenExpiry)
-	if err != nil {
-		common.RespondError(context, http.StatusInternalServerError, "Failed to update device token")
-		return
-	}
-
-	accessToken, accessTokenExpiry, err := GenerateTokens(user.Username, user.ID, user.Role)
-	if err != nil {
-		common.RespondError(context, http.StatusInternalServerError, "Failed to generate new access tokens")
-		return
-	}
-
 	// 更新 cookies
-	newRefreshTokenMaxAge := int(time.Until(newRefreshTokenExpiry).Seconds())
-	setAuthCookies(context, newRefreshToken, deviceID, newRefreshTokenMaxAge)
+	newRefreshTokenMaxAge := int(time.Until(result.RefreshTokenExpiry).Seconds())
+	setAuthCookies(context, result.RefreshToken, deviceID, newRefreshTokenMaxAge)
 
 	common.RespondSuccessMessage(context, "Refresh token successful", loginResponse{
-		AccessToken:       "Bearer " + accessToken,
-		AccessTokenExpiry: accessTokenExpiry.Unix(),
+		AccessToken:       "Bearer " + result.AccessToken,
+		AccessTokenExpiry: result.AccessTokenExpiry.Unix(),
 	})
-
 }
 
 // LogoutHandlerFunc user logout
@@ -158,30 +121,13 @@ func (h *LoginHandler) LogoutHandlerFunc(context *gin.Context) {
 		return
 	}
 
-	_ = h.devicesRepo.DeleteDeviceByDeviceID(deviceID)
+	if h.loginService != nil {
+		_ = h.loginService.Logout(deviceID)
+	}
 
 	clearAuthCookies(context)
 
 	common.RespondSuccessMessage(context, "Logout successful", nil)
-}
-
-// validateCredentials Verify user credentials
-func (h *LoginHandler) validateCredentials(username, password string) (*models.User, bool, error) {
-	user, err := h.accountsRepo.GetUserByUsername(username)
-	if err != nil {
-		return nil, false, fmt.Errorf("failed to get user: %w", err)
-	}
-
-	if user == nil {
-		return nil, false, nil
-	}
-
-	ok, err := cryptopackage.ComparePasswordAndHash(password, user.Password)
-	if err != nil {
-		return nil, false, fmt.Errorf("password comparison failed: %w", err)
-	}
-
-	return user, ok, nil
 }
 
 // setAuthCookies 设置 refresh_token 和 device_id 的 cookie
