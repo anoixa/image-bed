@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/config/db"
@@ -28,7 +29,8 @@ type ThumbnailTask struct {
 func (t *ThumbnailTask) Execute() {
 	defer t.recovery()
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
 
 	// 读取配置
 	settings, err := t.ConfigManager.GetThumbnailSettings(ctx)
@@ -76,7 +78,8 @@ func (t *ThumbnailTask) Execute() {
 
 // process 处理缩略图生成
 func (t *ThumbnailTask) process() *thumbnailResult {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
 
 	// 读取原图数据
 	imageData, err := t.getImageData(t.SourceIdentifier)

@@ -168,7 +168,7 @@ func clearAuthCookies(c *gin.Context) {
 	cfg := config.Get()
 
 	path := "/api/auth/"
-	domain := cfg.Server.Domain
+	domain := cfg.ServerDomain
 
 	// 将 MaxAge 设置为 -1 来让浏览器删除 Cookie
 	c.SetCookie("refresh_token", "", -1, path, domain, false, true)

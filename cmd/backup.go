@@ -102,7 +102,7 @@ func runBackup(outputFile string, tables []string, keepDir bool) error {
 	metadata := &backupMetadata{
 		Version:     "1.0",
 		Timestamp:   time.Now(),
-		Database:    cfg.Server.DatabaseConfig.Type,
+		Database:    cfg.DBType,
 		RecordCount: make(map[string]int64),
 	}
 

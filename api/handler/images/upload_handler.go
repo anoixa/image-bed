@@ -121,7 +121,7 @@ func (h *Handler) UploadImages(c *gin.Context) {
 	for _, f := range files {
 		totalSize += f.Size
 	}
-	maxBatchTotalMB := config.Get().Server.Upload.MaxBatchTotalMB
+	maxBatchTotalMB := config.Get().UploadMaxBatchTotalMB
 	maxTotalSize := int64(maxBatchTotalMB) * 1024 * 1024
 	if totalSize > maxTotalSize {
 		common.RespondError(c, http.StatusRequestEntityTooLarge, fmt.Sprintf("Total size of all files (%.2f MB) exceeds maximum allowed (%d MB)", float64(totalSize)/1024/1024, maxBatchTotalMB))

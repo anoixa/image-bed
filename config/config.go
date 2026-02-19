@@ -1,11 +1,9 @@
 package config
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"runtime"
-	"strings"
 	"sync"
 	"time"
 
@@ -17,68 +15,49 @@ var (
 	once         sync.Once
 )
 
+// Config 扁平化配置结构体
 type Config struct {
-	Server ServerConfig `mapstructure:"server"`
-}
+	// 服务器配置
+	ServerHost         string        `mapstructure:"server_host"`
+	ServerPort         int           `mapstructure:"server_port"`
+	ServerDomain       string        `mapstructure:"server_domain"`
+	ServerReadTimeout  time.Duration `mapstructure:"server_read_timeout"`
+	ServerWriteTimeout time.Duration `mapstructure:"server_write_timeout"`
+	ServerIdleTimeout  time.Duration `mapstructure:"server_idle_timeout"`
 
-type ServerConfig struct {
-	Host         string        `mapstructure:"host"`   // 服务器主机，如 "localhost" 或 "0.0.0.0"
-	Port         int           `mapstructure:"port"`   // 服务器端口，如 8080
-	Domain       string        `mapstructure:"domain"` // 外部访问域名，用于生成 URL
-	ReadTimeout  time.Duration `yaml:"readTimeout"`
-	WriteTimeout time.Duration `yaml:"writeTimeout"`
-	IdleTimeout  time.Duration `yaml:"idleTimeout"`
+	// 数据库配置
+	DBType            string `mapstructure:"db_type"`
+	DBHost            string `mapstructure:"db_host"`
+	DBPort            int    `mapstructure:"db_port"`
+	DBUsername        string `mapstructure:"db_username"`
+	DBPassword        string `mapstructure:"db_password"`
+	DBName            string `mapstructure:"db_name"`
+	DBFilePath        string `mapstructure:"db_file_path"`
+	DBMaxOpenConns    int    `mapstructure:"db_max_open_conns"`
+	DBMaxIdleConns    int    `mapstructure:"db_max_idle_conns"`
+	DBConnMaxLifetime int    `mapstructure:"db_conn_max_lifetime"`
 
-	DatabaseConfig DatabaseConfig  `mapstructure:"database"`
-	CacheConfig    CacheConfig     `mapstructure:"cache"`
-	RateLimit      RateLimitConfig `mapstructure:"rate_limit"`
-	Upload         UploadConfig    `mapstructure:"upload"`
-	WorkerCount    int             `mapstructure:"worker_count"` // 异步任务协程池worker数量
-}
+	// 缓存配置
+	CacheMaxImageCacheSizeMB int64 `mapstructure:"cache_max_image_cache_size_mb"`
+	CacheEnableImageCaching  bool  `mapstructure:"cache_enable_image_caching"`
+	CacheImageCacheTTL       int   `mapstructure:"cache_image_cache_ttl"`
+	CacheImageDataCacheTTL   int   `mapstructure:"cache_image_data_cache_ttl"`
 
-// UploadConfig 上传配置
-type UploadConfig struct {
-	MaxSizeMB       int `mapstructure:"max_size_mb"`        // 单文件最大上传大小（MB）
-	MaxBatchTotalMB int `mapstructure:"max_batch_total_mb"` // 批量上传总大小限制（MB）
-}
+	// 限流配置
+	RateLimitApiRPS     float64       `mapstructure:"rate_limit_api_rps"`
+	RateLimitApiBurst   int           `mapstructure:"rate_limit_api_burst"`
+	RateLimitImageRPS   float64       `mapstructure:"rate_limit_image_rps"`
+	RateLimitImageBurst int           `mapstructure:"rate_limit_image_burst"`
+	RateLimitAuthRPS    float64       `mapstructure:"rate_limit_auth_rps"`
+	RateLimitAuthBurst  int           `mapstructure:"rate_limit_auth_burst"`
+	RateLimitExpireTime time.Duration `mapstructure:"rate_limit_expire_time"`
 
-// RateLimitConfig 速率限制配置
-type RateLimitConfig struct {
-	// API 接口限流 (上传/管理等操作)
-	ApiRPS   float64 `mapstructure:"api_rps"`   // 每秒请求数
-	ApiBurst int     `mapstructure:"api_burst"` // 突发请求数
-	// 图片访问限流 (查看图片，应更宽松)
-	ImageRPS   float64 `mapstructure:"image_rps"`   // 每秒请求数
-	ImageBurst int     `mapstructure:"image_burst"` // 突发请求数
-	// 认证接口限流 (登录等)
-	AuthRPS   float64 `mapstructure:"auth_rps"`   // 每秒请求数
-	AuthBurst int     `mapstructure:"auth_burst"` // 突发请求数
-	// 限流器过期时间
-	ExpireTime time.Duration `mapstructure:"expire_time"`
-}
+	// 上传配置
+	UploadMaxSizeMB       int `mapstructure:"upload_max_size_mb"`
+	UploadMaxBatchTotalMB int `mapstructure:"upload_max_batch_total_mb"`
 
-type DatabaseConfig struct {
-	Type     string `mapstructure:"type"`
-	Host     string `mapstructure:"host"`
-	Port     int    `mapstructure:"port"`
-	Username string `mapstructure:"username"`
-	Password string `mapstructure:"password"`
-	Database string `mapstructure:"database"`
-
-	DatabaseFilePath string `mapstructure:"database_file_path"` //sqlite数据库文件路径
-
-	MaxOpenConns    int `mapstructure:"max_open_conns"`
-	MaxIdleConns    int `mapstructure:"max_idle_conns"`
-	ConnMaxLifetime int `mapstructure:"conn_max_lifetime"`
-}
-
-// CacheConfig 缓存配置
-type CacheConfig struct {
-	MaxImageCacheSize  int64 `mapstructure:"max_image_cache_size_mb"` // 最大图片缓存大小（MB），0表示无限制
-	EnableImageCaching bool  `mapstructure:"enable_image_caching"`    // 是否启用图片缓存
-
-	ImageCacheTTL     int `mapstructure:"image_cache_ttl"`      // 图片元数据缓存时间（秒）
-	ImageDataCacheTTL int `mapstructure:"image_data_cache_ttl"` // 图片数据缓存时间（秒）
+	// Worker 配置
+	WorkerCount int `mapstructure:"worker_count"`
 }
 
 // InitConfig Initialize configuration
@@ -94,127 +73,121 @@ func Get() *Config {
 
 // loadConfig Core configuration loading
 func loadConfig() {
-	// 默认值
-	viper.SetDefault("server.host", "127.0.0.1")
-	viper.SetDefault("server.port", 8080)
-	viper.SetDefault("server.ReadTimeout", 15*time.Second)
-	viper.SetDefault("server.WriteTimeout", 30*time.Second)
-	viper.SetDefault("server.IdleTimeout", 120*time.Second)
+	setDefaults()
 
-	viper.SetDefault("server.storage.type", "local")
-	viper.SetDefault("server.storage.local.path", "data/upload")
+	viper.SetConfigFile(".env")
+	viper.SetConfigType("env")
 
-	// Database connection pool defaults
-	viper.SetDefault("server.database.max_open_conns", 100)
-	viper.SetDefault("server.database.max_idle_conns", 25) // 25% of max_open_conns for better performance
-	viper.SetDefault("server.database.conn_max_lifetime", 3600)
-	viper.SetDefault("server.storage.minio.max_idle_conns", 256)
-	viper.SetDefault("server.storage.minio.max_idle_conns_per_host", 16)
-	viper.SetDefault("server.storage.minio.idle_conn_timeout", "60s")
-	viper.SetDefault("server.storage.minio.tls_handshake_timeout", "10s")
-	viper.SetDefault("server.cache.provider", "memory")
-
-	// Memory cache defaults
-	viper.SetDefault("server.cache.memory.num_counters", 1000000)
-	viper.SetDefault("server.cache.memory.max_cost", 1073741824) // 1GB
-	viper.SetDefault("server.cache.memory.buffer_items", 64)
-	viper.SetDefault("server.cache.memory.metrics", true)
-	viper.SetDefault("server.cache.max_image_cache_size_mb", 10) // 最大缓存 10MB 的图片
-	viper.SetDefault("server.cache.enable_image_caching", false) // 默认不启用图片缓存
-
-	// Redis
-	viper.SetDefault("server.cache.redis.pool_size", 10)
-	viper.SetDefault("server.cache.redis.min_idle_conns", 5)
-	viper.SetDefault("server.cache.redis.max_conn_age", "30m")
-	viper.SetDefault("server.cache.redis.pool_timeout", "30s")
-	viper.SetDefault("server.cache.redis.idle_timeout", "10m")
-	viper.SetDefault("server.cache.redis.idle_check_frequency", "1m")
-
-	// Rate limit defaults - more generous limits to avoid 429 errors
-	viper.SetDefault("server.rate_limit.api_rps", 30)        // API: 30 rps
-	viper.SetDefault("server.rate_limit.api_burst", 60)      // API: burst 60
-	viper.SetDefault("server.rate_limit.image_rps", 100)     // Image access: 100 rps
-	viper.SetDefault("server.rate_limit.image_burst", 200)   // Image access: burst 200
-	viper.SetDefault("server.rate_limit.auth_rps", 0.5)      // Auth: 0.5 rps
-	viper.SetDefault("server.rate_limit.auth_burst", 5)      // Auth: burst 5
-	viper.SetDefault("server.rate_limit.expire_time", "10m") // Limiter expire time
-
-	// Upload limits
-	viper.SetDefault("server.upload.max_size_mb", 50)         // 单文件最大 50MB
-	viper.SetDefault("server.upload.max_batch_total_mb", 500) // 批量上传总限制 500MB
-
-	// Worker pool defaults
-	viper.SetDefault("server.worker_count", getCpus()) // 异步任务协程池worker数量
-
-	configFileFromFlag := viper.GetString("config_file_path")
-
-	// 优先从 flag 读取配置文件路径
-	if configFileFromFlag != "" {
-		fmt.Fprintf(os.Stderr, "Attempting to use config file: %s\n", configFileFromFlag)
-		viper.SetConfigFile(configFileFromFlag)
+	if err := viper.ReadInConfig(); err != nil {
+		fmt.Fprintln(os.Stderr, "Info: .env file not found, using defaults and environment variables")
 	} else {
-		viper.SetConfigName("config")
-		viper.SetConfigType("yaml")
-		viper.AddConfigPath(".")
+		fmt.Fprintln(os.Stderr, "Info: Loaded configuration from .env file")
 	}
 
-	// 读取环境变量
-	viper.SetEnvPrefix("IMAGE_BED")
 	viper.AutomaticEnv()
-	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-
-	// 读取配置文件
-	if err := viper.ReadInConfig(); err != nil {
-		var configFileNotFoundError viper.ConfigFileNotFoundError
-
-		if errors.As(err, &configFileNotFoundError) {
-			if configFileFromFlag != "" {
-				fmt.Fprintf(os.Stderr, "Error: Configuration file not found at specified path: %s\n", configFileFromFlag)
-				os.Exit(1)
-			}
-			fmt.Fprintln(os.Stderr, "Warning: Configuration file not found. Using defaults and environment variables.")
-		} else {
-			fmt.Fprintf(os.Stderr, "Error reading configuration file: %v\n", err)
-			os.Exit(1)
-		}
-	} else {
-		fmt.Fprintln(os.Stderr, "Using configuration file:", viper.ConfigFileUsed())
+	for _, key := range viper.AllKeys() {
+		viper.BindEnv(key)
 	}
 
 	if err := viper.Unmarshal(&globalConfig); err != nil {
-		fmt.Fprintf(os.Stderr, "Fatal error: Unable to unmarshal config into struct, %v\n", err)
+		fmt.Fprintf(os.Stderr, "Fatal error: Unable to unmarshal config, %v\n", err)
 		os.Exit(1)
 	}
+
+	// WorkerCount: -1 = 使用 CPU 线程数, 0 = 使用默认值 (max(2, CPU核心数)), >0 = 使用指定值
+	switch {
+	case globalConfig.WorkerCount < 0:
+		// 使用当前 CPU 线程数
+		globalConfig.WorkerCount = runtime.GOMAXPROCS(0)
+	case globalConfig.WorkerCount == 0:
+		// 使用默认值
+		globalConfig.WorkerCount = getCpus()
+	// default: 使用配置文件中指定的值
+	}
+}
+
+// setDefaults 设置默认值
+func setDefaults() {
+	// 服务器配置默认值
+	viper.SetDefault("server_host", "127.0.0.1")
+	viper.SetDefault("server_port", 8080)
+	viper.SetDefault("server_domain", "")
+	viper.SetDefault("server_read_timeout", "15s")
+	viper.SetDefault("server_write_timeout", "30s")
+	viper.SetDefault("server_idle_timeout", "120s")
+
+	// 数据库配置默认值
+	viper.SetDefault("db_type", "sqlite")
+	viper.SetDefault("db_host", "localhost")
+	viper.SetDefault("db_port", 5432)
+	viper.SetDefault("db_username", "postgres")
+	viper.SetDefault("db_password", "")
+	viper.SetDefault("db_name", "image-bed")
+	viper.SetDefault("db_file_path", "")
+	viper.SetDefault("db_max_open_conns", 100)
+	viper.SetDefault("db_max_idle_conns", 25)
+	viper.SetDefault("db_conn_max_lifetime", 3600)
+
+	// 缓存配置默认值
+	viper.SetDefault("cache_max_image_cache_size_mb", 10)
+	viper.SetDefault("cache_enable_image_caching", false)
+	viper.SetDefault("cache_image_cache_ttl", 3600)
+	viper.SetDefault("cache_image_data_cache_ttl", 3600)
+
+	// 限流配置默认值
+	viper.SetDefault("rate_limit_api_rps", 30.0)
+	viper.SetDefault("rate_limit_api_burst", 60)
+	viper.SetDefault("rate_limit_image_rps", 100.0)
+	viper.SetDefault("rate_limit_image_burst", 200)
+	viper.SetDefault("rate_limit_auth_rps", 0.5)
+	viper.SetDefault("rate_limit_auth_burst", 5)
+	viper.SetDefault("rate_limit_expire_time", "10m")
+
+	// 上传配置默认值
+	viper.SetDefault("upload_max_size_mb", 50)
+	viper.SetDefault("upload_max_batch_total_mb", 500)
+
+	// Worker 配置默认值
+	viper.SetDefault("worker_count", 0) // 0 表示使用默认值
 }
 
 // Addr 返回监听地址，格式为 "host:port"
-func (s ServerConfig) Addr() string {
-	if s.Host == "" {
-		s.Host = "0.0.0.0"
+func (c *Config) Addr() string {
+	host := c.ServerHost
+	if host == "" {
+		host = "0.0.0.0"
 	}
-	if s.Port == 0 {
-		s.Port = 8080
+	port := c.ServerPort
+	if port == 0 {
+		port = 8080
 	}
-	return fmt.Sprintf("%s:%d", s.Host, s.Port)
+	return fmt.Sprintf("%s:%d", host, port)
 }
 
 // BaseURL 返回基础 URL，用于生成图片链接
-func (s ServerConfig) BaseURL() string {
-	if s.Domain != "" {
-		return s.Domain
+func (c *Config) BaseURL() string {
+	if c.ServerDomain != "" {
+		return c.ServerDomain
 	}
 	// 默认使用 localhost
-	host := s.Host
+	host := c.ServerHost
 	if host == "0.0.0.0" {
 		host = "localhost"
 	}
-	return fmt.Sprintf("http://%s:%d", host, s.Port)
+	return fmt.Sprintf("http://%s:%d", host, c.ServerPort)
 }
 
-// getCpus 给定默认线程数量
+// GetWorkerCount 返回 worker 数量
+func (c *Config) GetWorkerCount() int {
+	if c.WorkerCount <= 0 {
+		return getCpus()
+	}
+	return c.WorkerCount
+}
+
+// getCpus 获取默认线程数量
 func getCpus() int {
 	n := runtime.GOMAXPROCS(0)
-
 	if n < 2 {
 		return 2
 	}

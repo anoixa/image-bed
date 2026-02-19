@@ -9,19 +9,19 @@ import (
 // BuildImageURL 构建图片URL
 func BuildImageURL(identifier string) string {
 	cfg := config.Get()
-	return fmt.Sprintf("%s/images/%s", cfg.Server.BaseURL(), identifier)
+	return fmt.Sprintf("%s/images/%s", cfg.BaseURL(), identifier)
 }
 
 // BuildThumbnailURL 构建缩略图URL，默认600px
 func BuildThumbnailURL(identifier string) string {
 	cfg := config.Get()
-	return fmt.Sprintf("%s/thumbnails/%s?width=600", cfg.Server.BaseURL(), identifier)
+	return fmt.Sprintf("%s/thumbnails/%s?width=600", cfg.BaseURL(), identifier)
 }
 
 // BuildThumbnailURLWithWidth 构建指定宽度的缩略图URL
 func BuildThumbnailURLWithWidth(identifier string, width int) string {
 	cfg := config.Get()
-	return fmt.Sprintf("%s/thumbnails/%s?width=%d", cfg.Server.BaseURL(), identifier, width)
+	return fmt.Sprintf("%s/thumbnails/%s?width=%d", cfg.BaseURL(), identifier, width)
 }
 
 // LinkFormats 包含各种格式的图片链接

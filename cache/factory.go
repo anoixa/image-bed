@@ -14,7 +14,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// CryptoProvider 加密服务接口 - 由上层服务实现
+// CryptoProvider 加密服务接口
 type CryptoProvider interface {
 	// EncryptString 加密字符串
 	EncryptString(plaintext string) string
