@@ -146,6 +146,41 @@ func (r *Repository) UpdateImage(image *models.Image) error {
 	})
 }
 
+// MarkAsPendingDeletion 将图片标记为待删除状态
+func (r *Repository) MarkAsPendingDeletion(identifiers []string, userID uint) (int64, error) {
+	if len(identifiers) == 0 {
+		return 0, nil
+	}
+
+	result := r.db.DB().Model(&models.Image{}).
+		Where("identifier IN ? AND user_id = ?", identifiers, userID).
+		Update("is_pending_deletion", true)
+
+	return result.RowsAffected, result.Error
+}
+
+// DeletePendingImages 删除已标记为待删除的图片
+func (r *Repository) DeletePendingImages(identifiers []string, userID uint) (int64, error) {
+	if len(identifiers) == 0 {
+		return 0, nil
+	}
+
+	var affectedCount int64
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		result := tx.Where("identifier IN ? AND user_id = ? AND is_pending_deletion = ?", identifiers, userID, true).Delete(&models.Image{})
+		if result.Error != nil {
+			return fmt.Errorf("failed to delete pending images: %w", result.Error)
+		}
+		affectedCount = result.RowsAffected
+		return nil
+	})
+
+	if err != nil {
+		return 0, err
+	}
+	return affectedCount, nil
+}
+
 // ImageExists 检查图片是否存在
 func (r *Repository) ImageExists(identifier string) (bool, error) {
 	var count int64

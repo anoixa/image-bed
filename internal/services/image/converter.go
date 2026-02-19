@@ -74,11 +74,13 @@ func (c *Converter) TriggerWebPConversion(image *models.Image) {
 		return
 	}
 
-	// 提交任务
+	// 提交任务（传入尺寸信息避免重复解析）
 	task := &worker.WebPConversionTask{
 		VariantID:        variant.ID,
 		ImageID:          image.ID,
 		SourceIdentifier: image.Identifier,
+		SourceWidth:      image.Width,
+		SourceHeight:     image.Height,
 		ConfigManager:    c.configManager,
 		VariantRepo:      c.variantRepo,
 		Storage:          c.storage,

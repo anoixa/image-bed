@@ -47,15 +47,14 @@ func (h *Handler) DeleteImages(c *gin.Context) {
 		}
 	}
 
-	affectedCount, err := h.repo.DeleteImagesByIdentifiersAndUser(requestBody.ImageID, userID)
-	if err != nil {
-		common.RespondError(c, http.StatusInternalServerError, "Failed to delete images due to an internal error.")
-		return
-	}
-
-	// 级联删除变体
 	for _, img := range imagesToDelete {
 		h.deleteVariantsForImage(ctx, img)
+	}
+
+	affectedCount, err := h.repo.DeleteImagesByIdentifiersAndUser(requestBody.ImageID, userID)
+	if err != nil {
+
+		log.Printf("Failed to delete image records from database, but files have been removed: %v", err)
 	}
 
 	// 清除缓存

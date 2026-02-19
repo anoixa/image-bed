@@ -19,4 +19,6 @@ type Image struct {
 	User   User `gorm:"foreignKey:UserID"`
 
 	Albums []*Album `gorm:"many2many:album_images;"`
+
+	IsPendingDeletion bool `gorm:"default:false;not null" json:"-"` // 不序列化到JSON
 }

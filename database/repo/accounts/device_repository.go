@@ -53,7 +53,7 @@ func (r *DeviceRepository) GetDeviceByRefreshTokenAndDeviceID(refreshToken strin
 	hasher.Write([]byte(refreshToken))
 	hashedToken := hex.EncodeToString(hasher.Sum(nil))
 
-	err := r.db.DB().Where("refresh_token = ? AND device_id = ?", hashedToken, deviceID).First(&device).Error
+	err := r.db.DB().Where("refresh_token = ? AND device_id = ? AND expiry > ?", hashedToken, deviceID, time.Now()).First(&device).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, nil
