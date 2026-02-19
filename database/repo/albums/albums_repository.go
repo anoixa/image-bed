@@ -3,9 +3,7 @@ package albums
 import (
 	"context"
 	"errors"
-	"fmt"
 
-	"github.com/anoixa/image-bed/database"
 	"github.com/anoixa/image-bed/database/models"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -13,11 +11,11 @@ import (
 
 // Repository 相册仓库 - 封装所有相册相关的数据库操作
 type Repository struct {
-	db database.Provider
+	db *gorm.DB
 }
 
 // NewRepository 创建新的相册仓库
-func NewRepository(db database.Provider) *Repository {
+func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{db: db}
 }
 
@@ -32,7 +30,7 @@ type AlbumInfo struct {
 func (r *Repository) GetUserAlbums(userID uint, page, pageSize int) ([]*AlbumInfo, int64, error) {
 	var albums []*models.Album
 	var total int64
-	db := r.db.DB().Model(&models.Album{}).Where("user_id = ?", userID)
+	db := r.db.Model(&models.Album{}).Where("user_id = ?", userID)
 
 	if err := db.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -43,24 +41,18 @@ func (r *Repository) GetUserAlbums(userID uint, page, pageSize int) ([]*AlbumInf
 		return nil, 0, err
 	}
 
-	// 转换为 AlbumInfo 并获取每个相册的图片数量和封面
 	result := make([]*AlbumInfo, len(albums))
 	for i, album := range albums {
-		info := &AlbumInfo{
-			Album: album,
-		}
+		info := &AlbumInfo{Album: album}
 
-		// 获取图片数量
 		var count int64
-		if err := r.db.DB().Table("album_images").Where("album_id = ?", album.ID).Count(&count).Error; err != nil {
-			continue
+		if err := r.db.Table("album_images").Where("album_id = ?", album.ID).Count(&count).Error; err == nil {
+			info.ImageCount = count
 		}
-		info.ImageCount = count
 
-		// 获取最近一张图片作为封面
 		if count > 0 {
 			var coverImage models.Image
-			err := r.db.DB().
+			err := r.db.
 				Joins("JOIN album_images ON album_images.image_id = images.id").
 				Where("album_images.album_id = ?", album.ID).
 				Order("images.created_at desc").
@@ -79,7 +71,7 @@ func (r *Repository) GetUserAlbums(userID uint, page, pageSize int) ([]*AlbumInf
 // GetAlbumWithImagesByID 获取相册及其图片
 func (r *Repository) GetAlbumWithImagesByID(albumID, userID uint) (*models.Album, error) {
 	var album models.Album
-	err := r.db.DB().Preload("Images").First(&album, "id = ? AND user_id = ?", albumID, userID).Error
+	err := r.db.Preload("Images").First(&album, "id = ? AND user_id = ?", albumID, userID).Error
 	return &album, err
 }
 
@@ -87,14 +79,12 @@ func (r *Repository) GetAlbumWithImagesByID(albumID, userID uint) (*models.Album
 func (r *Repository) AddImageToAlbum(albumID, userID uint, image *models.Image) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		var album models.Album
-
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&album, "id = ? AND user_id = ?", albumID, userID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return fmt.Errorf("album with ID %d not found or access denied", albumID)
+				return errors.New("album not found or access denied")
 			}
 			return err
 		}
-
 		return tx.Model(&album).Association("Images").Append(image)
 	})
 }
@@ -103,94 +93,59 @@ func (r *Repository) AddImageToAlbum(albumID, userID uint, image *models.Image) 
 func (r *Repository) RemoveImageFromAlbum(albumID, userID uint, image *models.Image) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		var album models.Album
-
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&album, "id = ? AND user_id = ?", albumID, userID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return fmt.Errorf("album with ID %d not found or access denied", albumID)
+				return errors.New("album not found or access denied")
 			}
 			return err
 		}
-
 		return tx.Model(&album).Association("Images").Delete(image)
 	})
 }
 
 // CreateAlbum 创建相册
 func (r *Repository) CreateAlbum(album *models.Album) error {
-	return r.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&album).Error; err != nil {
-			return fmt.Errorf("failed to create album in transaction: %w", err)
-		}
-		return nil
-	})
+	return r.db.Create(album).Error
 }
 
 // DeleteAlbum 删除相册
 func (r *Repository) DeleteAlbum(albumID, userID uint) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		var album models.Album
-
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&album, "id = ? AND user_id = ?", albumID, userID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return fmt.Errorf("album with ID %d not found or access denied", albumID)
+				return errors.New("album not found or access denied")
 			}
 			return err
 		}
 
 		if err := tx.Model(&album).Association("Images").Clear(); err != nil {
-			return fmt.Errorf("failed to clear image associations for album %d: %w", albumID, err)
+			return err
 		}
-
-		if err := tx.Delete(&album).Error; err != nil {
-			return fmt.Errorf("failed to delete album %d: %w", albumID, err)
-		}
-
-		return nil
+		return tx.Delete(&album).Error
 	})
 }
 
 // GetAlbumByID 通过ID获取相册
 func (r *Repository) GetAlbumByID(albumID uint) (*models.Album, error) {
 	var album models.Album
-	err := r.db.DB().First(&album, albumID).Error
-	if err != nil {
-		return nil, err
-	}
-	return &album, nil
+	err := r.db.First(&album, albumID).Error
+	return &album, err
 }
 
 // AlbumExists 检查相册是否存在
 func (r *Repository) AlbumExists(albumID uint) (bool, error) {
 	var count int64
-	err := r.db.DB().Model(&models.Album{}).Where("id = ?", albumID).Count(&count).Error
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
+	err := r.db.Model(&models.Album{}).Where("id = ?", albumID).Count(&count).Error
+	return count > 0, err
 }
 
 // UpdateAlbum 更新相册
 func (r *Repository) UpdateAlbum(album *models.Album) error {
-	return r.db.Transaction(func(tx *gorm.DB) error {
-		return tx.Save(album).Error
-	})
+	return r.db.Save(album).Error
 }
 
 // WithContext 返回带上下文的仓库
 func (r *Repository) WithContext(ctx context.Context) *Repository {
-	return &Repository{db: &contextProvider{Provider: r.db, ctx: ctx}}
-}
-
-// contextProvider 包装 Provider 添加上下文
-type contextProvider struct {
-	database.Provider
-	ctx context.Context
-}
-
-func (c *contextProvider) DB() *gorm.DB {
-	return c.Provider.WithContext(c.ctx)
-}
-
-func (c *contextProvider) Transaction(fn database.TxFunc) error {
-	return c.Provider.TransactionWithContext(c.ctx, fn)
+	return &Repository{db: r.db.WithContext(ctx)}
 }
