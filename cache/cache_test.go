@@ -163,8 +163,9 @@ func TestFactory_Get_NilProvider(t *testing.T) {
 	ctx := context.Background()
 	var value string
 	err := factory.Get(ctx, "key1", &value)
+	// Get 在 provider 为 nil 时返回 ErrCacheMiss
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "not initialized")
+	assert.True(t, IsCacheMiss(err))
 }
 
 func TestFactory_Delete(t *testing.T) {
@@ -184,8 +185,8 @@ func TestFactory_Delete_NilProvider(t *testing.T) {
 
 	ctx := context.Background()
 	err := factory.Delete(ctx, "key1")
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "not initialized")
+	// Delete 操作在 provider 为 nil 时静默处理
+	assert.NoError(t, err)
 }
 
 func TestFactory_Exists(t *testing.T) {

@@ -1,7 +1,9 @@
 package cache
 
 import (
+	"context"
 	"fmt"
+	"time"
 
 	"github.com/anoixa/image-bed/cache/memory"
 	"github.com/anoixa/image-bed/cache/redis"
@@ -126,13 +128,13 @@ func InitFromConfig(cfg *config.Config) error {
 	switch cfg.CacheType {
 	case "redis":
 		cacheCfg = CacheConfig{
-			ID:       0,
-			Name:     "default-redis",
-			Type:     "redis",
+			ID:        0,
+			Name:      "default-redis",
+			Type:      "redis",
 			IsDefault: true,
-			Address:  cfg.CacheRedisAddr,
-			Password: cfg.CacheRedisPassword,
-			DB:       cfg.CacheRedisDB,
+			Address:   cfg.CacheRedisAddr,
+			Password:  cfg.CacheRedisPassword,
+			DB:        cfg.CacheRedisDB,
 		}
 	case "memory", "":
 		// 默认使用内存缓存
@@ -152,3 +154,92 @@ func InitFromConfig(cfg *config.Config) error {
 
 	return InitCache([]CacheConfig{cacheCfg})
 }
+
+// Factory 缓存工厂（兼容旧测试）
+type Factory struct {
+	providers       map[uint]Provider
+	defaultProvider Provider
+}
+
+// NewFactory 创建新的缓存工厂
+func NewFactory() *Factory {
+	return &Factory{
+		providers: make(map[uint]Provider),
+	}
+}
+
+// SetProvider 设置提供者
+func (f *Factory) SetProvider(id uint, provider Provider) {
+	if f.providers == nil {
+		f.providers = make(map[uint]Provider)
+	}
+	f.providers[id] = provider
+}
+
+// SetDefaultProvider 设置默认提供者
+func (f *Factory) SetDefaultProvider(provider Provider) {
+	f.defaultProvider = provider
+}
+
+// GetProvider 获取默认提供者
+func (f *Factory) GetProvider() Provider {
+	if f.defaultProvider != nil {
+		return f.defaultProvider
+	}
+	return GetDefault()
+}
+
+// Set 设置缓存值
+func (f *Factory) Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error {
+	provider := f.GetProvider()
+	if provider == nil {
+		return fmt.Errorf("cache provider not initialized")
+	}
+	return provider.Set(ctx, key, value, expiration)
+}
+
+// Get 获取缓存值
+func (f *Factory) Get(ctx context.Context, key string, dest interface{}) error {
+	provider := f.GetProvider()
+	if provider == nil {
+		return ErrCacheMiss
+	}
+	return provider.Get(ctx, key, dest)
+}
+
+// Delete 删除缓存
+func (f *Factory) Delete(ctx context.Context, key string) error {
+	provider := f.GetProvider()
+	if provider == nil {
+		return nil 
+	}
+	return provider.Delete(ctx, key)
+}
+
+// Exists 检查缓存是否存在
+func (f *Factory) Exists(ctx context.Context, key string) (bool, error) {
+	provider := f.GetProvider()
+	if provider == nil {
+		return false, fmt.Errorf("cache provider not initialized")
+	}
+	return provider.Exists(ctx, key)
+}
+
+// Close 关闭缓存
+func (f *Factory) Close() error {
+	if f.defaultProvider != nil {
+		return f.defaultProvider.Close()
+	}
+	return nil
+}
+
+// Name 返回缓存工厂名称（实现Provider接口）
+func (f *Factory) Name() string {
+	if f.defaultProvider != nil {
+		return f.defaultProvider.Name()
+	}
+	return "factory"
+}
+
+// 确保 Factory 实现了 Provider 接口
+var _ Provider = (*Factory)(nil)
