@@ -43,6 +43,12 @@ type Config struct {
 	CacheImageCacheTTL       int   `mapstructure:"cache_image_cache_ttl"`
 	CacheImageDataCacheTTL   int   `mapstructure:"cache_image_data_cache_ttl"`
 
+	// 缓存提供者配置
+	CacheType          string `mapstructure:"cache_type"`
+	CacheRedisAddr     string `mapstructure:"cache_redis_addr"`
+	CacheRedisPassword string `mapstructure:"cache_redis_password"`
+	CacheRedisDB       int    `mapstructure:"cache_redis_db"`
+
 	// 限流配置
 	RateLimitApiRPS     float64       `mapstructure:"rate_limit_api_rps"`
 	RateLimitApiBurst   int           `mapstructure:"rate_limit_api_burst"`
@@ -133,6 +139,12 @@ func setDefaults() {
 	viper.SetDefault("cache_enable_image_caching", false)
 	viper.SetDefault("cache_image_cache_ttl", 3600)
 	viper.SetDefault("cache_image_data_cache_ttl", 3600)
+
+	// 缓存提供者配置默认值
+	viper.SetDefault("cache_type", "memory")
+	viper.SetDefault("cache_redis_addr", "localhost:6379")
+	viper.SetDefault("cache_redis_password", "")
+	viper.SetDefault("cache_redis_db", 0)
 
 	// 限流配置默认值
 	viper.SetDefault("rate_limit_api_rps", 30.0)
