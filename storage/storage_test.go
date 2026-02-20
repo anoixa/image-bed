@@ -1,12 +1,22 @@
 package storage
 
 import (
+	"path/filepath"
 	"sync"
 	"testing"
 )
 
+// setupTestDir 创建测试用的临时目录
+func setupTestDir(t *testing.T) string {
+	t.Helper()
+	tempDir := t.TempDir()
+	return tempDir
+}
+
 // TestConcurrentAccess 测试并发访问 providers map
 func TestConcurrentAccess(t *testing.T) {
+	tempDir := setupTestDir(t)
+
 	// 清理测试环境
 	providersMu.Lock()
 	providers = make(map[uint]Provider)
@@ -45,7 +55,7 @@ func TestConcurrentAccess(t *testing.T) {
 				ID:        id,
 				Name:      "test-local",
 				Type:      "local",
-				LocalPath: "./data/test",
+				LocalPath: filepath.Join(tempDir, "test"),
 				IsDefault: false,
 			}
 			for j := 0; j < numOperations/2; j++ {
@@ -70,6 +80,8 @@ func TestConcurrentAccess(t *testing.T) {
 
 // TestAddOrUpdateProvider 测试添加/更新存储提供者
 func TestAddOrUpdateProvider(t *testing.T) {
+	tempDir := setupTestDir(t)
+
 	// 清理测试环境
 	providersMu.Lock()
 	providers = make(map[uint]Provider)
@@ -82,7 +94,7 @@ func TestAddOrUpdateProvider(t *testing.T) {
 		ID:        1,
 		Name:      "local-test",
 		Type:      "local",
-		LocalPath: "./data/test1",
+		LocalPath: filepath.Join(tempDir, "test1"),
 		IsDefault: false,
 	}
 
@@ -115,6 +127,8 @@ func TestAddOrUpdateProvider(t *testing.T) {
 
 // TestRemoveProvider 测试移除存储提供者
 func TestRemoveProvider(t *testing.T) {
+	tempDir := setupTestDir(t)
+
 	// 清理测试环境
 	providersMu.Lock()
 	providers = make(map[uint]Provider)
@@ -127,7 +141,7 @@ func TestRemoveProvider(t *testing.T) {
 		ID:        2,
 		Name:      "local-test-2",
 		Type:      "local",
-		LocalPath: "./data/test2",
+		LocalPath: filepath.Join(tempDir, "test2"),
 		IsDefault: false,
 	}
 
@@ -178,6 +192,8 @@ func TestRemoveDefaultProvider(t *testing.T) {
 
 // TestSetDefaultID 测试切换默认存储
 func TestSetDefaultID(t *testing.T) {
+	tempDir := setupTestDir(t)
+
 	// 清理测试环境
 	providersMu.Lock()
 	providers = make(map[uint]Provider)
@@ -190,14 +206,14 @@ func TestSetDefaultID(t *testing.T) {
 		ID:        10,
 		Name:      "local-test-10",
 		Type:      "local",
-		LocalPath: "./data/test10",
+		LocalPath: filepath.Join(tempDir, "test10"),
 		IsDefault: true,
 	}
 	cfg2 := StorageConfig{
 		ID:        11,
 		Name:      "local-test-11",
 		Type:      "local",
-		LocalPath: "./data/test11",
+		LocalPath: filepath.Join(tempDir, "test11"),
 		IsDefault: false,
 	}
 
@@ -228,6 +244,8 @@ func TestSetDefaultID(t *testing.T) {
 
 // TestListProviderIDs 测试列出所有存储ID
 func TestListProviderIDs(t *testing.T) {
+	tempDir := setupTestDir(t)
+
 	// 清理测试环境
 	providersMu.Lock()
 	providers = make(map[uint]Provider)
@@ -241,7 +259,7 @@ func TestListProviderIDs(t *testing.T) {
 			ID:        i,
 			Name:      "local-test",
 			Type:      "local",
-			LocalPath: "./data/test",
+			LocalPath: filepath.Join(tempDir, "test"),
 		}
 		_ = AddOrUpdateProvider(cfg)
 	}
@@ -254,6 +272,8 @@ func TestListProviderIDs(t *testing.T) {
 
 // TestGetProviderCount 测试获取存储数量
 func TestGetProviderCount(t *testing.T) {
+	tempDir := setupTestDir(t)
+
 	// 清理测试环境
 	providersMu.Lock()
 	providers = make(map[uint]Provider)
@@ -269,7 +289,7 @@ func TestGetProviderCount(t *testing.T) {
 		ID:        30,
 		Name:      "local-test",
 		Type:      "local",
-		LocalPath: "./data/test",
+		LocalPath: filepath.Join(tempDir, "test"),
 	}
 	_ = AddOrUpdateProvider(cfg)
 
@@ -277,3 +297,4 @@ func TestGetProviderCount(t *testing.T) {
 		t.Fatalf("Should have 1 provider, got %d", GetProviderCount())
 	}
 }
+
