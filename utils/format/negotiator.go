@@ -83,20 +83,18 @@ func (n *Negotiator) Negotiate(acceptHeader string, available map[FormatType]boo
 
 // clientSupports 检查客户端是否支持某格式
 func clientSupports(prefs []ClientPreference, format FormatType) bool {
-	// 先检查是否明确拒绝该格式
 	for _, pref := range prefs {
 		if pref.FormatType == format {
 			return pref.QValue > 0
 		}
 	}
-	
-	// 检查通配符 */*
+
 	for _, pref := range prefs {
 		if pref.FormatType == "" && pref.QValue > 0 {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -111,11 +109,8 @@ func parseAcceptHeader(header string) []ClientPreference {
 
 	for _, part := range parts {
 		part = strings.TrimSpace(part)
-
-		// 解析 MIME 类型和 q 值
 		mimeType, qValue := parseMediaRange(part)
 
-		// 映射到 FormatType
 		format := mimeToFormat(mimeType)
 		if format != "" || mimeType == "*/*" || strings.HasPrefix(mimeType, "image/*") {
 			prefs = append(prefs, ClientPreference{

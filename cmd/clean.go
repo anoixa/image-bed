@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 
 	"github.com/anoixa/image-bed/config"
+	"github.com/anoixa/image-bed/database"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/storage"
-	"github.com/anoixa/image-bed/storage/local"
 	"github.com/spf13/cobra"
 	"gorm.io/gorm"
 )
@@ -59,11 +59,11 @@ func runClean(dryRun, tempOnly, dbOnly, storageOnly bool) error {
 	config.InitConfig()
 	cfg := config.Get()
 
-	dbFactory, db, err := initDB()
+	db, err := initDB()
 	if err != nil {
 		return err
 	}
-	defer dbFactory.Close()
+	defer database.Close(db)
 
 	stats := &cleanStats{}
 
@@ -151,7 +151,7 @@ func cleanOrphanStorageFiles(db *gorm.DB, stats *cleanStats, dryRun bool) error 
 	}
 
 	// 检查是否为本地存储
-	localStorage, ok := provider.(*local.Storage)
+	localStorage, ok := provider.(*storage.LocalStorage)
 	if !ok {
 		log.Printf("Storage type '%s' does not support orphan file detection yet", provider.Name())
 		return nil

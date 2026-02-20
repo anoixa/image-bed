@@ -4,20 +4,20 @@ import (
 	"context"
 	"strings"
 
+	"github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
-	"github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/utils/format"
 )
 
 // VariantResult 变体选择结果
 type VariantResult struct {
-	Format       format.FormatType
-	IsOriginal   bool
-	Image        *models.Image
-	Variant      *models.ImageVariant
-	MIMEType     string
-	Identifier   string
+	Format     format.FormatType
+	IsOriginal bool
+	Image      *models.Image
+	Variant    *models.ImageVariant
+	MIMEType   string
+	Identifier string
 }
 
 // VariantService 变体服务
@@ -76,8 +76,6 @@ func (s *VariantService) SelectBestVariant(ctx context.Context, image *models.Im
 		result.MIMEType = image.MimeType
 		result.Identifier = image.Identifier
 
-		// Negotiate 返回 Original 可能是因为 WebP 变体不可用
-		// 此时需要检查客户端是否真的支持 WebP
 		if !available[format.FormatWebP] && strings.Contains(acceptHeader, "image/webp") {
 			go s.converter.TriggerWebPConversion(image)
 		}

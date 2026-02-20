@@ -95,22 +95,19 @@ func (s *RetryScanner) scanAndRetry() {
 	}
 }
 
-// StartRetryScanner 便捷函数：创建并启动重试扫描器
+// StartRetryScanner 创建并启动重试扫描器
 func StartRetryScanner(repo *images.VariantRepository, converter *Converter, interval time.Duration) *RetryScanner {
 	scanner := NewRetryScanner(repo, converter, interval)
 	scanner.Start()
 	return scanner
 }
 
-// ==================== OrphanScanner 孤儿任务扫描器 ====================
-
-// ThumbnailServiceAccessor 缩略图服务访问接口
+// ThumbnailServiceAccessor 缩略图
 type ThumbnailServiceAccessor interface {
 	TriggerGeneration(image *models.Image, width int)
 }
 
 // OrphanScanner 孤儿任务扫描器
-// 用于检测长时间处于 processing 状态的任务（进程崩溃导致的孤儿任务）
 type OrphanScanner struct {
 	variantRepo      *images.VariantRepository
 	converter        *Converter

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/anoixa/image-bed/config"
+	"github.com/anoixa/image-bed/database"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/spf13/cobra"
 	"gorm.io/gorm"
@@ -59,11 +60,6 @@ func init() {
 	restoreCmd.MarkFlagRequired("input")
 }
 
-// albumImageRecord album_images 关联记录
-type albumImageRecord struct {
-	AlbumID uint `json:"album_id"`
-	ImageID uint `json:"image_id"`
-}
 
 // restoreStats 还原统计
 type restoreStats struct {
@@ -91,11 +87,11 @@ func runRestore(inputFile string, tables []string, dryRun, truncate bool) error 
 	config.InitConfig()
 	cfg := config.Get()
 
-	dbFactory, db, err := initDB()
+	db, err := initDB()
 	if err != nil {
 		return err
 	}
-	defer dbFactory.Close()
+	defer database.Close(db)
 
 	// 创建临时目录解压备份
 	tempDir := filepath.Join(os.TempDir(), fmt.Sprintf("image-bed-restore-%d", time.Now().Unix()))

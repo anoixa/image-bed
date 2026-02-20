@@ -12,7 +12,7 @@ import (
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/configs"
-	cryptoservice "github.com/anoixa/image-bed/internal/services/crypto"
+	cryptoservice "github.com/anoixa/image-bed/internal/crypto"
 	"github.com/anoixa/image-bed/storage"
 	cryptoutils "github.com/anoixa/image-bed/utils/crypto"
 	"gorm.io/gorm"

@@ -2,11 +2,11 @@ package images
 
 import (
 	"github.com/anoixa/image-bed/cache"
-	"github.com/anoixa/image-bed/database"
-	"github.com/anoixa/image-bed/database/repo/images"
 	configSvc "github.com/anoixa/image-bed/config/db"
-	"github.com/anoixa/image-bed/internal/services/image"
+	"github.com/anoixa/image-bed/database/repo/images"
+	"github.com/anoixa/image-bed/internal/image"
 	"github.com/anoixa/image-bed/storage"
+	"gorm.io/gorm"
 )
 
 // Handler 图片处理器 - 使用依赖注入接收存储和缓存
@@ -21,9 +21,9 @@ type Handler struct {
 }
 
 // NewHandler 图片处理器
-func NewHandler(cacheProvider cache.Provider, imagesRepo *images.Repository, dbProvider database.Provider, converter *image.Converter, configManager *configSvc.Manager) *Handler {
+func NewHandler(cacheProvider cache.Provider, imagesRepo *images.Repository, db *gorm.DB, converter *image.Converter, configManager *configSvc.Manager) *Handler {
 	// 创建变体仓库和服务
-	variantRepo := images.NewVariantRepository(dbProvider.DB())
+	variantRepo := images.NewVariantRepository(db)
 	variantService := image.NewVariantService(variantRepo, configManager, converter)
 
 	// 创建缩略图服务
@@ -41,8 +41,7 @@ func NewHandler(cacheProvider cache.Provider, imagesRepo *images.Repository, dbP
 }
 
 // getStorageConfigID 根据存储名称获取存储配置ID
-// 如果 storageName 为空，则返回默认存储的ID
 func (h *Handler) getStorageConfigID(c interface{ Query(string) string }, storageName string) (uint, error) {
-	// 简化后只使用默认存储
+	// 如果 storageName 为空，回退默认存储的ID
 	return storage.GetDefaultID(), nil
 }

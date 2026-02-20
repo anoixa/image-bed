@@ -72,17 +72,11 @@ const (
 // Helper 缓存辅助工具结构
 type Helper struct {
 	provider Provider
-	factory  *Factory
 }
 
 // NewHelper 创建新的缓存辅助工具
 func NewHelper(provider Provider) *Helper {
-	h := &Helper{provider: provider}
-	// 如果 provider 是 Factory 类型，同时设置 factory 字段
-	if f, ok := provider.(*Factory); ok {
-		h.factory = f
-	}
-	return h
+	return &Helper{provider: provider}
 }
 
 // CacheImage 缓存图片元数据

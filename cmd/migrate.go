@@ -221,7 +221,6 @@ func openDatabase(dbType, dsn string) (*gorm.DB, error) {
 
 	switch dbType {
 	case "sqlite":
-		// 确保使用正确的 SQLite DSN 格式
 		sqliteDSN := dsn
 		if sqliteDSN == "" {
 			sqliteDSN = "file::memory:?cache=shared"

@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	// EncPrefixV1 AES-256-GCM 加密版本前缀
+	// EncPrefixV1 AES-256-GCM
 	EncPrefixV1 = "__ENC:v1:"
 	// EncPrefixV2 版本号
 	EncPrefixV2 = "__ENC:v2:"
@@ -30,7 +30,7 @@ const (
 	KeyDir = "config"
 )
 
-// SecureKey 安全密钥封装，支持内存清理
+// SecureKey 安全密钥封装
 type SecureKey struct {
 	key  []byte
 	lock sync.RWMutex
@@ -69,7 +69,6 @@ func NewMasterKeyManager(dataPath string) *MasterKeyManager {
 }
 
 // Initialize 初始化主密钥
-// checkDataExists: 回调函数，检查数据库是否已有配置记录，返回 (exists bool, error)
 func (m *MasterKeyManager) Initialize(checkDataExists func() (bool, error)) error {
 	var key []byte
 	var err error
@@ -97,7 +96,7 @@ func (m *MasterKeyManager) Initialize(checkDataExists func() (bool, error)) erro
 			}
 			m.source = "file"
 		} else {
-			// 3. 检查数据库是否已有加密数据（防止二次生成灾难）
+			// 3. 检查数据库是否已有加密数据
 			if checkDataExists != nil {
 				exists, err := checkDataExists()
 				if err != nil {
@@ -132,7 +131,7 @@ func (m *MasterKeyManager) Initialize(checkDataExists func() (bool, error)) erro
 	return nil
 }
 
-// printFingerprint 打印密钥指纹（SHA256 前8字节）
+// printFingerprint 打印密钥指纹
 func (m *MasterKeyManager) printFingerprint() {
 	hash := sha256.Sum256(m.key.Get())
 	fingerprint := hex.EncodeToString(hash[:8])

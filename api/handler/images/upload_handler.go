@@ -11,6 +11,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"strconv"
 	"sync"
 
 	"github.com/anoixa/image-bed/api/common"
@@ -60,13 +61,17 @@ func (h *Handler) UploadImage(c *gin.Context) {
 
 	fileHeader := files[0]
 
-	// 简化后只使用默认存储
-	storageConfigID := storage.GetDefaultID()
+	// 获取存储配置：优先使用 strategy_id，否则使用默认存储
+	storageProvider, storageConfigID, err := h.resolveStorageProvider(c)
+	if err != nil {
+		common.RespondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	userID := c.GetUint(middleware.ContextUserIDKey)
 	// 读取公开/私有参数，默认为公开
 	isPublic := c.PostForm("is_public") != "false"
-	image, _, err := h.processAndSaveImage(c.Request.Context(), userID, fileHeader, storage.GetDefault(), storageConfigID, isPublic)
+	image, _, err := h.processAndSaveImage(c.Request.Context(), userID, fileHeader, storageProvider, storageConfigID, isPublic)
 	if err != nil {
 		if !c.IsAborted() {
 			common.RespondError(c, http.StatusInternalServerError, err.Error())
@@ -114,27 +119,16 @@ func (h *Handler) UploadImages(c *gin.Context) {
 		return
 	}
 
-	// 使用 storage_id 选择存储配置
-	var storageProvider storage.Provider
-	var storageConfigID uint
-
-	storageIDStr := c.PostForm("storage_id")
-	if storageIDStr == "" {
-		storageIDStr = c.Query("storage_id")
+	// 获取存储配置：优先使用 strategy_id，否则使用默认存储
+	storageProvider, storageConfigID, err := h.resolveStorageProvider(c)
+	if err != nil {
+		common.RespondError(c, http.StatusBadRequest, err.Error())
+		return
 	}
 
-	if storageIDStr != "" {
-		// 简化后只使用默认存储
-		storageConfigID = storage.GetDefaultID()
-		storageProvider = storage.GetDefault()
-	} else {
-		// 使用默认存储
-		storageConfigID = storage.GetDefaultID()
-		storageProvider = storage.GetDefault()
-		if storageProvider == nil {
-			common.RespondError(c, http.StatusInternalServerError, "No default storage configured")
-			return
-		}
+	if storageProvider == nil {
+		common.RespondError(c, http.StatusInternalServerError, "No storage provider available")
+		return
 	}
 
 	type uploadResult struct {
@@ -232,11 +226,9 @@ func (h *Handler) processAndSaveImage(ctx context.Context, userID uint, fileHead
 		os.Remove(tempFile.Name()) // 清理临时文件
 	}()
 
-	// 流式计算哈希并写入临时文件
 	hasher := sha256.New()
 	writer := io.MultiWriter(tempFile, hasher)
 
-	// 使用共享缓冲池优化复制
 	buf := pool.SharedBufferPool.Get().([]byte)
 	defer pool.SharedBufferPool.Put(buf)
 
@@ -288,7 +280,7 @@ func (h *Handler) processAndSaveImage(ctx context.Context, userID uint, fileHead
 		return nil, false, errors.New("database error during hash check")
 	}
 
-	// 验证文件类型（读取前512字节）
+	// 验证文件类型
 	if _, err := tempFile.Seek(0, io.SeekStart); err != nil {
 		return nil, false, fmt.Errorf("failed to seek temp file: %w", err)
 	}
@@ -308,10 +300,8 @@ func (h *Handler) processAndSaveImage(ctx context.Context, userID uint, fileHead
 	}
 	imgWidth, imgHeight := utils.GetImageDimensions(tempFile)
 
-	// 生成唯一标识符
 	identifier := fileHash[:12]
 
-	// 保存到存储
 	if _, err := tempFile.Seek(0, io.SeekStart); err != nil {
 		return nil, false, fmt.Errorf("failed to seek temp file: %w", err)
 	}
@@ -320,7 +310,7 @@ func (h *Handler) processAndSaveImage(ctx context.Context, userID uint, fileHead
 		return nil, false, errors.New("failed to save uploaded file")
 	}
 
-	// 创建数据库记录
+	// 入库
 	newImage := &models.Image{
 		Identifier:      identifier,
 		OriginalName:    fileHeader.Filename,
@@ -358,4 +348,35 @@ func (h *Handler) warmCache(image *models.Image) {
 	if err := h.cacheHelper.CacheImage(ctx, image); err != nil {
 		log.Printf("WARN: Failed to pre-warm cache for image '%s': %v", utils.SanitizeLogMessage(image.Identifier), err)
 	}
+}
+
+// resolveStorageProvider 解析存储提供者
+func (h *Handler) resolveStorageProvider(c *gin.Context) (storage.Provider, uint, error) {
+	// 优先从 form 中获取，如果不存在则从 query 中获取
+	strategyIDStr := c.PostForm("strategy_id")
+	if strategyIDStr == "" {
+		strategyIDStr = c.Query("strategy_id")
+	}
+
+	// 获取对应的存储提供者
+	if strategyIDStr != "" {
+		strategyID, err := strconv.ParseUint(strategyIDStr, 10, 32)
+		if err != nil {
+			return nil, 0, fmt.Errorf("invalid strategy_id: %s", strategyIDStr)
+		}
+
+		provider, err := storage.GetByID(uint(strategyID))
+		if err != nil {
+			return nil, 0, fmt.Errorf("storage provider not found for strategy_id %d", strategyID)
+		}
+
+		return provider, uint(strategyID), nil
+	}
+
+	// 未指定 strategy_id，使用默认存储
+	provider := storage.GetDefault()
+	if provider == nil {
+		return nil, 0, fmt.Errorf("no default storage configured")
+	}
+	return provider, storage.GetDefaultID(), nil
 }

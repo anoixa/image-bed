@@ -8,21 +8,29 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/config/db"
+	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/h2non/bimg"
 )
-
-// ErrorType 错误类型
-type ErrorType int
 
 const (
 	ErrorTransient ErrorType = iota // 可重试
 	ErrorPermanent                  // 永久错误
 	ErrorConfig                     // 配置错误
 )
+
+// ErrorType 错误类型
+type ErrorType int
+
+// VariantRepository 接口（避免循环依赖）
+type VariantRepository interface {
+	UpdateStatusCAS(id uint, expected, newStatus, errMsg string) (bool, error)
+	UpdateCompleted(id uint, identifier string, fileSize int64, width, height int) error
+	UpdateFailed(id uint, errMsg string, allowRetry bool) error
+	GetByID(id uint) (*models.ImageVariant, error)
+}
 
 // ClassifyError 分类错误类型
 func ClassifyError(err error) ErrorType {
@@ -80,14 +88,11 @@ func (t *WebPConversionTask) Execute() {
 		utils.LogIfDevf("[WebPConversion] Failed to get config: %v", err)
 		return
 	}
-
-	// 检查 WebP 是否仍启用
 	if !t.isFormatEnabled(settings, models.FormatWebP) {
 		utils.LogIfDevf("[WebPConversion] WebP format disabled, skipping variant %d", t.VariantID)
 		return
 	}
 
-	// CAS 获取 processing 状态
 	utils.LogIfDevf("[WebPConversion] Attempting CAS: variant %d pending->processing", t.VariantID)
 	acquired, err := t.VariantRepo.UpdateStatusCAS(
 		t.VariantID,
@@ -163,7 +168,6 @@ func (t *WebPConversionTask) doConversion(ctx context.Context, settings *config.
 		return fmt.Errorf("read data: %w", err)
 	}
 
-	// 检查尺寸限制
 	if settings.MaxDimension > 0 {
 		width, height := t.SourceWidth, t.SourceHeight
 		if width == 0 || height == 0 {
@@ -178,7 +182,6 @@ func (t *WebPConversionTask) doConversion(ctx context.Context, settings *config.
 		}
 	}
 
-	// 转换为 WebP
 	converted, err := bimg.NewImage(data).Process(bimg.Options{
 		Type:    bimg.WEBP,
 		Quality: settings.WebPQuality,
@@ -193,7 +196,6 @@ func (t *WebPConversionTask) doConversion(ctx context.Context, settings *config.
 		return fmt.Errorf("save: %w", err)
 	}
 
-	// 获取尺寸
 	size, _ := bimg.NewImage(converted).Size()
 
 	// 保存结果
@@ -241,7 +243,6 @@ func (t *WebPConversionTask) handleFailure(err error) {
 	switch errType {
 	case ErrorPermanent:
 		utils.LogIfDevf("[WebPConversion] Permanent error for variant %d: %s", t.VariantID, errMsg)
-		// 永久错误，直接标记为失败
 		t.VariantRepo.UpdateStatusCAS(
 			t.VariantID,
 			models.VariantStatusProcessing,
@@ -250,7 +251,6 @@ func (t *WebPConversionTask) handleFailure(err error) {
 		)
 	case ErrorConfig:
 		utils.LogIfDevf("[WebPConversion] Config error for variant %d: %s", t.VariantID, errMsg)
-		// 配置错误，直接标记为失败
 		t.VariantRepo.UpdateStatusCAS(
 			t.VariantID,
 			models.VariantStatusProcessing,
@@ -272,12 +272,4 @@ func (t *WebPConversionTask) isFormatEnabled(settings *config.ConversionSettings
 		}
 	}
 	return false
-}
-
-// VariantRepository 接口（避免循环依赖）
-type VariantRepository interface {
-	UpdateStatusCAS(id uint, expected, newStatus, errMsg string) (bool, error)
-	UpdateCompleted(id uint, identifier string, fileSize int64, width, height int) error
-	UpdateFailed(id uint, errMsg string, allowRetry bool) error
-	GetByID(id uint) (*models.ImageVariant, error)
 }

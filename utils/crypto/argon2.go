@@ -14,9 +14,7 @@ import (
 
 // 定义 Argon2id 的推荐参数
 const (
-	// memory 是以 KiB 为单位的内存消耗
 	// 对于交互式应用，通常推荐 64MB (65536 KiB) 到 256MB (262144 KiB)
-	// 根据你的服务器资源和安全需求调整。
 	argon2Memory uint32 = 65536 // 64 MB
 
 	// iterations 是迭代次数（时间成本）
@@ -37,7 +35,6 @@ const (
 )
 
 // GenerateFromPassword 使用 Argon2id 算法哈希密码
-// 返回的字符串包含所有必要的参数，可以安全地存储在数据库中。
 func GenerateFromPassword(password string) (string, error) {
 	// 生成随机盐值
 	salt := make([]byte, argon2SaltLength)
@@ -100,7 +97,6 @@ func ComparePasswordAndHash(password, encodedHash string) (bool, error) {
 	}
 
 	// 重新计算给定密码的哈希值
-	// 注意: len(decodedHash) 作为 keyLength，确保与原始哈希的长度一致
 	computedHash := argon2.IDKey([]byte(password), decodedSalt, iterations, memory, uint8(parallelism), uint32(len(decodedHash)))
 
 	// 使用 constant-time 比较，防止定时攻击

@@ -7,7 +7,7 @@ import (
 
 	"github.com/anoixa/image-bed/api"
 	"github.com/anoixa/image-bed/api/common"
-	"github.com/anoixa/image-bed/internal/services/auth"
+	"github.com/anoixa/image-bed/internal/auth"
 	"github.com/gin-gonic/gin"
 )
 

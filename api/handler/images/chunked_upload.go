@@ -177,14 +177,12 @@ func (h *Handler) UploadChunk(c *gin.Context) {
 		return
 	}
 
-	// 获取上传的文件
 	file, err := c.FormFile("chunk")
 	if err != nil {
 		common.RespondError(c, http.StatusBadRequest, "Chunk file is required")
 		return
 	}
 
-	// 验证分片大小
 	if file.Size > session.ChunkSize+1024 { // 允许 1KB 误差
 		common.RespondError(c, http.StatusBadRequest, "Chunk size exceeds expected size")
 		return
@@ -246,7 +244,6 @@ func (h *Handler) CompleteChunkedUpload(c *gin.Context) {
 		return
 	}
 
-	// 检查是否所有分片都已上传
 	if len(session.ReceivedChunks) != session.TotalChunks {
 		missingChunks := make([]int, 0)
 		for i := 0; i < session.TotalChunks; i++ {
@@ -265,7 +262,6 @@ func (h *Handler) CompleteChunkedUpload(c *gin.Context) {
 	// 异步合并分片并保存
 	go func() {
 		defer func() {
-			// 处理完成后从map中移除
 			sessionsMu.Lock()
 			delete(sessions, req.SessionID)
 			sessionsMu.Unlock()
@@ -321,7 +317,6 @@ func (h *Handler) processChunkedUpload(ctx context.Context, session *ChunkedUplo
 		return fmt.Errorf("file hash mismatch: expected %s, got %s", session.FileHash, fileHash)
 	}
 
-	// 读取文件进行验证
 	fileBytes, err := os.ReadFile(mergedFile)
 	if err != nil {
 		return fmt.Errorf("failed to read merged file: %w", err)
@@ -332,14 +327,10 @@ func (h *Handler) processChunkedUpload(ctx context.Context, session *ChunkedUplo
 		return fmt.Errorf("uploaded file is not a valid image")
 	}
 
-	// 获取存储配置ID
 	storageConfigID := storage.GetDefaultID()
-
-	// 生成唯一标识符 - 使用安全的扩展名
 	ext := getSafeFileExtension(mimeType)
 	identifier := fmt.Sprintf("%d-%s%s", time.Now().UnixNano(), fileHash[:16], ext)
 
-	// 保存到存储
 	if err := storage.GetDefault().SaveWithContext(ctx, identifier, bytes.NewReader(fileBytes)); err != nil {
 		return fmt.Errorf("failed to save file to storage: %w", err)
 	}

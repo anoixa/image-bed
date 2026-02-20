@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/config/db"
+	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/h2non/bimg"
@@ -39,7 +39,6 @@ func (t *ThumbnailTask) Execute() {
 		return
 	}
 
-	// 检查缩略图功能是否启用
 	if !settings.Enabled {
 		utils.LogIfDevf("[ThumbnailTask] Thumbnail disabled, skipping variant %d", t.VariantID)
 		return
@@ -140,7 +139,6 @@ func (t *ThumbnailTask) generateThumbnail(data []byte, targetWidth int) ([]byte,
 		return nil, 0, 0, fmt.Errorf("failed to get image size: %w", err)
 	}
 
-	// 如果图片宽度已经小于目标宽度，直接返回原图（但转换为 WebP）
 	if size.Width <= targetWidth {
 		webpData, err := img.Convert(bimg.WEBP)
 		if err != nil {
@@ -149,10 +147,8 @@ func (t *ThumbnailTask) generateThumbnail(data []byte, targetWidth int) ([]byte,
 		return webpData, size.Width, size.Height, nil
 	}
 
-	// 计算新高度，保持比例
 	newHeight := int(float64(targetWidth) * float64(size.Height) / float64(size.Width))
 
-	// 设置处理选项（使用 WebP 格式）
 	options := bimg.Options{
 		Width:   targetWidth,
 		Height:  newHeight,

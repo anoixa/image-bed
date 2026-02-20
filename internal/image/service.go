@@ -86,7 +86,7 @@ type DeleteResult struct {
 
 // ==================== Service 主结构 ====================
 
-// Service 图片服务（合并 Upload + Query + Delete）
+// Service 图片服务
 type Service struct {
 	repo           *images.Repository
 	variantRepo    *images.VariantRepository
@@ -122,9 +122,79 @@ func (s *Service) UploadSingle(
 	ctx context.Context,
 	userID uint,
 	fileHeader *multipart.FileHeader,
-	storageName string,
+	storageID uint,
 	isPublic bool,
 ) (*UploadResult, error) {
+	storageProvider, err := s.getStorageProviderByID(storageID)
+	if err != nil {
+		return nil, err
+	}
+
+	image, isDup, err := s.processAndSaveImage(ctx, userID, fileHeader, storageProvider, storageID, isPublic)
+	if err != nil {
+		return nil, err
+	}
+
+	return &UploadResult{
+		Image:       image,
+		IsDuplicate: isDup,
+		Identifier:  image.Identifier,
+		FileName:    image.OriginalName,
+		FileSize:    image.FileSize,
+		Links:       utils.BuildLinkFormats(image.Identifier),
+	}, nil
+}
+
+// UploadBatch 批量上传
+func (s *Service) UploadBatch(ctx context.Context, userID uint, files []*multipart.FileHeader, storageID uint, isPublic bool) ([]*UploadResult, error) {
+	storageProvider, err := s.getStorageProviderByID(storageID)
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]*UploadResult, len(files))
+	var resultsMutex sync.Mutex
+
+	g, ctx := errgroup.WithContext(ctx)
+
+	for i, fileHeader := range files {
+		i, fileHeader := i, fileHeader
+		g.Go(func() error {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+				image, _, err := s.processAndSaveImage(ctx, userID, fileHeader, storageProvider, storageID, isPublic)
+				result := &UploadResult{
+					FileName: fileHeader.Filename,
+				}
+
+				if err != nil {
+					result.Error = err.Error()
+				} else {
+					result.Image = image
+					result.Identifier = image.Identifier
+					result.FileSize = image.FileSize
+					result.Links = utils.BuildLinkFormats(image.Identifier)
+				}
+
+				resultsMutex.Lock()
+				results[i] = result
+				resultsMutex.Unlock()
+				return nil
+			}
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return nil, fmt.Errorf("batch upload failed: %w", err)
+	}
+
+	return results, nil
+}
+
+// UploadSingleWithName 单文件上传（使用存储名称，向后兼容）
+func (s *Service) UploadSingleWithName(ctx context.Context, userID uint, fileHeader *multipart.FileHeader, storageName string, isPublic bool) (*UploadResult, error) {
 	storageProvider, storageConfigID, err := s.getStorageProvider(storageName)
 	if err != nil {
 		return nil, err
@@ -145,8 +215,8 @@ func (s *Service) UploadSingle(
 	}, nil
 }
 
-// UploadBatch 批量上传
-func (s *Service) UploadBatch(
+// UploadBatchWithName 批量上传（使用存储名称，向后兼容）
+func (s *Service) UploadBatchWithName(
 	ctx context.Context,
 	userID uint,
 	files []*multipart.FileHeader,
@@ -200,14 +270,7 @@ func (s *Service) UploadBatch(
 }
 
 // processAndSaveImage 处理并保存图片
-func (s *Service) processAndSaveImage(
-	ctx context.Context,
-	userID uint,
-	fileHeader *multipart.FileHeader,
-	storageProvider storage.Provider,
-	storageConfigID uint,
-	isPublic bool,
-) (*models.Image, bool, error) {
+func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHeader *multipart.FileHeader, storageProvider storage.Provider, storageConfigID uint, isPublic bool) (*models.Image, bool, error) {
 	file, err := fileHeader.Open()
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to open file: %w", err)
@@ -288,7 +351,6 @@ func (s *Service) processAndSaveImage(
 		return nil, false, errors.New("the uploaded file type is not supported")
 	}
 
-	// 获取图片尺寸
 	if _, err := tempFile.Seek(0, io.SeekStart); err != nil {
 		return nil, false, fmt.Errorf("failed to seek temp file: %w", err)
 	}
@@ -340,6 +402,25 @@ func (s *Service) getStorageProvider(storageName string) (storage.Provider, uint
 	return provider, storage.GetDefaultID(), nil
 }
 
+// getStorageProviderByID 根据存储ID获取存储提供者
+func (s *Service) getStorageProviderByID(storageID uint) (storage.Provider, error) {
+	// storageID 为 0 表示使用默认存储
+	if storageID == 0 {
+		provider := storage.GetDefault()
+		if provider == nil {
+			return nil, errors.New("no default storage configured")
+		}
+		return provider, nil
+	}
+
+	// 根据 ID 获取存储提供者
+	provider, err := storage.GetByID(storageID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get storage provider by ID %d: %w", storageID, err)
+	}
+	return provider, nil
+}
+
 func (s *Service) warmCache(image *models.Image) {
 	if s.cacheHelper == nil {
 		return
@@ -350,9 +431,7 @@ func (s *Service) warmCache(image *models.Image) {
 	}
 }
 
-// ==================== Query 方法 ====================
-
-// GetImageMetadata 获取图片元数据（带缓存和 singleflight）
+// GetImageMetadata 获取图片元数据
 func (s *Service) GetImageMetadata(ctx context.Context, identifier string) (*models.Image, error) {
 	var image models.Image
 
@@ -408,11 +487,7 @@ func (s *Service) CheckImagePermission(image *models.Image, userID uint) bool {
 }
 
 // GetImageWithNegotiation 获取图片（支持格式协商）
-func (s *Service) GetImageWithNegotiation(
-	ctx context.Context,
-	image *models.Image,
-	acceptHeader string,
-) (*VariantResult, error) {
+func (s *Service) GetImageWithNegotiation(ctx context.Context, image *models.Image, acceptHeader string) (*VariantResult, error) {
 	return s.variantService.SelectBestVariant(ctx, image, acceptHeader)
 }
 
@@ -441,15 +516,7 @@ func (s *Service) CacheImageData(ctx context.Context, identifier string, data []
 }
 
 // ListImages 获取图片列表
-func (s *Service) ListImages(
-	storageType string,
-	identifier string,
-	search string,
-	albumID *uint,
-	page int,
-	limit int,
-	userID int,
-) (*ListImagesResult, error) {
+func (s *Service) ListImages(storageType string, identifier string, search string, albumID *uint, page int, limit int, userID int) (*ListImagesResult, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -518,8 +585,6 @@ func isTransientError(err error) bool {
 	}
 	return false
 }
-
-// ==================== Delete 方法 ====================
 
 // DeleteSingle 删除单张图片
 func (s *Service) DeleteSingle(ctx context.Context, identifier string, userID uint) (*DeleteResult, error) {
@@ -601,8 +666,6 @@ func (s *Service) ClearImageCache(ctx context.Context, identifier string) error 
 	return nil
 }
 
-// ==================== 内部辅助函数 ====================
-
 func deleteVariantsForImage(ctx context.Context, variantRepo *images.VariantRepository, cacheHelper *cache.Helper, img *models.Image) {
 	// 获取所有变体
 	variants, err := variantRepo.GetVariantsByImageID(img.ID)
@@ -613,17 +676,14 @@ func deleteVariantsForImage(ctx context.Context, variantRepo *images.VariantRepo
 
 	// 删除每个变体的文件和缓存
 	for _, variant := range variants {
-		// 跳过未完成的变体
 		if variant.Identifier == "" || variant.Status != models.VariantStatusCompleted {
 			continue
 		}
 
-		// 删除文件
 		if err := storage.GetDefault().DeleteWithContext(ctx, variant.Identifier); err != nil {
 			log.Printf("Failed to delete variant file %s: %v", variant.Identifier, err)
 		}
 
-		// 清除变体缓存
 		if err := cacheHelper.DeleteCachedImageData(ctx, variant.Identifier); err != nil {
 			log.Printf("Failed to delete cache for variant %s: %v", utils.SanitizeLogMessage(variant.Identifier), err)
 		}
@@ -644,7 +704,7 @@ func clearImageCache(ctx context.Context, cacheHelper *cache.Helper, identifier 
 	}
 }
 
-// ServeImageData 提供图片数据（用于 Handler）
+// ServeImageData 提供图片数据
 func ServeImageData(w http.ResponseWriter, data []byte, contentType string) {
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Cache-Control", "public, max-age=86400")

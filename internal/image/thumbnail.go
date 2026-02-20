@@ -7,16 +7,14 @@ import (
 	"fmt"
 	"time"
 
+	config "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
-	config "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/internal/worker"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
 	"gorm.io/gorm"
 )
-
-// ==================== ThumbnailService 缩略图服务 ====================
 
 // ThumbnailResult 缩略图结果
 type ThumbnailResult struct {
@@ -90,13 +88,11 @@ func (s *ThumbnailService) TriggerGeneration(image *models.Image, width int) {
 		settings = config.DefaultThumbnailSettings()
 	}
 
-	// 检查缩略图是否启用
+	// 检查图片
 	if !settings.Enabled {
 		utils.LogIfDevf("[Thumbnail] Thumbnail generation disabled")
 		return
 	}
-
-	// 检查是否为有效尺寸
 	if !models.IsValidThumbnailWidth(width, settings.Sizes) {
 		utils.LogIfDevf("[Thumbnail] Invalid thumbnail width: %d", width)
 		return
@@ -111,34 +107,39 @@ func (s *ThumbnailService) TriggerGeneration(image *models.Image, width int) {
 		return
 	}
 
-	// 只有 pending 状态才提交任务
 	if variant.Status != models.VariantStatusPending {
 		utils.LogIfDevf("[Thumbnail] Variant %d status=%s, skip submission", variant.ID, variant.Status)
 		return
 	}
 
-	// 检查重试次数
 	if variant.RetryCount >= settings.MaxRetries {
 		utils.LogIfDevf("[Thumbnail] Variant %d reached max retries", variant.ID)
 		return
 	}
 
-	// 生成缩略图标识
 	thumbnailIdentifier := s.GenerateThumbnailIdentifier(image.Identifier, width)
 
 	// 提交任务
-	task := &worker.ThumbnailTask{
-		VariantID:        variant.ID,
-		ImageID:          image.ID,
-		SourceIdentifier: image.Identifier,
-		TargetIdentifier: thumbnailIdentifier,
-		TargetWidth:      width,
-		ConfigManager:    s.configManager,
-		VariantRepo:      s.variantRepo,
-		Storage:          s.storage,
+	pool := worker.GetGlobalPool()
+	if pool == nil {
+		return
 	}
 
-	if !worker.TrySubmit(task, 3, 100*time.Millisecond) {
+	ok := pool.Submit(func() {
+		task := &worker.ThumbnailTask{
+			VariantID:        variant.ID,
+			ImageID:          image.ID,
+			SourceIdentifier: image.Identifier,
+			TargetIdentifier: thumbnailIdentifier,
+			TargetWidth:      width,
+			ConfigManager:    s.configManager,
+			VariantRepo:      s.variantRepo,
+			Storage:          s.storage,
+		}
+		task.Execute()
+	})
+
+	if !ok {
 		utils.LogIfDevf("[Thumbnail] Failed to submit task for %s", image.Identifier)
 	}
 }
@@ -159,7 +160,6 @@ func (s *ThumbnailService) TriggerGenerationForAllSizes(image *models.Image) {
 }
 
 // EnsureThumbnail 确保缩略图存在，如果不存在则触发生成
-// 返回 true 表示缩略图已存在，false 表示已触发生成
 func (s *ThumbnailService) EnsureThumbnail(ctx context.Context, image *models.Image, width int) (*ThumbnailResult, bool, error) {
 	result, err := s.GetThumbnail(ctx, image, width)
 	if err != nil {
@@ -177,7 +177,6 @@ func (s *ThumbnailService) EnsureThumbnail(ctx context.Context, image *models.Im
 
 // GenerateThumbnailSync 同步生成缩略图
 func (s *ThumbnailService) GenerateThumbnailSync(ctx context.Context, image *models.Image, width int) (*ThumbnailResult, error) {
-	// 读取原图数据
 	imageData, err := s.getImageData(ctx, image.Identifier)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get image data: %w", err)
@@ -188,11 +187,8 @@ func (s *ThumbnailService) GenerateThumbnailSync(ctx context.Context, image *mod
 	if err != nil {
 		return nil, fmt.Errorf("failed to resize image: %w", err)
 	}
-
-	// 生成存储标识
 	thumbnailIdentifier := s.GenerateThumbnailIdentifier(image.Identifier, width)
 
-	// 存储缩略图
 	if err := s.storage.SaveWithContext(ctx, thumbnailIdentifier, bytes.NewReader(thumbnailData)); err != nil {
 		return nil, fmt.Errorf("failed to store thumbnail: %w", err)
 	}
@@ -243,8 +239,6 @@ func (s *ThumbnailService) GetThumbnailURL(identifier string, width int) string 
 	return s.GenerateThumbnailIdentifier(identifier, width)
 }
 
-// ==================== ThumbnailScanner 缩略图扫描器 ====================
-
 // ThumbnailScanner 缩略图预生成扫描器
 type ThumbnailScanner struct {
 	db            *gorm.DB
@@ -292,10 +286,8 @@ func (s *ThumbnailScanner) Start() error {
 	s.isRunning = true
 	s.ticker = time.NewTicker(settings.Interval)
 
-	// 立即执行一次
 	go s.runOnce()
 
-	// 定期执行
 	go s.runLoop()
 
 	return nil
@@ -342,7 +334,6 @@ func (s *ThumbnailScanner) runOnce() {
 	skipped := 0
 	errors := 0
 
-	// 查询需要处理的图片
 	images, err := s.queryImagesForThumbnail(settings)
 	if err != nil {
 		utils.LogIfDevf("[ThumbnailScanner] Failed to query images: %v", err)
@@ -355,7 +346,7 @@ func (s *ThumbnailScanner) runOnce() {
 		return
 	}
 
-	// 批量检查所有图片的缩略图生成需求（使用单次查询）
+	// 批量检查所有图片的缩略图生成
 	imageTasks, err := s.batchCheckNeedsGeneration(ctx, images, settings)
 	if err != nil {
 		utils.LogIfDevf("[ThumbnailScanner] Error batch checking generation needs: %v", err)
@@ -369,7 +360,6 @@ func (s *ThumbnailScanner) runOnce() {
 		return
 	}
 
-	// 处理每个需要生成缩略图的图片
 	for _, task := range imageTasks {
 		select {
 		case <-s.stopChan:
@@ -391,7 +381,6 @@ func (s *ThumbnailScanner) runOnce() {
 
 		processed++
 
-		// 小延迟避免过载
 		time.Sleep(100 * time.Millisecond)
 	}
 
@@ -423,13 +412,11 @@ func (s *ThumbnailScanner) batchCheckNeedsGeneration(ctx context.Context, images
 		formats = append(formats, models.GetThumbnailFormat(size.Width))
 	}
 
-	// 构建所有图片ID列表
 	imageIDs := make([]uint, 0, len(images))
 	for i := range images {
 		imageIDs = append(imageIDs, images[i].ID)
 	}
 
-	// 批量查询所有变体状态（单次查询）
 	variantStatus, err := s.thumbnailSvc.variantRepo.GetMissingThumbnailVariants(imageIDs, formats)
 	if err != nil {
 		return nil, err
@@ -460,7 +447,7 @@ func (s *ThumbnailScanner) batchCheckNeedsGeneration(ctx context.Context, images
 	return tasks, nil
 }
 
-// buildAllTasks 为所有图片构建任务（当配置获取失败时使用）
+// buildAllTasks 为所有图片构建任务
 func (s *ThumbnailScanner) buildAllTasks(images []models.Image, settings *config.ThumbnailSettings) []ImageTask {
 	// 尝试获取默认尺寸
 	var sizes []models.ThumbnailSize
@@ -524,7 +511,6 @@ func (s *ThumbnailScanner) submitThumbnailTask(ctx context.Context, image *model
 	}
 
 	submitted := 0
-	// 只为缺失的尺寸提交任务
 	for _, format := range missingFormats {
 		// 获取对应的尺寸配置
 		var targetWidth int
@@ -538,25 +524,30 @@ func (s *ThumbnailScanner) submitThumbnailTask(ctx context.Context, image *model
 			continue
 		}
 
-		// 创建待处理记录（如果存在则返回现有记录）
 		variant, err := s.thumbnailSvc.variantRepo.UpsertPending(image.ID, format)
 		if err != nil {
 			return fmt.Errorf("failed to create variant record: %w", err)
 		}
 
-		// 创建缩略图任务
-		task := &worker.ThumbnailTask{
-			VariantID:        variant.ID,
-			ImageID:          image.ID,
-			SourceIdentifier: image.Identifier,
-			TargetIdentifier: s.thumbnailSvc.GenerateThumbnailIdentifier(image.Identifier, targetWidth),
-			TargetWidth:      targetWidth,
-			ConfigManager:    s.configManager,
-			VariantRepo:      s.thumbnailSvc.variantRepo,
-			Storage:          s.thumbnailSvc.storage,
+		pool := worker.GetGlobalPool()
+		if pool == nil {
+			continue
 		}
 
-		ok := worker.SubmitBlocking(task, 5*time.Second)
+		thumbnailIdentifier := s.thumbnailSvc.GenerateThumbnailIdentifier(image.Identifier, targetWidth)
+		ok := pool.Submit(func() {
+			task := &worker.ThumbnailTask{
+				VariantID:        variant.ID,
+				ImageID:          image.ID,
+				SourceIdentifier: image.Identifier,
+				TargetIdentifier: thumbnailIdentifier,
+				TargetWidth:      targetWidth,
+				ConfigManager:    s.configManager,
+				VariantRepo:      s.thumbnailSvc.variantRepo,
+				Storage:          s.thumbnailSvc.storage,
+			}
+			task.Execute()
+		})
 		if !ok {
 			utils.LogIfDevf("[ThumbnailScanner] Failed to submit task for variant %d (image %d, format %s)",
 				variant.ID, image.ID, format)

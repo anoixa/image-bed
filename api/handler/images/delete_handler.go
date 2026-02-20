@@ -38,7 +38,6 @@ func (h *Handler) DeleteImages(c *gin.Context) {
 		return
 	}
 
-	// 获取图片信息以便级联删除变体
 	ctx := c.Request.Context()
 	var imagesToDelete []*models.Image
 	for _, identifier := range requestBody.ImageID {
@@ -85,7 +84,6 @@ func (h *Handler) DeleteSingleImage(c *gin.Context) {
 		return
 	}
 
-	// 获取图片信息以便级联删除变体
 	ctx := c.Request.Context()
 	img, err := h.repo.GetImageByIdentifier(imageIdentifier)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -103,7 +101,6 @@ func (h *Handler) DeleteSingleImage(c *gin.Context) {
 		return
 	}
 
-	// 级联删除变体
 	if img != nil && img.UserID == userID {
 		h.deleteVariantsForImage(ctx, img)
 	}
@@ -130,12 +127,10 @@ func (h *Handler) deleteVariantsForImage(ctx context.Context, img *models.Image)
 
 	// 删除每个变体的文件和缓存
 	for _, variant := range variants {
-		// 跳过未完成的变体（没有实际文件）
 		if variant.Identifier == "" || variant.Status != models.VariantStatusCompleted {
 			continue
 		}
 
-		// 删除文件
 		if err := storage.GetDefault().DeleteWithContext(ctx, variant.Identifier); err != nil {
 			log.Printf("Failed to delete variant file %s: %v", variant.Identifier, err)
 		}
@@ -146,7 +141,6 @@ func (h *Handler) deleteVariantsForImage(ctx context.Context, img *models.Image)
 		}
 	}
 
-	// 删除数据库中的变体记录
 	if err := h.variantRepo.DeleteByImageID(img.ID); err != nil {
 		log.Printf("Failed to delete variant records for image %d: %v", img.ID, err)
 	}
