@@ -5,6 +5,7 @@ import (
 
 	"github.com/anoixa/image-bed/cache/memory"
 	"github.com/anoixa/image-bed/cache/redis"
+	"github.com/anoixa/image-bed/config"
 )
 
 // providers 存储所有配置的缓存提供者
@@ -116,4 +117,38 @@ func createProvider(cfg CacheConfig) (Provider, error) {
 	default:
 		return nil, fmt.Errorf("unsupported cache type: %s", cfg.Type)
 	}
+}
+
+// InitFromConfig 从静态配置初始化缓存
+func InitFromConfig(cfg *config.Config) error {
+	var cacheCfg CacheConfig
+
+	switch cfg.CacheType {
+	case "redis":
+		cacheCfg = CacheConfig{
+			ID:       0,
+			Name:     "default-redis",
+			Type:     "redis",
+			IsDefault: true,
+			Address:  cfg.CacheRedisAddr,
+			Password: cfg.CacheRedisPassword,
+			DB:       cfg.CacheRedisDB,
+		}
+	case "memory", "":
+		// 默认使用内存缓存
+		cacheCfg = CacheConfig{
+			ID:          0,
+			Name:        "default-memory",
+			Type:        "memory",
+			IsDefault:   true,
+			NumCounters: 1000000,
+			MaxCost:     1073741824, // 1GB
+			BufferItems: 64,
+			Metrics:     true,
+		}
+	default:
+		return fmt.Errorf("unsupported cache type from config: %s", cfg.CacheType)
+	}
+
+	return InitCache([]CacheConfig{cacheCfg})
 }
