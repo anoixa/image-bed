@@ -13,6 +13,7 @@ import (
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/configs"
 	cryptoservice "github.com/anoixa/image-bed/internal/services/crypto"
+	"github.com/anoixa/image-bed/storage"
 	cryptoutils "github.com/anoixa/image-bed/utils/crypto"
 	"gorm.io/gorm"
 )
@@ -48,7 +49,6 @@ func NewManager(db *gorm.DB, dataPath string) *Manager {
 }
 
 // NewManagerWithCache 创建带缓存的配置管理器
-// 简化版本：不再使用装饰器模式，缓存逻辑由调用者处理
 func NewManagerWithCache(db *gorm.DB, dataPath string, cacheProvider cache.Provider, cacheTTL time.Duration) *Manager {
 	if cacheTTL == 0 {
 		cacheTTL = configs.DefaultCacheTTL
@@ -65,7 +65,7 @@ func NewManagerWithCache(db *gorm.DB, dataPath string, cacheProvider cache.Provi
 	}
 }
 
-// SetCache 设置缓存（简化版本，仅存储缓存提供者供外部使用）
+// SetCache 设置缓存
 func (m *Manager) SetCache(cacheProvider cache.Provider, cacheTTL time.Duration) {
 	if cacheProvider == nil {
 		return
@@ -621,3 +621,60 @@ func getStringFromMap(m map[string]interface{}, key, defaultValue string) string
 func BoolPtr(b bool) *bool {
 	return &b
 }
+
+// GetStorageConfigs 获取所有启用的存储配置
+func (m *Manager) GetStorageConfigs(ctx context.Context) ([]storage.StorageConfig, error) {
+	configs, err := m.repo.List(ctx, models.ConfigCategoryStorage, true)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list storage configs: %w", err)
+	}
+
+	result := make([]storage.StorageConfig, 0, len(configs))
+	for _, cfg := range configs {
+		// 解密配置
+		configMap, err := m.DecryptConfig(cfg.ConfigJSON)
+		if err != nil {
+			log.Printf("[ConfigManager] Failed to decrypt storage config %s: %v", cfg.Key, err)
+			continue
+		}
+
+		storageCfg := storage.StorageConfig{
+			ID:        cfg.ID,
+			Name:      cfg.Name,
+			IsDefault: cfg.IsDefault,
+		}
+
+		// 根据类型解析配置
+		storageType := getStringFromMap(configMap, "type", "local")
+		storageCfg.Type = storageType
+
+		switch storageType {
+		case "local":
+			storageCfg.LocalPath = getStringFromMap(configMap, "local_path", "./data/upload")
+		case "minio":
+			storageCfg.Endpoint = getStringFromMap(configMap, "endpoint", "")
+			storageCfg.AccessKeyID = getStringFromMap(configMap, "access_key_id", "")
+			storageCfg.SecretAccessKey = getStringFromMap(configMap, "secret_access_key", "")
+			storageCfg.BucketName = getStringFromMap(configMap, "bucket_name", "")
+			// UseSSL 处理
+			if val, ok := configMap["use_ssl"]; ok {
+				switch v := val.(type) {
+				case bool:
+					storageCfg.UseSSL = v
+				case string:
+					storageCfg.UseSSL = v == "true" || v == "1" || v == "yes"
+				}
+			} else {
+				storageCfg.UseSSL = true
+			}
+		default:
+			log.Printf("[ConfigManager] Unknown storage type: %s", storageType)
+			continue
+		}
+
+		result = append(result, storageCfg)
+	}
+
+	return result, nil
+}
+
