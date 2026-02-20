@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -71,6 +72,13 @@ func InitDependencies(cfg *config.Config) (*Dependencies, error) {
 		KeysRepo:     keys.NewRepository(db),
 	}
 
+	// 从配置文件初始化缓存
+	if err := cache.InitFromConfig(cfg); err != nil {
+		dbFactory.Close()
+		return nil, fmt.Errorf("failed to initialize cache: %w", err)
+	}
+	log.Println("[Dependencies] Cache initialized from config")
+
 	// 初始化配置管理器
 	configManager := configSvc.NewManager(db, "./data")
 	if err := configManager.Initialize(); err != nil {
@@ -78,11 +86,23 @@ func InitDependencies(cfg *config.Config) (*Dependencies, error) {
 		return nil, err
 	}
 
-	// 设置缓存
+	// 设置缓存到配置管理器
 	cacheProvider := cache.GetDefault()
 	if cacheProvider != nil {
 		configManager.SetCache(cacheProvider, 0)
 		log.Println("[Dependencies] Config cache enabled")
+	}
+
+	// 初始化存储层
+	storageConfigs, err := configManager.GetStorageConfigs(context.Background())
+	if err == nil && len(storageConfigs) > 0 {
+		if err := storage.InitStorage(storageConfigs); err != nil {
+			log.Printf("[Dependencies] Warning: Failed to init storage: %v", err)
+		} else {
+			log.Println("[Dependencies] Storage initialized from database configs")
+		}
+	} else if err != nil {
+		log.Printf("[Dependencies] Warning: Failed to get storage configs: %v", err)
 	}
 
 	// 初始化变体仓库和转换器
