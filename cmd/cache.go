@@ -6,8 +6,8 @@ import (
 	"log"
 	"strings"
 
+	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
-	"github.com/anoixa/image-bed/internal/app"
 	"github.com/spf13/cobra"
 )
 
@@ -46,20 +46,13 @@ func init() {
 // runCacheClear 执行缓存清理
 func runCacheClear(imageOnly, all bool, pattern string) error {
 	config.InitConfig()
-	cfg := config.Get()
 
-	container := app.NewContainer(cfg)
-	if err := container.Init(); err != nil {
-		return fmt.Errorf("failed to initialize container: %w", err)
-	}
-	defer container.Close()
-
-	cacheFactory := container.GetCacheFactory()
-	if cacheFactory == nil {
-		return fmt.Errorf("cache factory not initialized")
+	// 初始化缓存（使用默认内存缓存）
+	if err := cache.InitDefault(); err != nil {
+		return fmt.Errorf("failed to initialize cache: %w", err)
 	}
 
-	provider := cacheFactory.GetProvider()
+	provider := cache.GetDefault()
 	if provider == nil {
 		return fmt.Errorf("cache provider not initialized")
 	}
@@ -110,7 +103,6 @@ func clearAllCache(ctx context.Context, provider interface{}) error {
 		return p.ClearAll(ctx)
 	}
 
-	// 不支持批量清理，尝试清理已知缓存键
 	log.Println("Cache provider does not support bulk clear, attempting to clear known keys...")
 	return clearImageCache(ctx, provider)
 }
@@ -126,7 +118,6 @@ func clearCacheByPattern(ctx context.Context, provider interface{}, pattern stri
 		return p.ClearByPattern(ctx, pattern)
 	}
 
-	// 不支持模式匹配，回退到图片缓存清理
 	log.Printf("Cache provider does not support pattern matching, falling back to image cache clear...")
 	return clearImageCache(ctx, provider)
 }
@@ -141,7 +132,6 @@ func clearImageCache(ctx context.Context, provider interface{}) error {
 		"img:",
 	}
 
-	// 尝试使用 Delete 方法清理
 	type Deleter interface {
 		Delete(ctx context.Context, key string) error
 	}
@@ -151,13 +141,10 @@ func clearImageCache(ctx context.Context, provider interface{}) error {
 		return fmt.Errorf("cache provider does not support delete operation")
 	}
 
-	// 尝试清理各种可能的图片缓存键
 	for _, prefix := range imageCachePrefixes {
-		// 尝试清理一些常见的缓存键
 		keys := generateImageCacheKeys(prefix)
 		for _, key := range keys {
 			if err := deleter.Delete(ctx, key); err != nil {
-				// 忽略删除不存在的键的错误
 				if !isKeyNotFoundError(err) {
 					log.Printf("Warning: failed to delete cache key %s: %v", key, err)
 				}
@@ -165,7 +152,6 @@ func clearImageCache(ctx context.Context, provider interface{}) error {
 		}
 	}
 
-	// 尝试使用特定的图片缓存清理接口
 	type ImageCacheClear interface {
 		ClearImageCache(ctx context.Context) error
 	}
@@ -179,10 +165,8 @@ func clearImageCache(ctx context.Context, provider interface{}) error {
 	return nil
 }
 
-// generateImageCacheKeys 生成一些可能的图片缓存键（用于测试和示例）
+// generateImageCacheKeys 生成一些可能的图片缓存键
 func generateImageCacheKeys(prefix string) []string {
-	// 由于无法知道所有缓存键，这里只是示例
-	// 实际应用中可能需要遍历数据库获取所有图片ID
 	return []string{
 		prefix + "list",
 		prefix + "all",
@@ -194,7 +178,6 @@ func isKeyNotFoundError(err error) bool {
 	if err == nil {
 		return false
 	}
-	// 常见的键不存在错误信息
 	notFoundPatterns := []string{
 		"not found",
 		"does not exist",

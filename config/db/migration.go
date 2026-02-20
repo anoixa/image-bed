@@ -8,7 +8,6 @@ import (
 )
 
 // MigrateFromLegacy 从旧配置（config.yaml）迁移到数据库
-// 注意：这是为了向后兼容，新部署可以直接使用 CreateDefaultConfigs
 func (m *Manager) MigrateFromLegacy(legacyStorage, legacyCache map[string]interface{}) error {
 	ctx := context.Background()
 
@@ -18,13 +17,11 @@ func (m *Manager) MigrateFromLegacy(legacyStorage, legacyCache map[string]interf
 		return err
 	}
 
-	// 检查是否已有缓存配置
 	cacheCount, err := m.repo.CountByCategory(ctx, models.ConfigCategoryCache)
 	if err != nil {
 		return err
 	}
 
-	// 只有当没有配置时才迁移
 	if storageCount == 0 && len(legacyStorage) > 0 {
 		if err := m.migrateStorage(ctx, legacyStorage); err != nil {
 			log.Printf("[ConfigMigration] Failed to migrate storage config: %v", err)
@@ -49,15 +46,7 @@ func (m *Manager) MigrateJWTFromLegacy(legacySecret, legacyExpiresIn, legacyRefr
 	if err != nil {
 		return err
 	}
-
-	// 如果已有 JWT 配置，则跳过
-	if jwtCount > 0 {
-		return nil
-	}
-
-	// 如果配置文件中没有设置，则使用默认值
-	if legacySecret == "" {
-		// 不迁移，让系统自动生成默认配置
+	if jwtCount > 0 || legacySecret == "" {
 		return nil
 	}
 
@@ -218,21 +207,17 @@ func (m *Manager) CreateDefaultConfigs() error {
 		return err
 	}
 
-	// 创建默认存储配置
+	// 创建默认配置
 	if storageCount == 0 {
 		if err := m.createDefaultStorage(ctx); err != nil {
 			log.Printf("[ConfigMigration] Failed to create default storage config: %v", err)
 		}
 	}
-
-	// 创建默认缓存配置
 	if cacheCount == 0 {
 		if err := m.createDefaultCache(ctx); err != nil {
 			log.Printf("[ConfigMigration] Failed to create default cache config: %v", err)
 		}
 	}
-
-	// 创建默认 JWT 配置
 	if jwtCount == 0 {
 		if err := m.EnsureDefaultJWTConfig(ctx); err != nil {
 			log.Printf("[ConfigMigration] Failed to create default JWT config: %v", err)
@@ -328,5 +313,3 @@ func getInt64FromMap(m map[string]interface{}, key string, defaultVal int64) int
 		return defaultVal
 	}
 }
-
-// 注意：getStringFromMap 和 BoolPtr 函数定义在 manager.go 中

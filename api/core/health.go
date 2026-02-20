@@ -2,24 +2,56 @@ package core
 
 import (
 	"context"
+	"database/sql"
+	"net/http"
+	"time"
 
 	"github.com/anoixa/image-bed/cache"
-	"github.com/anoixa/image-bed/database"
+	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/storage"
+	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
-func checkDatabaseHealth(provider database.Provider) string {
-	if provider == nil {
-		return "not initialized"
-	}
+var startTime = time.Now()
 
-	db := provider.DB()
-	if db == nil {
-		return "not initialized"
+// HealthHandler 健康检查处理器
+type HealthHandler struct {
+	db *gorm.DB
+}
+
+// NewHealthHandler 创建健康检查处理器
+func NewHealthHandler(db *gorm.DB) *HealthHandler {
+	return &HealthHandler{db: db}
+}
+
+// Handle 处理健康检查请求
+func (h *HealthHandler) Handle(context *gin.Context) {
+	sqlDB, _ := h.db.DB()
+	health := gin.H{
+		"status":  "ok",
+		"uptime":  time.Since(startTime).Round(time.Second).String(),
+		"version": config.Version,
+		"commit":  config.CommitHash,
+		"checks": gin.H{
+			"database": checkDatabaseHealth(sqlDB),
+			"cache":    checkCacheHealth(),
+			"storage":  checkStorageHealth(),
+		},
 	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		return "error: " + err.Error()
+	httpStatus := http.StatusOK
+	for _, checkResult := range health["checks"].(gin.H) {
+		if result, ok := checkResult.(string); ok && result != "ok" {
+			httpStatus = http.StatusServiceUnavailable
+			break
+		}
+	}
+	context.JSON(httpStatus, health)
+}
+
+func checkDatabaseHealth(sqlDB *sql.DB) string {
+	if sqlDB == nil {
+		return "not initialized"
 	}
 	if err := sqlDB.Ping(); err != nil {
 		return "unavailable: " + err.Error()
@@ -27,22 +59,15 @@ func checkDatabaseHealth(provider database.Provider) string {
 	return "ok"
 }
 
-func checkCacheHealth(cacheFactory *cache.Factory) string {
-	if cacheFactory == nil {
-		return "not initialized"
-	}
-	if cacheFactory.GetProvider() != nil {
+func checkCacheHealth() string {
+	if cache.GetDefault() != nil {
 		return "ok"
 	}
 	return "not initialized"
 }
 
-func checkStorageHealth(storageFactory *storage.Factory) string {
-	if storageFactory == nil {
-		return "not initialized"
-	}
-
-	provider := storageFactory.GetDefault()
+func checkStorageHealth() string {
+	provider := storage.GetDefault()
 	if provider == nil {
 		return "error: no default storage provider"
 	}

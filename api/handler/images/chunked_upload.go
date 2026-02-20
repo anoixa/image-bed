@@ -18,6 +18,7 @@ import (
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/database/models"
+	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/anoixa/image-bed/utils/validator"
 	"github.com/gin-gonic/gin"
@@ -176,14 +177,12 @@ func (h *Handler) UploadChunk(c *gin.Context) {
 		return
 	}
 
-	// 获取上传的文件
 	file, err := c.FormFile("chunk")
 	if err != nil {
 		common.RespondError(c, http.StatusBadRequest, "Chunk file is required")
 		return
 	}
 
-	// 验证分片大小
 	if file.Size > session.ChunkSize+1024 { // 允许 1KB 误差
 		common.RespondError(c, http.StatusBadRequest, "Chunk size exceeds expected size")
 		return
@@ -245,7 +244,6 @@ func (h *Handler) CompleteChunkedUpload(c *gin.Context) {
 		return
 	}
 
-	// 检查是否所有分片都已上传
 	if len(session.ReceivedChunks) != session.TotalChunks {
 		missingChunks := make([]int, 0)
 		for i := 0; i < session.TotalChunks; i++ {
@@ -264,7 +262,6 @@ func (h *Handler) CompleteChunkedUpload(c *gin.Context) {
 	// 异步合并分片并保存
 	go func() {
 		defer func() {
-			// 处理完成后从map中移除
 			sessionsMu.Lock()
 			delete(sessions, req.SessionID)
 			sessionsMu.Unlock()
@@ -320,7 +317,6 @@ func (h *Handler) processChunkedUpload(ctx context.Context, session *ChunkedUplo
 		return fmt.Errorf("file hash mismatch: expected %s, got %s", session.FileHash, fileHash)
 	}
 
-	// 读取文件进行验证
 	fileBytes, err := os.ReadFile(mergedFile)
 	if err != nil {
 		return fmt.Errorf("failed to read merged file: %w", err)
@@ -331,21 +327,11 @@ func (h *Handler) processChunkedUpload(ctx context.Context, session *ChunkedUplo
 		return fmt.Errorf("uploaded file is not a valid image")
 	}
 
-	// 获取存储提供者
-	storageProvider, err := h.storageFactory.Get("")
-	if err != nil {
-		return fmt.Errorf("failed to get storage: %w", err)
-	}
-
-	// 获取存储配置ID
-	storageConfigID := h.storageFactory.GetDefaultID()
-
-	// 生成唯一标识符 - 使用安全的扩展名
+	storageConfigID := storage.GetDefaultID()
 	ext := getSafeFileExtension(mimeType)
 	identifier := fmt.Sprintf("%d-%s%s", time.Now().UnixNano(), fileHash[:16], ext)
 
-	// 保存到存储
-	if err := storageProvider.SaveWithContext(ctx, identifier, bytes.NewReader(fileBytes)); err != nil {
+	if err := storage.GetDefault().SaveWithContext(ctx, identifier, bytes.NewReader(fileBytes)); err != nil {
 		return fmt.Errorf("failed to save file to storage: %w", err)
 	}
 
@@ -361,7 +347,7 @@ func (h *Handler) processChunkedUpload(ctx context.Context, session *ChunkedUplo
 	}
 
 	if err := h.repo.SaveImage(newImage); err != nil {
-		storageProvider.DeleteWithContext(ctx, identifier)
+		storage.GetDefault().DeleteWithContext(ctx, identifier)
 		return fmt.Errorf("failed to save image metadata: %w", err)
 	}
 
@@ -398,20 +384,30 @@ func (h *Handler) GetChunkedUploadStatus(c *gin.Context) {
 		"total_chunks":    session.TotalChunks,
 		"received_chunks": len(session.ReceivedChunks),
 		"received_list":   receivedChunks,
+		"is_processing":   session.IsProcessing,
 	})
 }
 
-// CleanupExpiredSessions 清理过期会话
+// CleanupExpiredSessions 清理过期的分片上传会话
 func CleanupExpiredSessions() {
 	sessionsMu.Lock()
 	defer sessionsMu.Unlock()
 
 	now := time.Now()
-	for id, session := range sessions {
+	expiredCount := 0
+
+	for sessionID, session := range sessions {
 		if now.Sub(session.CreatedAt) > UploadSessionExpiry {
-			delete(sessions, id)
-			os.RemoveAll(session.TempDir)
-			log.Printf("Cleaned up expired upload session: %s", id)
+			// 清理临时文件
+			if session.TempDir != "" {
+				os.RemoveAll(session.TempDir)
+			}
+			delete(sessions, sessionID)
+			expiredCount++
 		}
+	}
+
+	if expiredCount > 0 {
+		log.Printf("[Cleanup] Cleaned up %d expired upload sessions", expiredCount)
 	}
 }

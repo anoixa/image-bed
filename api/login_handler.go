@@ -6,7 +6,7 @@ import (
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/config"
-	"github.com/anoixa/image-bed/internal/services/auth"
+	"github.com/anoixa/image-bed/internal/auth"
 
 	"github.com/gin-gonic/gin"
 )
@@ -23,7 +23,7 @@ func NewLoginHandlerWithService(loginService *auth.LoginService) *LoginHandler {
 	}
 }
 
-// SetLoginService 设置登录服务（用于依赖注入）
+// SetLoginService 设置登录服务
 func (h *LoginHandler) SetLoginService(loginService *auth.LoginService) {
 	h.loginService = loginService
 }
@@ -58,7 +58,6 @@ func (h *LoginHandler) LoginHandlerFunc(context *gin.Context) {
 	// 执行登录
 	result, err := h.loginService.Login(req.Username, req.Password)
 	if err != nil {
-		// 检查是否是凭据错误
 		if err.Error() == "invalid credentials" {
 			common.RespondError(context, http.StatusUnauthorized, "Invalid credentials")
 			return

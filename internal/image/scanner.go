@@ -8,15 +8,108 @@ import (
 	"github.com/anoixa/image-bed/utils"
 )
 
-// ThumbnailServiceAccessor 缩略图服务访问接口
+// ==================== RetryScanner 重试扫描器 ====================
+
+// RetryScanner 重试扫描器
+type RetryScanner struct {
+	variantRepo *images.VariantRepository
+	converter   *Converter
+	interval    time.Duration
+	batchSize   int
+	stopCh      chan struct{}
+}
+
+// NewRetryScanner 创建重试扫描器
+func NewRetryScanner(repo *images.VariantRepository, converter *Converter, interval time.Duration) *RetryScanner {
+	return &RetryScanner{
+		variantRepo: repo,
+		converter:   converter,
+		interval:    interval,
+		batchSize:   100,
+		stopCh:      make(chan struct{}),
+	}
+}
+
+// Start 启动扫描器
+func (s *RetryScanner) Start() {
+	ticker := time.NewTicker(s.interval)
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				s.scanAndRetry()
+			case <-s.stopCh:
+				ticker.Stop()
+				return
+			}
+		}
+	}()
+	utils.LogIfDevf("[RetryScanner] Started with interval %v", s.interval)
+}
+
+// Stop 停止扫描器
+func (s *RetryScanner) Stop() {
+	close(s.stopCh)
+}
+
+// scanAndRetry 扫描并重试
+func (s *RetryScanner) scanAndRetry() {
+	now := time.Now()
+
+	// 查询可重试的变体
+	variants, err := s.variantRepo.GetRetryableVariants(now, s.batchSize)
+	if err != nil {
+		utils.LogIfDevf("[RetryScanner] Failed to get retryable variants: %v", err)
+		return
+	}
+
+	if len(variants) == 0 {
+		return
+	}
+
+	utils.LogIfDevf("[RetryScanner] Found %d retryable variants", len(variants))
+
+	for _, variant := range variants {
+		utils.LogIfDevf("[RetryScanner] Processing variant %d: status=%s, retry_count=%d",
+			variant.ID, variant.Status, variant.RetryCount)
+
+		// 使用 ResetForRetry: failed → pending，同时增加 retry_count 和设置 next_retry_at
+		err := s.variantRepo.ResetForRetry(variant.ID, s.interval)
+		if err != nil {
+			utils.LogIfDevf("[RetryScanner] ResetForRetry failed for variant %d: %v", variant.ID, err)
+			continue
+		}
+		utils.LogIfDevf("[RetryScanner] ResetForRetry success: variant %d status changed from failed to pending, retry_count incremented", variant.ID)
+
+		// 获取图片信息
+		img, err := s.variantRepo.GetImageByID(variant.ImageID)
+		if err != nil {
+			utils.LogIfDevf("[RetryScanner] Failed to get image %d: %v", variant.ImageID, err)
+			continue
+		}
+
+		// 触发转换
+		utils.LogIfDevf("[RetryScanner] Triggering conversion for variant %d (image: %s)",
+			variant.ID, img.Identifier)
+		s.converter.TriggerWebPConversion(img)
+	}
+}
+
+// StartRetryScanner 创建并启动重试扫描器
+func StartRetryScanner(repo *images.VariantRepository, converter *Converter, interval time.Duration) *RetryScanner {
+	scanner := NewRetryScanner(repo, converter, interval)
+	scanner.Start()
+	return scanner
+}
+
+// ThumbnailServiceAccessor 缩略图
 type ThumbnailServiceAccessor interface {
 	TriggerGeneration(image *models.Image, width int)
 }
 
 // OrphanScanner 孤儿任务扫描器
-// 用于检测长时间处于 processing 状态的任务（进程崩溃导致的孤儿任务）
 type OrphanScanner struct {
-	variantRepo      images.VariantRepository
+	variantRepo      *images.VariantRepository
 	converter        *Converter
 	thumbnailService ThumbnailServiceAccessor
 	interval         time.Duration
@@ -28,7 +121,7 @@ type OrphanScanner struct {
 // NewOrphanScanner 创建孤儿任务扫描器
 // threshold: 超过多长时间视为孤儿任务（如 10 分钟）
 // interval: 扫描间隔（如 5 分钟）
-func NewOrphanScanner(repo images.VariantRepository, converter *Converter, thumbnailService ThumbnailServiceAccessor, threshold, interval time.Duration) *OrphanScanner {
+func NewOrphanScanner(repo *images.VariantRepository, converter *Converter, thumbnailService ThumbnailServiceAccessor, threshold, interval time.Duration) *OrphanScanner {
 	return &OrphanScanner{
 		variantRepo:      repo,
 		converter:        converter,
@@ -118,8 +211,8 @@ func (s *OrphanScanner) processOrphanVariant(variant models.ImageVariant) {
 	}
 }
 
-// StartOrphanScanner 创建并启动扫描器
-func StartOrphanScanner(repo images.VariantRepository, converter *Converter, thumbnailService ThumbnailServiceAccessor, threshold, interval time.Duration) *OrphanScanner {
+// StartOrphanScanner 创建并启动孤儿任务扫描器
+func StartOrphanScanner(repo *images.VariantRepository, converter *Converter, thumbnailService ThumbnailServiceAccessor, threshold, interval time.Duration) *OrphanScanner {
 	scanner := NewOrphanScanner(repo, converter, thumbnailService, threshold, interval)
 	scanner.Start()
 	return scanner

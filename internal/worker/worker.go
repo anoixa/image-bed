@@ -1,202 +1,144 @@
 package worker
 
 import (
-	"context"
 	"log"
 	"runtime"
 	"sync"
-	"time"
+	"sync/atomic"
 )
 
-// Task 异步任务接口
-type Task interface {
-	Execute()
+// PoolStats 任务池统计信息
+type PoolStats struct {
+	Submitted   uint64 // 已提交任务数
+	Executed    uint64 // 已执行任务数
+	Failed      uint64 // 失败任务数（panic）
+	QueueSize   int    // 当前队列长度
+	QueueCap    int    // 队列容量
+	WorkerCount int    // Worker 数量
 }
 
-// WorkerPool 协程池
-type WorkerPool struct {
-	workers int
-	queue   chan Task
-	wg      sync.WaitGroup
-	ctx     context.Context
-	cancel  context.CancelFunc
-	started bool
-	mu      sync.Mutex
+// Pool 独立的异步任务池
+type Pool struct {
+	taskCh   chan func()
+	wg       sync.WaitGroup
+	isClosed atomic.Bool
+
+	submittedCount atomic.Uint64
+	executedCount  atomic.Uint64
+	failedCount    atomic.Uint64
+	workerCount    int
+	queueCap       int
 }
 
 var (
-	globalPool *WorkerPool
-	once       sync.Once
+	globalPool     *Pool
+	globalPoolOnce sync.Once
 )
 
-// InitGlobalPool 初始化全局协程池
+// InitGlobalPool 初始化全局任务池
 func InitGlobalPool(workers, queueSize int) {
-	once.Do(func() {
-		if workers <= 0 {
-			workers = 12 // 默认12个worker
-		}
-		globalPool = NewWorkerPool(workers, queueSize)
-		globalPool.Start()
+	globalPoolOnce.Do(func() {
+		globalPool = NewPool(workers, queueSize)
 	})
 }
 
-// GetGlobalPool 获取全局协程池
-func GetGlobalPool() *WorkerPool {
+// GetGlobalPool 获取全局任务池实例
+func GetGlobalPool() *Pool {
 	return globalPool
 }
 
-// StopGlobalPool 停止全局协程池
+// StopGlobalPool 全局平滑退出入口
 func StopGlobalPool() {
 	if globalPool != nil {
 		globalPool.Stop()
 	}
 }
 
-// NewWorkerPool 创建工作池
-func NewWorkerPool(workers, queueSize int) *WorkerPool {
-	if workers <= 0 {
-		workers = runtime.NumCPU() * 2
-	}
+// NewPool 创建新的任务池
+func NewPool(workers, queueSize int) *Pool {
 	if queueSize <= 0 {
 		queueSize = 1000
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	return &WorkerPool{
-		workers: workers,
-		queue:   make(chan Task, queueSize),
-		ctx:     ctx,
-		cancel:  cancel,
-	}
-}
-
-// Start 启动工作池
-func (p *WorkerPool) Start() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if p.started {
-		return
+	if workers <= 0 {
+		workers = runtime.NumCPU() * 2
 	}
 
-	for i := 0; i < p.workers; i++ {
+	p := &Pool{
+		taskCh:   make(chan func(), queueSize),
+		queueCap: queueSize,
+	}
+
+	for i := 0; i < workers; i++ {
 		p.wg.Add(1)
-		go p.worker(i)
+		go p.worker()
 	}
 
-	p.started = true
-	log.Printf("Async worker pool started with %d workers", p.workers)
+	p.workerCount = workers
+	log.Printf("[WorkerPool] Started with %d workers, queue size %d", workers, queueSize)
+	return p
 }
 
-// Stop 停止工作池
-func (p *WorkerPool) Stop() {
-	p.mu.Lock()
-	if !p.started {
-		p.mu.Unlock()
-		return
-	}
-	p.mu.Unlock()
-
-	p.cancel()
-	p.wg.Wait()
-	close(p.queue)
-
-	p.mu.Lock()
-	p.started = false
-	p.mu.Unlock()
-
-	log.Println("Async worker pool stopped")
-}
-
-// Submit 提交任务（非阻塞，队列满时丢弃）
-func (p *WorkerPool) Submit(task Task) bool {
-	select {
-	case p.queue <- task:
-		return true
-	case <-p.ctx.Done():
-		return false
-	default:
-		// 队列满时，直接丢弃任务但记录日志
-		log.Println("WARN: Worker pool queue is full, task dropped")
-		return false
-	}
-}
-
-// SubmitBlocking 阻塞提交任务，队列满时等待（带超时）
-func (p *WorkerPool) SubmitBlocking(task Task, timeout time.Duration) bool {
-	if timeout <= 0 {
-		// 无限期等待
-		select {
-		case p.queue <- task:
-			return true
-		case <-p.ctx.Done():
-			return false
-		}
-	}
-
-	ctx, cancel := context.WithTimeout(p.ctx, timeout)
-	defer cancel()
-
-	select {
-	case p.queue <- task:
-		return true
-	case <-ctx.Done():
-		return false
-	}
-}
-
-// TrySubmit 尝试提交任务，可配置重试次数和间隔
-func (p *WorkerPool) TrySubmit(task Task, retries int, interval time.Duration) bool {
-	for i := 0; i <= retries; i++ {
-		if i > 0 {
-			time.Sleep(interval)
-		}
-		if p.Submit(task) {
-			return true
-		}
-	}
-	return false
-}
-
-// worker 工作协程
-func (p *WorkerPool) worker(id int) {
+// worker 是实际执行任务的 Goroutine
+func (p *Pool) worker() {
 	defer p.wg.Done()
-
-	for {
-		select {
-		case task, ok := <-p.queue:
-			if !ok {
-				return
-			}
-			p.executeTask(task)
-		case <-p.ctx.Done():
-			return
+	for task := range p.taskCh {
+		if task != nil {
+			p.executeTaskWithRecovery(task)
 		}
 	}
 }
 
-// executeTask 执行任务并捕获 panic
-func (p *WorkerPool) executeTask(task Task) {
+// executeTaskWithRecovery 包装单个任务
+func (p *Pool) executeTaskWithRecovery(task func()) {
+	p.executedCount.Add(1)
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("Panic recovered in async task: %v", r)
+			p.failedCount.Add(1)
+			log.Printf("[WorkerPool] Task panicked: %v", r)
 		}
 	}()
-	task.Execute()
+	task()
 }
 
-// Submit 提交任务到全局池
-func Submit(task Task) bool {
-	if globalPool == nil {
-		InitGlobalPool(12, 1000)
+// Submit 提交异步任务到队列
+// 返回 false 表示队列已满或池已关闭
+func (p *Pool) Submit(task func()) (ok bool) {
+	if p.isClosed.Load() {
+		return false
 	}
-	return globalPool.Submit(task)
+	defer func() {
+		if r := recover(); r != nil {
+			ok = false
+		}
+	}()
+	select {
+	case p.taskCh <- task:
+		p.submittedCount.Add(1)
+		return true
+	default:
+		log.Printf("[WorkerPool] Task queue full, dropping task")
+		return false
+	}
 }
 
-// TrySubmit 尝试提交任务到全局池，可配置重试次数和间隔
-func TrySubmit(task Task, retries int, interval time.Duration) bool {
-	if globalPool == nil {
-		InitGlobalPool(12, 1000)
+// Stop 关闭池
+func (p *Pool) Stop() {
+	if p.isClosed.CompareAndSwap(false, true) {
+		log.Println("[WorkerPool] Stopping...")
+		close(p.taskCh)
+		p.wg.Wait()
+		log.Println("[WorkerPool] Stopped gracefully.")
 	}
-	return globalPool.TrySubmit(task, retries, interval)
+}
+
+// GetStats 获取任务池当前的运行状态
+func (p *Pool) GetStats() PoolStats {
+	return PoolStats{
+		Submitted:   p.submittedCount.Load(),
+		Executed:    p.executedCount.Load(),
+		Failed:      p.failedCount.Load(),
+		QueueSize:   len(p.taskCh),
+		QueueCap:    p.queueCap,
+		WorkerCount: p.workerCount,
+	}
 }

@@ -28,11 +28,11 @@ type AlbumImageHandler struct {
 }
 
 // NewAlbumImageHandler 创建相册图片处理器
-func NewAlbumImageHandler(albumsRepo *albums.Repository, imagesRepo *images.Repository, cacheFactory *cache.Factory) *AlbumImageHandler {
+func NewAlbumImageHandler(albumsRepo *albums.Repository, imagesRepo *images.Repository, cacheProvider cache.Provider) *AlbumImageHandler {
 	return &AlbumImageHandler{
 		repo:        albumsRepo,
 		imageRepo:   imagesRepo,
-		cacheHelper: cache.NewHelper(cacheFactory),
+		cacheHelper: cache.NewHelper(cacheProvider),
 	}
 }
 

@@ -12,9 +12,9 @@ type Handler struct {
 }
 
 // NewHandler 创建新的相册处理器
-func NewHandler(repo *albums.Repository, cacheFactory *cache.Factory) *Handler {
+func NewHandler(repo *albums.Repository, cacheProvider cache.Provider) *Handler {
 	return &Handler{
 		repo:        repo,
-		cacheHelper: cache.NewHelper(cacheFactory),
+		cacheHelper: cache.NewHelper(cacheProvider),
 	}
 }

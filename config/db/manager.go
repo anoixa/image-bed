@@ -12,7 +12,8 @@ import (
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/configs"
-	cryptoservice "github.com/anoixa/image-bed/internal/services/crypto"
+	cryptoservice "github.com/anoixa/image-bed/internal/crypto"
+	"github.com/anoixa/image-bed/storage"
 	cryptoutils "github.com/anoixa/image-bed/utils/crypto"
 	"gorm.io/gorm"
 )
@@ -49,20 +50,13 @@ func NewManager(db *gorm.DB, dataPath string) *Manager {
 
 // NewManagerWithCache 创建带缓存的配置管理器
 func NewManagerWithCache(db *gorm.DB, dataPath string, cacheProvider cache.Provider, cacheTTL time.Duration) *Manager {
-	repo := configs.NewRepository(db)
-
-	// 如果提供了缓存，使用装饰器包装仓库
-	if cacheProvider != nil {
-		repo = configs.NewCachedRepository(repo, cacheProvider, cacheTTL)
-	}
-
 	if cacheTTL == 0 {
 		cacheTTL = configs.DefaultCacheTTL
 	}
 
 	return &Manager{
 		db:       db,
-		repo:     repo,
+		repo:     configs.NewRepository(db),
 		crypto:   cryptoservice.NewService(dataPath),
 		eventBus: NewEventBus(),
 		dataPath: dataPath,
@@ -71,7 +65,7 @@ func NewManagerWithCache(db *gorm.DB, dataPath string, cacheProvider cache.Provi
 	}
 }
 
-// SetCache 设置缓存（用于初始化后注入缓存）
+// SetCache 设置缓存
 func (m *Manager) SetCache(cacheProvider cache.Provider, cacheTTL time.Duration) {
 	if cacheProvider == nil {
 		return
@@ -82,64 +76,12 @@ func (m *Manager) SetCache(cacheProvider cache.Provider, cacheTTL time.Duration)
 		m.cacheTTL = cacheTTL
 	}
 
-	// 使用装饰器包装当前仓库
-	m.repo = configs.NewCachedRepository(m.repo, cacheProvider, m.cacheTTL)
-
-	// 设置缓存失效监听
-	m.setupCacheInvalidation()
-
 	log.Println("[ConfigManager] Cache enabled with TTL:", m.cacheTTL)
 }
 
-// setupCacheInvalidation 设置缓存失效监听
-func (m *Manager) setupCacheInvalidation() {
-	cachedRepo, ok := m.repo.(*configs.CachedRepository)
-	if !ok {
-		return
-	}
-
-	// 监听配置变更事件，自动失效缓存
-	m.Subscribe(EventConfigUpdated, func(event *Event) {
-		ctx := context.Background()
-		cachedRepo.InvalidateByCategory(ctx, event.Config.Category)
-		log.Printf("[ConfigManager] Cache invalidated for category: %s", event.Config.Category)
-	})
-
-	m.Subscribe(EventConfigCreated, func(event *Event) {
-		ctx := context.Background()
-		cachedRepo.InvalidateByCategory(ctx, event.Config.Category)
-	})
-
-	m.Subscribe(EventConfigDeleted, func(event *Event) {
-		ctx := context.Background()
-		cachedRepo.InvalidateByID(ctx, event.Config.ID)
-		cachedRepo.InvalidateByKey(ctx, event.Config.Key)
-		cachedRepo.InvalidateByCategory(ctx, event.Config.Category)
-	})
-}
-
-// InvalidateCache 手动失效缓存（公开方法）
-func (m *Manager) InvalidateCache(category models.ConfigCategory) {
-	cachedRepo, ok := m.repo.(*configs.CachedRepository)
-	if !ok {
-		return
-	}
-
-	ctx := context.Background()
-	cachedRepo.InvalidateByCategory(ctx, category)
-	log.Printf("[ConfigManager] Manual cache invalidation for category: %s", category)
-}
-
-// InvalidateAllCache 失效所有配置缓存
-func (m *Manager) InvalidateAllCache() {
-	cachedRepo, ok := m.repo.(*configs.CachedRepository)
-	if !ok {
-		return
-	}
-
-	ctx := context.Background()
-	cachedRepo.InvalidateAll(ctx)
-	log.Println("[ConfigManager] All config cache invalidated")
+// GetCache 获取缓存提供者
+func (m *Manager) GetCache() cache.Provider {
+	return m.cache
 }
 
 // Initialize 初始化配置
@@ -679,3 +621,60 @@ func getStringFromMap(m map[string]interface{}, key, defaultValue string) string
 func BoolPtr(b bool) *bool {
 	return &b
 }
+
+// GetStorageConfigs 获取所有启用的存储配置
+func (m *Manager) GetStorageConfigs(ctx context.Context) ([]storage.StorageConfig, error) {
+	configs, err := m.repo.List(ctx, models.ConfigCategoryStorage, true)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list storage configs: %w", err)
+	}
+
+	result := make([]storage.StorageConfig, 0, len(configs))
+	for _, cfg := range configs {
+		// 解密配置
+		configMap, err := m.DecryptConfig(cfg.ConfigJSON)
+		if err != nil {
+			log.Printf("[ConfigManager] Failed to decrypt storage config %s: %v", cfg.Key, err)
+			continue
+		}
+
+		storageCfg := storage.StorageConfig{
+			ID:        cfg.ID,
+			Name:      cfg.Name,
+			IsDefault: cfg.IsDefault,
+		}
+
+		// 根据类型解析配置
+		storageType := getStringFromMap(configMap, "type", "local")
+		storageCfg.Type = storageType
+
+		switch storageType {
+		case "local":
+			storageCfg.LocalPath = getStringFromMap(configMap, "local_path", "./data/upload")
+		case "minio":
+			storageCfg.Endpoint = getStringFromMap(configMap, "endpoint", "")
+			storageCfg.AccessKeyID = getStringFromMap(configMap, "access_key_id", "")
+			storageCfg.SecretAccessKey = getStringFromMap(configMap, "secret_access_key", "")
+			storageCfg.BucketName = getStringFromMap(configMap, "bucket_name", "")
+			// UseSSL 处理
+			if val, ok := configMap["use_ssl"]; ok {
+				switch v := val.(type) {
+				case bool:
+					storageCfg.UseSSL = v
+				case string:
+					storageCfg.UseSSL = v == "true" || v == "1" || v == "yes"
+				}
+			} else {
+				storageCfg.UseSSL = true
+			}
+		default:
+			log.Printf("[ConfigManager] Unknown storage type: %s", storageType)
+			continue
+		}
+
+		result = append(result, storageCfg)
+	}
+
+	return result, nil
+}
+

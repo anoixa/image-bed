@@ -12,7 +12,7 @@ func BuildImageURL(identifier string) string {
 	return fmt.Sprintf("%s/images/%s", cfg.BaseURL(), identifier)
 }
 
-// BuildThumbnailURL 构建缩略图URL，默认600px
+// BuildThumbnailURL 构建缩略图URL
 func BuildThumbnailURL(identifier string) string {
 	cfg := config.Get()
 	return fmt.Sprintf("%s/thumbnails/%s?width=600", cfg.BaseURL(), identifier)
@@ -26,11 +26,11 @@ func BuildThumbnailURLWithWidth(identifier string, width int) string {
 
 // LinkFormats 包含各种格式的图片链接
 type LinkFormats struct {
-	URL            string `json:"url"`
-	ThumbnailURL   string `json:"thumbnail_url"`
-	HTML           string `json:"html"`
-	BBCode         string `json:"bbcode"`
-	Markdown       string `json:"markdown"`
+	URL              string `json:"url"`
+	ThumbnailURL     string `json:"thumbnail_url"`
+	HTML             string `json:"html"`
+	BBCode           string `json:"bbcode"`
+	Markdown         string `json:"markdown"`
 	MarkdownWithLink string `json:"markdown_with_link"`
 }
 

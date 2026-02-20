@@ -2,37 +2,35 @@ package images
 
 import (
 	"github.com/anoixa/image-bed/cache"
-	"github.com/anoixa/image-bed/database"
-	"github.com/anoixa/image-bed/database/repo/images"
 	configSvc "github.com/anoixa/image-bed/config/db"
-	"github.com/anoixa/image-bed/internal/services/image"
+	"github.com/anoixa/image-bed/database/repo/images"
+	"github.com/anoixa/image-bed/internal/image"
 	"github.com/anoixa/image-bed/storage"
+	"gorm.io/gorm"
 )
 
 // Handler 图片处理器 - 使用依赖注入接收存储和缓存
 type Handler struct {
-	storageFactory   *storage.Factory
 	cacheHelper      *cache.Helper
 	repo             *images.Repository
 	converter        *image.Converter
 	configManager    *configSvc.Manager
 	variantService   *image.VariantService
 	thumbnailService *image.ThumbnailService
-	variantRepo      images.VariantRepository
+	variantRepo      *images.VariantRepository
 }
 
 // NewHandler 图片处理器
-func NewHandler(storageFactory *storage.Factory, cacheFactory *cache.Factory, imagesRepo *images.Repository, dbProvider database.Provider, converter *image.Converter, configManager *configSvc.Manager) *Handler {
+func NewHandler(cacheProvider cache.Provider, imagesRepo *images.Repository, db *gorm.DB, converter *image.Converter, configManager *configSvc.Manager) *Handler {
 	// 创建变体仓库和服务
-	variantRepo := images.NewVariantRepository(dbProvider.DB())
+	variantRepo := images.NewVariantRepository(db)
 	variantService := image.NewVariantService(variantRepo, configManager, converter)
 
 	// 创建缩略图服务
-	thumbnailService := image.NewThumbnailService(variantRepo, configManager, storageFactory.GetDefault(), converter)
+	thumbnailService := image.NewThumbnailService(variantRepo, configManager, storage.GetDefault(), converter)
 
 	return &Handler{
-		storageFactory:   storageFactory,
-		cacheHelper:      cache.NewHelper(cacheFactory),
+		cacheHelper:      cache.NewHelper(cacheProvider),
 		repo:             imagesRepo,
 		converter:        converter,
 		configManager:    configManager,
@@ -43,10 +41,7 @@ func NewHandler(storageFactory *storage.Factory, cacheFactory *cache.Factory, im
 }
 
 // getStorageConfigID 根据存储名称获取存储配置ID
-// 如果 storageName 为空，则返回默认存储的ID
 func (h *Handler) getStorageConfigID(c interface{ Query(string) string }, storageName string) (uint, error) {
-	if storageName != "" {
-		return h.storageFactory.GetIDByName(storageName)
-	}
-	return h.storageFactory.GetDefaultID(), nil
+	// 如果 storageName 为空，回退默认存储的ID
+	return storage.GetDefaultID(), nil
 }

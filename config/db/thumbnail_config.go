@@ -12,18 +12,18 @@ import (
 
 // ThumbnailSettings 缩略图配置
 type ThumbnailSettings struct {
-	Enabled    bool                 `json:"enabled" mapstructure:"enabled"`             // 是否启用
-	Sizes      []models.ThumbnailSize `json:"sizes" mapstructure:"sizes"`               // 尺寸配置
-	Quality    int                  `json:"quality" mapstructure:"quality"`             // JPEG质量 1-100
-	MaxRetries int                  `json:"max_retries" mapstructure:"max_retries"`     // 最大重试次数
+	Enabled    bool                   `json:"enabled" mapstructure:"enabled"`         // 是否启用
+	Sizes      []models.ThumbnailSize `json:"sizes" mapstructure:"sizes"`             // 尺寸配置
+	Quality    int                    `json:"quality" mapstructure:"quality"`         // JPEG质量 1-100
+	MaxRetries int                    `json:"max_retries" mapstructure:"max_retries"` // 最大重试次数
 }
 
 // DefaultThumbnailSettings 默认缩略图配置
 func DefaultThumbnailSettings() *ThumbnailSettings {
 	return &ThumbnailSettings{
-		Enabled: true,
-		Sizes:   models.DefaultThumbnailSizes,
-		Quality: 85,
+		Enabled:    true,
+		Sizes:      models.DefaultThumbnailSizes,
+		Quality:    85,
 		MaxRetries: 3,
 	}
 }
@@ -54,11 +54,11 @@ func (m *Manager) GetThumbnailSettings(ctx context.Context) (*ThumbnailSettings,
 	config, err := m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryThumbnail)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			// 不存在，创建默认配置
+			// 创建默认配置
 			if err := m.ensureDefaultThumbnailConfig(ctx); err != nil {
 				return nil, fmt.Errorf("failed to create default thumbnail config: %w", err)
 			}
-			// 重新获取
+
 			config, err = m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryThumbnail)
 			if err != nil {
 				return nil, fmt.Errorf("failed to get thumbnail config after creation: %w", err)
@@ -97,8 +97,8 @@ func (m *Manager) ensureDefaultThumbnailConfig(ctx context.Context) error {
 	defaultSettings := DefaultThumbnailSettings()
 
 	req := &models.SystemConfigStoreRequest{
-		Category:    models.ConfigCategoryThumbnail,
-		Name:        "Thumbnail Configuration",
+		Category: models.ConfigCategoryThumbnail,
+		Name:     "Thumbnail Configuration",
 		Config: map[string]interface{}{
 			"enabled":     defaultSettings.Enabled,
 			"sizes":       defaultSettings.Sizes,
@@ -133,8 +133,8 @@ func (m *Manager) SaveThumbnailSettings(ctx context.Context, settings *Thumbnail
 
 	// 构建更新请求
 	req := &models.SystemConfigStoreRequest{
-		Category:    models.ConfigCategoryThumbnail,
-		Name:        "Thumbnail Configuration",
+		Category: models.ConfigCategoryThumbnail,
+		Name:     "Thumbnail Configuration",
 		Config: map[string]interface{}{
 			"enabled":     settings.Enabled,
 			"sizes":       settings.Sizes,

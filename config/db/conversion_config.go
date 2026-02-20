@@ -50,11 +50,9 @@ func (s *ConversionSettings) IsFormatEnabled(format string) bool {
 
 // GetConversionSettings 获取转换配置
 func (m *Manager) GetConversionSettings(ctx context.Context) (*ConversionSettings, error) {
-	// 获取默认转换配置
 	config, err := m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryConversion)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			// 不存在，创建默认配置
 			if err := m.EnsureDefaultConversionConfig(ctx); err != nil {
 				return nil, fmt.Errorf("failed to create default conversion config: %w", err)
 			}
@@ -97,8 +95,8 @@ func (m *Manager) EnsureDefaultConversionConfig(ctx context.Context) error {
 	defaultSettings := DefaultConversionSettings()
 
 	req := &models.SystemConfigStoreRequest{
-		Category:    models.ConfigCategoryConversion,
-		Name:        "格式转换配置",
+		Category: models.ConfigCategoryConversion,
+		Name:     "格式转换配置",
 		Config: map[string]interface{}{
 			"enabled_formats":   defaultSettings.EnabledFormats,
 			"webp_quality":      defaultSettings.WebPQuality,
@@ -112,7 +110,7 @@ func (m *Manager) EnsureDefaultConversionConfig(ctx context.Context) error {
 		},
 		IsEnabled:   BoolPtr(true),
 		IsDefault:   BoolPtr(true),
-		Description: "图片格式转换设置（WebP/AVIF）",
+		Description: "Image Format Conversion Settings（WebP/AVIF）",
 	}
 
 	_, err = m.CreateConfig(ctx, req, 0)
@@ -136,10 +134,9 @@ func (m *Manager) SaveConversionSettings(ctx context.Context, settings *Conversi
 		return err
 	}
 
-	// 构建更新请求
 	req := &models.SystemConfigStoreRequest{
-		Category:    models.ConfigCategoryConversion,
-		Name:        "格式转换配置",
+		Category: models.ConfigCategoryConversion,
+		Name:     "格式转换配置",
 		Config: map[string]interface{}{
 			"enabled_formats":   settings.EnabledFormats,
 			"webp_quality":      settings.WebPQuality,
@@ -160,7 +157,7 @@ func (m *Manager) SaveConversionSettings(ctx context.Context, settings *Conversi
 	return err
 }
 
-// InitializeConversionConfig 初始化转换配置（兼容旧方法名）
+// InitializeConversionConfig 初始化转换配置
 func (m *Manager) InitializeConversionConfig(ctx context.Context) error {
 	return m.EnsureDefaultConversionConfig(ctx)
 }

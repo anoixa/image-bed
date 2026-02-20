@@ -1,4 +1,4 @@
-package memory
+package cache
 
 import (
 	"context"
@@ -9,24 +9,24 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-// ErrCacheMiss 缓存未命中错误
-var ErrCacheMiss = errors.New("cache miss")
+// ErrMemoryCacheMiss 内存缓存未命中错误
+var ErrMemoryCacheMiss = errors.New("cache miss")
 
-// Memory 内存缓存实现
-type Memory struct {
+// MemoryCache 内存缓存实现
+type MemoryCache struct {
 	client *ristretto.Cache
 }
 
-// Config 内存缓存配置
-type Config struct {
+// MemoryConfig 内存缓存配置
+type MemoryConfig struct {
 	NumCounters int64
 	MaxCost     int64
 	BufferItems int64
 	Metrics     bool
 }
 
-// NewMemory 创建新的内存缓存提供者
-func NewMemory(config Config) (*Memory, error) {
+// NewMemoryCache 创建新的内存缓存提供者
+func NewMemoryCache(config MemoryConfig) (*MemoryCache, error) {
 	client, err := ristretto.NewCache(&ristretto.Config{
 		NumCounters: config.NumCounters,
 		MaxCost:     config.MaxCost,
@@ -38,13 +38,13 @@ func NewMemory(config Config) (*Memory, error) {
 		return nil, err
 	}
 
-	return &Memory{
+	return &MemoryCache{
 		client: client,
 	}, nil
 }
 
 // Set 设置缓存项
-func (m *Memory) Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error {
+func (m *MemoryCache) Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error {
 	size := int64(1) // 默认大小
 	if data, ok := value.([]byte); ok {
 		size = int64(len(data))
@@ -59,7 +59,7 @@ func (m *Memory) Set(ctx context.Context, key string, value interface{}, expirat
 }
 
 // Get 获取缓存项
-func (m *Memory) Get(ctx context.Context, key string, dest interface{}) error {
+func (m *MemoryCache) Get(ctx context.Context, key string, dest interface{}) error {
 	value, found := m.client.Get(key)
 	if !found {
 		return ErrCacheMiss
@@ -97,24 +97,24 @@ func (m *Memory) Get(ctx context.Context, key string, dest interface{}) error {
 }
 
 // Delete 删除缓存项
-func (m *Memory) Delete(ctx context.Context, key string) error {
+func (m *MemoryCache) Delete(ctx context.Context, key string) error {
 	m.client.Del(key)
 	return nil
 }
 
 // Exists 检查缓存项是否存在
-func (m *Memory) Exists(ctx context.Context, key string) (bool, error) {
+func (m *MemoryCache) Exists(ctx context.Context, key string) (bool, error) {
 	_, found := m.client.Get(key)
 	return found, nil
 }
 
 // Close 关闭缓存连接
-func (m *Memory) Close() error {
+func (m *MemoryCache) Close() error {
 	m.client.Close()
 	return nil
 }
 
 // Name 返回缓存提供者名称
-func (m *Memory) Name() string {
+func (m *MemoryCache) Name() string {
 	return "memory"
 }
