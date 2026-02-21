@@ -241,47 +241,14 @@ func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *i
 // serveVariantData 提供变体数据
 func (h *Handler) serveVariantData(c *gin.Context, img *models.Image, result *image.VariantResult, data []byte) {
 	reader := bytes.NewReader(data)
-
 	contentType := result.MIMEType
 	if contentType == "" {
 		contentType = "image/webp"
 	}
-
 	c.Header("Content-Type", contentType)
 	c.Header("Cache-Control", "public, max-age=2592000, immutable")
 	c.Header("Vary", "Accept")
-
-	// 处理 range 请求
-	c.Writer.Header().Set("Accept-Ranges", "bytes")
-	c.Writer.Header().Set("Content-Length", strconv.Itoa(len(data)))
-
-	if c.Request.Method == http.MethodHead {
-		c.Status(http.StatusOK)
-		return
-	}
-
-	rangeHeader := c.GetHeader("Range")
-	if rangeHeader == "" {
-		reader.Seek(0, io.SeekStart)
-		c.DataFromReader(http.StatusOK, int64(len(data)), contentType, reader, nil)
-		return
-	}
-
-	// 解析 range 请求
-	ranges := h.parseRangeHeader(rangeHeader, int64(len(data)))
-	if len(ranges) == 0 {
-		reader.Seek(0, io.SeekStart)
-		c.DataFromReader(http.StatusOK, int64(len(data)), contentType, reader, nil)
-		return
-	}
-
-	// 支持单 range
-	r := ranges[0]
-	reader.Seek(r.start, io.SeekStart)
-	c.Header("Content-Range", fmt.Sprintf("bytes %d-%d/%d", r.start, r.end, len(data)))
-	c.Header("Content-Length", strconv.FormatInt(r.length, 10))
-	c.Status(http.StatusPartialContent)
-	io.CopyN(c.Writer, reader, r.length)
+	http.ServeContent(c.Writer, c.Request, "", time.Time{}, reader)
 }
 
 // fetchImageMetadata 查询图片信息
@@ -406,7 +373,7 @@ func (h *Handler) streamAndCacheImage(c *gin.Context, image *models.Image) {
 	// if文件太大或禁用缓存fallback到流式传输
 	if !shouldCache {
 		if isSeeker {
-			_ = h.serveImageStream(c, image, rs)
+			h.serveImageStream(c, image, rs)
 		} else {
 			if image.FileSize > 0 {
 				c.Header("Content-Length", strconv.FormatInt(image.FileSize, 10))
@@ -436,7 +403,7 @@ func (h *Handler) streamAndCacheImage(c *gin.Context, image *models.Image) {
 			}
 		}(image.Identifier, data)
 
-		_ = h.serveImageStream(c, image, bytes.NewReader(data))
+		h.serveImageStream(c, image, bytes.NewReader(data))
 		return
 	}
 
@@ -479,25 +446,23 @@ func (h *Handler) streamAndCacheImage(c *gin.Context, image *models.Image) {
 		}
 	}(image.Identifier, data)
 
-	_ = h.serveImageStream(c, image, bytes.NewReader(data))
+	h.serveImageStream(c, image, bytes.NewReader(data))
 }
 
 // serveImageData 直接提供图片数据
 func (h *Handler) serveImageData(c *gin.Context, image *models.Image, data []byte) {
 	reader := bytes.NewReader(data)
-	_ = h.serveImageStream(c, image, reader)
+	h.serveImageStream(c, image, reader)
 }
 
 // serveImageStream 流式提供图片
-func (h *Handler) serveImageStream(c *gin.Context, image *models.Image, reader io.ReadSeeker) error {
+func (h *Handler) serveImageStream(c *gin.Context, image *models.Image, reader io.ReadSeeker) {
 	contentType := image.MimeType
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-
 	c.Header("Content-Type", contentType)
 	c.Header("Cache-Control", "public, max-age=2592000, immutable")
-
 	if image.OriginalName != "" {
 		asciiName := toASCII(image.OriginalName)
 		rfc5987Name := url.QueryEscape(image.OriginalName)
@@ -507,38 +472,7 @@ func (h *Handler) serveImageStream(c *gin.Context, image *models.Image, reader i
 			c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s"; filename*=UTF-8''%s`, asciiName, rfc5987Name))
 		}
 	}
-
-	// 处理 range 请求
-	c.Writer.Header().Set("Accept-Ranges", "bytes")
-	c.Writer.Header().Set("Content-Length", strconv.FormatInt(image.FileSize, 10))
-
-	if c.Request.Method == http.MethodHead {
-		c.Status(http.StatusOK)
-		return nil
-	}
-
-	rangeHeader := c.GetHeader("Range")
-	if rangeHeader == "" {
-		reader.Seek(0, io.SeekStart)
-		_, err := io.Copy(c.Writer, reader)
-		return err
-	}
-
-	ranges := h.parseRangeHeader(rangeHeader, image.FileSize)
-	if len(ranges) == 0 {
-		reader.Seek(0, io.SeekStart)
-		_, err := io.Copy(c.Writer, reader)
-		return err
-	}
-
-	// 支持单 range
-	r := ranges[0]
-	reader.Seek(r.start, io.SeekStart)
-	c.Header("Content-Range", fmt.Sprintf("bytes %d-%d/%d", r.start, r.end, image.FileSize))
-	c.Header("Content-Length", strconv.FormatInt(r.length, 10))
-	c.Status(http.StatusPartialContent)
-	_, err := io.CopyN(c.Writer, reader, r.length)
-	return err
+	http.ServeContent(c.Writer, c.Request, image.OriginalName, time.Time{}, reader)
 }
 
 // serveImageStreamManualCopy 手动拷贝流式图片
@@ -572,66 +506,6 @@ func (h *Handler) serveImageStreamManualCopy(c *gin.Context, image *models.Image
 		return err
 	}
 	return nil
-}
-
-// parseRangeHeader 解析 HTTP Range 请求头
-func (h *Handler) parseRangeHeader(rangeHeader string, fileSize int64) []rangeInfo {
-	const prefix = "bytes="
-	if !strings.HasPrefix(rangeHeader, prefix) {
-		return nil
-	}
-
-	ranges := strings.Split(rangeHeader[len(prefix):], ",")
-	var result []rangeInfo
-
-	for _, r := range ranges {
-		r = strings.TrimSpace(r)
-		if r == "" {
-			continue
-		}
-
-		parts := strings.Split(r, "-")
-		if len(parts) != 2 {
-			continue
-		}
-
-		var start, end int64
-		var err error
-
-		if parts[0] == "" {
-			length, err := strconv.ParseInt(parts[1], 10, 64)
-			if err != nil || length <= 0 {
-				continue
-			}
-			start = fileSize - length
-			if start < 0 {
-				start = 0
-			}
-			end = fileSize - 1
-		} else {
-			start, err = strconv.ParseInt(parts[0], 10, 64)
-			if err != nil || start < 0 || start >= fileSize {
-				continue
-			}
-
-			if parts[1] == "" {
-				end = fileSize - 1
-			} else {
-				end, err = strconv.ParseInt(parts[1], 10, 64)
-				if err != nil || end < start || end >= fileSize {
-					continue
-				}
-			}
-		}
-
-		result = append(result, rangeInfo{
-			start:  start,
-			end:    end,
-			length: end - start + 1,
-		})
-	}
-
-	return result
 }
 
 // isBrokenPipe 检查是否为断开的连接错误
