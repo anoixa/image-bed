@@ -56,6 +56,17 @@ func (r *Repository) DeleteImagesByIdentifiersAndUser(identifiers []string, user
 	return result.RowsAffected, result.Error
 }
 
+// GetImagesByIdentifiersAndUser 批量查询用户的图片（使用 IN 语句，避免 N+1 查询）
+func (r *Repository) GetImagesByIdentifiersAndUser(identifiers []string, userID uint) ([]*models.Image, error) {
+	if len(identifiers) == 0 {
+		return []*models.Image{}, nil
+	}
+
+	var images []*models.Image
+	err := r.db.Where("identifier IN ? AND user_id = ?", identifiers, userID).Find(&images).Error
+	return images, err
+}
+
 // DeleteImageByIdentifierAndUser 根据标识符和用户ID删除图片
 func (r *Repository) DeleteImageByIdentifierAndUser(identifier string, userID uint) error {
 	if identifier == "" {

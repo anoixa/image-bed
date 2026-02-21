@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"sync"
 )
 
@@ -55,10 +56,15 @@ type Provider interface {
 	Health(ctx context.Context) error
 
 	// Name 返回存储名称
-	Name() string
-}
-
-// InitStorage 初始化存储层
+		Name() string
+	}
+	
+	// FileOpener 支持直接打开 *os.File 的存储（用于零拷贝传输）
+	type FileOpener interface {
+		OpenFile(ctx context.Context, name string) (*os.File, error)
+	}
+	
+	// InitStorage 初始化存储层
 func InitStorage(configs []StorageConfig) error {
 	providersMu.Lock()
 	defer providersMu.Unlock()
