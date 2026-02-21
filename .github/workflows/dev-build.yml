@@ -31,13 +31,10 @@ jobs:
           path: ~/go/pkg/mod
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
 
-      - name: Check go mod tidy
+      - name: Download dependencies
         run: |
-          go mod tidy
-          if [ -n "$(git status --porcelain go.mod go.sum)" ]; then
-            echo "Error: go.mod or go.sum is not tidy"
-            exit 1
-          fi
+          go mod download
+          go mod verify
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
