@@ -32,8 +32,10 @@ import (
 )
 
 var (
-	imageGroup       singleflight.Group
-	metaFetchTimeout = 30 * time.Second
+	imageGroup        singleflight.Group
+	fileDownloadGroup singleflight.Group
+	metaFetchTimeout  = 30 * time.Second
+	fileFetchTimeout  = 30 * time.Second
 )
 
 var (
