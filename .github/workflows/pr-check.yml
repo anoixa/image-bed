@@ -36,13 +36,10 @@ jobs:
           go mod verify
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        env:
-          GOFLAGS: "-buildvcs=false"
+        uses: golangci/golangci-lint-action@v7
         with:
           version: v2.10.1
           args: --timeout=5m
-          skip-cache: true
 
       - name: Run govulncheck
         uses: golang/govulncheck-action@v1
