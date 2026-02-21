@@ -63,7 +63,7 @@ func runClean(dryRun, tempOnly, dbOnly, storageOnly bool) error {
 	if err != nil {
 		return err
 	}
-	defer database.Close(db)
+	defer func() { _ = database.Close(db) }()
 
 	stats := &cleanStats{}
 

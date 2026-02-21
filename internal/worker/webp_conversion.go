@@ -260,7 +260,7 @@ func (t *WebPConversionTask) handleFailure(err error) {
 	case ErrorTransient:
 		utils.LogIfDevf("[WebPConversion] Transient error for variant %d: %s", t.VariantID, errMsg)
 		// 临时错误，允许重试
-		t.VariantRepo.UpdateFailed(t.VariantID, errMsg, true)
+		_ = t.VariantRepo.UpdateFailed(t.VariantID, errMsg, true)
 	}
 }
 

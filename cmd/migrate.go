@@ -121,7 +121,7 @@ func runMigration(fromType, toType, fromDSN, toDSN, fromSQLite, toPostgres strin
 		return fmt.Errorf("failed to connect to source database: %w", err)
 	}
 	sqlDB, _ := sourceDB.DB()
-	defer sqlDB.Close()
+	defer func() { _ = sqlDB.Close() }()
 
 	// 连接目标数据库
 	targetDB, err := openDatabase(toType, toDSN)
@@ -129,7 +129,7 @@ func runMigration(fromType, toType, fromDSN, toDSN, fromSQLite, toPostgres strin
 		return fmt.Errorf("failed to connect to target database: %w", err)
 	}
 	sqlDB2, _ := targetDB.DB()
-	defer sqlDB2.Close()
+	defer func() { _ = sqlDB2.Close() }()
 
 	// 确认迁移
 	if !skipConfirm {
@@ -138,7 +138,7 @@ func runMigration(fromType, toType, fromDSN, toDSN, fromSQLite, toPostgres strin
 		fmt.Println("Existing data in target database may be affected.")
 		fmt.Print("Do you want to continue? [y/N]: ")
 		var response string
-		fmt.Scanln(&response)
+		_, _ = fmt.Scanln(&response)
 		if response != "y" && response != "Y" {
 			fmt.Println("Migration cancelled.")
 			return nil

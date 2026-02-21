@@ -57,7 +57,7 @@ func init() {
 	restoreCmd.Flags().Bool("dry-run", false, "Preview restore without actually writing to database")
 	restoreCmd.Flags().Bool("truncate", false, "Clear existing data before restore")
 
-	restoreCmd.MarkFlagRequired("input")
+	_ = restoreCmd.MarkFlagRequired("input")
 }
 
 
@@ -91,14 +91,14 @@ func runRestore(inputFile string, tables []string, dryRun, truncate bool) error 
 	if err != nil {
 		return err
 	}
-	defer database.Close(db)
+	defer func() { _ = database.Close(db) }()
 
 	// 创建临时目录解压备份
 	tempDir := filepath.Join(os.TempDir(), fmt.Sprintf("image-bed-restore-%d", time.Now().Unix()))
 	if err := os.MkdirAll(tempDir, 0755); err != nil {
 		return fmt.Errorf("failed to create temp directory: %w", err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	log.Printf("Extracting backup: %s", inputFile)
 
@@ -130,7 +130,7 @@ func runRestore(inputFile string, tables []string, dryRun, truncate bool) error 
 		}
 		fmt.Print("Do you want to continue? [y/N]: ")
 		var response string
-		fmt.Scanln(&response)
+		_, _ = fmt.Scanln(&response)
 		if response != "y" && response != "Y" {
 			fmt.Println("Restore cancelled.")
 			return nil
@@ -188,7 +188,7 @@ func readMetadata(path string) (*backupMetadata, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	var metadata backupMetadata
 	decoder := json.NewDecoder(file)
@@ -205,13 +205,13 @@ func extractTarGz(archivePath, destDir string) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	gzReader, err := gzip.NewReader(file)
 	if err != nil {
 		return err
 	}
-	defer gzReader.Close()
+	defer func() { _ = gzReader.Close() }()
 
 	tarReader := tar.NewReader(gzReader)
 
@@ -242,10 +242,10 @@ func extractTarGz(archivePath, destDir string) error {
 			}
 
 			if _, err := io.Copy(outFile, tarReader); err != nil {
-				outFile.Close()
+				_ = outFile.Close()
 				return err
 			}
-			outFile.Close()
+			_ = outFile.Close()
 		}
 	}
 
@@ -258,7 +258,7 @@ func restoreTable(db *gorm.DB, tableName, jsonlPath string, stats *restoreStats,
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	scanner := bufio.NewScanner(file)
 	var lineNum int

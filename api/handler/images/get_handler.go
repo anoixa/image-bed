@@ -9,20 +9,16 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
-	"syscall"
 	"time"
 	"unicode"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
-	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/internal/image"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
-	"github.com/anoixa/image-bed/utils/pool"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
@@ -333,61 +329,6 @@ func isTransientError(err error) bool {
 	return false
 }
 
-// streamAndCacheImage 流式处理（保留用于兼容）
-func (h *Handler) streamAndCacheImage(c *gin.Context, image *models.Image) {
-	imageStream, err := storage.GetDefault().GetWithContext(c.Request.Context(), image.Identifier)
-	if err != nil {
-		log.Printf("WARN: File for identifier '%s' not found in storage, but exists in DB. Error: %v", utils.SanitizeLogMessage(image.Identifier), err)
-		common.RespondError(c, http.StatusNotFound, "Image file not found in storage")
-		return
-	}
-
-	defer func() {
-		if closer, ok := imageStream.(io.Closer); ok {
-			_ = closer.Close()
-		}
-	}()
-
-	cfg := config.Get()
-	enableImageCaching := cfg.CacheEnableImageCaching
-	maxCacheSizeMB := cfg.CacheMaxImageCacheSizeMB
-	maxCacheSize := maxCacheSizeMB * 1024 * 1024
-	shouldCache := enableImageCaching && image.FileSize > 0 && (maxCacheSizeMB == 0 || image.FileSize <= maxCacheSize)
-
-	if c.IsAborted() {
-		return
-	}
-
-	// if文件太大或禁用缓存fallback到流式传输
-	if !shouldCache {
-		if image.FileSize > 0 {
-			c.Header("Content-Length", strconv.FormatInt(image.FileSize, 10))
-		}
-		_ = h.serveImageStreamManualCopy(c, image, imageStream)
-		return
-	}
-
-	data, readErr := io.ReadAll(imageStream)
-	if readErr != nil {
-		if !isBrokenPipe(readErr) {
-			log.Printf("Failed to read image data for %s: %v", image.Identifier, readErr)
-		}
-		return
-	}
-
-	// 异步缓存
-	go func(id string, d []byte) {
-		if h.cacheHelper == nil {
-			return
-		}
-		ctx := context.Background()
-		if cacheErr := h.cacheHelper.CacheImageData(ctx, id, d); cacheErr != nil {
-			log.Printf("Failed to cache image data for '%s': %v", id, cacheErr)
-		}
-	}(image.Identifier, data)
-
-	h.serveImageStream(c, image, bytes.NewReader(data))
-}
 
 // serveImageData 直接提供图片数据
 func (h *Handler) serveImageData(c *gin.Context, image *models.Image, data []byte) {
@@ -415,54 +356,6 @@ func (h *Handler) serveImageStream(c *gin.Context, image *models.Image, reader i
 	http.ServeContent(c.Writer, c.Request, image.OriginalName, time.Time{}, reader)
 }
 
-// serveImageStreamManualCopy 手动拷贝流式图片
-func (h *Handler) serveImageStreamManualCopy(c *gin.Context, image *models.Image, reader io.Reader) error {
-	contentType := image.MimeType
-	if contentType == "" {
-		contentType = "application/octet-stream"
-	}
-
-	c.Header("Content-Type", contentType)
-	c.Header("Cache-Control", "public, max-age=2592000, immutable")
-
-	if image.OriginalName != "" {
-		asciiName := toASCII(image.OriginalName)
-		rfc5987Name := url.QueryEscape(image.OriginalName)
-		if asciiName == image.OriginalName {
-			c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, asciiName))
-		} else {
-			c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s"; filename*=UTF-8''%s`, asciiName, rfc5987Name))
-		}
-	}
-
-	bufPtr := pool.SharedBufferPool.Get().(*[]byte)
-	defer pool.SharedBufferPool.Put(bufPtr)
-	buf := *bufPtr
-
-	_, err := io.CopyBuffer(c.Writer, reader, buf)
-	if err != nil {
-		if isBrokenPipe(err) {
-			return nil
-		}
-		return err
-	}
-	return nil
-}
-
-// isBrokenPipe 检查是否为断开的连接错误
-func isBrokenPipe(err error) bool {
-	if err == nil {
-		return false
-	}
-	// 检查常见的连接断开错误
-	if errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) {
-		return true
-	}
-	errStr := strings.ToLower(err.Error())
-	return strings.Contains(errStr, "broken pipe") ||
-		strings.Contains(errStr, "connection reset by peer") ||
-		strings.Contains(errStr, "write tcp") && strings.Contains(errStr, "reset")
-}
 
 // toASCII 将字符串转换为 ASCII 表示（非 ASCII 字符转为下划线）
 func toASCII(s string) string {

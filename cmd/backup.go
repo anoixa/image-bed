@@ -105,7 +105,7 @@ func runBackup(outputFile string, tables []string, keepDir bool) error {
 	}
 
 	if !keepDir {
-		defer os.RemoveAll(tempDir)
+		defer func() { _ = os.RemoveAll(tempDir) }()
 	}
 
 	log.Printf("Starting backup to: %s", outputFile)
@@ -261,7 +261,7 @@ func createTarGz(sourceDir, targetFile string) error {
 	defer func() { _ = gzWriter.Close() }()
 
 	tarWriter := tar.NewWriter(gzWriter)
-	defer tarWriter.Close()
+	defer func() { _ = tarWriter.Close() }()
 
 	return filepath.Walk(sourceDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -288,7 +288,7 @@ func createTarGz(sourceDir, targetFile string) error {
 			if err != nil {
 				return err
 			}
-			defer data.Close()
+			defer func() { _ = data.Close() }()
 
 			if _, err := io.Copy(tarWriter, data); err != nil {
 				return err

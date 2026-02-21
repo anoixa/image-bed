@@ -69,7 +69,7 @@ func InitDependencies(cfg *config.Config) (*Dependencies, error) {
 	// 从配置文件初始化缓存
 	cacheCfg := buildCacheConfig(cfg)
 	if err := cache.Init(cacheCfg); err != nil {
-		database.Close(db)
+		_ = database.Close(db)
 		return nil, fmt.Errorf("failed to initialize cache: %w", err)
 	}
 	log.Println("[Dependencies] Cache initialized from config")
@@ -77,7 +77,7 @@ func InitDependencies(cfg *config.Config) (*Dependencies, error) {
 	// 初始化配置管理器
 	configManager := configSvc.NewManager(db, "./data")
 	if err := configManager.Initialize(); err != nil {
-		database.Close(db)
+		_ = database.Close(db)
 		return nil, err
 	}
 
@@ -135,7 +135,7 @@ func RunServer() {
 	if err != nil {
 		log.Fatalf("Failed to initialize dependencies: %v", err)
 	}
-	defer deps.Close()
+	defer func() { _ = deps.Close() }()
 
 	// 初始化数据库
 	InitDatabase(deps)
@@ -159,7 +159,9 @@ func RunServer() {
 		deps.ConfigManager,
 		thumbnailSvc,
 	)
-	thumbnailScanner.Start()
+	if err := thumbnailScanner.Start(); err != nil {
+		log.Fatalf("Failed to start thumbnail scanner: %v", err)
+	}
 
 	// 启动孤儿任务扫描器
 	orphanScanner := imageSvc.NewOrphanScanner(
