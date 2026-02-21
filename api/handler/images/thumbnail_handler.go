@@ -100,7 +100,7 @@ func (h *Handler) serveThumbnailImage(c *gin.Context, image *models.Image, resul
 		h.serveOriginalImage(c, image)
 		return
 	}
-	reader.Seek(0, io.SeekStart)
+	_, _ = reader.Seek(0, io.SeekStart)
 
 	c.Header("Content-Length", strconv.FormatInt(size, 10))
 

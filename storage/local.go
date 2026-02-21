@@ -34,8 +34,8 @@ func NewLocalStorage(basePath string) (*LocalStorage, error) {
 	if err != nil {
 		return nil, fmt.Errorf("local storage directory '%s' is not writable: %w", absPath, err)
 	}
-	f.Close()
-	os.Remove(testFile)
+	_ = f.Close()
+	_ = os.Remove(testFile)
 
 	return &LocalStorage{
 		absBasePath: absPath + string(os.PathSeparator),
@@ -58,7 +58,7 @@ func (s *LocalStorage) SaveWithContext(ctx context.Context, identifier string, f
 	if err != nil {
 		return fmt.Errorf("failed to create destination file '%s': %w", dstPath, err)
 	}
-	defer dst.Close()
+	defer func() { _ = dst.Close() }()
 
 	if _, err := io.Copy(dst, file); err != nil {
 		_ = os.Remove(dstPath)
@@ -182,10 +182,10 @@ func IsValidIdentifier(identifier string) bool {
 	}
 
 	for _, r := range identifier {
-		if !((r >= 'a' && r <= 'z') ||
-			(r >= 'A' && r <= 'Z') ||
-			(r >= '0' && r <= '9') ||
-			r == '-' || r == '_' || r == '.') {
+		if (r < 'a' || r > 'z') &&
+			(r < 'A' || r > 'Z') &&
+			(r < '0' || r > '9') &&
+			r != '-' && r != '_' && r != '.' {
 			return false
 		}
 	}

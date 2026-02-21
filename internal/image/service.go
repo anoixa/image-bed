@@ -180,19 +180,19 @@ func (s *Service) ProcessChunkedUpload(ctx context.Context, session *ChunkedUplo
 		chunkPath := filepath.Join(session.TempDir, strconv.Itoa(i))
 		chunkFile, err := os.Open(chunkPath)
 		if err != nil {
-			outFile.Close()
+			_ = outFile.Close()
 			return nil, fmt.Errorf("failed to open chunk %d: %w", i, err)
 		}
 
 		if _, err := io.Copy(writer, chunkFile); err != nil {
-			chunkFile.Close()
-			outFile.Close()
+			_ = chunkFile.Close()
+			_ = outFile.Close()
 			return nil, fmt.Errorf("failed to copy chunk %d: %w", i, err)
 		}
-		chunkFile.Close()
+		_ = chunkFile.Close()
 	}
 
-	outFile.Close()
+	_ = outFile.Close()
 
 	// 验证哈希
 	fileHash := hex.EncodeToString(hasher.Sum(nil))
@@ -230,7 +230,7 @@ func (s *Service) ProcessChunkedUpload(ctx context.Context, session *ChunkedUplo
 	}
 
 	if err := s.repo.SaveImage(newImage); err != nil {
-		storage.GetDefault().DeleteWithContext(ctx, identifier)
+		_ = storage.GetDefault().DeleteWithContext(ctx, identifier)
 		return nil, fmt.Errorf("failed to save image metadata: %w", err)
 	}
 
@@ -425,7 +425,7 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to open file: %w", err)
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	// 预读头部用于 MIME 验证
 	header := make([]byte, 512)
@@ -445,16 +445,17 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 		return nil, false, fmt.Errorf("failed to create temp file: %w", err)
 	}
 	defer func() {
-		tmp.Close()
-		os.Remove(tmp.Name())
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
 	}()
 
 	// 同时计算哈希并写入临时文件
 	hash := sha256.New()
 	w := io.MultiWriter(tmp, hash)
 
-	buf := pool.SharedBufferPool.Get().([]byte)
-	defer pool.SharedBufferPool.Put(buf)
+	bufPtr := pool.SharedBufferPool.Get().(*[]byte)
+	defer pool.SharedBufferPool.Put(bufPtr)
+	buf := *bufPtr
 
 	if _, err = io.CopyBuffer(w, reader, buf); err != nil {
 		return nil, false, fmt.Errorf("failed to process file stream: %w", err)
@@ -525,7 +526,7 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 	}
 
 	if err := s.repo.SaveImage(img); err != nil {
-		storageProvider.DeleteWithContext(ctx, identifier)
+		_ = storageProvider.DeleteWithContext(ctx, identifier)
 		return nil, false, errors.New("failed to save image metadata")
 	}
 
@@ -568,9 +569,7 @@ func (s *Service) warmCache(image *models.Image) {
 		return
 	}
 	ctx := context.Background()
-	if err := s.cacheHelper.CacheImage(ctx, image); err != nil {
-		// 只记录日志
-	}
+	_ = s.cacheHelper.CacheImage(ctx, image) // 缓存失败只记录日志
 }
 
 // GetImageMetadata 获取图片元数据
@@ -847,7 +846,7 @@ func ServeImageData(w http.ResponseWriter, data []byte, contentType string) {
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	w.WriteHeader(http.StatusOK)
-	w.Write(data)
+	_, _ = w.Write(data)
 }
 
 // StreamImage 流式传输图片
@@ -857,8 +856,9 @@ func StreamImage(ctx context.Context, w http.ResponseWriter, reader io.ReadSeeke
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", fileSize))
 	w.WriteHeader(http.StatusOK)
 
-	buf := pool.SharedBufferPool.Get().([]byte)
-	defer pool.SharedBufferPool.Put(buf)
+	bufPtr := pool.SharedBufferPool.Get().(*[]byte)
+	defer pool.SharedBufferPool.Put(bufPtr)
+	buf := *bufPtr
 
 	_, err := io.CopyBuffer(w, reader, buf)
 	return err

@@ -7,25 +7,18 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"net/url"
-	"os"
-	"regexp"
-	"strconv"
 	"strings"
-	"syscall"
 	"time"
 	"unicode"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
-	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/internal/image"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
-	"github.com/anoixa/image-bed/utils/pool"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
@@ -35,19 +28,12 @@ var (
 	imageGroup        singleflight.Group
 	fileDownloadGroup singleflight.Group
 	metaFetchTimeout  = 30 * time.Second
-	fileFetchTimeout  = 30 * time.Second
 )
 
 var (
 	ErrTemporaryFailure = errors.New("temporary failure, should be retried")
 )
 
-// rangeInfo range 请求信息
-type rangeInfo struct {
-	start  int64
-	end    int64
-	length int64
-}
 
 // GetImage 获取图片（支持格式协商）
 func (h *Handler) GetImage(c *gin.Context) {
@@ -139,7 +125,7 @@ func (h *Handler) fetchFromRemote(identifier string) ([]byte, error) {
 		}
 		defer func() {
 			if closer, ok := stream.(io.Closer); ok {
-				closer.Close()
+				_ = closer.Close()
 			}
 		}()
 
@@ -152,7 +138,7 @@ func (h *Handler) fetchFromRemote(identifier string) ([]byte, error) {
 		// 异步缓存
 		go func() {
 			if h.cacheHelper != nil {
-				h.cacheHelper.CacheImageData(context.Background(), identifier, data)
+				_ = h.cacheHelper.CacheImageData(context.Background(), identifier, data)
 			}
 		}()
 
@@ -172,7 +158,7 @@ func (h *Handler) serveBySendfile(c *gin.Context, image *models.Image, opener st
 	if err != nil {
 		return false
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	stat, err := file.Stat()
 	if err != nil {
@@ -216,7 +202,7 @@ func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *i
 	if opener, ok := storage.GetDefault().(storage.FileOpener); ok {
 		file, err := opener.OpenFile(c.Request.Context(), identifier)
 		if err == nil {
-			defer file.Close()
+			defer func() { _ = file.Close() }()
 			if stat, err := file.Stat(); err == nil {
 				c.Header("Content-Type", result.MIMEType)
 				c.Header("Cache-Control", "public, max-age=2592000, immutable")
@@ -343,111 +329,6 @@ func isTransientError(err error) bool {
 	return false
 }
 
-// streamAndCacheImage 流式处理（保留用于兼容）
-func (h *Handler) streamAndCacheImage(c *gin.Context, image *models.Image) {
-	imageStream, err := storage.GetDefault().GetWithContext(c.Request.Context(), image.Identifier)
-	if err != nil {
-		log.Printf("WARN: File for identifier '%s' not found in storage, but exists in DB. Error: %v", utils.SanitizeLogMessage(image.Identifier), err)
-		common.RespondError(c, http.StatusNotFound, "Image file not found in storage")
-		return
-	}
-
-	defer func() {
-		if closer, ok := imageStream.(io.Closer); ok {
-			_ = closer.Close()
-		}
-	}()
-
-	cfg := config.Get()
-	enableImageCaching := cfg.CacheEnableImageCaching
-	maxCacheSizeMB := cfg.CacheMaxImageCacheSizeMB
-	maxCacheSize := maxCacheSizeMB * 1024 * 1024
-	shouldCache := enableImageCaching && image.FileSize > 0 && (maxCacheSizeMB == 0 || image.FileSize <= maxCacheSize)
-
-	rs, isSeeker := imageStream.(io.ReadSeeker)
-
-	if c.IsAborted() {
-		return
-	}
-
-	// if文件太大或禁用缓存fallback到流式传输
-	if !shouldCache {
-		if isSeeker {
-			h.serveImageStream(c, image, rs)
-		} else {
-			if image.FileSize > 0 {
-				c.Header("Content-Length", strconv.FormatInt(image.FileSize, 10))
-			}
-			_ = h.serveImageStreamManualCopy(c, image, imageStream)
-		}
-		return
-	}
-
-	if isSeeker {
-		data, readErr := io.ReadAll(rs)
-		if readErr != nil {
-			if !isBrokenPipe(readErr) {
-				log.Printf("Failed to read image data for %s: %v", image.Identifier, readErr)
-			}
-			return
-		}
-
-		// 异步缓存
-		go func(id string, d []byte) {
-			if h.cacheHelper == nil {
-				return
-			}
-			ctx := context.Background()
-			if cacheErr := h.cacheHelper.CacheImageData(ctx, id, d); cacheErr != nil {
-				log.Printf("Failed to cache image data for '%s': %v", id, cacheErr)
-			}
-		}(image.Identifier, data)
-
-		h.serveImageStream(c, image, bytes.NewReader(data))
-		return
-	}
-
-	maxBufferSize := maxCacheSize
-	if maxBufferSize <= 0 {
-		maxBufferSize = 10 * 1024 * 1024 // 默认 10MB
-	}
-
-	// 使用 LimitReader 限制读取大小
-	limitedReader := io.LimitReader(imageStream, maxBufferSize)
-	var buffer bytes.Buffer
-
-	// 尝试读取到缓冲区
-	n, copyErr := io.Copy(&buffer, limitedReader)
-	if copyErr != nil && !isBrokenPipe(copyErr) {
-		log.Printf("Failed to buffer image stream for '%s': %v", image.Identifier, copyErr)
-		return
-	}
-
-	// 如果实际大小超过限制fallback流式传输
-	if n >= maxBufferSize || (image.FileSize > 0 && n < image.FileSize) {
-		log.Printf("Image %s too large for buffering (%d bytes), streaming directly", image.Identifier, n)
-
-		multiReader := io.MultiReader(bytes.NewReader(buffer.Bytes()), imageStream)
-		if image.FileSize > 0 {
-			c.Header("Content-Length", strconv.FormatInt(image.FileSize, 10))
-		}
-		_ = h.serveImageStreamManualCopy(c, image, multiReader)
-		return
-	}
-
-	data := buffer.Bytes()
-	go func(id string, d []byte) {
-		if h.cacheHelper == nil {
-			return
-		}
-		ctx := context.Background()
-		if cacheErr := h.cacheHelper.CacheImageData(ctx, id, d); cacheErr != nil {
-			log.Printf("Failed to cache image data for '%s': %v", id, cacheErr)
-		}
-	}(image.Identifier, data)
-
-	h.serveImageStream(c, image, bytes.NewReader(data))
-}
 
 // serveImageData 直接提供图片数据
 func (h *Handler) serveImageData(c *gin.Context, image *models.Image, data []byte) {
@@ -475,53 +356,6 @@ func (h *Handler) serveImageStream(c *gin.Context, image *models.Image, reader i
 	http.ServeContent(c.Writer, c.Request, image.OriginalName, time.Time{}, reader)
 }
 
-// serveImageStreamManualCopy 手动拷贝流式图片
-func (h *Handler) serveImageStreamManualCopy(c *gin.Context, image *models.Image, reader io.Reader) error {
-	contentType := image.MimeType
-	if contentType == "" {
-		contentType = "application/octet-stream"
-	}
-
-	c.Header("Content-Type", contentType)
-	c.Header("Cache-Control", "public, max-age=2592000, immutable")
-
-	if image.OriginalName != "" {
-		asciiName := toASCII(image.OriginalName)
-		rfc5987Name := url.QueryEscape(image.OriginalName)
-		if asciiName == image.OriginalName {
-			c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, asciiName))
-		} else {
-			c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s"; filename*=UTF-8''%s`, asciiName, rfc5987Name))
-		}
-	}
-
-	buf := pool.SharedBufferPool.Get().([]byte)
-	defer pool.SharedBufferPool.Put(buf)
-
-	_, err := io.CopyBuffer(c.Writer, reader, buf)
-	if err != nil {
-		if isBrokenPipe(err) {
-			return nil
-		}
-		return err
-	}
-	return nil
-}
-
-// isBrokenPipe 检查是否为断开的连接错误
-func isBrokenPipe(err error) bool {
-	if err == nil {
-		return false
-	}
-	// 检查常见的连接断开错误
-	if errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) {
-		return true
-	}
-	errStr := strings.ToLower(err.Error())
-	return strings.Contains(errStr, "broken pipe") ||
-		strings.Contains(errStr, "connection reset by peer") ||
-		strings.Contains(errStr, "write tcp") && strings.Contains(errStr, "reset")
-}
 
 // toASCII 将字符串转换为 ASCII 表示（非 ASCII 字符转为下划线）
 func toASCII(s string) string {
@@ -536,59 +370,3 @@ func toASCII(s string) string {
 	return string(result)
 }
 
-var svgMagicRegex = regexp.MustCompile(`(?i)^\s*(?:<\?xml[^>]*>\s*)?<svg`)
-
-// isSVG 检查文件是否为 SVG 格式
-func isSVG(data []byte) bool {
-	return svgMagicRegex.Match(data)
-}
-
-// isSafeFileName 检查文件名是否安全
-func isSafeFileName(name string) bool {
-	// 检查是否包含路径分隔符
-	if strings.Contains(name, "..") || strings.Contains(name, "/") || strings.Contains(name, "\\") {
-		return false
-	}
-	// 检查是否为隐藏文件
-	if strings.HasPrefix(name, ".") {
-		return false
-	}
-	return true
-}
-
-// isClientDisconnected 检查客户端是否已断开连接
-func isClientDisconnected(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	// 检查网络错误
-	var netErr net.Error
-	if errors.As(err, &netErr) {
-		if netErr.Timeout() || !netErr.Temporary() {
-			return true
-		}
-	}
-
-	errStr := strings.ToLower(err.Error())
-	disconnectedPatterns := []string{
-		"broken pipe",
-		"connection reset by peer",
-		"client disconnected",
-		"context canceled",
-		"write tcp",
-	}
-
-	for _, pattern := range disconnectedPatterns {
-		if strings.Contains(errStr, pattern) {
-			return true
-		}
-	}
-
-	// 检查文件系统错误
-	if errors.Is(err, os.ErrClosed) {
-		return true
-	}
-
-	return false
-}

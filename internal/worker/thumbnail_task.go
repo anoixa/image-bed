@@ -195,9 +195,9 @@ func (t *ThumbnailTask) handleError(err error, maxRetries int) {
 	}
 
 	if shouldRetry {
-		t.VariantRepo.UpdateFailed(t.VariantID, err.Error(), true)
+		_ = t.VariantRepo.UpdateFailed(t.VariantID, err.Error(), true)
 	} else {
-		t.VariantRepo.UpdateFailed(t.VariantID, err.Error(), false)
+		_ = t.VariantRepo.UpdateFailed(t.VariantID, err.Error(), false)
 	}
 }
 
@@ -206,7 +206,7 @@ func (t *ThumbnailTask) recovery() {
 	if r := recover(); r != nil {
 		utils.LogIfDevf("[ThumbnailTask] Panic recovered: %v", r)
 		if t.VariantID > 0 {
-			t.VariantRepo.UpdateFailed(t.VariantID, fmt.Sprintf("panic: %v", r), true)
+			_ = t.VariantRepo.UpdateFailed(t.VariantID, fmt.Sprintf("panic: %v", r), true)
 		}
 	}
 }

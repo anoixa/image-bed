@@ -49,11 +49,6 @@ func NewHandler(cacheProvider cache.Provider, imagesRepo *images.Repository, db 
 	}
 }
 
-// getStorageConfigID 根据存储名称获取存储配置ID
-func (h *Handler) getStorageConfigID(c interface{ Query(string) string }, storageName string) (uint, error) {
-	// 如果 storageName 为空，回退默认存储的ID
-	return storage.GetDefaultID(), nil
-}
 
 // warmCache 预热图片缓存
 func (h *Handler) warmCache(image *models.Image) {

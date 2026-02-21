@@ -92,7 +92,7 @@ func loadConfig() {
 
 	viper.AutomaticEnv()
 	for _, key := range viper.AllKeys() {
-		viper.BindEnv(key)
+		_ = viper.BindEnv(key)
 	}
 
 	if err := viper.Unmarshal(&globalConfig); err != nil {

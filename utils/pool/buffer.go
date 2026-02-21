@@ -6,8 +6,10 @@ import "sync"
 const BufferSize = 256 * 1024
 
 // SharedBufferPool 共享缓冲区池
+// 存储 *([]byte) 以避免 SA6002 警告
 var SharedBufferPool = sync.Pool{
 	New: func() interface{} {
-		return make([]byte, BufferSize)
+		buf := make([]byte, BufferSize)
+		return &buf
 	},
 }

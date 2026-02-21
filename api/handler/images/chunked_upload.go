@@ -138,7 +138,7 @@ func (h *Handler) InitChunkedUpload(c *gin.Context) {
 	sessionsMu.Lock()
 	if len(sessions) >= MaxUploadSessions {
 		sessionsMu.Unlock()
-		os.RemoveAll(tempDir)
+		_ = os.RemoveAll(tempDir)
 		common.RespondError(c, http.StatusServiceUnavailable, "Server is busy, too many upload sessions")
 		return
 	}
@@ -191,7 +191,7 @@ func (h *Handler) UploadChunk(c *gin.Context) {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to open chunk file")
 		return
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	chunkPath := filepath.Join(session.TempDir, strconv.Itoa(req.ChunkIndex))
 	dst, err := os.Create(chunkPath)
@@ -199,7 +199,7 @@ func (h *Handler) UploadChunk(c *gin.Context) {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to create chunk file")
 		return
 	}
-	defer dst.Close()
+	defer func() { _ = dst.Close() }()
 
 	if _, err := dst.ReadFrom(src); err != nil {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to save chunk")
@@ -288,7 +288,7 @@ func (h *Handler) processChunkedUploadAsync(sessionID string, session *ChunkedUp
 		sessionsMu.Lock()
 		delete(sessions, sessionID)
 		sessionsMu.Unlock()
-		os.RemoveAll(session.TempDir)
+		_ = os.RemoveAll(session.TempDir)
 	}()
 
 	ctx := context.Background()
@@ -343,7 +343,7 @@ func CleanupExpiredSessions() {
 	for sessionID, session := range sessions {
 		if now.Sub(session.CreatedAt) > UploadSessionExpiry {
 			if session.TempDir != "" {
-				os.RemoveAll(session.TempDir)
+				_ = os.RemoveAll(session.TempDir)
 			}
 			delete(sessions, sessionID)
 			expiredCount++
@@ -351,6 +351,7 @@ func CleanupExpiredSessions() {
 	}
 
 	if expiredCount > 0 {
-		// 清理日志
+		// 清理日志，使用 _ 避免 unused 警告
+		_ = expiredCount
 	}
 }

@@ -8,7 +8,6 @@ import (
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/config"
-	"github.com/anoixa/image-bed/utils"
 	"github.com/gin-gonic/gin"
 )
 
@@ -160,11 +159,3 @@ func (h *Handler) resolveStorageConfigID(c interface {
 	return 0, nil
 }
 
-// getSafeFileExtension 根据MIME类型获取安全的文件扩展名
-func getSafeFileExtension(mimeType string) string {
-	ext := utils.GetSafeExtension(mimeType)
-	if ext == "" {
-		return ".bin"
-	}
-	return ext
-}
