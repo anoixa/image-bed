@@ -87,7 +87,7 @@ func runBackup(outputFile string, tables []string, keepDir bool) error {
 	if err != nil {
 		return err
 	}
-	defer database.Close(db)
+	defer func() { _ = database.Close(db) }()
 
 	if outputFile == "" {
 		timestamp := time.Now().Format("20060102_150405")
@@ -156,7 +156,7 @@ func backupTable(db *gorm.DB, table string, tempDir string) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("failed to create output file: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	encoder := json.NewEncoder(file)
 	var count int64
@@ -242,7 +242,7 @@ func writeJSONFile(path string, data interface{}) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	encoder := json.NewEncoder(file)
 	encoder.SetIndent("", "  ")
@@ -255,10 +255,10 @@ func createTarGz(sourceDir, targetFile string) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	gzWriter := gzip.NewWriter(file)
-	defer gzWriter.Close()
+	defer func() { _ = gzWriter.Close() }()
 
 	tarWriter := tar.NewWriter(gzWriter)
 	defer tarWriter.Close()

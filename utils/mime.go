@@ -65,11 +65,11 @@ func GetImageDimensions(stream io.ReadSeeker) (int, int) {
 
 	img, _, err := image.Decode(stream)
 	if err != nil {
-		stream.Seek(currentPos, io.SeekStart)
+		_, _ = stream.Seek(currentPos, io.SeekStart)
 		return 0, 0
 	}
 
-	stream.Seek(currentPos, io.SeekStart)
+	_, _ = stream.Seek(currentPos, io.SeekStart)
 
 	bounds := img.Bounds()
 	return bounds.Dx(), bounds.Dy()

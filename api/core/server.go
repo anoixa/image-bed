@@ -59,7 +59,9 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 		MaxAge:           12 * time.Hour,
 	}))
 
-	router.SetTrustedProxies(nil)
+	if err := router.SetTrustedProxies(nil); err != nil {
+		log.Printf("Warning: Failed to set trusted proxies: %v", err)
+	}
 
 	// 初始化限制器
 	router.MaxMultipartMemory = int64(cfg.UploadMaxSizeMB) << 20

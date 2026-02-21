@@ -419,7 +419,7 @@ func (h *ConfigHandler) testCacheConfig(config map[string]interface{}) *models.T
 				Message: fmt.Sprintf("Failed to connect to Redis: %v", err),
 			}
 		}
-		defer provider.Close()
+		defer func() { _ = provider.Close() }()
 
 		ctx := context.Background()
 		if err := provider.Health(ctx); err != nil {
