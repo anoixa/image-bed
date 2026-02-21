@@ -97,28 +97,77 @@ func (h *Handler) GetImage(c *gin.Context) {
 
 // serveOriginalImage 提供原图
 func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
+	identifier := image.Identifier
+
 	// 检查缓存
-	imageData, err := h.cacheHelper.GetCachedImageData(c.Request.Context(), image.Identifier)
+	imageData, err := h.cacheHelper.GetCachedImageData(c.Request.Context(), identifier)
 	if err == nil {
 		h.serveImageData(c, image, imageData)
 		return
 	}
 
-	if h.serveBySendfile(c, image) {
+	// 本地存储
+	if opener, ok := storage.GetDefault().(storage.FileOpener); ok {
+		if h.serveBySendfile(c, image, opener) {
+			return
+		}
+	}
+
+	// 远程存储
+	data, err := h.fetchFromRemote(identifier)
+	if err != nil {
+		log.Printf("[serveOriginal] Failed to get image %s: %v", identifier, err)
+		common.RespondError(c, http.StatusNotFound, "Image file not found")
 		return
 	}
 
-	// 回退到普通流式传输
-	h.streamAndCacheImage(c, image)
+	h.serveImageData(c, image, data)
+}
+
+// fetchFromRemote 从远程存储获取图片数据（带 singleflight 防击穿）
+func (h *Handler) fetchFromRemote(identifier string) ([]byte, error) {
+	v, err, _ := fileDownloadGroup.Do(identifier, func() (interface{}, error) {
+		// 双重检查缓存
+		if data, err := h.cacheHelper.GetCachedImageData(context.Background(), identifier); err == nil {
+			return data, nil
+		}
+
+		// 从存储获取
+		stream, err := storage.GetDefault().GetWithContext(context.Background(), identifier)
+		if err != nil {
+			return nil, err
+		}
+		defer func() {
+			if closer, ok := stream.(io.Closer); ok {
+				closer.Close()
+			}
+		}()
+
+		// 读取数据到内存
+		data, err := io.ReadAll(stream)
+		if err != nil {
+			return nil, err
+		}
+
+		// 异步缓存
+		go func() {
+			if h.cacheHelper != nil {
+				h.cacheHelper.CacheImageData(context.Background(), identifier, data)
+			}
+		}()
+
+		return data, nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return v.([]byte), nil
 }
 
 // serveBySendfile 使用 sendfile 零拷贝传输
-func (h *Handler) serveBySendfile(c *gin.Context, image *models.Image) bool {
-	opener, ok := storage.GetDefault().(storage.FileOpener)
-	if !ok {
-		return false
-	}
-
+func (h *Handler) serveBySendfile(c *gin.Context, image *models.Image, opener storage.FileOpener) bool {
 	file, err := opener.OpenFile(c.Request.Context(), image.Identifier)
 	if err != nil {
 		return false
@@ -143,7 +192,6 @@ func (h *Handler) serveBySendfile(c *gin.Context, image *models.Image) bool {
 		c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s"; filename*=UTF-8''%s`, asciiName, rfc5987Name))
 	}
 
-	// 使用 http.ServeContent 自动处理 Range 和 sendfile
 	http.ServeContent(c.Writer, c.Request, image.OriginalName, stat.ModTime(), file)
 
 	// 异步预热缓存
@@ -151,7 +199,6 @@ func (h *Handler) serveBySendfile(c *gin.Context, image *models.Image) bool {
 
 	return true
 }
-
 
 // serveVariantImage 提供格式变体
 func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *image.VariantResult) {
@@ -165,120 +212,30 @@ func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *i
 		return
 	}
 
-	// 本地存储优先使用 sendfile
-	if h.serveVariantBySendfile(c, img, result) {
-		return
+	// 判断是否为本地存储
+	if opener, ok := storage.GetDefault().(storage.FileOpener); ok {
+		file, err := opener.OpenFile(c.Request.Context(), identifier)
+		if err == nil {
+			defer file.Close()
+			if stat, err := file.Stat(); err == nil {
+				c.Header("Content-Type", result.MIMEType)
+				c.Header("Cache-Control", "public, max-age=2592000, immutable")
+				c.Header("Vary", "Accept")
+				http.ServeContent(c.Writer, c.Request, "", stat.ModTime(), file)
+				return
+			}
+		}
 	}
 
-	imageStream, err := storage.GetDefault().GetWithContext(context.Background(), identifier)
+	// 远程存储
+	data, err := h.fetchFromRemote(identifier)
 	if err != nil {
 		log.Printf("[serveVariant] Failed to get variant %s: %v", identifier, err)
 		h.serveOriginalImage(c, img)
 		return
 	}
 
-	h.streamVariantWithTee(c, img, result, imageStream)
-}
-
-// serveVariantBySendfile 变体使用 sendfile 零拷贝
-func (h *Handler) serveVariantBySendfile(c *gin.Context, img *models.Image, result *image.VariantResult) bool {
-	opener, ok := storage.GetDefault().(storage.FileOpener)
-	if !ok {
-		return false
-	}
-
-	file, err := opener.OpenFile(c.Request.Context(), result.Variant.Identifier)
-	if err != nil {
-		return false
-	}
-	defer file.Close()
-
-	stat, err := file.Stat()
-	if err != nil {
-		return false
-	}
-
-	c.Header("Content-Type", result.MIMEType)
-	c.Header("Cache-Control", "public, max-age=2592000, immutable")
-	c.Header("Vary", "Accept")
-
-	http.ServeContent(c.Writer, c.Request, "", stat.ModTime(), file)
-
-	// 异步缓存（文件已验证存在）
-	go h.cacheVariantFile(result.Variant.Identifier, result.Variant.Identifier)
-
-	return true
-}
-
-// streamVariantWithTee 使用 TeeReader 边传输边缓存
-func (h *Handler) streamVariantWithTee(c *gin.Context, img *models.Image, result *image.VariantResult, src io.ReadSeeker) {
-	variant := result.Variant
-
-	pr, pw := io.Pipe()
-	tee := io.TeeReader(src, pw)
-
-	// 异步缓存
-	go func(id string, r io.Reader) {
-		defer pr.Close()
-		if h.cacheHelper == nil {
-			io.Copy(io.Discard, r)
-			return
-		}
-
-		buf := pool.SharedBufferPool.Get().([]byte)
-		defer pool.SharedBufferPool.Put(buf)
-
-		var cacheBuf bytes.Buffer
-		if _, err := io.CopyBuffer(&cacheBuf, r, buf); err != nil {
-			log.Printf("[serveVariant] Failed to buffer for cache %s: %v", id, err)
-			return
-		}
-
-		if err := h.cacheHelper.CacheImageData(context.Background(), id, cacheBuf.Bytes()); err != nil {
-			log.Printf("[serveVariant] Failed to cache variant %s: %v", id, err)
-		}
-	}(variant.Identifier, pr)
-
-	c.Header("Content-Type", result.MIMEType)
-	c.Header("Cache-Control", "public, max-age=2592000, immutable")
-	c.Header("Vary", "Accept")
-
-	buf := pool.SharedBufferPool.Get().([]byte)
-	defer pool.SharedBufferPool.Put(buf)
-
-	_, err := io.CopyBuffer(c.Writer, tee, buf)
-	pw.CloseWithError(err)
-
-	if err != nil && !isBrokenPipe(err) {
-		log.Printf("[serveVariant] Failed to stream variant %s: %v", variant.Identifier, err)
-	}
-}
-
-// cacheVariantFile 异步缓存变体文件
-func (h *Handler) cacheVariantFile(identifier string, cacheKey string) {
-	if h.cacheHelper == nil {
-		return
-	}
-
-	opener, ok := storage.GetDefault().(storage.FileOpener)
-	if !ok {
-		return
-	}
-
-	file, err := opener.OpenFile(context.Background(), identifier)
-	if err != nil {
-		return
-	}
-	defer file.Close()
-
-	data, err := io.ReadAll(file)
-	if err != nil {
-		return
-	}
-
-	if err := h.cacheHelper.CacheImageData(context.Background(), cacheKey, data); err != nil {
-		log.Printf("[serveVariant] Failed to cache variant %s: %v", cacheKey, err)
-	}
+	h.serveVariantData(c, img, result, data)
 }
 
 // serveVariantData 提供变体数据
@@ -419,7 +376,7 @@ func isTransientError(err error) bool {
 	return false
 }
 
-// streamAndCacheImage 流式处理
+// streamAndCacheImage 流式处理（保留用于兼容）
 func (h *Handler) streamAndCacheImage(c *gin.Context, image *models.Image) {
 	imageStream, err := storage.GetDefault().GetWithContext(c.Request.Context(), image.Identifier)
 	if err != nil {
