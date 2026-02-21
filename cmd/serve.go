@@ -132,7 +132,6 @@ func RunServer() {
 		log.Fatalf("Failed to create temp directory: %v", err)
 	}
 
-	// 显式初始化依赖
 	deps, err := InitDependencies(cfg)
 	if err != nil {
 		log.Fatalf("Failed to initialize dependencies: %v", err)
