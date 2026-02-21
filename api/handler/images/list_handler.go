@@ -15,6 +15,7 @@ import (
 type ImageDTO struct {
 	ID           uint   `json:"id"`
 	URL          string `json:"url"`
+	ThumbnailURL string `json:"thumbnail_url"`
 	OriginalName string `json:"original_name"`
 	FileSize     int64  `json:"file_size"`
 	MimeType     string `json:"mime_type"`
@@ -29,6 +30,8 @@ type ImageRequestBody struct {
 	Identifier  string `json:"identifier"`
 	Search      string `json:"search"`
 	AlbumID     *uint  `json:"album_id"`
+	StartTime   int64  `json:"start_time"`  // Unix时间戳（毫秒）
+	EndTime     int64  `json:"end_time"`    // Unix时间戳（毫秒）
 
 	Page  int `json:"page" binding:"required"`
 	Limit int `json:"limit" binding:"required"`
@@ -67,7 +70,7 @@ func (h *Handler) ListImages(c *gin.Context) {
 		limit = maxLimit
 	}
 
-	list, total, err := h.repo.GetImageList(body.StorageType, body.Identifier, body.Search, body.AlbumID, page, limit, int(userID))
+	list, total, err := h.repo.GetImageList(body.StorageType, body.Identifier, body.Search, body.AlbumID, body.StartTime, body.EndTime, page, limit, int(userID))
 	if err != nil {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to get image list")
 		return
@@ -93,10 +96,12 @@ func toImageDTO(image *models.Image) *ImageDTO {
 	}
 
 	imageUrl := utils.BuildImageURL(image.Identifier)
+	thumbnailUrl := utils.BuildThumbnailURL(image.Identifier)
 
 	return &ImageDTO{
 		ID:           image.ID,
 		URL:          imageUrl,
+		ThumbnailURL: thumbnailUrl,
 		OriginalName: image.OriginalName,
 		FileSize:     image.FileSize,
 		MimeType:     image.MimeType,

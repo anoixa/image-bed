@@ -2,6 +2,7 @@ package images
 
 import (
 	"context"
+	"time"
 
 	"github.com/anoixa/image-bed/database/models"
 	"gorm.io/gorm"
@@ -174,7 +175,7 @@ func (r *Repository) UpdateImageByIdentifier(identifier string, updates map[stri
 }
 
 // GetImageList 获取图片列表（支持搜索和过滤）
-func (r *Repository) GetImageList(storageType, identifier, search string, albumID *uint, page, pageSize, userID int) ([]*models.Image, int64, error) {
+func (r *Repository) GetImageList(storageType, identifier, search string, albumID *uint, startTime, endTime int64, page, pageSize, userID int) ([]*models.Image, int64, error) {
 	var imageList []*models.Image
 	var total int64
 
@@ -192,6 +193,13 @@ func (r *Repository) GetImageList(storageType, identifier, search string, albumI
 	if albumID != nil {
 		db = db.Joins("JOIN album_images ON album_images.image_id = images.id").
 			Where("album_images.album_id = ?", *albumID)
+	}
+	// 时间区间过滤（Unix时间戳秒）
+	if startTime > 0 {
+		db = db.Where("created_at >= ?", time.Unix(startTime, 0))
+	}
+	if endTime > 0 {
+		db = db.Where("created_at <= ?", time.Unix(endTime, 0))
 	}
 
 	if err := db.Count(&total).Error; err != nil {
