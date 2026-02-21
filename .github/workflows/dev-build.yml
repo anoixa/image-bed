@@ -8,6 +8,10 @@ on:
     branches:
       - dev
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
@@ -165,8 +169,8 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=dev
-            type=sha,prefix=dev-,suffix=,format=short
+            type=raw,value=dev-amd64
+            type=sha,prefix=dev-,suffix=-amd64,format=short
 
       - name: Build and push amd64
         uses: docker/build-push-action@v5
@@ -207,8 +211,8 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=dev
-            type=sha,prefix=dev-,suffix=,format=short
+            type=raw,value=dev-arm64
+            type=sha,prefix=dev-,suffix=-arm64,format=short
 
       - name: Build and push arm64
         uses: docker/build-push-action@v5
@@ -220,3 +224,47 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # 合并多架构镜像
+  merge-docker-manifest:
+    name: Merge Multi-Arch Docker Manifest
+    runs-on: ubuntu-latest
+    needs: [build-docker-amd64, build-docker-arm64]
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push multi-arch manifest
+        run: |
+          # 获取镜像名
+          IMAGE_NAME="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          SHA_SHORT=$(echo '${{ github.sha }}' | cut -c1-7)
+          
+          # 创建多架构 manifest for dev tag
+          docker buildx imagetools create \
+            -t "${IMAGE_NAME}:dev" \
+            "${IMAGE_NAME}:dev-amd64" \
+            "${IMAGE_NAME}:dev-arm64"
+          
+          # 创建多架构 manifest for sha tag
+          docker buildx imagetools create \
+            -t "${IMAGE_NAME}:dev-${SHA_SHORT}" \
+            "${IMAGE_NAME}:dev-${SHA_SHORT}-amd64" \
+            "${IMAGE_NAME}:dev-${SHA_SHORT}-arm64"
+
+      - name: Verify multi-arch manifest
+        run: |
+          IMAGE_NAME="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          echo "Inspecting manifest for ${IMAGE_NAME}:dev"
+          docker buildx imagetools inspect "${IMAGE_NAME}:dev"
