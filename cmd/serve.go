@@ -58,6 +58,12 @@ func InitDependencies(cfg *config.Config) (*Dependencies, error) {
 		return nil, err
 	}
 
+	if err := database.AutoMigrate(db); err != nil {
+		database.Close(db)
+		return nil, fmt.Errorf("failed to auto migrate database: %w", err)
+	}
+	log.Println("[Dependencies] Database migration completed")
+
 	// 初始化仓库
 	repos := &core.Repositories{
 		AccountsRepo: accounts.NewRepository(db),
@@ -91,14 +97,13 @@ func InitDependencies(cfg *config.Config) (*Dependencies, error) {
 
 	// 初始化存储层
 	storageConfigs, err := configManager.GetStorageConfigs(context.Background())
-	if err == nil && len(storageConfigs) > 0 {
-		if err := storage.InitStorage(storageConfigs); err != nil {
-			log.Printf("[Dependencies] Warning: Failed to init storage: %v", err)
-		} else {
-			log.Println("[Dependencies] Storage initialized from database configs")
-		}
-	} else if err != nil {
+	if err != nil {
 		log.Printf("[Dependencies] Warning: Failed to get storage configs: %v", err)
+	}
+	if err := storage.InitStorage(storageConfigs); err != nil {
+		log.Printf("[Dependencies] Warning: Failed to init storage: %v", err)
+	} else {
+		log.Println("[Dependencies] Storage initialized")
 	}
 
 	// 初始化变体仓库和转换器
@@ -132,15 +137,13 @@ func RunServer() {
 		log.Fatalf("Failed to create temp directory: %v", err)
 	}
 
-	// 显式初始化依赖
 	deps, err := InitDependencies(cfg)
 	if err != nil {
 		log.Fatalf("Failed to initialize dependencies: %v", err)
 	}
 	defer deps.Close()
 
-	// 初始化数据库
-	InitDatabase(deps)
+	deps.Repositories.AccountsRepo.CreateDefaultAdminUser()
 
 	// 初始化异步任务协程池
 	worker.InitGlobalPool(cfg.WorkerCount, 1000)
