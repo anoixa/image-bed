@@ -1,4 +1,4 @@
-package local
+package storage
 
 import (
 	"context"
@@ -6,39 +6,50 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
-// Storage 本地文件存储实现
-type Storage struct {
+// LocalStorage 本地文件存储实现
+type LocalStorage struct {
 	absBasePath string
 }
 
-// NewStorage 创建本地存储提供者
-func NewStorage(basePath string) (*Storage, error) {
+// NewLocalStorage 创建本地存储提供者
+func NewLocalStorage(basePath string) (*LocalStorage, error) {
 	absPath, err := filepath.Abs(basePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get absolute path for '%s': %w", basePath, err)
 	}
 
+	// 创建目录
 	if err := os.MkdirAll(absPath, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create local storage directory '%s': %w", absPath, err)
 	}
 
-	return &Storage{
+	// 检查目录是否可写
+	testFile := filepath.Join(absPath, ".write_test_"+strconv.FormatInt(time.Now().UnixNano(), 10))
+	f, err := os.Create(testFile)
+	if err != nil {
+		return nil, fmt.Errorf("local storage directory '%s' is not writable: %w", absPath, err)
+	}
+	f.Close()
+	os.Remove(testFile)
+
+	return &LocalStorage{
 		absBasePath: absPath + string(os.PathSeparator),
 	}, nil
 }
 
 // SaveWithContext 保存文件到本地存储
-func (s *Storage) SaveWithContext(ctx context.Context, identifier string, file io.Reader) error {
+func (s *LocalStorage) SaveWithContext(ctx context.Context, identifier string, file io.Reader) error {
 	if !IsValidIdentifier(identifier) {
 		return fmt.Errorf("invalid file identifier: %s", identifier)
 	}
 
 	dstPath := filepath.Join(s.absBasePath, identifier)
 
-	// 确保最终路径在 basePath
 	if !strings.HasPrefix(dstPath, s.absBasePath) {
 		return fmt.Errorf("invalid file path, potential directory traversal: %s", identifier)
 	}
@@ -58,7 +69,7 @@ func (s *Storage) SaveWithContext(ctx context.Context, identifier string, file i
 }
 
 // GetWithContext 从本地存储获取文件
-func (s *Storage) GetWithContext(ctx context.Context, identifier string) (io.ReadSeeker, error) {
+func (s *LocalStorage) GetWithContext(ctx context.Context, identifier string) (io.ReadSeeker, error) {
 	if !IsValidIdentifier(identifier) {
 		return nil, fmt.Errorf("invalid file identifier: %s", identifier)
 	}
@@ -81,8 +92,22 @@ func (s *Storage) GetWithContext(ctx context.Context, identifier string) (io.Rea
 	return file, nil
 }
 
+// OpenFile 零拷贝传输
+func (s *LocalStorage) OpenFile(ctx context.Context, name string) (*os.File, error) {
+	if !IsValidIdentifier(name) {
+		return nil, fmt.Errorf("invalid file identifier: %s", name)
+	}
+
+	fullPath := filepath.Join(s.absBasePath, name)
+	if !strings.HasPrefix(fullPath, s.absBasePath) {
+		return nil, fmt.Errorf("invalid file path: %s", name)
+	}
+
+	return os.Open(fullPath)
+}
+
 // DeleteWithContext 从本地存储删除文件
-func (s *Storage) DeleteWithContext(ctx context.Context, identifier string) error {
+func (s *LocalStorage) DeleteWithContext(ctx context.Context, identifier string) error {
 	if !IsValidIdentifier(identifier) {
 		return fmt.Errorf("invalid file identifier: %s", identifier)
 	}
@@ -106,7 +131,7 @@ func (s *Storage) DeleteWithContext(ctx context.Context, identifier string) erro
 }
 
 // Exists 检查文件是否存在
-func (s *Storage) Exists(ctx context.Context, identifier string) (bool, error) {
+func (s *LocalStorage) Exists(ctx context.Context, identifier string) (bool, error) {
 	if !IsValidIdentifier(identifier) {
 		return false, fmt.Errorf("invalid file identifier: %s", identifier)
 	}
@@ -127,18 +152,18 @@ func (s *Storage) Exists(ctx context.Context, identifier string) (bool, error) {
 }
 
 // Health 检查存储健康状态
-func (s *Storage) Health(ctx context.Context) error {
+func (s *LocalStorage) Health(ctx context.Context) error {
 	_, err := os.ReadDir(s.absBasePath)
 	return err
 }
 
 // Name 返回存储名称
-func (s *Storage) Name() string {
+func (s *LocalStorage) Name() string {
 	return "local"
 }
 
 // BasePath 返回存储的基础路径
-func (s *Storage) BasePath() string {
+func (s *LocalStorage) BasePath() string {
 	return s.absBasePath
 }
 

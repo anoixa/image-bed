@@ -59,7 +59,7 @@ func (SystemConfig) TableName() string {
 	return "system_configs"
 }
 
-// ToResponse 转换为响应结构（脱敏）
+// ToResponse 转换为响应结构
 func (sc *SystemConfig) ToResponse(config map[string]interface{}) map[string]interface{} {
 	return map[string]interface{}{
 		"id":          sc.ID,

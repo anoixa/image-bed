@@ -2,25 +2,24 @@ package image
 
 import (
 	"context"
-	"time"
 
+	"github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
-	"github.com/anoixa/image-bed/config/db"
+	"github.com/anoixa/image-bed/internal/worker"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
-	"github.com/anoixa/image-bed/internal/worker"
 )
 
 // Converter 图片转换器
 type Converter struct {
 	configManager *config.Manager
-	variantRepo   images.VariantRepository
+	variantRepo   *images.VariantRepository
 	storage       storage.Provider
 }
 
 // NewConverter 创建转换器
-func NewConverter(cm *config.Manager, repo images.VariantRepository, storage storage.Provider) *Converter {
+func NewConverter(cm *config.Manager, repo *images.VariantRepository, storage storage.Provider) *Converter {
 	return &Converter{
 		configManager: cm,
 		variantRepo:   repo,
@@ -45,7 +44,6 @@ func (c *Converter) TriggerWebPConversion(image *models.Image) {
 		return
 	}
 
-	// 检查大小限制
 	if settings.SkipSmallerThan > 0 {
 		minSize := int64(settings.SkipSmallerThan * 1024)
 		if image.FileSize < minSize {
@@ -53,40 +51,45 @@ func (c *Converter) TriggerWebPConversion(image *models.Image) {
 		}
 	}
 
-	// 创建或获取变体记录
 	variant, err := c.variantRepo.UpsertPending(image.ID, models.FormatWebP)
 	if err != nil {
 		utils.LogIfDevf("[Converter] Failed to upsert variant: %v", err)
 		return
 	}
 
-	// 只有 pending 状态才提交任务
 	if variant.Status != models.VariantStatusPending {
 		utils.LogIfDevf("[Converter] Variant %d status=%s, skip submission (retry_count=%d)",
 			variant.ID, variant.Status, variant.RetryCount)
 		return
 	}
 
-	// 检查重试次数
 	if variant.RetryCount >= settings.MaxRetries {
 		utils.LogIfDevf("[Converter] Variant %d reached max retries (%d >= %d), skip submission",
 			variant.ID, variant.RetryCount, settings.MaxRetries)
 		return
 	}
 
-	// 提交任务（传入尺寸信息避免重复解析）
-	task := &worker.WebPConversionTask{
-		VariantID:        variant.ID,
-		ImageID:          image.ID,
-		SourceIdentifier: image.Identifier,
-		SourceWidth:      image.Width,
-		SourceHeight:     image.Height,
-		ConfigManager:    c.configManager,
-		VariantRepo:      c.variantRepo,
-		Storage:          c.storage,
+	// 提交任务
+	pool := worker.GetGlobalPool()
+	if pool == nil {
+		return
 	}
 
-	if !worker.TrySubmit(task, 3, 100*time.Millisecond) {
+	ok := pool.Submit(func() {
+		task := &worker.WebPConversionTask{
+			VariantID:        variant.ID,
+			ImageID:          image.ID,
+			SourceIdentifier: image.Identifier,
+			SourceWidth:      image.Width,
+			SourceHeight:     image.Height,
+			ConfigManager:    c.configManager,
+			VariantRepo:      c.variantRepo,
+			Storage:          c.storage,
+		}
+		task.Execute()
+	})
+
+	if !ok {
 		utils.LogIfDevf("[Converter] Failed to submit task for %s", image.Identifier)
 	}
 }
@@ -99,12 +102,10 @@ func (c *Converter) TriggerRetry(variant *models.ImageVariant, image *models.Ima
 		return
 	}
 
-	// 检查重试次数
 	if variant.RetryCount >= settings.MaxRetries {
 		return
 	}
 
-	// CAS 重置为 pending
 	if err := c.variantRepo.ResetForRetry(variant.ID, 0); err != nil {
 		utils.LogIfDevf("[Converter] Failed to reset variant %d: %v", variant.ID, err)
 		return

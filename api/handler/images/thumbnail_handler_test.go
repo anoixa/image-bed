@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"testing"
 
-	imageSvc "github.com/anoixa/image-bed/internal/services/image"
+	imageSvc "github.com/anoixa/image-bed/internal/image"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 )

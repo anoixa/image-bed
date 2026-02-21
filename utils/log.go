@@ -8,21 +8,18 @@ import (
 	"github.com/anoixa/image-bed/config"
 )
 
-// maxLogMessageLen 日志消息最大长度，防止日志过大
+// maxLogMessageLen 日志消息最大长度
 const maxLogMessageLen = 500
 
-// SanitizeLogMessage 清理日志消息，防止日志注入攻击
-// 移除所有控制字符，限制长度
+// SanitizeLogMessage 清理日志消息
 func SanitizeLogMessage(msg string) string {
 	var sb strings.Builder
 	for _, r := range msg {
-		// 只保留可打印字符，移除换行、制表符等控制字符
 		if unicode.IsPrint(r) {
 			sb.WriteRune(r)
 		}
 	}
 	result := sb.String()
-	// 限制长度
 	if len(result) > maxLogMessageLen {
 		return result[:maxLogMessageLen] + "..."
 	}
@@ -38,7 +35,6 @@ func SanitizeLogUsername(username string) string {
 }
 
 // LogIfDev 仅在开发版本时输出日志
-// 生产版本(CommitHash != "n/a")不输出任何日志
 func LogIfDev(msg string) {
 	if config.CommitHash == "n/a" {
 		log.Println(msg)
@@ -46,7 +42,6 @@ func LogIfDev(msg string) {
 }
 
 // LogIfDevf 仅在开发版本时格式化输出日志
-// 生产版本(CommitHash != "n/a")不输出任何日志
 func LogIfDevf(format string, v ...interface{}) {
 	if config.CommitHash == "n/a" {
 		log.Printf(format, v...)

@@ -4,11 +4,11 @@ import "gorm.io/gorm"
 
 type Image struct {
 	gorm.Model
-	Identifier    string `gorm:"uniqueIndex:idx_identifier;not null"`
-	OriginalName  string `gorm:"not null"`
-	FileSize      int64  `gorm:"not null"`
-	MimeType      string `gorm:"not null"`
-	StorageConfigID uint `gorm:"column:storage_config_id;not null"`
+	Identifier      string `gorm:"uniqueIndex:idx_identifier;not null"`
+	OriginalName    string `gorm:"not null"`
+	FileSize        int64  `gorm:"not null"`
+	MimeType        string `gorm:"not null"`
+	StorageConfigID uint   `gorm:"column:storage_config_id;not null"`
 
 	FileHash string `gorm:"uniqueIndex:idx_filehash;not null"`
 	Width    int
@@ -20,5 +20,5 @@ type Image struct {
 
 	Albums []*Album `gorm:"many2many:album_images;"`
 
-	IsPendingDeletion bool `gorm:"default:false;not null" json:"-"` // 不序列化到JSON
+	IsPendingDeletion bool `gorm:"default:false;not null" json:"-"`
 }

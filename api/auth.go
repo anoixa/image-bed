@@ -3,14 +3,14 @@ package api
 import (
 	"time"
 
-	"github.com/anoixa/image-bed/database/repo/keys"
-	"github.com/anoixa/image-bed/internal/services/auth"
 	configSvc "github.com/anoixa/image-bed/config/db"
+	"github.com/anoixa/image-bed/database/repo/keys"
+	"github.com/anoixa/image-bed/internal/auth"
 )
 
 var (
 	// jwtService JWT 服务实例
-	jwtService *auth.JWTService
+	jwtService   *auth.JWTService
 	tokenManager *auth.TokenManager
 	authKeysRepo *keys.Repository
 )
@@ -36,7 +36,7 @@ func TokenInitFromManager(manager *configSvc.Manager) error {
 	return nil
 }
 
-// GetJWTConfig 获取当前 JWT 配置（只读）
+// GetJWTConfig 获取当前 JWT 配置
 func GetJWTConfig() (secret []byte, expiresIn, refreshExpiresIn time.Duration) {
 	if tokenManager == nil {
 		return nil, 0, 0
@@ -48,6 +48,11 @@ func GetJWTConfig() (secret []byte, expiresIn, refreshExpiresIn time.Duration) {
 // GetJWTService 获取 JWT 服务实例
 func GetJWTService() *auth.JWTService {
 	return jwtService
+}
+
+// GetTokenManager 获取 Token 管理器实例
+func GetTokenManager() *auth.TokenManager {
+	return tokenManager
 }
 
 // InitTestJWT 初始化测试用的 JWT 配置

@@ -8,10 +8,11 @@ import (
 	"path/filepath"
 
 	"github.com/anoixa/image-bed/config"
+	"github.com/anoixa/image-bed/database"
 	"github.com/anoixa/image-bed/database/models"
-	"github.com/anoixa/image-bed/internal/app"
-	"github.com/anoixa/image-bed/storage/local"
+	"github.com/anoixa/image-bed/storage"
 	"github.com/spf13/cobra"
+	"gorm.io/gorm"
 )
 
 // cleanCmd 清理数据库孤儿记录和临时文件
@@ -58,24 +59,24 @@ func runClean(dryRun, tempOnly, dbOnly, storageOnly bool) error {
 	config.InitConfig()
 	cfg := config.Get()
 
-	container := app.NewContainer(cfg)
-	if err := container.Init(); err != nil {
-		return fmt.Errorf("failed to initialize container: %w", err)
+	db, err := initDB()
+	if err != nil {
+		return err
 	}
-	defer container.Close()
+	defer database.Close(db)
 
 	stats := &cleanStats{}
 
 	// 数据库清理
 	if !tempOnly && !storageOnly {
-		if err := cleanOrphanDBRecords(container, stats, dryRun); err != nil {
+		if err := cleanOrphanDBRecords(db, stats, dryRun); err != nil {
 			stats.errors = append(stats.errors, fmt.Sprintf("clean orphan DB records failed: %v", err))
 		}
 	}
 
 	// 存储清理
 	if !tempOnly && !dbOnly {
-		if err := cleanOrphanStorageFiles(container, stats, dryRun); err != nil {
+		if err := cleanOrphanStorageFiles(db, stats, dryRun); err != nil {
 			stats.errors = append(stats.errors, fmt.Sprintf("clean orphan storage files failed: %v", err))
 		}
 	}
@@ -97,11 +98,8 @@ func runClean(dryRun, tempOnly, dbOnly, storageOnly bool) error {
 }
 
 // cleanOrphanDBRecords 清理数据库中不存在对应文件的记录
-func cleanOrphanDBRecords(container *app.Container, stats *cleanStats, dryRun bool) error {
+func cleanOrphanDBRecords(db *gorm.DB, stats *cleanStats, dryRun bool) error {
 	log.Println("Checking for orphan database records...")
-
-	db := container.GetDatabaseProvider().DB()
-	storageFactory := container.GetStorageFactory()
 
 	var images []models.Image
 	if err := db.Find(&images).Error; err != nil {
@@ -110,13 +108,7 @@ func cleanOrphanDBRecords(container *app.Container, stats *cleanStats, dryRun bo
 
 	var orphanIDs []uint
 	for _, img := range images {
-		provider, err := storageFactory.GetByID(img.StorageConfigID)
-		if err != nil {
-			log.Printf("Warning: unknown storage config ID '%d' for image %s", img.StorageConfigID, img.Identifier)
-			continue
-		}
-
-		exists, err := provider.Exists(context.Background(), img.Identifier)
+		exists, err := storage.GetDefault().Exists(context.Background(), img.Identifier)
 		if err != nil {
 			log.Printf("Warning: failed to check existence of %s: %v", img.Identifier, err)
 			continue
@@ -149,28 +141,21 @@ func cleanOrphanDBRecords(container *app.Container, stats *cleanStats, dryRun bo
 }
 
 // cleanOrphanStorageFiles 清理存储中没有对应数据库记录的文件
-func cleanOrphanStorageFiles(container *app.Container, stats *cleanStats, dryRun bool) error {
+func cleanOrphanStorageFiles(db *gorm.DB, stats *cleanStats, dryRun bool) error {
 	log.Println("Checking for orphan storage files...")
 
-	storageFactory := container.GetStorageFactory()
-	if storageFactory == nil {
-		return fmt.Errorf("storage factory not initialized")
-	}
-
 	// 获取默认存储提供者
-	provider := storageFactory.GetDefault()
+	provider := storage.GetDefault()
 	if provider == nil {
 		return fmt.Errorf("no default storage provider")
 	}
 
 	// 检查是否为本地存储
-	localStorage, ok := provider.(*local.Storage)
+	localStorage, ok := provider.(*storage.LocalStorage)
 	if !ok {
 		log.Printf("Storage type '%s' does not support orphan file detection yet", provider.Name())
 		return nil
 	}
-
-	db := container.GetDatabaseProvider().DB()
 
 	var identifiers []string
 	if err := db.Model(&models.Image{}).Pluck("identifier", &identifiers).Error; err != nil {

@@ -2,32 +2,24 @@ package images
 
 import (
 	"context"
-	"fmt"
 
-	"github.com/anoixa/image-bed/database"
 	"github.com/anoixa/image-bed/database/models"
 	"gorm.io/gorm"
 )
 
 // Repository 图片仓库 - 封装所有图片相关的数据库操作
 type Repository struct {
-	db database.Provider
+	db *gorm.DB
 }
 
 // NewRepository 创建新的图片仓库
-func NewRepository(db database.Provider) *Repository {
+func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{db: db}
 }
 
 // SaveImage 保存图片
 func (r *Repository) SaveImage(image *models.Image) error {
-	return r.db.Transaction(func(tx *gorm.DB) error {
-		err := tx.Create(&image).Error
-		if err != nil {
-			return fmt.Errorf("failed to create image in transaction: %w", err)
-		}
-		return nil
-	})
+	return r.db.Create(&image).Error
 }
 
 // CreateWithTx 在指定事务中创建图片记录
@@ -38,29 +30,20 @@ func (r *Repository) CreateWithTx(tx *gorm.DB, image *models.Image) error {
 // GetImageByHash 通过哈希获取图片
 func (r *Repository) GetImageByHash(hash string) (*models.Image, error) {
 	var image models.Image
-	err := r.db.DB().Where("file_hash = ?", hash).First(&image).Error
-	if err != nil {
-		return nil, err
-	}
-	return &image, nil
+	err := r.db.Where("file_hash = ?", hash).First(&image).Error
+	return &image, err
 }
 
 // GetImageByIdentifier 通过标识符获取图片
 func (r *Repository) GetImageByIdentifier(identifier string) (*models.Image, error) {
 	var image models.Image
-	result := r.db.DB().Where("identifier = ?", identifier).First(&image)
+	result := r.db.Where("identifier = ?", identifier).First(&image)
 	return &image, result.Error
 }
 
 // DeleteImage 删除图片
 func (r *Repository) DeleteImage(image *models.Image) error {
-	return r.db.Transaction(func(tx *gorm.DB) error {
-		err := tx.Delete(&image).Error
-		if err != nil {
-			return fmt.Errorf("failed to delete image in transaction: %w", err)
-		}
-		return nil
-	})
+	return r.db.Delete(&image).Error
 }
 
 // DeleteImagesByIdentifiersAndUser 根据标识符和用户ID批量删除图片
@@ -69,20 +52,19 @@ func (r *Repository) DeleteImagesByIdentifiersAndUser(identifiers []string, user
 		return 0, nil
 	}
 
-	var affectedCount int64
-	err := r.db.Transaction(func(tx *gorm.DB) error {
-		result := tx.Where("identifier IN ? AND user_id = ?", identifiers, userID).Delete(&models.Image{})
-		if result.Error != nil {
-			return fmt.Errorf("failed to batch delete images by identifiers and user ID in transaction: %w", result.Error)
-		}
-		affectedCount = result.RowsAffected
-		return nil
-	})
+	result := r.db.Where("identifier IN ? AND user_id = ?", identifiers, userID).Delete(&models.Image{})
+	return result.RowsAffected, result.Error
+}
 
-	if err != nil {
-		return 0, err
+// GetImagesByIdentifiersAndUser 批量查询用户的图片（使用 IN 语句，避免 N+1 查询）
+func (r *Repository) GetImagesByIdentifiersAndUser(identifiers []string, userID uint) ([]*models.Image, error) {
+	if len(identifiers) == 0 {
+		return []*models.Image{}, nil
 	}
-	return affectedCount, nil
+
+	var images []*models.Image
+	err := r.db.Where("identifier IN ? AND user_id = ?", identifiers, userID).Find(&images).Error
+	return images, err
 }
 
 // DeleteImageByIdentifierAndUser 根据标识符和用户ID删除图片
@@ -91,16 +73,11 @@ func (r *Repository) DeleteImageByIdentifierAndUser(identifier string, userID ui
 		return gorm.ErrRecordNotFound
 	}
 
-	return r.db.Transaction(func(tx *gorm.DB) error {
-		result := tx.Where("identifier = ? AND user_id = ?", identifier, userID).Delete(&models.Image{})
-		if result.Error != nil {
-			return fmt.Errorf("failed to delete image by identifier and user ID in transaction: %w", result.Error)
-		}
-		if result.RowsAffected == 0 {
-			return gorm.ErrRecordNotFound
-		}
-		return nil
-	})
+	result := r.db.Where("identifier = ? AND user_id = ?", identifier, userID).Delete(&models.Image{})
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return result.Error
 }
 
 // ListImagesByUser 获取用户图片列表
@@ -108,8 +85,7 @@ func (r *Repository) ListImagesByUser(userID uint, page, pageSize int) ([]*model
 	var images []*models.Image
 	var total int64
 
-	db := r.db.DB().Model(&models.Image{}).Where("user_id = ?", userID)
-
+	db := r.db.Model(&models.Image{}).Where("user_id = ?", userID)
 	if err := db.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
@@ -122,28 +98,20 @@ func (r *Repository) ListImagesByUser(userID uint, page, pageSize int) ([]*model
 // GetImageByID 通过ID获取图片
 func (r *Repository) GetImageByID(id uint) (*models.Image, error) {
 	var image models.Image
-	err := r.db.DB().First(&image, id).Error
-	if err != nil {
-		return nil, err
-	}
-	return &image, nil
+	err := r.db.First(&image, id).Error
+	return &image, err
 }
 
 // GetImageByIDAndUser 通过ID和用户ID获取图片
 func (r *Repository) GetImageByIDAndUser(id, userID uint) (*models.Image, error) {
 	var image models.Image
-	err := r.db.DB().Where("id = ? AND user_id = ?", id, userID).First(&image).Error
-	if err != nil {
-		return nil, err
-	}
-	return &image, nil
+	err := r.db.Where("id = ? AND user_id = ?", id, userID).First(&image).Error
+	return &image, err
 }
 
 // UpdateImage 更新图片
 func (r *Repository) UpdateImage(image *models.Image) error {
-	return r.db.Transaction(func(tx *gorm.DB) error {
-		return tx.Save(image).Error
-	})
+	return r.db.Save(image).Error
 }
 
 // MarkAsPendingDeletion 将图片标记为待删除状态
@@ -152,7 +120,7 @@ func (r *Repository) MarkAsPendingDeletion(identifiers []string, userID uint) (i
 		return 0, nil
 	}
 
-	result := r.db.DB().Model(&models.Image{}).
+	result := r.db.Model(&models.Image{}).
 		Where("identifier IN ? AND user_id = ?", identifiers, userID).
 		Update("is_pending_deletion", true)
 
@@ -165,66 +133,44 @@ func (r *Repository) DeletePendingImages(identifiers []string, userID uint) (int
 		return 0, nil
 	}
 
-	var affectedCount int64
-	err := r.db.Transaction(func(tx *gorm.DB) error {
-		result := tx.Where("identifier IN ? AND user_id = ? AND is_pending_deletion = ?", identifiers, userID, true).Delete(&models.Image{})
-		if result.Error != nil {
-			return fmt.Errorf("failed to delete pending images: %w", result.Error)
-		}
-		affectedCount = result.RowsAffected
-		return nil
-	})
-
-	if err != nil {
-		return 0, err
-	}
-	return affectedCount, nil
+	result := r.db.Where("identifier IN ? AND user_id = ? AND is_pending_deletion = ?", identifiers, userID, true).Delete(&models.Image{})
+	return result.RowsAffected, result.Error
 }
 
 // ImageExists 检查图片是否存在
 func (r *Repository) ImageExists(identifier string) (bool, error) {
 	var count int64
-	err := r.db.DB().Model(&models.Image{}).Where("identifier = ?", identifier).Count(&count).Error
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
+	err := r.db.Model(&models.Image{}).Where("identifier = ?", identifier).Count(&count).Error
+	return count > 0, err
 }
 
 // CountImagesByUser 统计用户图片数量
 func (r *Repository) CountImagesByUser(userID uint) (int64, error) {
 	var count int64
-	err := r.db.DB().Model(&models.Image{}).Where("user_id = ?", userID).Count(&count).Error
+	err := r.db.Model(&models.Image{}).Where("user_id = ?", userID).Count(&count).Error
 	return count, err
 }
 
 // GetSoftDeletedImageByHash 通过哈希获取软删除的图片
 func (r *Repository) GetSoftDeletedImageByHash(hash string) (*models.Image, error) {
 	var image models.Image
-	err := r.db.DB().Unscoped().Where("file_hash = ? AND deleted_at IS NOT NULL", hash).First(&image).Error
-	if err != nil {
-		return nil, err
-	}
-	return &image, nil
+	err := r.db.Unscoped().Where("file_hash = ? AND deleted_at IS NOT NULL", hash).First(&image).Error
+	return &image, err
 }
 
 // UpdateImageByIdentifier 通过标识符更新图片
 func (r *Repository) UpdateImageByIdentifier(identifier string, updates map[string]interface{}) (*models.Image, error) {
-	var image models.Image
-	err := r.db.Transaction(func(tx *gorm.DB) error {
-		result := tx.Model(&models.Image{}).Where("identifier = ?", identifier).Updates(updates)
-		if result.Error != nil {
-			return fmt.Errorf("failed to update image by identifier in transaction: %w", result.Error)
-		}
-		if result.RowsAffected == 0 {
-			return gorm.ErrRecordNotFound
-		}
-		return tx.Where("identifier = ?", identifier).First(&image).Error
-	})
-	if err != nil {
-		return nil, err
+	result := r.db.Model(&models.Image{}).Where("identifier = ?", identifier).Updates(updates)
+	if result.Error != nil {
+		return nil, result.Error
 	}
-	return &image, nil
+	if result.RowsAffected == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+
+	var image models.Image
+	err := r.db.Where("identifier = ?", identifier).First(&image).Error
+	return &image, err
 }
 
 // GetImageList 获取图片列表（支持搜索和过滤）
@@ -232,35 +178,26 @@ func (r *Repository) GetImageList(storageType, identifier, search string, albumI
 	var imageList []*models.Image
 	var total int64
 
-	db := r.db.DB().Model(&models.Image{}).Where("user_id = ?", userID)
+	db := r.db.Model(&models.Image{}).Where("user_id = ?", userID)
 
-	// 应用存储类型过滤
 	if storageType != "" {
 		db = db.Where("storage_driver = ?", storageType)
 	}
-
-	// 应用标识符过滤
 	if identifier != "" {
 		db = db.Where("identifier = ?", identifier)
 	}
-
-	// 应用搜索条件
 	if search != "" {
 		db = db.Where("original_name LIKE ?", "%"+search+"%")
 	}
-
-	// 应用相册过滤
 	if albumID != nil {
 		db = db.Joins("JOIN album_images ON album_images.image_id = images.id").
 			Where("album_images.album_id = ?", *albumID)
 	}
 
-	// 获取总数
 	if err := db.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	// 分页查询
 	offset := (page - 1) * pageSize
 	err := db.Order("created_at desc").Offset(offset).Limit(pageSize).Find(&imageList).Error
 	return imageList, total, err
@@ -271,16 +208,14 @@ func (r *Repository) GetImagesByAlbumID(albumID uint, page, pageSize int) ([]*mo
 	var imageList []*models.Image
 	var total int64
 
-	db := r.db.DB().Model(&models.Image{}).
+	db := r.db.Model(&models.Image{}).
 		Joins("JOIN album_images ON album_images.image_id = images.id").
 		Where("album_images.album_id = ?", albumID)
 
-	// 获取总数
 	if err := db.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	// 分页查询
 	offset := (page - 1) * pageSize
 	err := db.Order("images.created_at desc").Offset(offset).Limit(pageSize).Find(&imageList).Error
 	return imageList, total, err
@@ -288,24 +223,10 @@ func (r *Repository) GetImagesByAlbumID(albumID uint, page, pageSize int) ([]*mo
 
 // WithContext 返回带上下文的仓库
 func (r *Repository) WithContext(ctx context.Context) *Repository {
-	return &Repository{db: &contextProvider{Provider: r.db, ctx: ctx}}
+	return &Repository{db: r.db.WithContext(ctx)}
 }
 
 // DB 返回底层 *gorm.DB 实例
 func (r *Repository) DB() *gorm.DB {
-	return r.db.DB()
-}
-
-// contextProvider 包装 Provider 添加上下文
-type contextProvider struct {
-	database.Provider
-	ctx context.Context
-}
-
-func (c *contextProvider) DB() *gorm.DB {
-	return c.Provider.WithContext(c.ctx)
-}
-
-func (c *contextProvider) Transaction(fn database.TxFunc) error {
-	return c.Provider.TransactionWithContext(c.ctx, fn)
+	return r.db
 }

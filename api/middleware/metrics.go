@@ -2,8 +2,9 @@ package middleware
 
 import (
 	"fmt"
-	"github.com/gin-gonic/gin"
 	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
 var (
@@ -40,10 +41,4 @@ func GetMetrics() map[string]interface{} {
 			return 0
 		}(),
 	}
-}
-
-// ResetMetrics 重置指标（可选，用于测试或定期重置）
-func ResetMetrics() {
-	requestCount = 0
-	requestDuration = 0
 }

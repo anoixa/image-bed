@@ -9,7 +9,6 @@ import (
 	_ "image/png"
 	"io"
 	"log"
-	"time"
 
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/storage"
@@ -31,7 +30,6 @@ func (t *ImageDimensionsTask) Execute() {
 		return
 	}
 
-	// 检查是否已存在尺寸信息
 	var existing models.Image
 	if err := t.DB.Select("width", "height").Where("identifier = ?", t.Identifier).First(&existing).Error; err == nil {
 		if existing.Width > 0 && existing.Height > 0 {
@@ -39,7 +37,6 @@ func (t *ImageDimensionsTask) Execute() {
 		}
 	}
 
-	// 使用存储提供者读取文件
 	width, height, err := t.extractFromStorage()
 
 	if err != nil {
@@ -68,7 +65,7 @@ func (t *ImageDimensionsTask) Execute() {
 // extractFromStorage 从存储提供者读取并提取尺寸
 func (t *ImageDimensionsTask) extractFromStorage() (int, int, error) {
 	ctx := context.Background()
-	
+
 	// 获取文件流
 	reader, err := t.Storage.GetWithContext(ctx, t.Identifier)
 	if err != nil {
@@ -80,7 +77,7 @@ func (t *ImageDimensionsTask) extractFromStorage() (int, int, error) {
 		}
 	}()
 
-	// 读取数据到内存（无大小限制，统一处理所有图片）
+	// 读取数据到内存
 	data, err := io.ReadAll(reader)
 	if err != nil {
 		return 0, 0, err
@@ -102,14 +99,22 @@ func decodeImageDimensions(data []byte) (int, int, error) {
 
 // ExtractImageDimensionsAsync 异步提取图片尺寸
 func ExtractImageDimensionsAsync(identifier string, storageConfigID uint, db *gorm.DB, storage storage.Provider) {
-	task := &ImageDimensionsTask{
-		Identifier: identifier,
-		StorageKey: "",
-		DB:         db,
-		Storage:    storage,
+	pool := GetGlobalPool()
+	if pool == nil {
+		return
 	}
-	// 使用带重试的提交，确保任务不被丢弃
-	if !TrySubmit(task, 3, 100*time.Millisecond) {
-		log.Printf("Failed to submit image dimensions task for %s after retries", identifier)
+
+	ok := pool.Submit(func() {
+		task := &ImageDimensionsTask{
+			Identifier: identifier,
+			StorageKey: "",
+			DB:         db,
+			Storage:    storage,
+		}
+		task.Execute()
+	})
+
+	if !ok {
+		log.Printf("Failed to submit image dimensions task for %s", identifier)
 	}
 }
