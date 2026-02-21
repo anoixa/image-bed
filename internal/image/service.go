@@ -37,8 +37,6 @@ var (
 	ErrTemporaryFailure = errors.New("temporary failure, should be retried")
 )
 
-// ==================== Upload 相关 ====================
-
 // UploadResult 上传结果
 type UploadResult struct {
 	Image       *models.Image
@@ -49,8 +47,6 @@ type UploadResult struct {
 	Links       utils.LinkFormats
 	Error       string
 }
-
-// ==================== Query 相关 ====================
 
 // ImageResult 图片查询结果
 type ImageResult struct {
@@ -75,16 +71,12 @@ type ListImagesResult struct {
 	TotalPages int
 }
 
-// ==================== Delete 相关 ====================
-
 // DeleteResult 删除结果
 type DeleteResult struct {
 	Success      bool
 	DeletedCount int64
 	Error        error
 }
-
-// ==================== Service 主结构 ====================
 
 // Service 图片服务
 type Service struct {
@@ -115,7 +107,6 @@ func NewService(
 	}
 }
 
-// ==================== Upload 方法 ====================
 
 // UploadSingle 单文件上传
 func (s *Service) UploadSingle(
@@ -617,13 +608,10 @@ func (s *Service) DeleteBatch(ctx context.Context, identifiers []string, userID 
 		return &DeleteResult{Success: true, DeletedCount: 0}, nil
 	}
 
-	// 获取所有要删除的图片信息（用于级联删除变体）
-	var imagesToDelete []*models.Image
-	for _, identifier := range identifiers {
-		img, err := s.repo.GetImageByIdentifier(identifier)
-		if err == nil && img != nil && img.UserID == userID {
-			imagesToDelete = append(imagesToDelete, img)
-		}
+	// 批量查询图片信息（避免 N+1 查询）
+	imagesToDelete, err := s.repo.GetImagesByIdentifiersAndUser(identifiers, userID)
+	if err != nil {
+		log.Printf("Failed to get images for batch delete: %v", err)
 	}
 
 	// 级联删除变体
@@ -634,7 +622,6 @@ func (s *Service) DeleteBatch(ctx context.Context, identifiers []string, userID 
 	// 删除数据库记录
 	affectedCount, err := s.repo.DeleteImagesByIdentifiersAndUser(identifiers, userID)
 	if err != nil {
-		// 记录错误但继续清理缓存
 		log.Printf("Failed to delete image records: %v", err)
 	}
 
