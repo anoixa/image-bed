@@ -120,11 +120,16 @@ jobs:
           path: ~/go/pkg/mod
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
 
+      - name: Install libvips
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libvips-dev
+
       - name: Build binary
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 0
+          CGO_ENABLED: 1
         run: |
           go build -trimpath -ldflags="-s -w -X 'github.com/anoixa/image-bed/config.Version=dev-${{ github.sha }}'" \
             -o image-bed-${{ matrix.suffix }} .
