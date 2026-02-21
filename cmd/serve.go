@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -233,24 +232,6 @@ func InitDatabase(deps *Dependencies) {
 	deps.Repositories.AccountsRepo.CreateDefaultAdminUser()
 }
 
-// cleanupTempFiles 清理临时文件
-func cleanupTempFiles() {
-	tempDir := "./data/temp"
-	entries, err := os.ReadDir(tempDir)
-	if err != nil {
-		log.Printf("Failed to read temp directory: %v", err)
-		return
-	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			path := filepath.Join(tempDir, entry.Name())
-			if err := os.Remove(path); err != nil {
-				log.Printf("Failed to remove temp file %s: %v", path, err)
-			}
-		}
-	}
-}
 
 // buildCacheConfig 从应用配置构建缓存配置
 func buildCacheConfig(cfg *config.Config) cache.Config {

@@ -351,6 +351,7 @@ func CleanupExpiredSessions() {
 	}
 
 	if expiredCount > 0 {
-		// 清理日志
+		// 清理日志，使用 _ 避免 unused 警告
+		_ = expiredCount
 	}
 }

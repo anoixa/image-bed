@@ -25,7 +25,7 @@ func TestConcurrentAccess(t *testing.T) {
 	providersMu.Unlock()
 
 	// 初始化默认存储
-	InitStorage([]StorageConfig{})
+	_ = InitStorage([]StorageConfig{})
 
 	var wg sync.WaitGroup
 	numGoroutines := 100
@@ -179,7 +179,7 @@ func TestRemoveDefaultProvider(t *testing.T) {
 	providersMu.Unlock()
 
 	// 初始化默认存储
-	InitStorage([]StorageConfig{})
+	_ = InitStorage([]StorageConfig{})
 
 	defaultID := GetDefaultID()
 

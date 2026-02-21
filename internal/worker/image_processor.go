@@ -73,7 +73,7 @@ func (t *ImageDimensionsTask) extractFromStorage() (int, int, error) {
 	}
 	defer func() {
 		if closer, ok := reader.(io.Closer); ok {
-			closer.Close()
+			_ = closer.Close()
 		}
 	}()
 

@@ -128,7 +128,7 @@ func (t *WebPConversionTask) Execute() {
 func (t *WebPConversionTask) recovery() {
 	if rec := recover(); rec != nil {
 		utils.LogIfDevf("[WebPConversion] Panic recovered: %v", rec)
-		t.VariantRepo.UpdateStatusCAS(
+		_, _ = t.VariantRepo.UpdateStatusCAS(
 			t.VariantID,
 			models.VariantStatusProcessing,
 			models.VariantStatusFailed,
@@ -228,7 +228,7 @@ func (t *WebPConversionTask) handleSuccess() {
 	if err != nil {
 		// 清理已上传的文件
 		ctx := context.Background()
-		t.Storage.DeleteWithContext(ctx, t.result.identifier)
+		_ = t.Storage.DeleteWithContext(ctx, t.result.identifier)
 		utils.LogIfDevf("[WebPConversion] Failed to update completed status for variant %d: %v", t.VariantID, err)
 	} else {
 		utils.LogIfDevf("[WebPConversion] Successfully completed variant %d", t.VariantID)
@@ -243,7 +243,7 @@ func (t *WebPConversionTask) handleFailure(err error) {
 	switch errType {
 	case ErrorPermanent:
 		utils.LogIfDevf("[WebPConversion] Permanent error for variant %d: %s", t.VariantID, errMsg)
-		t.VariantRepo.UpdateStatusCAS(
+		_, _ = t.VariantRepo.UpdateStatusCAS(
 			t.VariantID,
 			models.VariantStatusProcessing,
 			models.VariantStatusFailed,
@@ -251,7 +251,7 @@ func (t *WebPConversionTask) handleFailure(err error) {
 		)
 	case ErrorConfig:
 		utils.LogIfDevf("[WebPConversion] Config error for variant %d: %s", t.VariantID, errMsg)
-		t.VariantRepo.UpdateStatusCAS(
+		_, _ = t.VariantRepo.UpdateStatusCAS(
 			t.VariantID,
 			models.VariantStatusProcessing,
 			models.VariantStatusFailed,

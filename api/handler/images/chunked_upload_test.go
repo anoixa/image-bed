@@ -213,16 +213,16 @@ func TestUploadChunkRequest_Binding(t *testing.T) {
 		body := &bytes.Buffer{}
 		writer := multipart.NewWriter(body)
 		if sessionID != "" {
-			writer.WriteField("session_id", sessionID)
+			_ = writer.WriteField("session_id", sessionID)
 		}
 		if chunkIndex != "" {
-			writer.WriteField("chunk_index", chunkIndex)
+			_ = writer.WriteField("chunk_index", chunkIndex)
 		}
 		if includeFile {
 			part, _ := writer.CreateFormFile("chunk", "chunk")
-			part.Write([]byte("test chunk data"))
+			_, _ = part.Write([]byte("test chunk data"))
 		}
-		writer.Close()
+		_ = writer.Close()
 
 		req := httptest.NewRequest(http.MethodPost, "/chunk", body)
 		req.Header.Set("Content-Type", writer.FormDataContentType())
@@ -468,7 +468,7 @@ func TestChunkFileOperations(t *testing.T) {
 		_, err = mergedFile.Write(chunkData)
 		assert.NoError(t, err)
 	}
-	mergedFile.Close()
+	_ = mergedFile.Close()
 
 	// 验证合并后文件
 	mergedData, err := os.ReadFile(mergedPath)
@@ -605,7 +605,7 @@ func BenchmarkChunkFileWrite(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		chunkPath := filepath.Join(tempDir, fmt.Sprintf("chunk_%d", i))
-		os.WriteFile(chunkPath, data, 0644)
+		_ = os.WriteFile(chunkPath, data, 0644)
 	}
 }
 
@@ -669,7 +669,7 @@ func TestFullChunkedUploadFlow_Simulation(t *testing.T) {
 		_, err = mergedFile.Write(chunkData)
 		assert.NoError(t, err)
 	}
-	mergedFile.Close()
+	_ = mergedFile.Close()
 
 	// 6. 验证完整性
 	mergedData, err := os.ReadFile(mergedPath)

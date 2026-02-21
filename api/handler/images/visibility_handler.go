@@ -64,10 +64,7 @@ func (h *Handler) UpdateImageVisibility(c *gin.Context) {
 
 	// 更新缓存
 	ctx := c.Request.Context()
-	if err := h.cacheHelper.CacheImage(ctx, updatedImage); err != nil {
-		// 缓存更新失败只记录日志，不影响主流程
-		// log.Printf("Failed to update cache for image %s: %v", utils.SanitizeLogMessage(identifier), err)
-	}
+	_ = h.cacheHelper.CacheImage(ctx, updatedImage) // 缓存更新失败不影响主流程
 
 	visibility := "private"
 	if updatedImage.IsPublic {
