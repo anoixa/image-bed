@@ -92,6 +92,20 @@ func (s *LocalStorage) GetWithContext(ctx context.Context, identifier string) (i
 	return file, nil
 }
 
+// OpenFile 零拷贝传输
+func (s *LocalStorage) OpenFile(ctx context.Context, name string) (*os.File, error) {
+	if !IsValidIdentifier(name) {
+		return nil, fmt.Errorf("invalid file identifier: %s", name)
+	}
+
+	fullPath := filepath.Join(s.absBasePath, name)
+	if !strings.HasPrefix(fullPath, s.absBasePath) {
+		return nil, fmt.Errorf("invalid file path: %s", name)
+	}
+
+	return os.Open(fullPath)
+}
+
 // DeleteWithContext 从本地存储删除文件
 func (s *LocalStorage) DeleteWithContext(ctx context.Context, identifier string) error {
 	if !IsValidIdentifier(identifier) {

@@ -95,14 +95,61 @@ func (h *Handler) GetImage(c *gin.Context) {
 
 // serveOriginalImage 提供原图
 func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
+	// 检查缓存
 	imageData, err := h.cacheHelper.GetCachedImageData(c.Request.Context(), image.Identifier)
 	if err == nil {
 		h.serveImageData(c, image, imageData)
 		return
 	}
 
+	if h.serveBySendfile(c, image) {
+		return
+	}
+
+	// 回退到普通流式传输
 	h.streamAndCacheImage(c, image)
 }
+
+// serveBySendfile 使用 sendfile 零拷贝传输
+func (h *Handler) serveBySendfile(c *gin.Context, image *models.Image) bool {
+	opener, ok := storage.GetDefault().(storage.FileOpener)
+	if !ok {
+		return false
+	}
+
+	file, err := opener.OpenFile(c.Request.Context(), image.Identifier)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+
+	stat, err := file.Stat()
+	if err != nil {
+		return false
+	}
+
+	// 设置响应头
+	contentType := image.MimeType
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	c.Header("Content-Type", contentType)
+	c.Header("Cache-Control", "public, max-age=2592000, immutable")
+	if image.OriginalName != "" {
+		asciiName := toASCII(image.OriginalName)
+		rfc5987Name := url.QueryEscape(image.OriginalName)
+		c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s"; filename*=UTF-8''%s`, asciiName, rfc5987Name))
+	}
+
+	// 使用 http.ServeContent 自动处理 Range 和 sendfile
+	http.ServeContent(c.Writer, c.Request, image.OriginalName, stat.ModTime(), file)
+
+	// 异步预热缓存
+	go h.warmCache(image)
+
+	return true
+}
+
 
 // serveVariantImage 提供格式变体
 func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *image.VariantResult) {

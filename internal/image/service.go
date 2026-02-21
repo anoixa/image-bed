@@ -271,127 +271,119 @@ func (s *Service) UploadBatchWithName(
 
 // processAndSaveImage 处理并保存图片
 func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHeader *multipart.FileHeader, storageProvider storage.Provider, storageConfigID uint, isPublic bool) (*models.Image, bool, error) {
-	file, err := fileHeader.Open()
+	src, err := fileHeader.Open()
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to open file: %w", err)
 	}
-	defer file.Close()
+	defer src.Close()
+
+	// 预读头部用于 MIME 验证
+	header := make([]byte, 512)
+	n, _ := io.ReadFull(src, header)
+	header = header[:n]
+
+	isImage, mimeType := validator.IsImageBytes(header)
+	if !isImage {
+		return nil, false, errors.New("the uploaded file type is not supported")
+	}
+
+	reader := io.MultiReader(bytes.NewReader(header), src)
 
 	// 创建临时文件
-	tempFile, err := os.CreateTemp("./data/temp", "upload-*")
+	tmp, err := os.CreateTemp("./data/temp", "upload-*")
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to create temp file: %w", err)
 	}
 	defer func() {
-		tempFile.Close()
-		os.Remove(tempFile.Name())
+		tmp.Close()
+		os.Remove(tmp.Name())
 	}()
 
-	// 流式计算哈希
-	hasher := sha256.New()
-	writer := io.MultiWriter(tempFile, hasher)
+	// 同时计算哈希并写入临时文件
+	hash := sha256.New()
+	w := io.MultiWriter(tmp, hash)
 
 	buf := pool.SharedBufferPool.Get().([]byte)
 	defer pool.SharedBufferPool.Put(buf)
 
-	if _, err = io.CopyBuffer(writer, file, buf); err != nil {
+	if _, err = io.CopyBuffer(w, reader, buf); err != nil {
 		return nil, false, fmt.Errorf("failed to process file stream: %w", err)
 	}
 
-	fileHash := hex.EncodeToString(hasher.Sum(nil))
+	fileHash := hex.EncodeToString(hash.Sum(nil))
 
 	// 检查重复文件
-	image, err := s.repo.GetImageByHash(fileHash)
-	if err == nil {
-		go s.warmCache(image)
-		go s.converter.TriggerWebPConversion(image)
-		go s.thumbnailSvc.TriggerGenerationForAllSizes(image)
-		return image, true, nil
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
+	if img, err := s.repo.GetImageByHash(fileHash); err == nil {
+		go s.warmCache(img)
+		go s.converter.TriggerWebPConversion(img)
+		go s.thumbnailSvc.TriggerGenerationForAllSizes(img)
+		return img, true, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, false, errors.New("database error during hash check")
 	}
 
 	// 检查软删除的文件
-	softDeletedImage, err := s.repo.GetSoftDeletedImageByHash(fileHash)
-	if err == nil {
-		updateData := map[string]interface{}{
+	if softDeleted, err := s.repo.GetSoftDeletedImageByHash(fileHash); err == nil {
+		updates := map[string]interface{}{
 			"deleted_at":        nil,
 			"original_name":     fileHeader.Filename,
 			"user_id":           userID,
 			"is_public":         isPublic,
 			"storage_config_id": storageConfigID,
 		}
-
-		restoredImage, err := s.repo.UpdateImageByIdentifier(softDeletedImage.Identifier, updateData)
+		restored, err := s.repo.UpdateImageByIdentifier(softDeleted.Identifier, updates)
 		if err != nil {
 			return nil, false, errors.New("failed to restore existing image data")
 		}
-
-		go s.warmCache(restoredImage)
-		go s.converter.TriggerWebPConversion(restoredImage)
-		go s.thumbnailSvc.TriggerGenerationForAllSizes(restoredImage)
-		return restoredImage, true, nil
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		go s.warmCache(restored)
+		go s.converter.TriggerWebPConversion(restored)
+		go s.thumbnailSvc.TriggerGenerationForAllSizes(restored)
+		return restored, true, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, false, errors.New("database error during hash check")
 	}
 
-	// 验证文件类型
-	if _, err := tempFile.Seek(0, io.SeekStart); err != nil {
+	// 只需一次 Seek 获取尺寸并保存
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
 		return nil, false, fmt.Errorf("failed to seek temp file: %w", err)
 	}
 
-	fileHeaderBuf := make([]byte, 512)
-	n, _ := tempFile.Read(fileHeaderBuf)
-	fileHeaderBuf = fileHeaderBuf[:n]
+	width, height := utils.GetImageDimensions(tmp)
 
-	isImage, mimeType := validator.IsImageBytes(fileHeaderBuf)
-	if !isImage {
-		return nil, false, errors.New("the uploaded file type is not supported")
-	}
-
-	if _, err := tempFile.Seek(0, io.SeekStart); err != nil {
+	// 重新定位到开头用于保存
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
 		return nil, false, fmt.Errorf("failed to seek temp file: %w", err)
 	}
-	imgWidth, imgHeight := utils.GetImageDimensions(tempFile)
 
-	// 生成唯一标识符
 	identifier := fileHash[:12]
-
-	// 保存到存储
-	if _, err := tempFile.Seek(0, io.SeekStart); err != nil {
-		return nil, false, fmt.Errorf("failed to seek temp file: %w", err)
-	}
-
-	if err := storageProvider.SaveWithContext(ctx, identifier, tempFile); err != nil {
+	if err := storageProvider.SaveWithContext(ctx, identifier, tmp); err != nil {
 		return nil, false, errors.New("failed to save uploaded file")
 	}
 
 	// 创建数据库记录
-	newImage := &models.Image{
+	img := &models.Image{
 		Identifier:      identifier,
 		OriginalName:    fileHeader.Filename,
 		FileSize:        fileHeader.Size,
 		MimeType:        mimeType,
 		StorageConfigID: storageConfigID,
 		FileHash:        fileHash,
-		Width:           imgWidth,
-		Height:          imgHeight,
+		Width:           width,
+		Height:          height,
 		IsPublic:        isPublic,
 		UserID:          userID,
 	}
 
-	if err := s.repo.SaveImage(newImage); err != nil {
+	if err := s.repo.SaveImage(img); err != nil {
 		storageProvider.DeleteWithContext(ctx, identifier)
 		return nil, false, errors.New("failed to save image metadata")
 	}
 
-	go s.warmCache(newImage)
-	go s.converter.TriggerWebPConversion(newImage)
-	go s.thumbnailSvc.TriggerGenerationForAllSizes(newImage)
+	go s.warmCache(img)
+	go s.converter.TriggerWebPConversion(img)
+	go s.thumbnailSvc.TriggerGenerationForAllSizes(img)
 
-	return newImage, false, nil
+	return img, false, nil
 }
 
 func (s *Service) getStorageProvider(storageName string) (storage.Provider, uint, error) {
