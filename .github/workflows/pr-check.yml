@@ -95,9 +95,6 @@ jobs:
           - goos: linux
             goarch: amd64
             suffix: linux-amd64
-          - goos: linux
-            goarch: arm64
-            suffix: linux-arm64
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
