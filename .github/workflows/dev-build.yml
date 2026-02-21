@@ -38,9 +38,12 @@ jobs:
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
+        env:
+          GOFLAGS: "-buildvcs=false"
         with:
-          version: latest
+          version: v1.63.4
           args: --timeout=5m
+          skip-cache: true
 
       - name: Run govulncheck
         uses: golang/govulncheck-action@v1
