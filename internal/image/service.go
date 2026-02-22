@@ -23,6 +23,7 @@ import (
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
+	"github.com/anoixa/image-bed/utils/generator"
 	"github.com/anoixa/image-bed/utils/pool"
 	"github.com/anoixa/image-bed/utils/validator"
 	"golang.org/x/sync/errgroup"
@@ -223,7 +224,9 @@ func (s *Service) ProcessChunkedUpload(ctx context.Context, session *ChunkedUplo
 
 	storageConfigID := storage.GetDefaultID()
 	ext := getSafeFileExtension(mimeType)
-	identifier := fmt.Sprintf("%d-%s%s", time.Now().UnixNano(), fileHash[:16], ext)
+
+	pg := generator.NewPathGenerator()
+	identifier := pg.GenerateOriginalIdentifier(fileHash, ext, time.Now())
 
 	if err := storage.GetDefault().SaveWithContext(ctx, identifier, bytes.NewReader(fileBytes)); err != nil {
 		return nil, fmt.Errorf("failed to save file to storage: %w", err)
@@ -517,7 +520,10 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 		return nil, false, fmt.Errorf("failed to seek temp file: %w", err)
 	}
 
-	identifier := fileHash[:12]
+	// 使用 PathGenerator 生成时间分层路径
+	pg := generator.NewPathGenerator()
+	ext := getSafeFileExtension(mimeType)
+	identifier := pg.GenerateOriginalIdentifier(fileHash, ext, time.Now())
 	if err := storageProvider.SaveWithContext(ctx, identifier, tmp); err != nil {
 		return nil, false, errors.New("failed to save uploaded file")
 	}
@@ -914,7 +920,7 @@ func (s *Service) GetImageWithVariant(ctx context.Context, identifier string, ac
 		return &ImageResultDTO{
 			Image:      image,
 			IsOriginal: true,
-			URL:        s.buildImageURL(image.Identifier),
+			URL:        utils.BuildImageURL(s.baseURL, image.Identifier),
 			MIMEType:   image.MimeType,
 		}, nil
 	}
@@ -932,25 +938,20 @@ func (s *Service) GetImageWithVariant(ctx context.Context, identifier string, ac
 	}
 
 	if variantResult.IsOriginal {
-		result.URL = s.buildImageURL(image.Identifier)
+		result.URL = utils.BuildImageURL(s.baseURL, image.Identifier)
 		result.MIMEType = image.MimeType
 	} else {
 		result.Variant = variantResult.Variant
 		if variantResult.Variant != nil {
-			result.URL = s.buildImageURL(variantResult.Variant.Identifier)
+			result.URL = utils.BuildImageURL(s.baseURL, variantResult.Variant.Identifier)
 		} else {
 			// 变体不存在，降级返回原图
 			result.IsOriginal = true
-			result.URL = s.buildImageURL(image.Identifier)
+			result.URL = utils.BuildImageURL(s.baseURL, image.Identifier)
 			result.MIMEType = image.MimeType
 		}
 	}
 
 	return result, nil
-}
-
-// buildImageURL 构建图片 URL
-func (s *Service) buildImageURL(identifier string) string {
-	return fmt.Sprintf("%s/images/%s", s.baseURL, identifier)
 }
 

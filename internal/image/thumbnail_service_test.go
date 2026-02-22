@@ -17,22 +17,22 @@ func TestGenerateThumbnailIdentifier(t *testing.T) {
 		want     string
 	}{
 		{
-			name:     "simple_identifier",
-			original: "abc123.png",
+			name:     "new_format_identifier",
+			original: "original/2024/01/15/a1b2c3d4e5f6.jpg",
 			width:    300,
-			want:     "thumbnails/abc123.png_300.webp",
+			want:     "thumbnails/2024/01/15/a1b2c3d4e5f6_300.webp",
 		},
 		{
-			name:     "path_with_slash",
-			original: "images/photo.jpg",
-			width:    150,
-			want:     "thumbnails/images/photo.jpg_150.webp",
+			name:     "old_format_identifier",
+			original: "abc123.png",
+			width:    300,
+			want:     "thumbnails/abc123_300.webp",
 		},
 		{
 			name:     "large_width",
-			original: "image.png",
+			original: "original/2024/01/15/xyz789.jpg",
 			width:    600,
-			want:     "thumbnails/image.png_600.webp",
+			want:     "thumbnails/2024/01/15/xyz789_600.webp",
 		},
 	}
 

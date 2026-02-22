@@ -62,11 +62,12 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	}
 	router.Use(gin.Recovery())
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{cfg.BaseURL()},
-		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Length", "Content-Type", "Authorization"},
-		AllowCredentials: true,
-		MaxAge:           12 * time.Hour,
+		AllowOrigins:              []string{"*"},
+		AllowMethods:              []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"},
+		AllowHeaders:              []string{"Origin", "Content-Length", "Content-Type", "Authorization"},
+		AllowCredentials:          true,
+		MaxAge:                    12 * time.Hour,
+		OptionsResponseStatusCode: 204,
 	}))
 
 	if err := router.SetTrustedProxies(nil); err != nil {

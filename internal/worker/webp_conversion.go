@@ -12,6 +12,7 @@ import (
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
+	"github.com/anoixa/image-bed/utils/generator"
 	"github.com/h2non/bimg"
 )
 
@@ -197,8 +198,11 @@ func (t *WebPConversionTask) doConversion(ctx context.Context, settings *config.
 		return fmt.Errorf("convert: %w", err)
 	}
 
+	// 使用 PathGenerator 生成分层路径
+	pathGen := generator.NewPathGenerator()
+	variantIdentifier := pathGen.GenerateConvertedIdentifier(t.SourceIdentifier, "webp")
+
 	// 保存到存储
-	variantIdentifier := fmt.Sprintf("%s.webp", t.SourceIdentifier)
 	if err := t.Storage.SaveWithContext(ctx, variantIdentifier, bytes.NewReader(converted)); err != nil {
 		return fmt.Errorf("save: %w", err)
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/anoixa/image-bed/internal/worker"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
+	"github.com/anoixa/image-bed/utils/generator"
 	"gorm.io/gorm"
 )
 
@@ -227,8 +228,9 @@ func (s *ThumbnailService) resizeImage(data []byte, width int) ([]byte, int, err
 
 // GenerateThumbnailIdentifier 生成缩略图存储标识
 func (s *ThumbnailService) GenerateThumbnailIdentifier(originalIdentifier string, width int) string {
-	// images/abc.png -> thumbnails/abc_300.webp
-	return fmt.Sprintf("thumbnails/%s_%d.webp", originalIdentifier, width)
+	// 使用 PathGenerator 生成分层路径
+	pathGen := generator.NewPathGenerator()
+	return pathGen.GenerateThumbnailIdentifier(originalIdentifier, width)
 }
 
 // getMIMETypeFromFormat 根据格式获取 MIME 类型

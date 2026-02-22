@@ -109,7 +109,7 @@ func loadConfig() {
 	case globalConfig.WorkerCount == 0:
 		// 使用默认值
 		globalConfig.WorkerCount = getCpus()
-	// default: 使用配置文件中指定的值
+		// default: 使用配置文件中指定的值
 	}
 }
 
@@ -118,7 +118,7 @@ func setDefaults() {
 	// 服务器配置默认值
 	viper.SetDefault("server_host", "127.0.0.1")
 	viper.SetDefault("server_port", 8080)
-	viper.SetDefault("server_domain", "")
+	viper.SetDefault("server_domain", "http://localhost:8080")
 	viper.SetDefault("server_read_timeout", "15s")
 	viper.SetDefault("server_write_timeout", "30s")
 	viper.SetDefault("server_idle_timeout", "120s")

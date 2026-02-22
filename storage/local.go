@@ -54,6 +54,10 @@ func (s *LocalStorage) SaveWithContext(ctx context.Context, identifier string, f
 		return fmt.Errorf("invalid file path, potential directory traversal: %s", identifier)
 	}
 
+	if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+		return fmt.Errorf("failed to create directory for '%s': %w", identifier, err)
+	}
+
 	dst, err := os.Create(dstPath)
 	if err != nil {
 		return fmt.Errorf("failed to create destination file '%s': %w", dstPath, err)
@@ -185,7 +189,7 @@ func IsValidIdentifier(identifier string) bool {
 		if (r < 'a' || r > 'z') &&
 			(r < 'A' || r > 'Z') &&
 			(r < '0' || r > '9') &&
-			r != '-' && r != '_' && r != '.' {
+			r != '-' && r != '_' && r != '.' && r != '/' {
 			return false
 		}
 	}
