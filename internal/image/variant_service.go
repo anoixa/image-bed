@@ -44,6 +44,45 @@ func (s *VariantService) SelectBestVariant(ctx context.Context, image *models.Im
 		return nil, err
 	}
 
+	switch image.VariantStatus {
+	case models.ImageVariantStatusNone:
+		// 从未处理过，直接返回原图
+		return s.handleOriginalWithConversion(image, acceptHeader, settings, false)
+	case models.ImageVariantStatusProcessing:
+		// 正在处理中，返回原图
+		return s.handleOriginalWithConversion(image, acceptHeader, settings, false)
+	case models.ImageVariantStatusFailed:
+		// 处理失败，可触发重试
+		return s.handleOriginalWithConversion(image, acceptHeader, settings, true)
+	case models.ImageVariantStatusThumbnailCompleted, models.ImageVariantStatusCompleted:
+		// 缩略图或全部已完成，查询变体表
+		return s.handleCompletedVariants(ctx, image, acceptHeader, settings)
+	default:
+		// 默认按 None 处理
+		return s.handleOriginalWithConversion(image, acceptHeader, settings, false)
+	}
+}
+
+// handleOriginalWithConversion 返回原图，根据条件触发转换
+func (s *VariantService) handleOriginalWithConversion(image *models.Image, acceptHeader string, settings *config.ConversionSettings, allowTrigger bool) (*VariantResult, error) {
+	result := &VariantResult{
+		Format:     format.FormatOriginal,
+		IsOriginal: true,
+		Image:      image,
+		MIMEType:   image.MimeType,
+		Identifier: image.Identifier,
+	}
+
+	// 检查是否需要触发 WebP 转换
+	if allowTrigger && strings.Contains(acceptHeader, "image/webp") {
+		go s.converter.TriggerWebPConversion(image)
+	}
+
+	return result, nil
+}
+
+// handleCompletedVariants 处理已完成变体的情况
+func (s *VariantService) handleCompletedVariants(ctx context.Context, image *models.Image, acceptHeader string, settings *config.ConversionSettings) (*VariantResult, error) {
 	// 查询可用变体
 	variants, err := s.variantRepo.GetVariantsByImageID(image.ID)
 	if err != nil {
@@ -75,10 +114,6 @@ func (s *VariantService) SelectBestVariant(ctx context.Context, image *models.Im
 		result.IsOriginal = true
 		result.MIMEType = image.MimeType
 		result.Identifier = image.Identifier
-
-		if !available[format.FormatWebP] && strings.Contains(acceptHeader, "image/webp") {
-			go s.converter.TriggerWebPConversion(image)
-		}
 	} else {
 		variant := variantMap[selectedFormat]
 		result.Variant = variant
@@ -87,9 +122,10 @@ func (s *VariantService) SelectBestVariant(ctx context.Context, image *models.Im
 		if variant != nil {
 			result.Identifier = variant.Identifier
 		} else {
-			// 变体不存在，触发后台转换
+			// 变体不存在（异常情况），降级返回原图
 			result.Identifier = image.Identifier
-			go s.converter.TriggerWebPConversion(image)
+			result.IsOriginal = true
+			result.MIMEType = image.MimeType
 		}
 	}
 

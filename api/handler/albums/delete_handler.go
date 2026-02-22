@@ -9,6 +9,7 @@ import (
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
+	"github.com/anoixa/image-bed/utils"
 	"github.com/gin-gonic/gin"
 )
 
@@ -23,7 +24,7 @@ func (h *Handler) DeleteAlbumHandler(c *gin.Context) {
 
 	userID := c.GetUint(middleware.ContextUserIDKey)
 
-	err = h.repo.DeleteAlbum(uint(albumID), userID)
+	err = h.svc.DeleteAlbum(uint(albumID), userID)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found or access denied") {
 			common.RespondError(c, http.StatusNotFound, err.Error())
@@ -35,7 +36,7 @@ func (h *Handler) DeleteAlbumHandler(c *gin.Context) {
 	}
 
 	// 清除相册缓存和用户的相册列表缓存
-	go func() {
+	utils.SafeGo(func() {
 		ctx := context.Background()
 		if err := h.cacheHelper.DeleteCachedAlbum(ctx, uint(albumID)); err != nil {
 			log.Printf("Failed to delete album cache for %d: %v", albumID, err)
@@ -43,7 +44,7 @@ func (h *Handler) DeleteAlbumHandler(c *gin.Context) {
 		if err := h.cacheHelper.DeleteCachedAlbumList(ctx, userID); err != nil {
 			log.Printf("Failed to delete album list cache for user %d: %v", userID, err)
 		}
-	}()
+	})
 
 	common.RespondSuccessMessage(c, "Album deleted successfully", nil)
 }

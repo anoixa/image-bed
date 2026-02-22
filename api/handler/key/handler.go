@@ -1,17 +1,17 @@
 package key
 
 import (
-	"github.com/anoixa/image-bed/database/repo/keys"
+	"github.com/anoixa/image-bed/internal/auth"
 )
 
 // Handler API Token 处理器
 type Handler struct {
-	repo *keys.Repository
+	svc *auth.KeyService
 }
 
 // NewHandler 创建新的 Token 处理器
-func NewHandler(repo *keys.Repository) *Handler {
+func NewHandler(svc *auth.KeyService) *Handler {
 	return &Handler{
-		repo: repo,
+		svc: svc,
 	}
 }

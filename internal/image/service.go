@@ -71,7 +71,17 @@ var (
 
 var (
 	ErrTemporaryFailure = errors.New("temporary failure, should be retried")
+	ErrForbidden        = errors.New("forbidden: access denied")
 )
+
+// ImageResultDTO 返回给 Handler 的 DTO
+type ImageResultDTO struct {
+	Image      *models.Image
+	Variant    *models.ImageVariant
+	IsOriginal bool
+	URL        string
+	MIMEType   string
+}
 
 // UploadResult 上传结果
 type UploadResult struct {
@@ -122,6 +132,7 @@ type Service struct {
 	thumbnailSvc   *ThumbnailService
 	variantService *VariantService
 	cacheHelper    *cache.Helper
+	baseURL        string
 }
 
 // NewService 创建图片服务
@@ -132,6 +143,7 @@ func NewService(
 	thumbnailSvc *ThumbnailService,
 	variantService *VariantService,
 	cacheHelper *cache.Helper,
+	baseURL string,
 ) *Service {
 	return &Service{
 		repo:           repo,
@@ -140,6 +152,7 @@ func NewService(
 		thumbnailSvc:   thumbnailSvc,
 		variantService: variantService,
 		cacheHelper:    cacheHelper,
+		baseURL:        baseURL,
 	}
 }
 
@@ -150,7 +163,7 @@ func (s *Service) InitChunkedUpload(ctx context.Context, fileName, fileHash stri
 		return &ChunkedUploadInitResult{
 			InstantUpload: true,
 			Identifier:    existingImage.Identifier,
-			Links:         utils.BuildLinkFormats(existingImage.Identifier),
+			Links:         utils.BuildLinkFormats(s.baseURL, existingImage.Identifier),
 		}, nil
 	}
 
@@ -173,6 +186,8 @@ func (s *Service) ProcessChunkedUpload(ctx context.Context, session *ChunkedUplo
 		return nil, fmt.Errorf("failed to create merged file: %w", err)
 	}
 
+	defer func() { _ = outFile.Close() }()
+
 	hasher := sha256.New()
 	writer := io.MultiWriter(outFile, hasher)
 
@@ -180,19 +195,15 @@ func (s *Service) ProcessChunkedUpload(ctx context.Context, session *ChunkedUplo
 		chunkPath := filepath.Join(session.TempDir, strconv.Itoa(i))
 		chunkFile, err := os.Open(chunkPath)
 		if err != nil {
-			_ = outFile.Close()
 			return nil, fmt.Errorf("failed to open chunk %d: %w", i, err)
 		}
 
 		if _, err := io.Copy(writer, chunkFile); err != nil {
 			_ = chunkFile.Close()
-			_ = outFile.Close()
 			return nil, fmt.Errorf("failed to copy chunk %d: %w", i, err)
 		}
 		_ = chunkFile.Close()
 	}
-
-	_ = outFile.Close()
 
 	// 验证哈希
 	fileHash := hex.EncodeToString(hasher.Sum(nil))
@@ -291,7 +302,7 @@ func (s *Service) UploadSingle(
 		Identifier:  image.Identifier,
 		FileName:    image.OriginalName,
 		FileSize:    image.FileSize,
-		Links:       utils.BuildLinkFormats(image.Identifier),
+		Links:       utils.BuildLinkFormats(s.baseURL, image.Identifier),
 	}, nil
 }
 
@@ -325,7 +336,7 @@ func (s *Service) UploadBatch(ctx context.Context, userID uint, files []*multipa
 					result.Image = image
 					result.Identifier = image.Identifier
 					result.FileSize = image.FileSize
-					result.Links = utils.BuildLinkFormats(image.Identifier)
+					result.Links = utils.BuildLinkFormats(s.baseURL, image.Identifier)
 				}
 
 				resultsMutex.Lock()
@@ -361,7 +372,7 @@ func (s *Service) UploadSingleWithName(ctx context.Context, userID uint, fileHea
 		Identifier:  image.Identifier,
 		FileName:    image.OriginalName,
 		FileSize:    image.FileSize,
-		Links:       utils.BuildLinkFormats(image.Identifier),
+		Links:       utils.BuildLinkFormats(s.baseURL, image.Identifier),
 	}, nil
 }
 
@@ -401,7 +412,7 @@ func (s *Service) UploadBatchWithName(
 					result.Image = image
 					result.Identifier = image.Identifier
 					result.FileSize = image.FileSize
-					result.Links = utils.BuildLinkFormats(image.Identifier)
+					result.Links = utils.BuildLinkFormats(s.baseURL, image.Identifier)
 				}
 
 				resultsMutex.Lock()
@@ -872,3 +883,73 @@ func ReadImageData(reader io.ReadSeeker) ([]byte, error) {
 	}
 	return buf.Bytes(), nil
 }
+
+// GetImageByIdentifier 获取图片
+func (s *Service) GetImageByIdentifier(identifier string) (*models.Image, error) {
+	return s.repo.GetImageByIdentifier(identifier)
+}
+
+// UpdateImageByIdentifier 更新图片
+func (s *Service) UpdateImageByIdentifier(identifier string, updates map[string]interface{}) (*models.Image, error) {
+	return s.repo.UpdateImageByIdentifier(identifier, updates)
+}
+
+// GetImageWithVariant 获取图片（包含完整的业务逻辑）
+func (s *Service) GetImageWithVariant(ctx context.Context, identifier string, acceptHeader string, userID uint) (*ImageResultDTO, error) {
+	// 使用 GetImageMetadata 以启用缓存和防击穿
+	image, err := s.GetImageMetadata(ctx, identifier)
+	if err != nil {
+		return nil, err
+	}
+
+	if !image.IsPublic && image.UserID != userID {
+		return nil, ErrForbidden
+	}
+
+	// 选择最优变体
+	variantResult, err := s.variantService.SelectBestVariant(ctx, image, acceptHeader)
+	if err != nil {
+		// 失败时返回原图
+		return &ImageResultDTO{
+			Image:      image,
+			IsOriginal: true,
+			URL:        s.buildImageURL(image.Identifier),
+			MIMEType:   image.MimeType,
+		}, nil
+	}
+
+	if !variantResult.IsOriginal && variantResult.Variant == nil {
+		utils.SafeGo(func() {
+			s.converter.TriggerWebPConversion(image)
+		})
+	}
+
+	result := &ImageResultDTO{
+		Image:      image,
+		IsOriginal: variantResult.IsOriginal,
+		MIMEType:   variantResult.MIMEType,
+	}
+
+	if variantResult.IsOriginal {
+		result.URL = s.buildImageURL(image.Identifier)
+		result.MIMEType = image.MimeType
+	} else {
+		result.Variant = variantResult.Variant
+		if variantResult.Variant != nil {
+			result.URL = s.buildImageURL(variantResult.Variant.Identifier)
+		} else {
+			// 变体不存在，降级返回原图
+			result.IsOriginal = true
+			result.URL = s.buildImageURL(image.Identifier)
+			result.MIMEType = image.MimeType
+		}
+	}
+
+	return result, nil
+}
+
+// buildImageURL 构建图片 URL
+func (s *Service) buildImageURL(identifier string) string {
+	return fmt.Sprintf("%s/images/%s", s.baseURL, identifier)
+}
+

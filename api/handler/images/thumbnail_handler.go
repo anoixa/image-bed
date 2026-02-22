@@ -24,19 +24,18 @@ func (h *Handler) GetThumbnail(c *gin.Context) {
 	// 解析宽度参数
 	width := h.parseThumbnailWidth(c)
 
-	image, err := h.repo.GetImageByIdentifier(identifier)
+	// 使用 Service 层获取图片并检查权限
+	image, err := h.imageService.GetImageByIdentifier(identifier)
 	if err != nil {
 		common.RespondError(c, http.StatusNotFound, "Image not found")
 		return
 	}
 
 	// 检查私有图片权限
-	if !image.IsPublic {
-		userID := c.GetUint(middleware.ContextUserIDKey)
-		if userID == 0 || userID != image.UserID {
-			common.RespondError(c, http.StatusForbidden, "This image is private")
-			return
-		}
+	userID := c.GetUint(middleware.ContextUserIDKey)
+	if !h.imageService.CheckImagePermission(image, userID) {
+		common.RespondError(c, http.StatusForbidden, "This image is private")
+		return
 	}
 
 	// 获取缩略图配置

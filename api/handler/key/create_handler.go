@@ -47,7 +47,7 @@ func (h *Handler) CreateStaticToken(context *gin.Context) {
 		IsActive:    true,
 	}
 
-	err = h.repo.CreateKey(&token)
+	err = h.svc.CreateKey(&token)
 
 	if err != nil {
 		common.RespondError(context, http.StatusInternalServerError, err.Error())

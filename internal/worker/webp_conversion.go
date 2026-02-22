@@ -24,12 +24,18 @@ const (
 // ErrorType 错误类型
 type ErrorType int
 
-// VariantRepository 接口（避免循环依赖）
+// VariantRepository 接口
 type VariantRepository interface {
 	UpdateStatusCAS(id uint, expected, newStatus, errMsg string) (bool, error)
 	UpdateCompleted(id uint, identifier string, fileSize int64, width, height int) error
 	UpdateFailed(id uint, errMsg string, allowRetry bool) error
 	GetByID(id uint) (*models.ImageVariant, error)
+}
+
+// ImageRepository 接口
+type ImageRepository interface {
+	UpdateVariantStatus(imageID uint, status models.ImageVariantStatus) error
+	GetImageByID(id uint) (*models.Image, error)
 }
 
 // ClassifyError 分类错误类型
@@ -72,6 +78,7 @@ type WebPConversionTask struct {
 	SourceHeight     int
 	ConfigManager    *config.Manager
 	VariantRepo      VariantRepository
+	ImageRepo        ImageRepository
 	Storage          storage.Provider
 	result           *conversionResult
 }
@@ -230,8 +237,18 @@ func (t *WebPConversionTask) handleSuccess() {
 		ctx := context.Background()
 		_ = t.Storage.DeleteWithContext(ctx, t.result.identifier)
 		utils.LogIfDevf("[WebPConversion] Failed to update completed status for variant %d: %v", t.VariantID, err)
-	} else {
-		utils.LogIfDevf("[WebPConversion] Successfully completed variant %d", t.VariantID)
+		return
+	}
+
+	utils.LogIfDevf("[WebPConversion] Successfully completed variant %d", t.VariantID)
+
+	// 更新图片状态为 Completed
+	if t.ImageRepo != nil {
+		if err := t.ImageRepo.UpdateVariantStatus(t.ImageID, models.ImageVariantStatusCompleted); err != nil {
+			utils.LogIfDevf("[WebPConversion] Failed to update image status to completed: %v", err)
+		} else {
+			utils.LogIfDevf("[WebPConversion] Updated image %d status to completed", t.ImageID)
+		}
 	}
 }
 
@@ -249,6 +266,8 @@ func (t *WebPConversionTask) handleFailure(err error) {
 			models.VariantStatusFailed,
 			errMsg,
 		)
+		// 更新图片状态为 Failed
+		t.updateImageStatusOnFailure()
 	case ErrorConfig:
 		utils.LogIfDevf("[WebPConversion] Config error for variant %d: %s", t.VariantID, errMsg)
 		_, _ = t.VariantRepo.UpdateStatusCAS(
@@ -257,10 +276,25 @@ func (t *WebPConversionTask) handleFailure(err error) {
 			models.VariantStatusFailed,
 			errMsg,
 		)
+		// 更新图片状态为 Failed
+		t.updateImageStatusOnFailure()
 	case ErrorTransient:
 		utils.LogIfDevf("[WebPConversion] Transient error for variant %d: %s", t.VariantID, errMsg)
 		// 临时错误，允许重试
 		_ = t.VariantRepo.UpdateFailed(t.VariantID, errMsg, true)
+	}
+}
+
+// updateImageStatusOnFailure 更新图片状态为 Failed
+func (t *WebPConversionTask) updateImageStatusOnFailure() {
+	if t.ImageRepo == nil {
+		return
+	}
+
+	if err := t.ImageRepo.UpdateVariantStatus(t.ImageID, models.ImageVariantStatusFailed); err != nil {
+		utils.LogIfDevf("[WebPConversion] Failed to update image status to failed: %v", err)
+	} else {
+		utils.LogIfDevf("[WebPConversion] Updated image %d status to failed", t.ImageID)
 	}
 }
 

@@ -14,10 +14,19 @@ import (
 	"github.com/anoixa/image-bed/config"
 	configSvc "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/internal/auth"
+	svcAlbums "github.com/anoixa/image-bed/internal/albums"
 	imageSvc "github.com/anoixa/image-bed/internal/image"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
+
+// getBaseURL 从配置获取基础 URL
+func getBaseURL(cfg *config.Config) string {
+	if cfg != nil && cfg.ServerDomain != "" {
+		return cfg.ServerDomain
+	}
+	return ""
+}
 
 // RouterDependencies 路由注册依赖
 type RouterDependencies struct {
@@ -30,6 +39,9 @@ type RouterDependencies struct {
 	AuthRateLimiter  *middleware.IPRateLimiter
 	APIRateLimiter   *middleware.IPRateLimiter
 	ImageRateLimiter *middleware.IPRateLimiter
+	CacheProvider    cache.Provider
+	ServerVersion    ServerVersion
+	Config           *config.Config
 }
 
 // RegisterRoutes 注册所有路由
@@ -51,8 +63,8 @@ func registerBasicRoutes(router *gin.Engine, deps *RouterDependencies) {
 
 	router.GET("/version", func(context *gin.Context) {
 		common.RespondSuccess(context, gin.H{
-			"version": config.Version,
-			"commit":  config.CommitHash,
+			"version": deps.ServerVersion.Version,
+			"commit":  deps.ServerVersion.CommitHash,
 		})
 	})
 
@@ -63,9 +75,15 @@ func registerBasicRoutes(router *gin.Engine, deps *RouterDependencies) {
 
 // registerPublicRoutes 注册公共接口路由
 func registerPublicRoutes(router *gin.Engine, deps *RouterDependencies) {
+	cfg := deps.Config
+	baseURL := getBaseURL(cfg)
+	uploadMaxBatchTotalMB := 500 // 默认值
+	if cfg != nil {
+		uploadMaxBatchTotalMB = cfg.UploadMaxBatchTotalMB
+	}
+
 	// 创建处理器
-	cacheProvider := cache.GetDefault()
-	imageHandler := handlerImages.NewHandler(cacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager)
+	imageHandler := handlerImages.NewHandler(deps.CacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager, cfg, baseURL, uploadMaxBatchTotalMB)
 
 	// 公共图片访问
 	publicGroup := router.Group("/images")
@@ -84,12 +102,20 @@ func registerPublicRoutes(router *gin.Engine, deps *RouterDependencies) {
 
 // registerAPIRoutes 注册 API 路由
 func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
-	cacheProvider := cache.GetDefault()
-	imageHandler := handlerImages.NewHandler(cacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager)
-	albumHandler := handlerAlbums.NewHandler(deps.Repositories.AlbumsRepo, cacheProvider)
-	albumImageHandler := handlerAlbums.NewAlbumImageHandler(deps.Repositories.AlbumsRepo, deps.Repositories.ImagesRepo, cacheProvider)
-	keyHandler := key.NewHandler(deps.Repositories.KeysRepo)
-	loginHandler := api.NewLoginHandlerWithService(deps.LoginService)
+	cfg := deps.Config
+	baseURL := getBaseURL(cfg)
+	uploadMaxBatchTotalMB := 500 // 默认值
+	if cfg != nil {
+		uploadMaxBatchTotalMB = cfg.UploadMaxBatchTotalMB
+	}
+
+	imageHandler := handlerImages.NewHandler(deps.CacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager, cfg, baseURL, uploadMaxBatchTotalMB)
+	albumService := svcAlbums.NewService(deps.Repositories.AlbumsRepo)
+	albumHandler := handlerAlbums.NewHandler(albumService, deps.CacheProvider, baseURL)
+	albumImageHandler := handlerAlbums.NewAlbumImageHandler(albumService, deps.Repositories.ImagesRepo, deps.CacheProvider, cfg)
+	keyService := auth.NewKeyService(deps.Repositories.KeysRepo)
+	keyHandler := key.NewHandler(keyService)
+	loginHandler := api.NewLoginHandlerWithService(deps.LoginService, cfg)
 
 	apiGroup := router.Group("/api")
 	apiGroup.Use(func(context *gin.Context) {

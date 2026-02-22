@@ -38,10 +38,11 @@ type Config struct {
 	DBConnMaxLifetime int    `mapstructure:"db_conn_max_lifetime"`
 
 	// 缓存配置
-	CacheMaxImageCacheSizeMB int64 `mapstructure:"cache_max_image_cache_size_mb"`
-	CacheEnableImageCaching  bool  `mapstructure:"cache_enable_image_caching"`
-	CacheImageCacheTTL       int   `mapstructure:"cache_image_cache_ttl"`
-	CacheImageDataCacheTTL   int   `mapstructure:"cache_image_data_cache_ttl"`
+	CacheMaxImageCacheSizeMB   int64 `mapstructure:"cache_max_image_cache_size_mb"`
+	CacheEnableImageCaching    bool  `mapstructure:"cache_enable_image_caching"`
+	CacheImageCacheTTL         int   `mapstructure:"cache_image_cache_ttl"`
+	CacheImageDataCacheTTL     int   `mapstructure:"cache_image_data_cache_ttl"`
+	CacheMaxCacheableImageSize int64 `mapstructure:"cache_max_cacheable_image_size"` // 默认 10MB
 
 	// 缓存提供者配置
 	CacheType          string `mapstructure:"cache_type"`

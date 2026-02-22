@@ -56,12 +56,29 @@ func GetDefaultThumbnailScannerSettings() *ThumbnailScannerConfig {
 func (m *Manager) GetThumbnailScannerSettings() (*ThumbnailScannerConfig, error) {
 	ctx := context.Background()
 
+	m.cacheMutex.RLock()
+	if val, exists := m.localCache[cacheKeyThumbnailScanner]; exists {
+		m.cacheMutex.RUnlock()
+		return val.(*ThumbnailScannerConfig), nil
+	}
+	m.cacheMutex.RUnlock()
+
+	m.cacheMutex.Lock()
+	defer m.cacheMutex.Unlock()
+
+	// 双重检查
+	if val, exists := m.localCache[cacheKeyThumbnailScanner]; exists {
+		return val.(*ThumbnailScannerConfig), nil
+	}
+
 	// 获取默认扫描器配置
 	config, err := m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryThumbnailScanner)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			// 不存在，返回默认配置
-			return GetDefaultThumbnailScannerSettings(), nil
+			settings := GetDefaultThumbnailScannerSettings()
+			m.localCache[cacheKeyThumbnailScanner] = settings
+			return settings, nil
 		}
 		return nil, fmt.Errorf("failed to get thumbnail scanner config: %w", err)
 	}
@@ -70,14 +87,21 @@ func (m *Manager) GetThumbnailScannerSettings() (*ThumbnailScannerConfig, error)
 	configMap, err := m.DecryptConfig(config.ConfigJSON)
 	if err != nil {
 		// 解密失败，返回默认配置
-		return GetDefaultThumbnailScannerSettings(), nil
+		settings := GetDefaultThumbnailScannerSettings()
+		m.localCache[cacheKeyThumbnailScanner] = settings
+		return settings, nil
 	}
 
 	settings := &ThumbnailScannerConfig{}
 	if err := mapstructure.Decode(configMap, settings); err != nil {
 		// 解析失败，返回默认配置
-		return GetDefaultThumbnailScannerSettings(), nil
+		settings := GetDefaultThumbnailScannerSettings()
+		m.localCache[cacheKeyThumbnailScanner] = settings
+		return settings, nil
 	}
+
+	// 写入缓存
+	m.localCache[cacheKeyThumbnailScanner] = settings
 
 	return settings, nil
 }

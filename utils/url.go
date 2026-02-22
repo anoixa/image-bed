@@ -2,26 +2,21 @@ package utils
 
 import (
 	"fmt"
-
-	"github.com/anoixa/image-bed/config"
 )
 
 // BuildImageURL 构建图片URL
-func BuildImageURL(identifier string) string {
-	cfg := config.Get()
-	return fmt.Sprintf("%s/images/%s", cfg.BaseURL(), identifier)
+func BuildImageURL(baseURL, identifier string) string {
+	return fmt.Sprintf("%s/images/%s", baseURL, identifier)
 }
 
 // BuildThumbnailURL 构建缩略图URL
-func BuildThumbnailURL(identifier string) string {
-	cfg := config.Get()
-	return fmt.Sprintf("%s/thumbnails/%s?width=600", cfg.BaseURL(), identifier)
+func BuildThumbnailURL(baseURL, identifier string) string {
+	return fmt.Sprintf("%s/thumbnails/%s?width=600", baseURL, identifier)
 }
 
 // BuildThumbnailURLWithWidth 构建指定宽度的缩略图URL
-func BuildThumbnailURLWithWidth(identifier string, width int) string {
-	cfg := config.Get()
-	return fmt.Sprintf("%s/thumbnails/%s?width=%d", cfg.BaseURL(), identifier, width)
+func BuildThumbnailURLWithWidth(baseURL, identifier string, width int) string {
+	return fmt.Sprintf("%s/thumbnails/%s?width=%d", baseURL, identifier, width)
 }
 
 // LinkFormats 包含各种格式的图片链接
@@ -35,9 +30,9 @@ type LinkFormats struct {
 }
 
 // BuildLinkFormats 构建各种格式的图片链接
-func BuildLinkFormats(identifier string) LinkFormats {
-	url := BuildImageURL(identifier)
-	thumbnailURL := BuildThumbnailURL(identifier)
+func BuildLinkFormats(baseURL, identifier string) LinkFormats {
+	url := BuildImageURL(baseURL, identifier)
+	thumbnailURL := BuildThumbnailURL(baseURL, identifier)
 
 	return LinkFormats{
 		URL:              url,

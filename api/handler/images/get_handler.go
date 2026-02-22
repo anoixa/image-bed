@@ -9,7 +9,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 	"unicode"
 
@@ -21,17 +20,10 @@ import (
 	"github.com/anoixa/image-bed/utils"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/sync/singleflight"
-	"gorm.io/gorm"
 )
 
 var (
-	imageGroup        singleflight.Group
 	fileDownloadGroup singleflight.Group
-	metaFetchTimeout  = 30 * time.Second
-)
-
-var (
-	ErrTemporaryFailure = errors.New("temporary failure, should be retried")
 )
 
 
@@ -43,41 +35,30 @@ func (h *Handler) GetImage(c *gin.Context) {
 		return
 	}
 
-	image, err := h.fetchImageMetadata(c.Request.Context(), identifier)
+	userID := c.GetUint(middleware.ContextUserIDKey)
+	acceptHeader := c.GetHeader("Accept")
+
+	result, err := h.imageService.GetImageWithVariant(c.Request.Context(), identifier, acceptHeader, userID)
 	if err != nil {
+		if errors.Is(err, image.ErrForbidden) {
+			common.RespondError(c, http.StatusForbidden, "This image is private")
+			return
+		}
 		h.handleMetadataError(c, utils.SanitizeLogMessage(identifier), err)
 		return
 	}
 
-	// 检查私有图片权限
-	if !image.IsPublic {
-		userID := c.GetUint(middleware.ContextUserIDKey)
-		if userID == 0 || userID != image.UserID {
-			common.RespondError(c, http.StatusForbidden, "This image is private")
-			return
-		}
-	}
-
-	// 格式协商
-	acceptHeader := c.GetHeader("Accept")
-	variantResult, err := h.variantService.SelectBestVariant(context.Background(), image, acceptHeader)
-	if err != nil {
-		log.Printf("[GetImage] Format negotiation failed for %s: %v", identifier, err)
-		h.serveOriginalImage(c, image)
-		return
-	}
-
-	if !variantResult.IsOriginal && variantResult.Variant == nil {
-		go h.converter.TriggerWebPConversion(image)
-
-		h.serveOriginalImage(c, image)
-		return
-	}
-
-	if variantResult.IsOriginal {
-		h.serveOriginalImage(c, image)
+	if result.IsOriginal {
+		h.serveOriginalImage(c, result.Image)
 	} else {
-		h.serveVariantImage(c, image, variantResult)
+		// 构建 VariantResult 供 serveVariantImage 使用
+		variantResult := &image.VariantResult{
+			IsOriginal: false,
+			Variant:    result.Variant,
+			MIMEType:   result.MIMEType,
+			Identifier: result.Variant.Identifier,
+		}
+		h.serveVariantImage(c, result.Image, variantResult)
 	}
 }
 
@@ -136,11 +117,11 @@ func (h *Handler) fetchFromRemote(identifier string) ([]byte, error) {
 		}
 
 		// 异步缓存
-		go func() {
+		utils.SafeGo(func() {
 			if h.cacheHelper != nil {
 				_ = h.cacheHelper.CacheImageData(context.Background(), identifier, data)
 			}
-		}()
+		})
 
 		return data, nil
 	})
@@ -181,7 +162,9 @@ func (h *Handler) serveBySendfile(c *gin.Context, image *models.Image, opener st
 	http.ServeContent(c.Writer, c.Request, image.OriginalName, stat.ModTime(), file)
 
 	// 异步预热缓存
-	go h.warmCache(image)
+	utils.SafeGo(func() {
+		h.warmCache(image)
+	})
 
 	return true
 }
@@ -237,96 +220,15 @@ func (h *Handler) serveVariantData(c *gin.Context, img *models.Image, result *im
 	http.ServeContent(c.Writer, c.Request, "", time.Time{}, reader)
 }
 
-// fetchImageMetadata 查询图片信息
-func (h *Handler) fetchImageMetadata(ctx context.Context, identifier string) (*models.Image, error) {
-	var image models.Image
-
-	// 缓存命中
-	if err := h.cacheHelper.GetCachedImage(ctx, identifier, &image); err == nil {
-		return &image, nil
-	}
-
-	resultChan := imageGroup.DoChan(identifier, func() (interface{}, error) {
-		imagePtr, err := h.repo.GetImageByIdentifier(identifier)
-		if err != nil {
-			if isTransientError(err) {
-				return nil, ErrTemporaryFailure
-			}
-			return nil, err
-		}
-
-		go func(img *models.Image) {
-			if h.cacheHelper == nil {
-				return
-			}
-			cacheCtx := context.Background()
-			if cacheErr := h.cacheHelper.CacheImage(cacheCtx, img); cacheErr != nil {
-				log.Printf("Failed to cache image metadata for '%s': %v", img.Identifier, cacheErr)
-			}
-		}(imagePtr)
-
-		return imagePtr, nil
-	})
-
-	select {
-	case result := <-resultChan:
-		if result.Err != nil {
-			if errors.Is(result.Err, ErrTemporaryFailure) {
-				imageGroup.Forget(identifier)
-			}
-			return nil, result.Err
-		}
-		return result.Val.(*models.Image), nil
-	case <-time.After(metaFetchTimeout):
-		imageGroup.Forget(identifier)
-		return nil, ErrTemporaryFailure
-	}
-}
-
 // handleMetadataError 处理元数据查询错误
 func (h *Handler) handleMetadataError(c *gin.Context, identifier string, err error) {
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		log.Printf("Image not found: %s", identifier)
-		common.RespondError(c, http.StatusNotFound, "Image not found")
-		return
-	}
-
-	if errors.Is(err, ErrTemporaryFailure) {
-		log.Printf("Temporary failure fetching image metadata for '%s': %v", identifier, err)
-		common.RespondError(c, http.StatusServiceUnavailable, "Service temporarily unavailable, please retry")
+	if errors.Is(err, image.ErrForbidden) {
+		common.RespondError(c, http.StatusForbidden, "This image is private")
 		return
 	}
 
 	log.Printf("Failed to fetch image metadata for '%s': %v", identifier, err)
-	common.RespondError(c, http.StatusInternalServerError, "Error retrieving image")
-}
-
-// isTransientError 检查是否为临时错误
-func isTransientError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	errStr := err.Error()
-	timeoutPatterns := []string{
-		"timeout",
-		"deadline exceeded",
-		"connection refused",
-		"connection reset",
-		"temporary",
-		"i/o timeout",
-		"context deadline exceeded",
-		"connection timed out",
-		"no such host",
-		"network is unreachable",
-	}
-
-	for _, pattern := range timeoutPatterns {
-		if strings.Contains(strings.ToLower(errStr), pattern) {
-			return true
-		}
-	}
-	return false
+	common.RespondError(c, http.StatusNotFound, "Image not found")
 }
 
 

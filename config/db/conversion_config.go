@@ -50,6 +50,21 @@ func (s *ConversionSettings) IsFormatEnabled(format string) bool {
 
 // GetConversionSettings 获取转换配置
 func (m *Manager) GetConversionSettings(ctx context.Context) (*ConversionSettings, error) {
+	m.cacheMutex.RLock()
+	if val, exists := m.localCache[cacheKeyConversion]; exists {
+		m.cacheMutex.RUnlock()
+		return val.(*ConversionSettings), nil
+	}
+	m.cacheMutex.RUnlock()
+
+	m.cacheMutex.Lock()
+	defer m.cacheMutex.Unlock()
+
+	// 双重检查
+	if val, exists := m.localCache[cacheKeyConversion]; exists {
+		return val.(*ConversionSettings), nil
+	}
+
 	config, err := m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryConversion)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -76,6 +91,9 @@ func (m *Manager) GetConversionSettings(ctx context.Context) (*ConversionSetting
 	if err := mapstructure.Decode(configMap, settings); err != nil {
 		return nil, fmt.Errorf("failed to decode conversion settings: %w", err)
 	}
+
+	// 写入缓存
+	m.localCache[cacheKeyConversion] = settings
 
 	return settings, nil
 }

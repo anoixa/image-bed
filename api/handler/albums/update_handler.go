@@ -8,6 +8,7 @@ import (
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
+	"github.com/anoixa/image-bed/utils"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -45,7 +46,7 @@ func (h *Handler) UpdateAlbumHandler(c *gin.Context) {
 	userID := c.GetUint(middleware.ContextUserIDKey)
 
 	// 获取相册
-	album, err := h.repo.GetAlbumWithImagesByID(uint(albumID), userID)
+	album, err := h.svc.GetAlbumWithImagesByID(uint(albumID), userID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			common.RespondError(c, http.StatusNotFound, "Album not found or access denied")
@@ -59,13 +60,13 @@ func (h *Handler) UpdateAlbumHandler(c *gin.Context) {
 	album.Name = req.Name
 	album.Description = req.Description
 
-	if err := h.repo.UpdateAlbum(album); err != nil {
+	if err := h.svc.UpdateAlbum(album); err != nil {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to update album")
 		return
 	}
 
 	// 清除相册缓存和用户的相册列表缓存
-	go func() {
+	utils.SafeGo(func() {
 		ctx := context.Background()
 		if err := h.cacheHelper.DeleteCachedAlbum(ctx, uint(albumID)); err != nil {
 			log.Printf("Failed to delete album cache for %d: %v", albumID, err)
@@ -73,7 +74,7 @@ func (h *Handler) UpdateAlbumHandler(c *gin.Context) {
 		if err := h.cacheHelper.DeleteCachedAlbumList(ctx, userID); err != nil {
 			log.Printf("Failed to delete album list cache for user %d: %v", userID, err)
 		}
-	}()
+	})
 
 	common.RespondSuccess(c, UpdateAlbumResponse{
 		ID:          album.ID,

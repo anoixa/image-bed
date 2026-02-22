@@ -15,7 +15,6 @@ import (
 type ImageDTO struct {
 	ID           uint   `json:"id"`
 	URL          string `json:"url"`
-	ThumbnailURL string `json:"thumbnail_url"`
 	OriginalName string `json:"original_name"`
 	FileSize     int64  `json:"file_size"`
 	MimeType     string `json:"mime_type"`
@@ -30,8 +29,6 @@ type ImageRequestBody struct {
 	Identifier  string `json:"identifier"`
 	Search      string `json:"search"`
 	AlbumID     *uint  `json:"album_id"`
-	StartTime   int64  `json:"start_time"`  // Unix时间戳（毫秒）
-	EndTime     int64  `json:"end_time"`    // Unix时间戳（毫秒）
 
 	Page  int `json:"page" binding:"required"`
 	Limit int `json:"limit" binding:"required"`
@@ -63,45 +60,43 @@ func (h *Handler) ListImages(c *gin.Context) {
 	if body.Limit <= 0 {
 		limit = 10
 	}
-	
+
 	// 限制最大分页数量
 	const maxLimit = 100
 	if limit > maxLimit {
 		limit = maxLimit
 	}
 
-	list, total, err := h.repo.GetImageList(body.StorageType, body.Identifier, body.Search, body.AlbumID, body.StartTime, body.EndTime, page, limit, int(userID))
+	result, err := h.imageService.ListImages(body.StorageType, body.Identifier, body.Search, body.AlbumID, page, limit, int(userID))
 	if err != nil {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to get image list")
 		return
 	}
 
-	imageListDTO := toImageDTOs(list)
+	imageListDTO := h.toImageDTOs(result.Images)
 	sort.Slice(imageListDTO, func(i, j int) bool {
 		return imageListDTO[i].ID < imageListDTO[j].ID
 	})
 
 	common.RespondSuccess(c, ImageListResponse{
 		Images:     imageListDTO,
-		Total:      total,
+		Total:      result.Total,
 		Page:       body.Page,
 		Limit:      body.Limit,
-		TotalPages: int(math.Ceil(float64(total) / float64(body.Limit))),
+		TotalPages: int(math.Ceil(float64(result.Total) / float64(body.Limit))),
 	})
 }
 
-func toImageDTO(image *models.Image) *ImageDTO {
+func (h *Handler) toImageDTO(image *models.Image) *ImageDTO {
 	if image == nil {
 		return nil
 	}
 
-	imageUrl := utils.BuildImageURL(image.Identifier)
-	thumbnailUrl := utils.BuildThumbnailURL(image.Identifier)
+	imageUrl := utils.BuildImageURL(h.baseURL, image.Identifier)
 
 	return &ImageDTO{
 		ID:           image.ID,
 		URL:          imageUrl,
-		ThumbnailURL: thumbnailUrl,
 		OriginalName: image.OriginalName,
 		FileSize:     image.FileSize,
 		MimeType:     image.MimeType,
@@ -112,10 +107,10 @@ func toImageDTO(image *models.Image) *ImageDTO {
 	}
 }
 
-func toImageDTOs(images []*models.Image) []*ImageDTO {
+func (h *Handler) toImageDTOs(images []*models.Image) []*ImageDTO {
 	dtos := make([]*ImageDTO, len(images))
 	for i, image := range images {
-		dtos[i] = toImageDTO(image)
+		dtos[i] = h.toImageDTO(image)
 	}
 	return dtos
 }

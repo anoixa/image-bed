@@ -27,7 +27,7 @@ func (h *Handler) DisableToken(context *gin.Context) {
 	}
 	tokenID := uint(tokenID64)
 
-	err = h.repo.DisableApiToken(tokenID, userID)
+	err = h.svc.DisableApiToken(tokenID, userID)
 
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -58,7 +58,7 @@ func (h *Handler) RevokeToken(context *gin.Context) {
 	}
 	tokenID := uint(tokenID64)
 
-	err = h.repo.RevokeApiToken(tokenID, userID)
+	err = h.svc.RevokeApiToken(tokenID, userID)
 
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -89,7 +89,7 @@ func (h *Handler) EnableToken(context *gin.Context) {
 	}
 	tokenID := uint(tokenID64)
 
-	err = h.repo.EnableApiToken(tokenID, userID)
+	err = h.svc.EnableApiToken(tokenID, userID)
 
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {

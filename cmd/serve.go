@@ -102,7 +102,8 @@ func InitDependencies(cfg *config.Config) (*Dependencies, error) {
 
 	// 初始化变体仓库和转换器
 	variantRepo := images.NewVariantRepository(db)
-	converter := imageSvc.NewConverter(configManager, variantRepo, storage.GetDefault())
+	imageRepo := images.NewRepository(db)
+	converter := imageSvc.NewConverter(configManager, variantRepo, imageRepo, storage.GetDefault())
 
 	return &Dependencies{
 		DB:            db,
@@ -145,33 +146,31 @@ func RunServer() {
 
 	// 初始化变体仓库和服务
 	variantRepo := images.NewVariantRepository(deps.DB)
-	retryScanner := imageSvc.NewRetryScanner(
-		variantRepo,
-		deps.Converter,
-		5*time.Minute,
-	)
+	imageRepo := images.NewRepository(deps.DB)
+	
+	// 启动重试扫描器
+	retryScanner := imageSvc.NewRetryScanner(variantRepo, imageRepo, deps.Converter, 5*time.Minute)
 	retryScanner.Start()
+	defer retryScanner.Stop()
 
 	// 初始化缩略图服务
-	thumbnailSvc := imageSvc.NewThumbnailService(variantRepo, deps.ConfigManager, storage.GetDefault(), deps.Converter)
-	thumbnailScanner := imageSvc.NewThumbnailScanner(
-		deps.DB,
-		deps.ConfigManager,
-		thumbnailSvc,
-	)
+	thumbnailSvc := imageSvc.NewThumbnailService(variantRepo, imageRepo, deps.ConfigManager, storage.GetDefault(), deps.Converter)
+	
+	// 启动缩略图扫描器
+	thumbnailScanner := imageSvc.NewThumbnailScanner(deps.DB, deps.ConfigManager, thumbnailSvc)
 	if err := thumbnailScanner.Start(); err != nil {
 		log.Fatalf("Failed to start thumbnail scanner: %v", err)
 	}
+	defer thumbnailScanner.Stop()
 
 	// 启动孤儿任务扫描器
 	orphanScanner := imageSvc.NewOrphanScanner(
-		variantRepo,
-		deps.Converter,
-		thumbnailSvc,
+		variantRepo, deps.Converter, thumbnailSvc,
 		10*time.Minute, // 10分钟视为孤儿任务
 		5*time.Minute,  // 每5分钟扫描一次
 	)
 	orphanScanner.Start()
+	defer orphanScanner.Stop()
 
 	// 初始化 JWT
 	if err := api.TokenInitFromManager(deps.ConfigManager); err != nil {
@@ -185,26 +184,35 @@ func RunServer() {
 		ConfigManager: deps.ConfigManager,
 		Converter:     deps.Converter,
 		TokenManager:  api.GetTokenManager(),
+		Config:        cfg,
+		CacheProvider: cache.GetDefault(),
+		ServerVersion: core.ServerVersion{
+			Version:    config.Version,
+			CommitHash: config.CommitHash,
+		},
 	}
 
 	// 启动gin
 	server, cleanup := core.StartServer(serverDeps)
+	serverErrCh := make(chan error, 1)
+	
 	go func() {
 		log.Printf("Server started on %s", cfg.Addr())
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("Server failed to start: %v", err)
+			serverErrCh <- err
 		}
 	}()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+	
+	select {
+	case err := <-serverErrCh:
+		log.Printf("Server unexpectedly stopped: %v", err)
+	case sig := <-quit:
+		log.Printf("Received signal: %v, shutting down...", sig)
+	}
 	log.Println("Shutting down server...")
-
-	// 停止所有后台任务
-	retryScanner.Stop()
-	thumbnailScanner.Stop()
-	orphanScanner.Stop()
 
 	// 停止全局 Worker 池
 	worker.StopGlobalPool()

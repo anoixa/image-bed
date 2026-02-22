@@ -6,7 +6,6 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 )
 
@@ -20,8 +19,8 @@ func addJitter(duration time.Duration) time.Duration {
 }
 
 const (
-	// ImageCachePrefix 图片缓存前缀
-	ImageCachePrefix = "image:"
+	// ImageCachePrefix 图片元数据缓存前缀
+	ImageCachePrefix = "image_meta:"
 
 	// UserCachePrefix 用户缓存前缀
 	UserCachePrefix = "user:"
@@ -67,16 +66,43 @@ const (
 
 	// DefaultAlbumListVersionExpiration 相册列表版本号过期时间
 	DefaultAlbumListVersionExpiration = 30 * time.Minute
+
+	// DefaultMaxCacheableImageSize 默认最大可缓存图片大小（10MB）
+	DefaultMaxCacheableImageSize = 10 * 1024 * 1024
 )
+
+// HelperConfig 缓存辅助工具配置
+type HelperConfig struct {
+	ImageCacheTTL         time.Duration
+	ImageDataCacheTTL     time.Duration
+	MaxCacheableImageSize int64
+}
+
+// DefaultHelperConfig 返回默认配置
+func DefaultHelperConfig() HelperConfig {
+	return HelperConfig{
+		ImageCacheTTL:         DefaultImageCacheExpiration,
+		ImageDataCacheTTL:     1 * time.Hour,
+		MaxCacheableImageSize: DefaultMaxCacheableImageSize,
+	}
+}
 
 // Helper 缓存辅助工具结构
 type Helper struct {
 	provider Provider
+	config   HelperConfig
 }
 
 // NewHelper 创建新的缓存辅助工具
-func NewHelper(provider Provider) *Helper {
-	return &Helper{provider: provider}
+func NewHelper(provider Provider, cfg ...HelperConfig) *Helper {
+	c := DefaultHelperConfig()
+	if len(cfg) > 0 {
+		c = cfg[0]
+	}
+	return &Helper{
+		provider: provider,
+		config:   c,
+	}
 }
 
 // CacheImage 缓存图片元数据
@@ -86,12 +112,7 @@ func (h *Helper) CacheImage(ctx context.Context, image *models.Image) error {
 	}
 
 	key := ImageCachePrefix + image.Identifier
-	cfg := config.Get()
-	ttl := DefaultImageCacheExpiration
-	if cfg != nil && cfg.CacheImageCacheTTL > 0 {
-		ttl = time.Duration(cfg.CacheImageCacheTTL) * time.Second
-	}
-	return h.provider.Set(ctx, key, image, addJitter(ttl))
+	return h.provider.Set(ctx, key, image, addJitter(h.config.ImageCacheTTL))
 }
 
 // GetCachedImage 获取缓存的图片元数据
@@ -258,19 +279,19 @@ func (h *Helper) DeleteEmptyValue(ctx context.Context, key string) error {
 	return h.provider.Delete(ctx, cacheKey)
 }
 
-// CacheImageData 缓存图片数据
+// CacheImageData 缓存图片数据（超过 MaxCacheableImageSize 的图片不会缓存）
 func (h *Helper) CacheImageData(ctx context.Context, identifier string, imageData []byte) error {
 	if h.provider == nil {
 		return fmt.Errorf("cache provider not initialized")
 	}
 
-	key := "image_data:" + identifier
-	cfg := config.Get()
-	expiration := 1 * time.Hour
-	if cfg != nil && cfg.CacheImageDataCacheTTL > 0 {
-		expiration = time.Duration(cfg.CacheImageDataCacheTTL) * time.Second
+	// 检查图片大小，超过限制则不缓存
+	if int64(len(imageData)) > h.config.MaxCacheableImageSize {
+		return nil
 	}
-	return h.provider.Set(ctx, key, imageData, addJitter(expiration))
+
+	key := "image_data:" + identifier
+	return h.provider.Set(ctx, key, imageData, addJitter(h.config.ImageDataCacheTTL))
 }
 
 // GetCachedImageData 获取缓存的图片数据

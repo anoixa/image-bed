@@ -41,28 +41,55 @@ func (r *Repository) GetUserAlbums(userID uint, page, pageSize int) ([]*AlbumInf
 		return nil, 0, err
 	}
 
+	if len(albums) == 0 {
+		return []*AlbumInfo{}, total, nil
+	}
+
+	// 批量获取相册ID列表
+	albumIDs := make([]uint, len(albums))
+	for i, album := range albums {
+		albumIDs[i] = album.ID
+	}
+
+	var imageCounts []struct {
+		AlbumID uint
+		Count   int64
+	}
+	r.db.Table("album_images").
+		Select("album_id, COUNT(*) as count").
+		Where("album_id IN ?", albumIDs).
+		Group("album_id").
+		Scan(&imageCounts)
+
+	countMap := make(map[uint]int64)
+	for _, c := range imageCounts {
+		countMap[c.AlbumID] = c.Count
+	}
+
+	var covers []struct {
+		AlbumID    uint
+		Identifier string
+	}
+	r.db.Raw(`
+		SELECT DISTINCT ON (ai.album_id) ai.album_id, i.identifier
+		FROM album_images ai
+		JOIN images i ON ai.image_id = i.id
+		WHERE ai.album_id IN ?
+		ORDER BY ai.album_id, i.created_at DESC
+	`, albumIDs).Scan(&covers)
+
+	coverMap := make(map[uint]string)
+	for _, c := range covers {
+		coverMap[c.AlbumID] = c.Identifier
+	}
+
 	result := make([]*AlbumInfo, len(albums))
 	for i, album := range albums {
-		info := &AlbumInfo{Album: album}
-
-		var count int64
-		if err := r.db.Table("album_images").Where("album_id = ?", album.ID).Count(&count).Error; err == nil {
-			info.ImageCount = count
+		result[i] = &AlbumInfo{
+			Album:      album,
+			ImageCount: countMap[album.ID],
+			CoverURL:   coverMap[album.ID],
 		}
-
-		if count > 0 {
-			var coverImage models.Image
-			err := r.db.
-				Joins("JOIN album_images ON album_images.image_id = images.id").
-				Where("album_images.album_id = ?", album.ID).
-				Order("images.created_at desc").
-				First(&coverImage).Error
-			if err == nil {
-				info.CoverURL = coverImage.Identifier
-			}
-		}
-
-		result[i] = info
 	}
 
 	return result, total, nil
@@ -100,6 +127,32 @@ func (r *Repository) RemoveImageFromAlbum(albumID, userID uint, image *models.Im
 			return err
 		}
 		return tx.Model(&album).Association("Images").Delete(image)
+	})
+}
+
+// AddImagesToAlbum 批量添加图片到相册
+func (r *Repository) AddImagesToAlbum(albumID, userID uint, imageIDs []uint) error {
+	if len(imageIDs) == 0 {
+		return nil
+	}
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		var album models.Album
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&album, "id = ? AND user_id = ?", albumID, userID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("album not found or access denied")
+			}
+			return err
+		}
+
+		// 批量插入关联记录
+		associations := make([]map[string]interface{}, len(imageIDs))
+		for i, id := range imageIDs {
+			associations[i] = map[string]interface{}{
+				"album_id": albumID,
+				"image_id": id,
+			}
+		}
+		return tx.Table("album_images").Create(associations).Error
 	})
 }
 

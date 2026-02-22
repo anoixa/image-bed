@@ -7,6 +7,7 @@ import (
 
 	"github.com/anoixa/image-bed/api"
 	"github.com/anoixa/image-bed/api/middleware"
+	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
 	configSvc "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/repo/accounts"
@@ -29,6 +30,12 @@ type Repositories struct {
 	KeysRepo     *keys.Repository
 }
 
+// ServerVersion 服务器版本信息
+type ServerVersion struct {
+	Version    string
+	CommitHash string
+}
+
 // ServerDependencies 服务器依赖项
 type ServerDependencies struct {
 	DB            *gorm.DB
@@ -36,15 +43,18 @@ type ServerDependencies struct {
 	ConfigManager *configSvc.Manager
 	Converter     *imageSvc.Converter
 	TokenManager  *auth.TokenManager
+	Config        *config.Config
+	CacheProvider cache.Provider
+	ServerVersion ServerVersion
 }
 
 // 启动gin
 func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
-	cfg := config.Get()
+	cfg := deps.Config
 	router := gin.New()
 
 	// 仅在开发版本时启用 gin 日志
-	if config.CommitHash == "n/a" {
+	if deps.ServerVersion.CommitHash == "n/a" {
 		gin.SetMode(gin.DebugMode)
 		router.Use(gin.Logger())
 	} else {
@@ -122,6 +132,9 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 		AuthRateLimiter:  authRateLimiter,
 		APIRateLimiter:   apiRateLimiter,
 		ImageRateLimiter: imageRateLimiter,
+		CacheProvider:    deps.CacheProvider,
+		ServerVersion:    deps.ServerVersion,
+		Config:           deps.Config,
 	}
 	RegisterRoutes(router, routerDeps)
 
@@ -130,7 +143,7 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 
 // StartServer 创建 http.Server
 func StartServer(deps *ServerDependencies) (*http.Server, func()) {
-	cfg := config.Get()
+	cfg := deps.Config
 	router, clean := setupRouter(deps)
 
 	srv := &http.Server{

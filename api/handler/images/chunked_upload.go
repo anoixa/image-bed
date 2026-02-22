@@ -13,6 +13,7 @@ import (
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/internal/image"
+	"github.com/anoixa/image-bed/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -256,7 +257,9 @@ func (h *Handler) CompleteChunkedUpload(c *gin.Context) {
 	sessionsMu.Unlock()
 
 	// 异步处理合并
-	go h.processChunkedUploadAsync(req.SessionID, session)
+	utils.SafeGo(func() {
+		h.processChunkedUploadAsync(req.SessionID, session)
+	})
 
 	common.RespondSuccess(c, gin.H{
 		"message":    "Upload completed, processing in background",

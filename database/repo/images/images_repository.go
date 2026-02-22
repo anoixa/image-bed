@@ -110,6 +110,16 @@ func (r *Repository) GetImageByIDAndUser(id, userID uint) (*models.Image, error)
 	return &image, err
 }
 
+// GetImagesByIDsAndUser 批量通过ID和用户ID获取图片
+func (r *Repository) GetImagesByIDsAndUser(ids []uint, userID uint) ([]*models.Image, error) {
+	if len(ids) == 0 {
+		return []*models.Image{}, nil
+	}
+	var images []*models.Image
+	err := r.db.Where("id IN ? AND user_id = ?", ids, userID).Find(&images).Error
+	return images, err
+}
+
 // UpdateImage 更新图片
 func (r *Repository) UpdateImage(image *models.Image) error {
 	return r.db.Save(image).Error
@@ -237,4 +247,16 @@ func (r *Repository) WithContext(ctx context.Context) *Repository {
 // DB 返回底层 *gorm.DB 实例
 func (r *Repository) DB() *gorm.DB {
 	return r.db
+}
+
+// UpdateVariantStatus 更新图片变体状态
+func (r *Repository) UpdateVariantStatus(imageID uint, status models.ImageVariantStatus) error {
+	return r.db.Model(&models.Image{}).Where("id = ?", imageID).Update("variant_status", status).Error
+}
+
+// GetImagesByVariantStatus 根据变体状态获取图片列表
+func (r *Repository) GetImagesByVariantStatus(statuses []models.ImageVariantStatus, limit int) ([]*models.Image, error) {
+	var images []*models.Image
+	err := r.db.Where("variant_status IN ?", statuses).Limit(limit).Find(&images).Error
+	return images, err
 }

@@ -15,14 +15,16 @@ import (
 type Converter struct {
 	configManager *config.Manager
 	variantRepo   *images.VariantRepository
+	imageRepo     *images.Repository
 	storage       storage.Provider
 }
 
 // NewConverter 创建转换器
-func NewConverter(cm *config.Manager, repo *images.VariantRepository, storage storage.Provider) *Converter {
+func NewConverter(cm *config.Manager, variantRepo *images.VariantRepository, imageRepo *images.Repository, storage storage.Provider) *Converter {
 	return &Converter{
 		configManager: cm,
-		variantRepo:   repo,
+		variantRepo:   variantRepo,
+		imageRepo:     imageRepo,
 		storage:       storage,
 	}
 }
@@ -48,6 +50,16 @@ func (c *Converter) TriggerWebPConversion(image *models.Image) {
 		minSize := int64(settings.SkipSmallerThan * 1024)
 		if image.FileSize < minSize {
 			return
+		}
+	}
+
+	// 更新图片状态为 Processing（如果当前是 None 或 Failed）
+	if image.VariantStatus == models.ImageVariantStatusNone || image.VariantStatus == models.ImageVariantStatusFailed {
+		if err := c.imageRepo.UpdateVariantStatus(image.ID, models.ImageVariantStatusProcessing); err != nil {
+			utils.LogIfDevf("[Converter] Failed to update image status to processing: %v", err)
+			// 继续尝试，不中断流程
+		} else {
+			image.VariantStatus = models.ImageVariantStatusProcessing
 		}
 	}
 
@@ -84,6 +96,7 @@ func (c *Converter) TriggerWebPConversion(image *models.Image) {
 			SourceHeight:     image.Height,
 			ConfigManager:    c.configManager,
 			VariantRepo:      c.variantRepo,
+			ImageRepo:        c.imageRepo,
 			Storage:          c.storage,
 		}
 		task.Execute()

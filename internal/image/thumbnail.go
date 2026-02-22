@@ -28,6 +28,7 @@ type ThumbnailResult struct {
 // ThumbnailService 缩略图服务
 type ThumbnailService struct {
 	variantRepo   *images.VariantRepository
+	imageRepo     *images.Repository
 	configManager *config.Manager
 	storage       storage.Provider
 	converter     *Converter
@@ -35,13 +36,15 @@ type ThumbnailService struct {
 
 // NewThumbnailService 创建缩略图服务
 func NewThumbnailService(
-	repo *images.VariantRepository,
+	variantRepo *images.VariantRepository,
+	imageRepo *images.Repository,
 	cm *config.Manager,
 	storage storage.Provider,
 	converter *Converter,
 ) *ThumbnailService {
 	return &ThumbnailService{
-		variantRepo:   repo,
+		variantRepo:   variantRepo,
+		imageRepo:     imageRepo,
 		configManager: cm,
 		storage:       storage,
 		converter:     converter,

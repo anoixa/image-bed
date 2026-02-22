@@ -22,6 +22,7 @@ type ThumbnailTask struct {
 	TargetWidth      int
 	ConfigManager    *config.Manager
 	VariantRepo      VariantRepository
+	ImageRepo        ImageRepository
 	Storage          storage.Provider
 }
 
@@ -173,6 +174,26 @@ func (t *ThumbnailTask) handleSuccess(result *thumbnailResult) {
 
 	if err := t.VariantRepo.UpdateCompleted(t.VariantID, t.TargetIdentifier, result.FileSize, result.Width, result.Height); err != nil {
 		utils.LogIfDevf("[ThumbnailTask] Failed to update status: %v", err)
+		return
+	}
+
+	// 更新图片状态为 ThumbnailCompleted（缩略图优先级高，先完成缩略图即标记）
+	if t.ImageRepo != nil {
+		img, err := t.ImageRepo.GetImageByID(t.ImageID)
+		if err != nil {
+			utils.LogIfDevf("[ThumbnailTask] Failed to get image %d: %v", t.ImageID, err)
+			return
+		}
+
+		// 只有从未完成状态升级时才更新
+		if img.VariantStatus == models.ImageVariantStatusNone ||
+			img.VariantStatus == models.ImageVariantStatusProcessing {
+			if err := t.ImageRepo.UpdateVariantStatus(t.ImageID, models.ImageVariantStatusThumbnailCompleted); err != nil {
+				utils.LogIfDevf("[ThumbnailTask] Failed to update image status to thumbnail_completed: %v", err)
+			} else {
+				utils.LogIfDevf("[ThumbnailTask] Updated image %d status to thumbnail_completed", t.ImageID)
+			}
+		}
 	}
 }
 

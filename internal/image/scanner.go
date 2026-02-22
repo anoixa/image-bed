@@ -13,6 +13,7 @@ import (
 // RetryScanner 重试扫描器
 type RetryScanner struct {
 	variantRepo *images.VariantRepository
+	imageRepo   *images.Repository
 	converter   *Converter
 	interval    time.Duration
 	batchSize   int
@@ -20,9 +21,10 @@ type RetryScanner struct {
 }
 
 // NewRetryScanner 创建重试扫描器
-func NewRetryScanner(repo *images.VariantRepository, converter *Converter, interval time.Duration) *RetryScanner {
+func NewRetryScanner(variantRepo *images.VariantRepository, imageRepo *images.Repository, converter *Converter, interval time.Duration) *RetryScanner {
 	return &RetryScanner{
-		variantRepo: repo,
+		variantRepo: variantRepo,
+		imageRepo:   imageRepo,
 		converter:   converter,
 		interval:    interval,
 		batchSize:   100,
@@ -55,6 +57,22 @@ func (s *RetryScanner) Stop() {
 // scanAndRetry 扫描并重试
 func (s *RetryScanner) scanAndRetry() {
 	now := time.Now()
+
+	// 首先扫描 VariantStatus 为 Failed 的图片
+	if s.imageRepo != nil {
+		failedImages, err := s.imageRepo.GetImagesByVariantStatus(
+			[]models.ImageVariantStatus{models.ImageVariantStatusFailed},
+			s.batchSize,
+		)
+		if err != nil {
+			utils.LogIfDevf("[RetryScanner] Failed to get failed images: %v", err)
+		} else if len(failedImages) > 0 {
+			utils.LogIfDevf("[RetryScanner] Found %d images with failed variant status", len(failedImages))
+			for _, img := range failedImages {
+				s.converter.TriggerWebPConversion(img)
+			}
+		}
+	}
 
 	// 查询可重试的变体
 	variants, err := s.variantRepo.GetRetryableVariants(now, s.batchSize)
@@ -96,8 +114,8 @@ func (s *RetryScanner) scanAndRetry() {
 }
 
 // StartRetryScanner 创建并启动重试扫描器
-func StartRetryScanner(repo *images.VariantRepository, converter *Converter, interval time.Duration) *RetryScanner {
-	scanner := NewRetryScanner(repo, converter, interval)
+func StartRetryScanner(variantRepo *images.VariantRepository, imageRepo *images.Repository, converter *Converter, interval time.Duration) *RetryScanner {
+	scanner := NewRetryScanner(variantRepo, imageRepo, converter, interval)
 	scanner.Start()
 	return scanner
 }

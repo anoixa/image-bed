@@ -8,6 +8,7 @@ import (
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
+	"github.com/anoixa/image-bed/utils"
 	"github.com/gin-gonic/gin"
 )
 
@@ -66,7 +67,7 @@ func (h *Handler) ListAlbumsHandler(c *gin.Context) {
 		return
 	}
 
-	albums, total, err := h.repo.GetUserAlbums(userID, req.Page, req.Limit)
+	albums, total, err := h.svc.GetUserAlbums(userID, req.Page, req.Limit)
 	if err != nil {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to get albums")
 		return
@@ -86,7 +87,7 @@ func (h *Handler) ListAlbumsHandler(c *gin.Context) {
 	}
 
 	// 异步写入缓存
-	go func() {
+	utils.SafeGo(func() {
 		ctx := context.Background()
 		cacheData := CachedAlbumList{
 			Albums: albumDTOs,
@@ -95,7 +96,7 @@ func (h *Handler) ListAlbumsHandler(c *gin.Context) {
 		if err := h.cacheHelper.CacheAlbumList(ctx, userID, req.Page, req.Limit, cacheData); err != nil {
 			log.Printf("Failed to cache album list for user %d: %v", userID, err)
 		}
-	}()
+	})
 
 	common.RespondSuccess(c, ListAlbumsResponse{
 		Albums:     albumDTOs,

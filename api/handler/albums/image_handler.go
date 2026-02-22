@@ -5,12 +5,15 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/cache"
-	"github.com/anoixa/image-bed/database/repo/albums"
+	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/repo/images"
+	svcAlbums "github.com/anoixa/image-bed/internal/albums"
+	"github.com/anoixa/image-bed/utils"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -22,17 +25,34 @@ type AddImagesToAlbumRequest struct {
 
 // AlbumImageHandler 相册图片处理器
 type AlbumImageHandler struct {
-	repo        *albums.Repository
+	svc         *svcAlbums.Service
 	imageRepo   *images.Repository
 	cacheHelper *cache.Helper
 }
 
 // NewAlbumImageHandler 创建相册图片处理器
-func NewAlbumImageHandler(albumsRepo *albums.Repository, imagesRepo *images.Repository, cacheProvider cache.Provider) *AlbumImageHandler {
+func NewAlbumImageHandler(albumsSvc *svcAlbums.Service, imagesRepo *images.Repository, cacheProvider cache.Provider, cfg *config.Config) *AlbumImageHandler {
+	helperCfg := cache.HelperConfig{
+		ImageCacheTTL:         cache.DefaultImageCacheExpiration,
+		ImageDataCacheTTL:     1 * time.Hour,
+		MaxCacheableImageSize: cache.DefaultMaxCacheableImageSize,
+	}
+	if cfg != nil {
+		if cfg.CacheImageCacheTTL > 0 {
+			helperCfg.ImageCacheTTL = time.Duration(cfg.CacheImageCacheTTL) * time.Second
+		}
+		if cfg.CacheImageDataCacheTTL > 0 {
+			helperCfg.ImageDataCacheTTL = time.Duration(cfg.CacheImageDataCacheTTL) * time.Second
+		}
+		if cfg.CacheMaxCacheableImageSize > 0 {
+			helperCfg.MaxCacheableImageSize = cfg.CacheMaxCacheableImageSize
+		}
+	}
+
 	return &AlbumImageHandler{
-		repo:        albumsRepo,
+		svc:         albumsSvc,
 		imageRepo:   imagesRepo,
-		cacheHelper: cache.NewHelper(cacheProvider),
+		cacheHelper: cache.NewHelper(cacheProvider, helperCfg),
 	}
 }
 
@@ -55,7 +75,7 @@ func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 	userID := c.GetUint(middleware.ContextUserIDKey)
 
 	// 验证相册存在且属于当前用户
-	_, err = h.repo.GetAlbumWithImagesByID(uint(albumID), userID)
+	_, err = h.svc.GetAlbumWithImagesByID(uint(albumID), userID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			common.RespondError(c, http.StatusNotFound, "Album not found or access denied")
@@ -65,24 +85,36 @@ func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 		return
 	}
 
-	// 批量添加图片
-	var addedCount int
+	// 批量查询图片
+	images, err := h.imageRepo.GetImagesByIDsAndUser(req.ImageIDs, userID)
+	if err != nil {
+		common.RespondError(c, http.StatusInternalServerError, "Failed to get images")
+		return
+	}
+
+	// 找出有效的图片ID和不存在的图片ID
+	foundIDs := make(map[uint]bool)
+	imageIDsToAdd := make([]uint, 0, len(images))
+	for _, img := range images {
+		foundIDs[img.ID] = true
+		imageIDsToAdd = append(imageIDsToAdd, img.ID)
+	}
+
 	var failedIDs []uint
-
-	for _, imageID := range req.ImageIDs {
-		// 验证图片存在且属于当前用户
-		image, err := h.imageRepo.GetImageByIDAndUser(imageID, userID)
-		if err != nil {
-			failedIDs = append(failedIDs, imageID)
-			continue
+	for _, id := range req.ImageIDs {
+		if !foundIDs[id] {
+			failedIDs = append(failedIDs, id)
 		}
+	}
 
-		// 添加到相册
-		if err := h.repo.AddImageToAlbum(uint(albumID), userID, image); err != nil {
-			failedIDs = append(failedIDs, imageID)
-			continue
+	// 批量添加到相册
+	addedCount := 0
+	if len(imageIDsToAdd) > 0 {
+		if err := h.svc.AddImagesToAlbum(uint(albumID), userID, imageIDsToAdd); err != nil {
+			common.RespondError(c, http.StatusInternalServerError, "Failed to add images to album")
+			return
 		}
-		addedCount++
+		addedCount = len(imageIDsToAdd)
 	}
 
 	common.RespondSuccess(c, gin.H{
@@ -93,7 +125,7 @@ func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 
 	// 如果成功添加了图片，清除相关缓存
 	if addedCount > 0 {
-		go func() {
+		utils.SafeGo(func() {
 			ctx := context.Background()
 			if err := h.cacheHelper.DeleteCachedAlbum(ctx, uint(albumID)); err != nil {
 				log.Printf("Failed to delete album cache for %d: %v", albumID, err)
@@ -101,7 +133,7 @@ func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 			if err := h.cacheHelper.DeleteCachedAlbumList(ctx, userID); err != nil {
 				log.Printf("Failed to delete album list cache for user %d: %v", userID, err)
 			}
-		}()
+		})
 	}
 }
 
@@ -137,7 +169,7 @@ func (h *AlbumImageHandler) RemoveImageFromAlbumHandler(c *gin.Context) {
 	}
 
 	// 从相册移除图片
-	if err := h.repo.RemoveImageFromAlbum(uint(albumID), userID, image); err != nil {
+	if err := h.svc.RemoveImageFromAlbum(uint(albumID), userID, image); err != nil {
 		if err == gorm.ErrRecordNotFound {
 			common.RespondError(c, http.StatusNotFound, "Album not found or access denied")
 			return
@@ -149,7 +181,7 @@ func (h *AlbumImageHandler) RemoveImageFromAlbumHandler(c *gin.Context) {
 	common.RespondSuccessMessage(c, "Image removed from album successfully", nil)
 
 	// 清除相关缓存
-	go func() {
+	utils.SafeGo(func() {
 		ctx := context.Background()
 		if err := h.cacheHelper.DeleteCachedAlbum(ctx, uint(albumID)); err != nil {
 			log.Printf("Failed to delete album cache for %d: %v", albumID, err)
@@ -157,5 +189,5 @@ func (h *AlbumImageHandler) RemoveImageFromAlbumHandler(c *gin.Context) {
 		if err := h.cacheHelper.DeleteCachedAlbumList(ctx, userID); err != nil {
 			log.Printf("Failed to delete album list cache for user %d: %v", userID, err)
 		}
-	}()
+	})
 }

@@ -50,6 +50,21 @@ func (s *ThumbnailSettings) GetSizeByWidth(width int) *models.ThumbnailSize {
 
 // GetThumbnailSettings 获取缩略图配置
 func (m *Manager) GetThumbnailSettings(ctx context.Context) (*ThumbnailSettings, error) {
+	m.cacheMutex.RLock()
+	if val, exists := m.localCache[cacheKeyThumbnail]; exists {
+		m.cacheMutex.RUnlock()
+		return val.(*ThumbnailSettings), nil
+	}
+	m.cacheMutex.RUnlock()
+
+	m.cacheMutex.Lock()
+	defer m.cacheMutex.Unlock()
+
+	// 双重检查
+	if val, exists := m.localCache[cacheKeyThumbnail]; exists {
+		return val.(*ThumbnailSettings), nil
+	}
+
 	// 获取默认缩略图配置
 	config, err := m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryThumbnail)
 	if err != nil {
@@ -78,6 +93,9 @@ func (m *Manager) GetThumbnailSettings(ctx context.Context) (*ThumbnailSettings,
 	if err := mapstructure.Decode(configMap, settings); err != nil {
 		return nil, fmt.Errorf("failed to decode thumbnail settings: %w", err)
 	}
+
+	// 写入缓存
+	m.localCache[cacheKeyThumbnail] = settings
 
 	return settings, nil
 }
