@@ -122,7 +122,8 @@ func (m *Manager) Initialize() error {
 	checkDataExists := func() (bool, error) {
 		count, err := m.repo.Count(context.Background())
 		if err != nil {
-			if strings.Contains(err.Error(), "no such table") ||
+			if strings.Contains(err.Error(), "no such table") || // SQLite
+				strings.Contains(err.Error(), "relation") && strings.Contains(err.Error(), "does not exist") || // PostgreSQL
 				errors.Is(err, gorm.ErrRecordNotFound) {
 				return false, nil
 			}
@@ -162,7 +163,8 @@ func (m *Manager) ensureDefaultConversionConfig() error {
 	// 检查是否已有转换配置
 	count, err := m.repo.CountByCategory(ctx, models.ConfigCategoryConversion)
 	if err != nil {
-		if strings.Contains(err.Error(), "no such table") {
+		if strings.Contains(err.Error(), "no such table") || // SQLite
+			strings.Contains(err.Error(), "relation") && strings.Contains(err.Error(), "does not exist") { // PostgreSQL
 			return nil // 表不存在，跳过
 		}
 		return err
@@ -209,7 +211,8 @@ func (m *Manager) ensureCanary() error {
 	canary, err := m.repo.GetByKey(ctx, "system:encryption_canary")
 	if err != nil {
 		if err == gorm.ErrRecordNotFound ||
-			strings.Contains(err.Error(), "no such table") {
+			strings.Contains(err.Error(), "no such table") || // SQLite
+			strings.Contains(err.Error(), "relation") && strings.Contains(err.Error(), "does not exist") { // PostgreSQL
 			return m.createCanary(ctx)
 		}
 		return err

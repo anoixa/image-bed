@@ -57,6 +57,13 @@ func InitDependencies(cfg *config.Config) (*Dependencies, error) {
 		return nil, err
 	}
 
+	// 自动迁移数据库
+	if err := database.AutoMigrate(db); err != nil {
+		_ = database.Close(db)
+		return nil, fmt.Errorf("failed to auto migrate database: %w", err)
+	}
+	log.Println("[Dependencies] Database migration completed")
+
 	// 初始化仓库
 	repos := &core.Repositories{
 		AccountsRepo: accounts.NewRepository(db),
@@ -229,14 +236,9 @@ func RunServer() {
 }
 
 // InitDatabase 初始化数据库
+// 注意：数据库迁移已在 InitDependencies 中完成，这里只创建默认账户
 func InitDatabase(deps *Dependencies) {
 	log.Println("Initializing database...")
-
-	// 自动迁移数据库
-	if err := database.AutoMigrate(deps.DB); err != nil {
-		log.Fatalf("Failed to auto migrate database: %v", err)
-	}
-	log.Println("Database migration completed")
 
 	// 创建默认账户
 	deps.Repositories.AccountsRepo.CreateDefaultAdminUser()
