@@ -18,6 +18,7 @@ import (
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/spf13/cobra"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // restoreCmd 数据库还原命令
@@ -226,6 +227,19 @@ func extractTarGz(archivePath, destDir string) error {
 
 		targetPath := filepath.Join(destDir, header.Name)
 
+
+		destDirAbs, err := filepath.Abs(destDir)
+		if err != nil {
+			return fmt.Errorf("failed to get absolute path for destDir: %w", err)
+		}
+		targetPathAbs, err := filepath.Abs(targetPath)
+		if err != nil {
+			return fmt.Errorf("failed to get absolute path for target: %w", err)
+		}
+		if !strings.HasPrefix(targetPathAbs, destDirAbs+string(os.PathSeparator)) {
+			return fmt.Errorf("illegal file path in archive: %s", header.Name)
+		}
+
 		switch header.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(targetPath, 0755); err != nil {
@@ -405,32 +419,27 @@ func restoreAlbumImagesBatch(db *gorm.DB, scanner *bufio.Scanner, lineNum *int, 
 	}
 }
 
-// insertBatch 插入批量记录（通用）
+// insertBatch 插入批量记录
 func insertBatch(db *gorm.DB, batch []interface{}, dryRun bool, stats *restoreStats, tableName string) {
 	if dryRun {
 		stats.Restored[tableName] += int64(len(batch))
 		return
 	}
 
-	// 使用事务批量插入
-	err := db.Transaction(func(tx *gorm.DB) error {
-		for _, record := range batch {
-			if err := tx.Create(record).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	if len(batch) == 0 {
+		return
+	}
 
-	if err != nil {
-		log.Printf("Warning: failed to insert batch: %v", err)
+
+	if err := db.CreateInBatches(batch, len(batch)).Error; err != nil {
+		log.Printf("Warning: failed to insert batch for %s: %v", tableName, err)
 		stats.Errors[tableName] += int64(len(batch))
 	} else {
 		stats.Restored[tableName] += int64(len(batch))
 	}
 }
 
-// insertAlbumImagesBatch 批量插入 album_images
+// insertAlbumImagesBatch 批量插入 album_images（跨数据库兼容版）
 func insertAlbumImagesBatch(db *gorm.DB, batch []albumImageRecord, dryRun bool, stats *restoreStats) {
 	if dryRun {
 		stats.Restored["album_images"] += int64(len(batch))
@@ -441,17 +450,15 @@ func insertAlbumImagesBatch(db *gorm.DB, batch []albumImageRecord, dryRun bool, 
 		return
 	}
 
-	// 构建批量插入 SQL
-	var values []string
-	var args []interface{}
-	for _, record := range batch {
-		values = append(values, "(?, ?)")
-		args = append(args, record.AlbumID, record.ImageID)
-	}
+	// 使用 GORM 的 OnConflict 实现跨数据库兼容的"存在则忽略"插入
+	// SQLite: INSERT OR IGNORE
+	// MySQL: INSERT IGNORE
+	// PostgreSQL: ON CONFLICT DO NOTHING
+	err := db.Table("album_images").
+		Clauses(clause.OnConflict{DoNothing: true}).
+		CreateInBatches(&batch, len(batch)).Error
 
-	sql := "INSERT OR IGNORE INTO album_images (album_id, image_id) VALUES " +
-		strings.Join(values, ", ")
-	if err := db.Exec(sql, args...).Error; err != nil {
+	if err != nil {
 		log.Printf("Warning: failed to insert album_images batch: %v", err)
 		stats.Errors["album_images"] += int64(len(batch))
 	} else {
@@ -460,27 +467,22 @@ func insertAlbumImagesBatch(db *gorm.DB, batch []albumImageRecord, dryRun bool, 
 }
 
 // truncateTables 清空表数据
-func truncateTables(db *gorm.DB, tables []string) error {
-	// 按依赖逆序清空
-	truncateOrder := []string{"album_images", "api_tokens", "images", "albums", "devices", "users"}
+func truncateTables(db *gorm.DB, tablesToClear []string) error {
+	truncateOrder := []string{
+		"album_images", "api_tokens", "images", 
+		"albums", "devices", "users",
+	}
 
-	for _, table := range truncateOrder {
-		if !contains(tables, table) {
+	for _, safeTable := range truncateOrder {
+		if !contains(tablesToClear, safeTable) {
 			continue
 		}
 
-		log.Printf("Truncating table: %s", table)
+		log.Printf("Truncating table: %s", safeTable)
 
-		// 针对不同表使用不同的清空方式
-		switch table {
-		case "album_images":
-			if err := db.Exec("DELETE FROM album_images").Error; err != nil {
-				return fmt.Errorf("failed to truncate %s: %w", table, err)
-			}
-		default:
-			if err := db.Exec(fmt.Sprintf("DELETE FROM %s", table)).Error; err != nil {
-				return fmt.Errorf("failed to truncate %s: %w", table, err)
-			}
+
+		if err := db.Table(safeTable).Where("1 = 1").Delete(nil).Error; err != nil {
+			return fmt.Errorf("failed to truncate %s: %w", safeTable, err)
 		}
 	}
 
