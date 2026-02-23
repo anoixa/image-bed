@@ -15,6 +15,7 @@ import (
 type ImageDTO struct {
 	ID           uint   `json:"id"`
 	URL          string `json:"url"`
+	ThumbnailURL string `json:"thumbnail_url"`
 	OriginalName string `json:"original_name"`
 	FileSize     int64  `json:"file_size"`
 	MimeType     string `json:"mime_type"`
@@ -95,10 +96,12 @@ func (h *Handler) toImageDTO(image *models.Image) *ImageDTO {
 	}
 
 	imageUrl := utils.BuildImageURL(h.baseURL, image.Identifier)
+	thumbnailUrl := utils.BuildThumbnailURL(h.baseURL, image.Identifier)
 
 	return &ImageDTO{
 		ID:           image.ID,
 		URL:          imageUrl,
+		ThumbnailURL: thumbnailUrl,
 		OriginalName: image.OriginalName,
 		FileSize:     image.FileSize,
 		MimeType:     image.MimeType,

@@ -62,7 +62,7 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	}
 	router.Use(gin.Recovery())
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:              []string{"*"},
+		AllowOrigins:              cfg.GetCorsOrigins(),
 		AllowMethods:              []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"},
 		AllowHeaders:              []string{"Origin", "Content-Length", "Content-Type", "Authorization"},
 		AllowCredentials:          true,

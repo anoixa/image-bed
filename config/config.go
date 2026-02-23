@@ -25,6 +25,8 @@ type Config struct {
 	ServerWriteTimeout time.Duration `mapstructure:"server_write_timeout"`
 	ServerIdleTimeout  time.Duration `mapstructure:"server_idle_timeout"`
 
+	CorsOrigins string `mapstructure:"cors_origins"`
+
 	// 数据库配置
 	DBType            string `mapstructure:"db_type"`
 	DBHost            string `mapstructure:"db_host"`
@@ -123,6 +125,8 @@ func setDefaults() {
 	viper.SetDefault("server_write_timeout", "30s")
 	viper.SetDefault("server_idle_timeout", "120s")
 
+	viper.SetDefault("cors_origins", "http://localhost:5173,http://127.0.0.1:5173")
+
 	// 数据库配置默认值
 	viper.SetDefault("db_type", "sqlite")
 	viper.SetDefault("db_host", "localhost")
@@ -196,6 +200,61 @@ func (c *Config) GetWorkerCount() int {
 		return getCpus()
 	}
 	return c.WorkerCount
+}
+
+// GetCorsOrigins 返回 CORS 允许的源地址列表
+func (c *Config) GetCorsOrigins() []string {
+	if c.CorsOrigins == "" {
+		return []string{"http://localhost:5173", "http://127.0.0.1:5173"}
+	}
+	// 按逗号分割
+	origins := []string{}
+	for _, origin := range splitAndTrim(c.CorsOrigins, ",") {
+		if origin != "" {
+			origins = append(origins, origin)
+		}
+	}
+	return origins
+}
+
+// splitAndTrim 分割字符串并去除空白
+func splitAndTrim(s, sep string) []string {
+	parts := []string{}
+	for _, part := range splitString(s, sep) {
+		trimmed := trimSpace(part)
+		if trimmed != "" {
+			parts = append(parts, trimmed)
+		}
+	}
+	return parts
+}
+
+// splitString 简单字符串分割
+func splitString(s, sep string) []string {
+	result := []string{}
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if i+len(sep) <= len(s) && s[i:i+len(sep)] == sep {
+			result = append(result, s[start:i])
+			start = i + len(sep)
+			i += len(sep) - 1
+		}
+	}
+	result = append(result, s[start:])
+	return result
+}
+
+// trimSpace 去除首尾空白字符
+func trimSpace(s string) string {
+	start := 0
+	end := len(s)
+	for start < end && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r') {
+		start++
+	}
+	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\n' || s[end-1] == '\r') {
+		end--
+	}
+	return s[start:end]
 }
 
 // getCpus 获取默认线程数量
