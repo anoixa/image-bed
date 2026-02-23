@@ -14,8 +14,8 @@ import (
 // 默认内存限制 512MB
 const defaultMemoryLimitMB = 512
 
-// MemoryLimitExceeded 内存限制超出错误（类似 PHP memory_limit）
-var MemoryLimitExceeded = errors.New("memory limit exceeded")
+// ErrMemoryLimitExceeded 内存限制超出错误
+var ErrMemoryLimitExceeded = errors.New("memory limit exceeded")
 
 // 内存限制变量（线程安全）
 var (
@@ -53,7 +53,7 @@ func CheckMemoryLimit() error {
 	// 使用 HeapAlloc 作为当前内存使用量
 	currentMB := float64(m.HeapAlloc) / 1024 / 1024
 	if currentMB >= float64(limit) {
-		return MemoryLimitExceeded
+		return ErrMemoryLimitExceeded
 	}
 	return nil
 }
@@ -81,7 +81,7 @@ func CheckMemoryLimitWithGC() error {
 	runtime.ReadMemStats(&m)
 	currentMB = float64(m.HeapAlloc) / 1024 / 1024
 	if currentMB >= float64(limit) {
-		return MemoryLimitExceeded
+		return ErrMemoryLimitExceeded
 	}
 	return nil
 }
