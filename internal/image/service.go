@@ -12,8 +12,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -30,40 +28,6 @@ import (
 	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 )
-
-// ChunkedUploadSession 分片上传会话
-type ChunkedUploadSession struct {
-	SessionID       string
-	FileName        string
-	FileHash        string
-	TotalSize       int64
-	ChunkSize       int64
-	TotalChunks     int
-	ReceivedChunks  map[int]bool
-	StorageConfigID uint
-	UserID          uint
-	TempDir         string
-	CreatedAt       time.Time
-	IsProcessing    bool
-}
-
-// ChunkedUploadInitResult 初始化分片上传结果
-type ChunkedUploadInitResult struct {
-	SessionID     string
-	TotalChunks   int
-	ChunkSize     int64
-	InstantUpload bool
-	Identifier    string
-	Links         utils.LinkFormats
-}
-
-// ChunkedUploadCompleteResult 完成分片上传结果
-type ChunkedUploadCompleteResult struct {
-	SessionID   string
-	Message     string
-	Identifier  string
-	Links       utils.LinkFormats
-}
 
 var (
 	imageGroup       singleflight.Group
@@ -155,113 +119,6 @@ func NewService(
 		cacheHelper:    cacheHelper,
 		baseURL:        baseURL,
 	}
-}
-
-// InitChunkedUpload 初始化分片上传
-func (s *Service) InitChunkedUpload(ctx context.Context, fileName, fileHash string, totalSize, chunkSize int64, userID uint) (*ChunkedUploadInitResult, error) {
-	// 检查文件是否已存在（秒传）
-	if existingImage, err := s.repo.GetImageByHash(fileHash); err == nil {
-		return &ChunkedUploadInitResult{
-			InstantUpload: true,
-			Identifier:    existingImage.Identifier,
-			Links:         utils.BuildLinkFormats(s.baseURL, existingImage.Identifier),
-		}, nil
-	}
-
-	totalChunks := int((totalSize + chunkSize - 1) / chunkSize)
-	sessionID := generateSessionID()
-
-	return &ChunkedUploadInitResult{
-		SessionID:   sessionID,
-		TotalChunks: totalChunks,
-		ChunkSize:   chunkSize,
-	}, nil
-}
-
-// ProcessChunkedUpload 处理分片上传完成后的合并和保存
-func (s *Service) ProcessChunkedUpload(ctx context.Context, session *ChunkedUploadSession) (*models.Image, error) {
-	// 合并所有分片
-	mergedFile := filepath.Join(session.TempDir, "merged")
-	outFile, err := os.Create(mergedFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create merged file: %w", err)
-	}
-
-	defer func() { _ = outFile.Close() }()
-
-	hasher := sha256.New()
-	writer := io.MultiWriter(outFile, hasher)
-
-	for i := 0; i < session.TotalChunks; i++ {
-		chunkPath := filepath.Join(session.TempDir, strconv.Itoa(i))
-		chunkFile, err := os.Open(chunkPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to open chunk %d: %w", i, err)
-		}
-
-		if _, err := io.Copy(writer, chunkFile); err != nil {
-			_ = chunkFile.Close()
-			return nil, fmt.Errorf("failed to copy chunk %d: %w", i, err)
-		}
-		_ = chunkFile.Close()
-	}
-
-	// 验证哈希
-	fileHash := hex.EncodeToString(hasher.Sum(nil))
-	if fileHash != session.FileHash {
-		return nil, fmt.Errorf("file hash mismatch: expected %s, got %s", session.FileHash, fileHash)
-	}
-
-	fileBytes, err := os.ReadFile(mergedFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read merged file: %w", err)
-	}
-
-	isImage, mimeType := validator.IsImageBytes(fileBytes)
-	if !isImage {
-		return nil, fmt.Errorf("uploaded file is not a valid image")
-	}
-
-	storageConfigID := storage.GetDefaultID()
-	ext := getSafeFileExtension(mimeType)
-
-	pg := generator.NewPathGenerator()
-	ids := pg.GenerateOriginalIdentifiers(fileHash, ext, time.Now())
-	identifier := ids.Identifier
-	storagePath := ids.StoragePath
-
-	if err := storage.GetDefault().SaveWithContext(ctx, storagePath, bytes.NewReader(fileBytes)); err != nil {
-		return nil, fmt.Errorf("failed to save file to storage: %w", err)
-	}
-
-	// 创建数据库记录
-	newImage := &models.Image{
-		Identifier:      identifier,
-		StoragePath:     storagePath,
-		OriginalName:    session.FileName,
-		FileSize:        int64(len(fileBytes)),
-		MimeType:        mimeType,
-		StorageConfigID: storageConfigID,
-		FileHash:        fileHash,
-		UserID:          session.UserID,
-	}
-
-	if err := s.repo.SaveImage(newImage); err != nil {
-		_ = storage.GetDefault().DeleteWithContext(ctx, storagePath)
-		return nil, fmt.Errorf("failed to save image metadata: %w", err)
-	}
-
-	// 异步处理：缓存预热、WebP转换、缩略图生成
-	go s.warmCache(newImage)
-	go s.converter.TriggerWebPConversion(newImage)
-	go s.thumbnailSvc.TriggerGenerationForAllSizes(newImage)
-
-	return newImage, nil
-}
-
-// generateSessionID 生成会话ID
-func generateSessionID() string {
-	return fmt.Sprintf("%d-%s", time.Now().UnixNano(), generateRandomString(8))
 }
 
 // generateRandomString 生成随机字符串

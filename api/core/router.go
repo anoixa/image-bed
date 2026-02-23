@@ -142,10 +142,6 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
 			{
 				imagesGroup.POST("/upload", imageHandler.UploadImage)
 				imagesGroup.POST("/uploads", imageHandler.UploadImages)
-				imagesGroup.POST("/upload/chunked/init", imageHandler.InitChunkedUpload)
-				imagesGroup.POST("/upload/chunked", imageHandler.UploadChunk)
-				imagesGroup.GET("/upload/chunked/status", imageHandler.GetChunkedUploadStatus)
-				imagesGroup.POST("/upload/chunked/complete", imageHandler.CompleteChunkedUpload)
 				imagesGroup.POST("", imageHandler.ListImages)
 				imagesGroup.POST("/delete", imageHandler.DeleteImages)
 				imagesGroup.DELETE("/:identifier", imageHandler.DeleteSingleImage)
