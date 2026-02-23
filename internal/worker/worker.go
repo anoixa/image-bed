@@ -7,6 +7,14 @@ import (
 	"sync/atomic"
 )
 
+// min 返回较小的整数
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 // PoolStats 任务池统计信息
 type PoolStats struct {
 	Submitted   uint64 // 已提交任务数
@@ -57,10 +65,11 @@ func StopGlobalPool() {
 // NewPool 创建新的任务池
 func NewPool(workers, queueSize int) *Pool {
 	if queueSize <= 0 {
-		queueSize = 1000
+		queueSize = 100 // 降低队列大小以减少内存占用（原 1000）
 	}
 	if workers <= 0 {
-		workers = runtime.NumCPU() * 2
+		// 限制最大 worker 数量，避免高 CPU 核心服务器占用过多内存
+		workers = min(runtime.NumCPU(), 4) // 最多 4 个 worker（原 CPU*2 无上限）
 	}
 
 	p := &Pool{

@@ -261,7 +261,7 @@ func buildCacheConfig(cfg *config.Config) cache.Config {
 		return cache.Config{
 			Type:        "memory",
 			NumCounters: 1000000,
-			MaxCost:     1073741824, // 1GB
+			MaxCost:     268435456, 
 			BufferItems: 64,
 			Metrics:     true,
 		}
@@ -271,7 +271,7 @@ func buildCacheConfig(cfg *config.Config) cache.Config {
 		return cache.Config{
 			Type:        "memory",
 			NumCounters: 1000000,
-			MaxCost:     1073741824,
+			MaxCost:     268435456,
 			BufferItems: 64,
 			Metrics:     true,
 		}

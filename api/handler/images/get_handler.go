@@ -87,7 +87,7 @@ func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 	h.serveImageData(c, image, data)
 }
 
-// fetchFromRemote 从远程存储获取图片数据（带 singleflight 防击穿）
+// fetchFromRemote 从远程存储获取图片数据
 func (h *Handler) fetchFromRemote(storagePath string) ([]byte, error) {
 	v, err, _ := fileDownloadGroup.Do(storagePath, func() (interface{}, error) {
 		// 双重检查缓存
@@ -106,18 +106,27 @@ func (h *Handler) fetchFromRemote(storagePath string) ([]byte, error) {
 			}
 		}()
 
-		// 读取数据到内存
-		data, err := io.ReadAll(stream)
+		// 读取数据到内存（限制最大 50MB，避免超大图片导致 OOM）
+		const maxImageSize = 50 * 1024 * 1024
+		limitedReader := io.LimitReader(stream, maxImageSize)
+		data, err := io.ReadAll(limitedReader)
 		if err != nil {
 			return nil, err
 		}
 
-		// 异步缓存
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			_ = h.cacheHelper.CacheImageData(ctx, storagePath, data)
-		}()
+		// 记录大图片日志
+		if len(data) > 10*1024*1024 {
+			log.Printf("[fetchFromRemote] Large image loaded: %d bytes, path: %s", len(data), storagePath)
+		}
+
+		// 异步缓存（仅缓存较小的图片，避免缓存占用过多内存）
+		if len(data) < 5*1024*1024 { // 只缓存小于 5MB 的图片
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = h.cacheHelper.CacheImageData(ctx, storagePath, data)
+			}()
+		}
 
 		return data, nil
 	})

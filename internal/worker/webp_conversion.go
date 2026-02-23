@@ -175,15 +175,21 @@ func (t *WebPConversionTask) doConversion(ctx context.Context, settings *config.
 		return fmt.Errorf("read source: %w", err)
 	}
 
+	const maxMemorySize = 10 * 1024 * 1024 // 10MB 阈值
 	data, err := io.ReadAll(reader)
 	if err != nil {
 		return fmt.Errorf("read data: %w", err)
 	}
 
+	// 记录大图片警告
+	if len(data) > maxMemorySize {
+		utils.LogIfDevf("[WebPConversion] Processing large image: %d bytes, path: %s", len(data), t.SourcePath)
+	}
+
 	if settings.MaxDimension > 0 {
 		width, height := t.SourceWidth, t.SourceHeight
 		if width == 0 || height == 0 {
-			// fallback: 从数据中解析
+			// fallback: 从数据中解析（复用已读取的数据）
 			size, err := bimg.NewImage(data).Size()
 			if err == nil {
 				width, height = size.Width, size.Height

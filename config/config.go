@@ -127,7 +127,7 @@ func setDefaults() {
 
 	viper.SetDefault("cors_origins", "http://localhost:5173,http://127.0.0.1:5173")
 
-	// 数据库配置默认值
+	// 数据库配置默认值（降低连接池大小以减少内存占用）
 	viper.SetDefault("db_type", "sqlite")
 	viper.SetDefault("db_host", "localhost")
 	viper.SetDefault("db_port", 5432)
@@ -135,8 +135,8 @@ func setDefaults() {
 	viper.SetDefault("db_password", "")
 	viper.SetDefault("db_name", "image-bed")
 	viper.SetDefault("db_file_path", "")
-	viper.SetDefault("db_max_open_conns", 100)
-	viper.SetDefault("db_max_idle_conns", 25)
+	viper.SetDefault("db_max_open_conns", 25)  
+	viper.SetDefault("db_max_idle_conns", 5)
 	viper.SetDefault("db_conn_max_lifetime", 3600)
 
 	// 缓存配置默认值

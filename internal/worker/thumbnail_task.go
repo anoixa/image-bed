@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"time"
 
 	config "github.com/anoixa/image-bed/config/db"
@@ -122,9 +123,18 @@ func (t *ThumbnailTask) getImageData(storagePath string) ([]byte, error) {
 		return nil, err
 	}
 
+	// 限制内存使用，避免大图片导致 OOM
+	const maxImageSize = 50 * 1024 * 1024 // 50MB 最大限制
+	limitedReader := io.LimitReader(reader, maxImageSize)
+
 	buf := new(bytes.Buffer)
-	if _, err := buf.ReadFrom(reader); err != nil {
+	if _, err := buf.ReadFrom(limitedReader); err != nil {
 		return nil, err
+	}
+
+	// 记录大图片处理日志
+	if buf.Len() > 10*1024*1024 { // 10MB
+		utils.LogIfDevf("[ThumbnailTask] Processing large image: %d bytes, path: %s", buf.Len(), storagePath)
 	}
 
 	return buf.Bytes(), nil
