@@ -8,6 +8,7 @@ import (
 	config "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
+	"github.com/anoixa/image-bed/internal/worker"
 	"github.com/anoixa/image-bed/utils/format"
 )
 
@@ -35,6 +36,13 @@ func NewVariantService(repo *images.VariantRepository, cm *config.Manager, conve
 		variantRepo:   repo,
 		configManager: cm,
 		converter:     converter,
+	}
+}
+
+// submitBackgroundTask 提交后台任务到 worker pool，避免 goroutine 风暴
+func (s *VariantService) submitBackgroundTask(task func()) {
+	if pool := worker.GetGlobalPool(); pool != nil {
+		pool.Submit(task)
 	}
 }
 
@@ -81,7 +89,8 @@ func (s *VariantService) handleOriginalWithConversion(image *models.Image, accep
 
 	// 检查是否需要触发 WebP 转换
 	if allowTrigger && strings.Contains(acceptHeader, "image/webp") {
-		go s.converter.TriggerWebPConversion(image)
+		// 使用 worker pool 提交后台任务，避免 goroutine 风暴
+		s.submitBackgroundTask(func() { s.converter.TriggerWebPConversion(image) })
 	}
 
 	return result, nil

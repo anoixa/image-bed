@@ -3,13 +3,13 @@ module github.com/anoixa/image-bed
 go 1.26.0
 
 require (
+	github.com/davidbyttow/govips/v2 v2.16.0
 	github.com/dgraph-io/ristretto v0.2.0
 	github.com/gin-contrib/cors v1.7.6
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-redis/redis/v8 v8.11.5
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
-	github.com/h2non/bimg v1.1.9
 	github.com/minio/minio-go/v7 v7.0.98
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/spf13/cobra v1.10.2
@@ -78,6 +78,7 @@ require (
 	go.uber.org/mock v0.6.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/arch v0.24.0 // indirect
+	golang.org/x/image v0.18.0 // indirect
 	golang.org/x/net v0.50.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect
 	golang.org/x/text v0.34.0 // indirect

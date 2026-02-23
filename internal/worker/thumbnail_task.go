@@ -11,21 +11,21 @@ import (
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
-	"github.com/h2non/bimg"
+	"github.com/davidbyttow/govips/v2/vips"
 )
 
 // ThumbnailTask 缩略图生成任务
 type ThumbnailTask struct {
-	VariantID       uint
-	ImageID         uint
-	SourcePath      string // 原图存储路径
-	TargetPath      string // 缩略图存储路径
+	VariantID        uint
+	ImageID          uint
+	SourcePath       string // 原图存储路径
+	TargetPath       string // 缩略图存储路径
 	TargetIdentifier string // 缩略图标识符
-	TargetWidth     int
-	ConfigManager   *config.Manager
-	VariantRepo     VariantRepository
-	ImageRepo       ImageRepository
-	Storage         storage.Provider
+	TargetWidth      int
+	ConfigManager    *config.Manager
+	VariantRepo      VariantRepository
+	ImageRepo        ImageRepository
+	Storage          storage.Provider
 }
 
 // Execute 执行任务
@@ -83,14 +83,14 @@ func (t *ThumbnailTask) process() *thumbnailResult {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	// 读取原图数据
-	imageData, err := t.getImageData(t.SourcePath)
+	// 从存储获取图片 reader
+	reader, err := t.Storage.GetWithContext(ctx, t.SourcePath)
 	if err != nil {
 		return &thumbnailResult{Error: fmt.Errorf("failed to get source image: %w", err)}
 	}
 
 	// 生成缩略图
-	thumbnailData, width, height, err := t.generateThumbnail(imageData, t.TargetWidth)
+	thumbnailData, width, height, err := t.generateThumbnail(reader, t.TargetWidth)
 	if err != nil {
 		return &thumbnailResult{Error: fmt.Errorf("failed to generate thumbnail: %w", err)}
 	}
@@ -115,65 +115,55 @@ type thumbnailResult struct {
 	Error    error
 }
 
-// getImageData 获取图片数据
-func (t *ThumbnailTask) getImageData(storagePath string) ([]byte, error) {
-	ctx := context.Background()
-	reader, err := t.Storage.GetWithContext(ctx, storagePath)
-	if err != nil {
-		return nil, err
-	}
-
+// generateThumbnail 生成缩略图
+func (t *ThumbnailTask) generateThumbnail(reader io.Reader, targetWidth int) ([]byte, int, int, error) {
 	// 限制内存使用，避免大图片导致 OOM
 	const maxImageSize = 50 * 1024 * 1024 // 50MB 最大限制
 	limitedReader := io.LimitReader(reader, maxImageSize)
 
-	buf := new(bytes.Buffer)
-	if _, err := buf.ReadFrom(limitedReader); err != nil {
-		return nil, err
+	// 使用 govips 从 reader 加载图片
+	img, err := vips.NewImageFromReader(limitedReader)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("failed to load image: %w", err)
 	}
-
-	// 记录大图片处理日志
-	if buf.Len() > 10*1024*1024 { // 10MB
-		utils.LogIfDevf("[ThumbnailTask] Processing large image: %d bytes, path: %s", buf.Len(), storagePath)
-	}
-
-	return buf.Bytes(), nil
-}
-
-// generateThumbnail 生成缩略图
-func (t *ThumbnailTask) generateThumbnail(data []byte, targetWidth int) ([]byte, int, int, error) {
-	// 使用 bimg (libvips) 进行图片处理
-	img := bimg.NewImage(data)
+	defer img.Close()
 
 	// 获取图片尺寸
-	size, err := img.Size()
-	if err != nil {
-		return nil, 0, 0, fmt.Errorf("failed to get image size: %w", err)
-	}
+	width := img.Width()
+	height := img.Height()
 
-	if size.Width <= targetWidth {
-		webpData, err := img.Convert(bimg.WEBP)
+	// 如果图片宽度小于等于目标宽度，直接转换为 WebP
+	if width <= targetWidth {
+		webpBytes, _, err := img.ExportWebp(&vips.WebpExportParams{
+			Quality:  85,
+			Lossless: false,
+		})
 		if err != nil {
-			return nil, 0, 0, fmt.Errorf("failed to convert to WebP: %w", err)
+			return nil, 0, 0, fmt.Errorf("failed to export webp: %w", err)
 		}
-		return webpData, size.Width, size.Height, nil
+		return webpBytes, width, height, nil
 	}
 
-	// 计算高度保持比例
-	targetHeight := size.Height * targetWidth / size.Width
+	// 计算目标高度保持比例
+	targetHeight := height * targetWidth / width
 
-	// 调整尺寸并转换为 WebP
-	processed, err := img.Process(bimg.Options{
-		Width:   targetWidth,
-		Height:  targetHeight,
-		Type:    bimg.WEBP,
-		Quality: 85,
+	// 使用 Thumbnail 调整尺寸（会直接修改当前图片对象）
+	// 注意：govips 的 Thumbnail 方法会直接修改 img 对象
+	err = img.Thumbnail(targetWidth, targetHeight, vips.InterestingCentre)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("failed to thumbnail image: %w", err)
+	}
+
+	// 导出为 WebP
+	webpBytes, _, err := img.ExportWebp(&vips.WebpExportParams{
+		Quality:  85,
+		Lossless: false,
 	})
 	if err != nil {
-		return nil, 0, 0, fmt.Errorf("failed to resize and convert: %w", err)
+		return nil, 0, 0, fmt.Errorf("failed to export webp: %w", err)
 	}
 
-	return processed, targetWidth, targetHeight, nil
+	return webpBytes, targetWidth, targetHeight, nil
 }
 
 // handleSuccess 处理成功

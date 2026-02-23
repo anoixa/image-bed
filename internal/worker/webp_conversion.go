@@ -14,7 +14,7 @@ import (
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/anoixa/image-bed/utils/generator"
-	"github.com/h2non/bimg"
+	"github.com/davidbyttow/govips/v2/vips"
 )
 
 const (
@@ -176,36 +176,40 @@ func (t *WebPConversionTask) doConversion(ctx context.Context, settings *config.
 	}
 
 	const maxMemorySize = 10 * 1024 * 1024 // 10MB 阈值
-	data, err := io.ReadAll(reader)
+
+	// 限制读取大小
+	limitedReader := io.LimitReader(reader, maxMemorySize*5) // 允许稍大的输入
+
+	// 使用 govips 从 reader 加载图片
+	img, err := vips.NewImageFromReader(limitedReader)
 	if err != nil {
-		return fmt.Errorf("read data: %w", err)
+		return fmt.Errorf("load image: %w", err)
 	}
+	defer img.Close()
+
+	// 获取图片尺寸（如果需要）
+	width := img.Width()
+	height := img.Height()
 
 	// 记录大图片警告
-	if len(data) > maxMemorySize {
-		utils.LogIfDevf("[WebPConversion] Processing large image: %d bytes, path: %s", len(data), t.SourcePath)
+	if width*height > 10000*10000 { // 约 100MP
+		utils.LogIfDevf("[WebPConversion] Processing large image: %dx%d, path: %s", width, height, t.SourcePath)
 	}
 
+	// 检查最大尺寸限制
 	if settings.MaxDimension > 0 {
-		width, height := t.SourceWidth, t.SourceHeight
-		if width == 0 || height == 0 {
-			// fallback: 从数据中解析（复用已读取的数据）
-			size, err := bimg.NewImage(data).Size()
-			if err == nil {
-				width, height = size.Width, size.Height
-			}
-		}
 		if width > settings.MaxDimension || height > settings.MaxDimension {
 			return fmt.Errorf("image exceeds max dimension: %dx%d", width, height)
 		}
 	}
 
-	converted, err := bimg.NewImage(data).Process(bimg.Options{
-		Type:    bimg.WEBP,
-		Quality: settings.WebPQuality,
+	// 导出为 WebP
+	webpBytes, _, err := img.ExportWebp(&vips.WebpExportParams{
+		Quality:  settings.WebPQuality,
+		Lossless: false,
 	})
 	if err != nil {
-		return fmt.Errorf("convert: %w", err)
+		return fmt.Errorf("export webp: %w", err)
 	}
 
 	// 使用 PathGenerator 生成存储路径
@@ -213,22 +217,16 @@ func (t *WebPConversionTask) doConversion(ctx context.Context, settings *config.
 	ids := pathGen.GenerateConvertedIdentifiers(t.SourcePath, models.FormatWebP)
 
 	// 存储转换后的文件
-	if err := t.Storage.SaveWithContext(ctx, ids.StoragePath, bytes.NewReader(converted)); err != nil {
+	if err := t.Storage.SaveWithContext(ctx, ids.StoragePath, bytes.NewReader(webpBytes)); err != nil {
 		return fmt.Errorf("save: %w", err)
-	}
-
-	// 获取图片尺寸
-	size, err := bimg.NewImage(converted).Size()
-	if err != nil {
-		return fmt.Errorf("get size: %w", err)
 	}
 
 	t.result = &conversionResult{
 		identifier:  ids.Identifier,
 		storagePath: ids.StoragePath,
-		fileSize:    int64(len(converted)),
-		width:       size.Width,
-		height:      size.Height,
+		fileSize:    int64(len(webpBytes)),
+		width:       width,
+		height:      height,
 	}
 
 	return nil

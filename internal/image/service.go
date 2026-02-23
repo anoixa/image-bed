@@ -19,6 +19,7 @@ import (
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
+	"github.com/anoixa/image-bed/internal/worker"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/anoixa/image-bed/utils/generator"
@@ -98,6 +99,7 @@ type Service struct {
 	variantService *VariantService
 	cacheHelper    *cache.Helper
 	baseURL        string
+	pathGenerator  *generator.PathGenerator
 }
 
 // NewService 创建图片服务
@@ -118,6 +120,16 @@ func NewService(
 		variantService: variantService,
 		cacheHelper:    cacheHelper,
 		baseURL:        baseURL,
+		pathGenerator:  generator.NewPathGenerator(),
+	}
+}
+
+// submitBackgroundTask 提交后台任务到 worker pool，避免 goroutine 风暴
+func (s *Service) submitBackgroundTask(task func()) {
+	if pool := worker.GetGlobalPool(); pool != nil {
+		pool.Submit(task)
+	} else {
+		go task()
 	}
 }
 
@@ -328,17 +340,14 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 	fileHash := hex.EncodeToString(hash.Sum(nil))
 
 	// 检查重复文件
-	if img, err := s.repo.GetImageByHash(fileHash); err == nil {
-		go s.warmCache(img)
-		go s.converter.TriggerWebPConversion(img)
-		go s.thumbnailSvc.TriggerGenerationForAllSizes(img)
-		return img, true, nil
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+	img, err := s.repo.GetImageByHash(fileHash)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, false, errors.New("database error during hash check")
 	}
 
-	// 检查软删除的文件
-	if softDeleted, err := s.repo.GetSoftDeletedImageByHash(fileHash); err == nil {
+	// 如果找到记录，检查是否软删除
+	if err == nil && img.DeletedAt.Valid {
+		// 软删除的文件，恢复它
 		updates := map[string]interface{}{
 			"deleted_at":        nil,
 			"original_name":     fileHeader.Filename,
@@ -346,16 +355,24 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 			"is_public":         isPublic,
 			"storage_config_id": storageConfigID,
 		}
-		restored, err := s.repo.UpdateImageByIdentifier(softDeleted.Identifier, updates)
+		restored, err := s.repo.UpdateImageByIdentifier(img.Identifier, updates)
 		if err != nil {
 			return nil, false, errors.New("failed to restore existing image data")
 		}
-		go s.warmCache(restored)
-		go s.converter.TriggerWebPConversion(restored)
-		go s.thumbnailSvc.TriggerGenerationForAllSizes(restored)
+		// 使用 worker pool 提交后台任务，避免 goroutine 风暴
+		s.submitBackgroundTask(func() { s.warmCache(restored) })
+		s.submitBackgroundTask(func() { s.converter.TriggerWebPConversion(restored) })
+		s.submitBackgroundTask(func() { s.thumbnailSvc.TriggerGenerationForAllSizes(restored) })
 		return restored, true, nil
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, false, errors.New("database error during hash check")
+	}
+
+	// 如果找到未删除的记录，直接返回
+	if err == nil {
+		// 使用 worker pool 提交后台任务，避免 goroutine 风暴
+		s.submitBackgroundTask(func() { s.warmCache(img) })
+		s.submitBackgroundTask(func() { s.converter.TriggerWebPConversion(img) })
+		s.submitBackgroundTask(func() { s.thumbnailSvc.TriggerGenerationForAllSizes(img) })
+		return img, true, nil
 	}
 
 	// 只需一次 Seek 获取尺寸并保存
@@ -365,27 +382,29 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 
 	width, height := utils.GetImageDimensions(tmp)
 
-	// 重新定位到开头用于保存
-	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-		return nil, false, fmt.Errorf("failed to seek temp file: %w", err)
-	}
 
-	// 使用 PathGenerator 生成时间分层路径
-	pg := generator.NewPathGenerator()
+	// 使用 PathGenerator 生成时间分层路径（使用缓存的实例）
 	ext := getSafeFileExtension(mimeType)
-	ids := pg.GenerateOriginalIdentifiers(fileHash, ext, time.Now())
+	ids := s.pathGenerator.GenerateOriginalIdentifiers(fileHash, ext, time.Now())
 	identifier := ids.Identifier
 	storagePath := ids.StoragePath
 	if err := storageProvider.SaveWithContext(ctx, storagePath, tmp); err != nil {
 		return nil, false, errors.New("failed to save uploaded file")
 	}
 
+	// 获取实际文件大小
+	fileInfo, err := tmp.Stat()
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to get file size: %w", err)
+	}
+	actualFileSize := fileInfo.Size()
+
 	// 创建数据库记录
-	img := &models.Image{
+	newImg := &models.Image{
 		Identifier:      identifier,
 		StoragePath:     storagePath,
 		OriginalName:    fileHeader.Filename,
-		FileSize:        fileHeader.Size,
+		FileSize:        actualFileSize,
 		MimeType:        mimeType,
 		StorageConfigID: storageConfigID,
 		FileHash:        fileHash,
@@ -395,16 +414,16 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 		UserID:          userID,
 	}
 
-	if err := s.repo.SaveImage(img); err != nil {
+	if err := s.repo.SaveImage(newImg); err != nil {
 		_ = storageProvider.DeleteWithContext(ctx, storagePath)
 		return nil, false, errors.New("failed to save image metadata")
 	}
 
-	go s.warmCache(img)
-	go s.converter.TriggerWebPConversion(img)
-	go s.thumbnailSvc.TriggerGenerationForAllSizes(img)
+	s.submitBackgroundTask(func() { s.warmCache(newImg) })
+	s.submitBackgroundTask(func() { s.converter.TriggerWebPConversion(newImg) })
+	s.submitBackgroundTask(func() { s.thumbnailSvc.TriggerGenerationForAllSizes(newImg) })
 
-	return img, false, nil
+	return newImg, false, nil
 }
 
 func (s *Service) getStorageProvider(storageName string) (storage.Provider, uint, error) {

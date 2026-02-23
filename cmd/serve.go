@@ -24,6 +24,7 @@ import (
 	imageSvc "github.com/anoixa/image-bed/internal/image"
 	"github.com/anoixa/image-bed/internal/worker"
 	"github.com/anoixa/image-bed/storage"
+	"github.com/davidbyttow/govips/v2/vips"
 	"github.com/spf13/cobra"
 	"gorm.io/gorm"
 )
@@ -139,6 +140,15 @@ func RunServer() {
 	if err := os.MkdirAll("./data/temp", os.ModePerm); err != nil {
 		log.Fatalf("Failed to create temp directory: %v", err)
 	}
+
+	// 初始化 govips
+	vips.Startup(&vips.Config{
+		MaxCacheMem:   0,
+		MaxCacheSize:  0,
+		MaxCacheFiles: 0,
+	})
+	defer vips.Shutdown()
+	log.Println("[VIPS] Govips initialized")
 
 	deps, err := InitDependencies(cfg)
 	if err != nil {

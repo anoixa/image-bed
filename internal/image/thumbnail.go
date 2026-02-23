@@ -34,6 +34,7 @@ type ThumbnailService struct {
 	configManager *config.Manager
 	storage       storage.Provider
 	converter     *Converter
+	pathGenerator *generator.PathGenerator
 }
 
 // NewThumbnailService 创建缩略图服务
@@ -50,6 +51,7 @@ func NewThumbnailService(
 		configManager: cm,
 		storage:       storage,
 		converter:     converter,
+		pathGenerator: generator.NewPathGenerator(),
 	}
 }
 
@@ -232,9 +234,7 @@ func (s *ThumbnailService) resizeImage(data []byte, width int) ([]byte, int, err
 
 // GenerateThumbnailIdentifiers 生成缩略图的 identifier 和 storage_path
 func (s *ThumbnailService) GenerateThumbnailIdentifiers(originalStoragePath string, width int) generator.StorageIdentifiers {
-	// 使用 PathGenerator 生成分层路径
-	pathGen := generator.NewPathGenerator()
-	return pathGen.GenerateThumbnailIdentifiers(originalStoragePath, width)
+	return s.pathGenerator.GenerateThumbnailIdentifiers(originalStoragePath, width)
 }
 
 // getMIMETypeFromFormat 根据格式获取 MIME 类型
