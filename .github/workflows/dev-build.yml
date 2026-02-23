@@ -2,11 +2,9 @@ name: Dev Build
 
 on:
   push:
-    branches:
-      - dev
+    branches: [dev]
   pull_request:
-    branches:
-      - dev
+    branches: [dev]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -17,31 +15,23 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+
+########################################
+# Lint + Security
+########################################
   lint:
     name: Lint & Security Check
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
+          go-version: "1.26"
+          cache: true
 
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-
-      - name: Install libvips
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libvips-dev
-
-      - name: Download dependencies
-        run: |
+      - run: |
           go mod download
           go mod verify
 
@@ -54,217 +44,219 @@ jobs:
       - name: Run govulncheck
         uses: golang/govulncheck-action@v1
         with:
-          go-version-input: '1.26'
+          go-version-input: "1.26"
           go-package: ./...
 
+########################################
+# Tests
+########################################
   test:
     name: Run Tests
     runs-on: ubuntu-latest
     needs: lint
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
-
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
+          go-version: "1.26"
+          cache: true
 
       - name: Install libvips
         run: |
           sudo apt-get update
           sudo apt-get install -y libvips-dev
 
-      - name: Download dependencies
-        run: go mod download
+      - run: go mod download
 
       - name: Run tests
-        run: go test -v -race -coverprofile=coverage.out ./...
+        run: |
+          go test -v -race -shuffle=on -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out
 
-      - name: Upload coverage
-        uses: codecov/codecov-action@v4
-        if: github.event_name == 'push'
-        with:
-          files: ./coverage.out
-          fail_ci_if_error: false
-
-  build-binary:
-    name: Build Binary
+########################################
+# Binary AMD64
+########################################
+  build-binary-amd64:
+    name: Build Binary (amd64)
     runs-on: ubuntu-latest
     needs: [lint, test]
-    strategy:
-      matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-            suffix: linux-amd64
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
-
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          go-version: "1.26"
+          cache: true
 
       - name: Install libvips
         run: |
           sudo apt-get update
-          sudo apt-get install -y libvips-dev
+          sudo apt-get install -y libvips-dev pkg-config
 
-      - name: Build binary
+      - name: Build
         env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
+          GOOS: linux
+          GOARCH: amd64
           CGO_ENABLED: 1
         run: |
-          go build -trimpath -ldflags="-s -w -X 'github.com/anoixa/image-bed/config.Version=dev-${{ github.sha }}'" \
-            -o image-bed-${{ matrix.suffix }} .
+          go build -trimpath \
+            -ldflags="-s -w -X 'github.com/anoixa/image-bed/config.Version=dev-${{ github.sha }}'" \
+            -o image-bed-linux-amd64 .
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: image-bed-${{ matrix.suffix }}
-          path: image-bed-${{ matrix.suffix }}
+          name: image-bed-linux-amd64
+          path: image-bed-linux-amd64
 
+########################################
+# Binary ARM64 (Native)
+########################################
+  build-binary-arm64:
+    name: Build Binary (arm64)
+    runs-on: ubuntu-24.04-arm
+    needs: [lint, test]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Install libvips
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libvips-dev pkg-config
+          
+      - name: Build
+        env:
+          GOOS: linux
+          GOARCH: arm64
+          CGO_ENABLED: 1
+        run: |
+          go build -trimpath \
+            -ldflags="-s -w -X 'github.com/anoixa/image-bed/config.Version=dev-${{ github.sha }}'" \
+            -o image-bed-linux-arm64 .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image-bed-linux-arm64
+          path: image-bed-linux-arm64
+
+########################################
+# Docker AMD64
+########################################
   build-docker-amd64:
-    name: Build Docker Image (amd64)
+    name: Docker (amd64)
     runs-on: ubuntu-latest
     needs: [lint, test]
+
     permissions:
       contents: read
       packages: write
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v3
 
-      - name: Login to GitHub Container Registry
+      - uses: docker/login-action@v3
         if: github.event_name == 'push'
-        uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=dev-amd64
-            type=sha,prefix=dev-,suffix=-amd64,format=short
-
-      - name: Build and push amd64
-        uses: docker/build-push-action@v5
+      - name: Build & Push
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
           push: ${{ github.event_name == 'push' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:dev-amd64
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:dev-${{ github.sha }}-amd64
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+########################################
+# Docker ARM64 (Native)
+########################################
   build-docker-arm64:
-    name: Build Docker Image (arm64)
-    runs-on: ubuntu-24.04-arm  # 原生 arm64 runner
+    name: Docker (arm64)
+    runs-on: ubuntu-24.04-arm
     needs: [lint, test]
+
     permissions:
       contents: read
       packages: write
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v3
 
-      - name: Login to GitHub Container Registry
+      - uses: docker/login-action@v3
         if: github.event_name == 'push'
-        uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=dev-arm64
-            type=sha,prefix=dev-,suffix=-arm64,format=short
-
-      - name: Build and push arm64
-        uses: docker/build-push-action@v5
+      - name: Build & Push
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/arm64
           push: ${{ github.event_name == 'push' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:dev-arm64
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:dev-${{ github.sha }}-arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # 合并多架构镜像
+########################################
+# Merge Multi-Arch
+########################################
   merge-docker-manifest:
-    name: Merge Multi-Arch Docker Manifest
+    name: Merge Multi-Arch Image
     runs-on: ubuntu-latest
     needs: [build-docker-amd64, build-docker-arm64]
     if: github.event_name == 'push'
+
     permissions:
       contents: read
       packages: write
-    steps:
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
 
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
+    steps:
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create and push multi-arch manifest
+      - name: Create manifest
         run: |
-          # 获取镜像名
-          IMAGE_NAME="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
-          SHA_SHORT=$(echo '${{ github.sha }}' | cut -c1-7)
-          
-          # 创建多架构 manifest for dev tag
-          docker buildx imagetools create \
-            -t "${IMAGE_NAME}:dev" \
-            "${IMAGE_NAME}:dev-amd64" \
-            "${IMAGE_NAME}:dev-arm64"
-          
-          # 创建多架构 manifest for sha tag
-          docker buildx imagetools create \
-            -t "${IMAGE_NAME}:dev-${SHA_SHORT}" \
-            "${IMAGE_NAME}:dev-${SHA_SHORT}-amd64" \
-            "${IMAGE_NAME}:dev-${SHA_SHORT}-arm64"
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          SHA="${{ github.sha }}"
 
-      - name: Verify multi-arch manifest
+          docker buildx imagetools create \
+            -t ${IMAGE}:dev \
+            ${IMAGE}:dev-amd64 \
+            ${IMAGE}:dev-arm64
+
+          docker buildx imagetools create \
+            -t ${IMAGE}:dev-${SHA} \
+            ${IMAGE}:dev-${SHA}-amd64 \
+            ${IMAGE}:dev-${SHA}-arm64
+
+      - name: Inspect
         run: |
-          IMAGE_NAME="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
-          echo "Inspecting manifest for ${IMAGE_NAME}:dev"
-          docker buildx imagetools inspect "${IMAGE_NAME}:dev"
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          docker buildx imagetools inspect ${IMAGE}:dev
