@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"runtime"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -169,6 +171,18 @@ func (t *WebPConversionTask) doConversionWithTimeout(ctx context.Context, settin
 
 // doConversion 执行转换
 func (t *WebPConversionTask) doConversion(ctx context.Context, settings *config.ConversionSettings) error {
+	// 获取信号量，限制并发处理的图片数量
+	semaphore := GetGlobalSemaphore()
+	if err := semaphore.Acquire(ctx); err != nil {
+		return fmt.Errorf("acquire semaphore: %w", err)
+	}
+	defer semaphore.Release()
+
+	// 记录处理前的内存状态
+	memBefore := utils.GetMemoryStats()
+	utils.LogIfDevf("[WebPConversion][%d] Starting conversion, heap: %.2fMB",
+		t.VariantID, memBefore.HeapAllocMB)
+
 	// 读取原图
 	reader, err := t.Storage.GetWithContext(ctx, t.SourcePath)
 	if err != nil {
@@ -180,12 +194,30 @@ func (t *WebPConversionTask) doConversion(ctx context.Context, settings *config.
 	// 限制读取大小
 	limitedReader := io.LimitReader(reader, maxMemorySize*5) // 允许稍大的输入
 
+	utils.LogIfDevf("[WebPConversion] Loading image for variant %d, source=%s", t.VariantID, t.SourcePath)
+
 	// 使用 govips 从 reader 加载图片
 	img, err := vips.NewImageFromReader(limitedReader)
 	if err != nil {
 		return fmt.Errorf("load image: %w", err)
 	}
-	defer img.Close()
+	defer func() {
+		img.Close()
+		// 强制 GC 以释放内存
+		runtime.GC()
+		// 释放内存给操作系统
+		debug.FreeOSMemory()
+		// 记录处理后的内存状态
+		memAfter := utils.GetMemoryStats()
+		delta := memAfter.HeapAllocMB - memBefore.HeapAllocMB
+		utils.LogIfDevf("[WebPConversion][%d] Image closed, heap delta: %+.2fMB (before: %.2fMB, after: %.2fMB)",
+			t.VariantID, delta, memBefore.HeapAllocMB, memAfter.HeapAllocMB)
+	}()
+
+	// 打印加载后的内存状态
+	memAfterLoad := utils.GetMemoryStats()
+	utils.LogIfDevf("[WebPConversion] Image loaded, heap delta: +%.2fMB",
+		memAfterLoad.HeapAllocMB-memBefore.HeapAllocMB)
 
 	// 获取图片尺寸（如果需要）
 	width := img.Width()

@@ -63,28 +63,24 @@ func (h *Handler) GetImage(c *gin.Context) {
 func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 	storagePath := image.StoragePath
 
-	// 检查缓存
 	imageData, err := h.cacheHelper.GetCachedImageData(c.Request.Context(), image.Identifier)
 	if err == nil {
 		h.serveImageData(c, image, imageData)
 		return
 	}
 
-	// 本地存储
 	if opener, ok := storage.GetDefault().(storage.FileOpener); ok {
 		if h.serveBySendfile(c, image, opener) {
 			return
 		}
 	}
 
-	// 尝试流式传输（避免全量加载到内存）
 	if streamer, ok := storage.GetDefault().(storage.StreamProvider); ok {
 		if h.serveByStreaming(c, image, streamer) {
 			return
 		}
 	}
 
-	// 远程存储（兜底方案）
 	data, err := h.fetchFromRemote(storagePath)
 	if err != nil {
 		log.Printf("[serveOriginal] Failed to get image %s (path: %s): %v", image.Identifier, storagePath, err)
@@ -95,7 +91,6 @@ func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 	h.serveImageData(c, image, data)
 }
 
-// serveByStreaming 使用流式传输（避免全量加载到内存）
 func (h *Handler) serveByStreaming(c *gin.Context, img *models.Image, streamer storage.StreamProvider) bool {
 	c.Header("Cache-Control", "public, max-age=86400")
 	c.Header("ETag", "\""+img.FileHash+"\"")

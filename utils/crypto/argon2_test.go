@@ -69,8 +69,8 @@ func TestComparePasswordAndHash_InvalidFormat(t *testing.T) {
 		"",
 		"invalid",
 		"$argon2i$v=19$m=65536,t=2,p=4$salt$hash", // wrong algorithm
-		"$argon2id$v=19$m=65536,t=2,p=4$",          // missing parts
-		"$argon2id$v=19$m=65536,t=2,p=4$salt",      // missing hash
+		"$argon2id$v=19$m=65536,t=2,p=4$",         // missing parts
+		"$argon2id$v=19$m=65536,t=2,p=4$salt",     // missing hash
 	}
 
 	for _, hash := range invalidHashes {
@@ -114,7 +114,7 @@ func TestPasswordHashRoundTrip(t *testing.T) {
 		"medium length password",
 		"a very long password with many characters and symbols !@#$%^&*()",
 		"密码测试", // Unicode
-		"🔐🔑🔒",    // Emoji
+		"🔐🔑🔒",  // Emoji
 	}
 
 	for _, password := range passwords {
@@ -136,11 +136,11 @@ func TestPasswordHashRoundTrip(t *testing.T) {
 // TestArgon2Parameters 测试Argon2参数常量
 func TestArgon2Parameters(t *testing.T) {
 	// 验证参数在合理范围内
-	assert.Equal(t, uint32(65536), argon2Memory)      // 64 MB
-	assert.Equal(t, uint32(3), argon2Iterations)      // 2 iterations
-	assert.Equal(t, uint8(4), argon2Parallelism)      // 4 threads
-	assert.Equal(t, uint32(16), argon2SaltLength)     // 16 bytes
-	assert.Equal(t, uint32(32), argon2KeyLength)      // 32 bytes
+	assert.Equal(t, uint32(65536), argon2Memory)  // 64 MB
+	assert.Equal(t, uint32(3), argon2Iterations)  // 2 iterations
+	assert.Equal(t, uint8(4), argon2Parallelism)  // 4 threads
+	assert.Equal(t, uint32(16), argon2SaltLength) // 16 bytes
+	assert.Equal(t, uint32(32), argon2KeyLength)  // 32 bytes
 
 	// 验证参数安全性
 	assert.GreaterOrEqual(t, argon2Memory, uint32(65536), "memory should be at least 64MB")

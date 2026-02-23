@@ -61,7 +61,6 @@ func init() {
 	_ = restoreCmd.MarkFlagRequired("input")
 }
 
-
 // restoreStats 还原统计
 type restoreStats struct {
 	Restored             map[string]int64
@@ -226,7 +225,6 @@ func extractTarGz(archivePath, destDir string) error {
 		}
 
 		targetPath := filepath.Join(destDir, header.Name)
-
 
 		destDirAbs, err := filepath.Abs(destDir)
 		if err != nil {
@@ -430,7 +428,6 @@ func insertBatch(db *gorm.DB, batch []interface{}, dryRun bool, stats *restoreSt
 		return
 	}
 
-
 	if err := db.CreateInBatches(batch, len(batch)).Error; err != nil {
 		log.Printf("Warning: failed to insert batch for %s: %v", tableName, err)
 		stats.Errors[tableName] += int64(len(batch))
@@ -469,7 +466,7 @@ func insertAlbumImagesBatch(db *gorm.DB, batch []albumImageRecord, dryRun bool, 
 // truncateTables 清空表数据
 func truncateTables(db *gorm.DB, tablesToClear []string) error {
 	truncateOrder := []string{
-		"album_images", "api_tokens", "images", 
+		"album_images", "api_tokens", "images",
 		"albums", "devices", "users",
 	}
 
@@ -479,7 +476,6 @@ func truncateTables(db *gorm.DB, tablesToClear []string) error {
 		}
 
 		log.Printf("Truncating table: %s", safeTable)
-
 
 		if err := db.Table(safeTable).Where("1 = 1").Delete(nil).Error; err != nil {
 			return fmt.Errorf("failed to truncate %s: %w", safeTable, err)

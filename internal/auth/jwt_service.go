@@ -20,9 +20,9 @@ type JWTService struct {
 
 // TokenPair 包含访问令牌和刷新令牌
 type TokenPair struct {
-	AccessToken       string
-	AccessTokenExpiry time.Time
-	RefreshToken      string
+	AccessToken        string
+	AccessTokenExpiry  time.Time
+	RefreshToken       string
 	RefreshTokenExpiry time.Time
 }
 

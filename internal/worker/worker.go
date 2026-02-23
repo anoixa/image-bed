@@ -1,11 +1,77 @@
 package worker
 
 import (
+	"context"
 	"log"
 	"runtime"
 	"sync"
 	"sync/atomic"
 )
+
+// ImageProcessingConfig 图片处理配置
+type ImageProcessingConfig struct {
+	MaxConcurrentImages int   // 同时处理的最大图片数
+	MaxImageSizeMB      int   // 最大图片大小(MB)
+	GCTriggerThreshold  int64 // 触发GC的内存阈值(字节)
+}
+
+// DefaultImageProcessingConfig 默认配置
+func DefaultImageProcessingConfig() *ImageProcessingConfig {
+	return &ImageProcessingConfig{
+		MaxConcurrentImages: 2,                 // 最多同时处理2张图片
+		MaxImageSizeMB:      50,                // 50MB
+		GCTriggerThreshold:  200 * 1024 * 1024, // 200MB
+	}
+}
+
+// ImageProcessingSemaphore 图片处理信号量
+type ImageProcessingSemaphore struct {
+	semaphore chan struct{}
+	config    *ImageProcessingConfig
+}
+
+var (
+	globalSemaphore     *ImageProcessingSemaphore
+	globalSemaphoreOnce sync.Once
+)
+
+// InitGlobalSemaphore 初始化全局信号量
+func InitGlobalSemaphore(config *ImageProcessingConfig) {
+	globalSemaphoreOnce.Do(func() {
+		globalSemaphore = &ImageProcessingSemaphore{
+			semaphore: make(chan struct{}, config.MaxConcurrentImages),
+			config:    config,
+		}
+		log.Printf("[WorkerPool] Image processing semaphore initialized, max concurrent: %d", config.MaxConcurrentImages)
+	})
+}
+
+// GetGlobalSemaphore 获取全局信号量
+func GetGlobalSemaphore() *ImageProcessingSemaphore {
+	if globalSemaphore == nil {
+		InitGlobalSemaphore(DefaultImageProcessingConfig())
+	}
+	return globalSemaphore
+}
+
+// Acquire 获取信号量许可
+func (s *ImageProcessingSemaphore) Acquire(ctx context.Context) error {
+	select {
+	case s.semaphore <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// Release 释放信号量许可
+func (s *ImageProcessingSemaphore) Release() {
+	select {
+	case <-s.semaphore:
+	default:
+		log.Println("[WorkerPool] Warning: releasing unacquired semaphore")
+	}
+}
 
 // min 返回较小的整数
 func min(a, b int) int {
@@ -76,6 +142,8 @@ func NewPool(workers, queueSize int) *Pool {
 		taskCh:   make(chan func(), queueSize),
 		queueCap: queueSize,
 	}
+
+	InitGlobalSemaphore(DefaultImageProcessingConfig())
 
 	for i := 0; i < workers; i++ {
 		p.wg.Add(1)

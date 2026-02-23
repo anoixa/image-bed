@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/anoixa/image-bed/database/models"
 	configSvc "github.com/anoixa/image-bed/config/db"
+	"github.com/anoixa/image-bed/database/models"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"gorm.io/driver/postgres"
@@ -174,12 +174,12 @@ func migrateCacheConfig(ctx context.Context, manager *configSvc.Manager) error {
 	switch provider {
 	case "redis":
 		configData = map[string]interface{}{
-			"provider_type":         "redis",
-			"address":               viper.GetString("server.cache.redis.address"),
-			"password":              viper.GetString("server.cache.redis.password"),
-			"db":                    viper.GetInt("server.cache.redis.db"),
-			"pool_size":             viper.GetInt("server.cache.redis.pool_size"),
-			"min_idle_conns":        viper.GetInt("server.cache.redis.min_idle_conns"),
+			"provider_type":  "redis",
+			"address":        viper.GetString("server.cache.redis.address"),
+			"password":       viper.GetString("server.cache.redis.password"),
+			"db":             viper.GetInt("server.cache.redis.db"),
+			"pool_size":      viper.GetInt("server.cache.redis.pool_size"),
+			"min_idle_conns": viper.GetInt("server.cache.redis.min_idle_conns"),
 		}
 		name = "Redis Cache"
 	case "memory":

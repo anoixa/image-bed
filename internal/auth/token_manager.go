@@ -138,4 +138,3 @@ func (tm *TokenManager) SetConfig(config TokenConfig) {
 	defer tm.mutex.Unlock()
 	tm.config = config
 }
-

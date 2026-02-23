@@ -273,7 +273,6 @@ func (s *ThumbnailService) resizeImageFromReader(reader io.Reader, targetWidth i
 	return webpBytes, targetHeight, nil
 }
 
-
 // GenerateThumbnailIdentifiers 生成缩略图的 identifier 和 storage_path
 func (s *ThumbnailService) GenerateThumbnailIdentifiers(originalStoragePath string, width int) generator.StorageIdentifiers {
 	return s.pathGenerator.GenerateThumbnailIdentifiers(originalStoragePath, width)

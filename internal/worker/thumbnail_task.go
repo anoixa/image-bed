@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"runtime"
+	"runtime/debug"
 	"time"
 
 	config "github.com/anoixa/image-bed/config/db"
@@ -117,16 +119,47 @@ type thumbnailResult struct {
 
 // generateThumbnail 生成缩略图
 func (t *ThumbnailTask) generateThumbnail(reader io.Reader, targetWidth int) ([]byte, int, int, error) {
+	// 获取信号量，限制并发处理的图片数量
+	ctx := context.Background()
+	semaphore := GetGlobalSemaphore()
+	if err := semaphore.Acquire(ctx); err != nil {
+		return nil, 0, 0, fmt.Errorf("acquire semaphore: %w", err)
+	}
+	defer semaphore.Release()
+
+	// 记录处理前的内存状态
+	memBefore := utils.GetMemoryStats()
+	utils.LogIfDevf("[ThumbnailTask][%d] Starting thumbnail generation, heap: %.2fMB",
+		t.VariantID, memBefore.HeapAllocMB)
+
 	// 限制内存使用，避免大图片导致 OOM
 	const maxImageSize = 50 * 1024 * 1024 // 50MB 最大限制
 	limitedReader := io.LimitReader(reader, maxImageSize)
+
+	utils.LogIfDevf("[ThumbnailTask] Loading image for variant %d, source=%s", t.VariantID, t.SourcePath)
 
 	// 使用 govips 从 reader 加载图片
 	img, err := vips.NewImageFromReader(limitedReader)
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("failed to load image: %w", err)
 	}
-	defer img.Close()
+	defer func() {
+		img.Close()
+		// 强制 GC 并等待完成
+		runtime.GC()
+		// 释放内存给操作系统
+		debug.FreeOSMemory()
+		// 记录处理后的内存状态
+		memAfter := utils.GetMemoryStats()
+		delta := memAfter.HeapAllocMB - memBefore.HeapAllocMB
+		utils.LogIfDevf("[ThumbnailTask][%d] Image closed, heap delta: %+.2fMB (before: %.2fMB, after: %.2fMB)",
+			t.VariantID, delta, memBefore.HeapAllocMB, memAfter.HeapAllocMB)
+	}()
+
+	// 打印加载后的内存状态
+	memAfterLoad := utils.GetMemoryStats()
+	utils.LogIfDevf("[ThumbnailTask] Image loaded, heap delta: +%.2fMB",
+		memAfterLoad.HeapAllocMB-memBefore.HeapAllocMB)
 
 	// 获取图片尺寸
 	width := img.Width()

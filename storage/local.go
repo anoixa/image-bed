@@ -23,12 +23,10 @@ func NewLocalStorage(basePath string) (*LocalStorage, error) {
 		return nil, fmt.Errorf("failed to get absolute path for '%s': %w", basePath, err)
 	}
 
-	// 创建目录
 	if err := os.MkdirAll(absPath, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create local storage directory '%s': %w", absPath, err)
 	}
 
-	// 检查目录是否可写
 	testFile := filepath.Join(absPath, ".write_test_"+strconv.FormatInt(time.Now().UnixNano(), 10))
 	f, err := os.Create(testFile)
 	if err != nil {
@@ -51,12 +49,10 @@ func (s *LocalStorage) SaveWithContext(ctx context.Context, storagePath string, 
 
 	dstPath := filepath.Join(s.absBasePath, storagePath)
 
-	// 防止目录遍历攻击
 	if !strings.HasPrefix(dstPath, s.absBasePath) {
 		return fmt.Errorf("invalid file path, potential directory traversal: %s", storagePath)
 	}
 
-	// 自动创建父目录
 	if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
 		return fmt.Errorf("failed to create directory for '%s': %w", storagePath, err)
 	}

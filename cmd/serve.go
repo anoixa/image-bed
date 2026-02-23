@@ -137,7 +137,7 @@ func RunServer() {
 	cfg := config.Get()
 
 	dataDir := utils.GetDataDir()
-	
+
 	if err := os.MkdirAll(dataDir, os.ModePerm); err != nil {
 		log.Fatalf("Failed to create data directory: %v", err)
 	}
@@ -145,14 +145,17 @@ func RunServer() {
 		log.Fatalf("Failed to create temp directory: %v", err)
 	}
 
-	// 初始化 govips
 	vips.Startup(&vips.Config{
-		MaxCacheMem:   0,
-		MaxCacheSize:  0,
+		MaxCacheMem:   64 << 20, // 64MB
+		MaxCacheSize:  100,
 		MaxCacheFiles: 0,
 	})
 	defer vips.Shutdown()
-	log.Println("[VIPS] Govips initialized")
+
+	log.Println("[VIPS] Govips initialized with minimal cache (1 byte)")
+	if config.CommitHash == "n/a" {
+		utils.LogMemoryStats("VIPS_INIT")
+	}
 
 	deps, err := InitDependencies(cfg)
 	if err != nil {
@@ -169,7 +172,7 @@ func RunServer() {
 	// 初始化变体仓库和服务
 	variantRepo := images.NewVariantRepository(deps.DB)
 	imageRepo := images.NewRepository(deps.DB)
-	
+
 	// 启动重试扫描器
 	retryScanner := imageSvc.NewRetryScanner(variantRepo, imageRepo, deps.Converter, 5*time.Minute)
 	retryScanner.Start()
@@ -177,7 +180,7 @@ func RunServer() {
 
 	// 初始化缩略图服务
 	thumbnailSvc := imageSvc.NewThumbnailService(variantRepo, imageRepo, deps.ConfigManager, storage.GetDefault(), deps.Converter)
-	
+
 	// 启动缩略图扫描器
 	thumbnailScanner := imageSvc.NewThumbnailScanner(deps.DB, deps.ConfigManager, thumbnailSvc)
 	if err := thumbnailScanner.Start(); err != nil {
@@ -217,7 +220,7 @@ func RunServer() {
 	// 启动gin
 	server, cleanup := core.StartServer(serverDeps)
 	serverErrCh := make(chan error, 1)
-	
+
 	go func() {
 		log.Printf("Server started on %s", cfg.Addr())
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -227,7 +230,7 @@ func RunServer() {
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	
+
 	select {
 	case err := <-serverErrCh:
 		log.Printf("Server unexpectedly stopped: %v", err)
@@ -259,7 +262,6 @@ func InitDatabase(deps *Dependencies) {
 	deps.Repositories.AccountsRepo.CreateDefaultAdminUser()
 }
 
-
 // buildCacheConfig 从应用配置构建缓存配置
 func buildCacheConfig(cfg *config.Config) cache.Config {
 	switch cfg.CacheType {
@@ -275,7 +277,7 @@ func buildCacheConfig(cfg *config.Config) cache.Config {
 		return cache.Config{
 			Type:        "memory",
 			NumCounters: 1000000,
-			MaxCost:     268435456, 
+			MaxCost:     268435456,
 			BufferItems: 64,
 			Metrics:     true,
 		}

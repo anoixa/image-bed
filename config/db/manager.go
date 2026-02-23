@@ -43,9 +43,9 @@ const (
 
 // JWTConfig JWT 配置结构
 type JWTConfig struct {
-	Secret           string
-	AccessTokenTTL   string
-	RefreshTokenTTL  string
+	Secret          string
+	AccessTokenTTL  string
+	RefreshTokenTTL string
 }
 
 // NewManager 创建配置管理器
@@ -794,4 +794,3 @@ func (m *Manager) GetDefaultStorageConfigID(ctx context.Context) (uint, error) {
 
 	return 0, fmt.Errorf("no storage config available")
 }
-

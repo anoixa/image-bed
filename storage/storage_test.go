@@ -297,4 +297,3 @@ func TestGetProviderCount(t *testing.T) {
 		t.Fatalf("Should have 1 provider, got %d", GetProviderCount())
 	}
 }
-

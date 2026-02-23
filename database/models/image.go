@@ -26,7 +26,7 @@ func (s ImageVariantStatus) HasPendingVariants() bool {
 type Image struct {
 	gorm.Model
 	Identifier      string `gorm:"uniqueIndex:idx_identifier;not null"`
-	StoragePath     string `gorm:"not null"`                             
+	StoragePath     string `gorm:"not null"`
 	OriginalName    string `gorm:"not null"`
 	FileSize        int64  `gorm:"not null"`
 	MimeType        string `gorm:"not null"`

@@ -12,9 +12,9 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/anoixa/image-bed/utils/pool"
 	minio "github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
-	"github.com/anoixa/image-bed/utils/pool"
 )
 
 // MinioConfig MinIO 配置结构

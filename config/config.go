@@ -66,7 +66,8 @@ type Config struct {
 	UploadMaxBatchTotalMB int `mapstructure:"upload_max_batch_total_mb"`
 
 	// Worker 配置
-	WorkerCount int `mapstructure:"worker_count"`
+	WorkerCount         int `mapstructure:"worker_count"`
+	WorkerMemoryLimitMB int `mapstructure:"worker_memory_limit_mb"`
 }
 
 // InitConfig Initialize configuration
@@ -135,7 +136,7 @@ func setDefaults() {
 	viper.SetDefault("db_password", "")
 	viper.SetDefault("db_name", "image-bed")
 	viper.SetDefault("db_file_path", "")
-	viper.SetDefault("db_max_open_conns", 25)  
+	viper.SetDefault("db_max_open_conns", 25)
 	viper.SetDefault("db_max_idle_conns", 5)
 	viper.SetDefault("db_conn_max_lifetime", 3600)
 
@@ -165,7 +166,16 @@ func setDefaults() {
 	viper.SetDefault("upload_max_batch_total_mb", 500)
 
 	// Worker 配置默认值
-	viper.SetDefault("worker_count", 0) // 0 表示使用默认值
+	viper.SetDefault("worker_count", 0)             // 0 表示使用默认值
+	viper.SetDefault("worker_memory_limit_mb", 512) // Worker 内存限制，默认 512MB
+}
+
+// GetWorkerMemoryLimitMB 返回 Worker 内存限制（MB），默认 512
+func (c *Config) GetWorkerMemoryLimitMB() int {
+	if c.WorkerMemoryLimitMB <= 0 {
+		return 512
+	}
+	return c.WorkerMemoryLimitMB
 }
 
 // Addr 返回监听地址，格式为 "host:port"

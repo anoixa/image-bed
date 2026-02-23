@@ -70,5 +70,3 @@ func NewHandler(cacheProvider cache.Provider, imagesRepo *images.Repository, db 
 		uploadMaxBatchTotalMB: uploadMaxBatchTotalMB,
 	}
 }
-
-

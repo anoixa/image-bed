@@ -142,7 +142,6 @@ func getSafeFileExtension(mimeType string) string {
 	return ext
 }
 
-
 // UploadSingle 单文件上传
 func (s *Service) UploadSingle(
 	ctx context.Context,
@@ -381,7 +380,6 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 	}
 
 	width, height := utils.GetImageDimensions(tmp)
-
 
 	// 使用 PathGenerator 生成时间分层路径（使用缓存的实例）
 	ext := getSafeFileExtension(mimeType)
@@ -833,4 +831,3 @@ func (s *Service) GetImageWithVariant(ctx context.Context, identifier string, ac
 
 	return result, nil
 }
-

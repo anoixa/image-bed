@@ -2,13 +2,13 @@ package image
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	config "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/internal/worker"
+	"github.com/anoixa/image-bed/utils"
 	"github.com/anoixa/image-bed/utils/format"
 )
 
@@ -54,8 +54,8 @@ func (s *VariantService) SelectBestVariant(ctx context.Context, image *models.Im
 		return nil, err
 	}
 
-	fmt.Printf("[VariantNegotiation] image=%s, variantStatus=%d, acceptHeader=%s\n", image.Identifier, uint(image.VariantStatus), acceptHeader)
-	fmt.Printf("[VariantNegotiation] enabledFormats=%v\n", settings.EnabledFormats)
+	utils.LogIfDevf("[VariantNegotiation] image=%s, variantStatus=%d, acceptHeader=%s", image.Identifier, uint(image.VariantStatus), acceptHeader)
+	utils.LogIfDevf("[VariantNegotiation] enabledFormats=%v", settings.EnabledFormats)
 
 	switch image.VariantStatus {
 	case models.ImageVariantStatusNone:
@@ -116,15 +116,15 @@ func (s *VariantService) handleCompletedVariants(ctx context.Context, image *mod
 		}
 	}
 
-	// 调试日志
-	fmt.Printf("[VariantNegotiation] image=%s, variantStatus=%d, acceptHeader=%s\n", image.Identifier, uint(image.VariantStatus), acceptHeader)
-	fmt.Printf("[VariantNegotiation] availableVariants=%v, enabledFormats=%v\n", available, settings.EnabledFormats)
+	// 调试日志（仅在 dev 环境显示）
+	utils.LogIfDevf("[VariantNegotiation] image=%s, variantStatus=%d, acceptHeader=%s", image.Identifier, uint(image.VariantStatus), acceptHeader)
+	utils.LogIfDevf("[VariantNegotiation] availableVariants=%v, enabledFormats=%v", available, settings.EnabledFormats)
 
 	// 格式协商
 	negotiator := format.NewNegotiator(settings.EnabledFormats)
 	selectedFormat := negotiator.Negotiate(acceptHeader, available)
 
-	fmt.Printf("[VariantNegotiation] selectedFormat=%s\n", selectedFormat)
+	utils.LogIfDevf("[VariantNegotiation] selectedFormat=%s", selectedFormat)
 
 	result := &VariantResult{
 		Format: selectedFormat,
