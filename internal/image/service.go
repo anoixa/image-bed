@@ -121,16 +121,6 @@ func NewService(
 	}
 }
 
-// generateRandomString 生成随机字符串
-func generateRandomString(length int) string {
-	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	b := make([]byte, length)
-	for i := range b {
-		b[i] = charset[time.Now().UnixNano()%int64(len(charset))]
-	}
-	return string(b)
-}
-
 // getSafeFileExtension 根据MIME类型获取安全的文件扩展名
 func getSafeFileExtension(mimeType string) string {
 	ext := utils.GetSafeExtension(mimeType)
