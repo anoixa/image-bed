@@ -327,7 +327,7 @@ func TestDefaultPoolConfig(t *testing.T) {
 	if stats.WorkerCount <= 0 {
 		t.Error("Expected worker count to be > 0 with default config")
 	}
-	if stats.QueueCap != 1000 {
-		t.Errorf("Expected default queue capacity 1000, got %d", stats.QueueCap)
+	if stats.QueueCap != 100 {
+		t.Errorf("Expected default queue capacity 100, got %d", stats.QueueCap)
 	}
 }
