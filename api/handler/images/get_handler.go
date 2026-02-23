@@ -14,6 +14,7 @@ import (
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/internal/image"
+	"github.com/anoixa/image-bed/internal/worker"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/gin-gonic/gin"
@@ -76,7 +77,14 @@ func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 		}
 	}
 
-	// 远程存储
+	// 尝试流式传输（避免全量加载到内存）
+	if streamer, ok := storage.GetDefault().(storage.StreamProvider); ok {
+		if h.serveByStreaming(c, image, streamer) {
+			return
+		}
+	}
+
+	// 远程存储（兜底方案）
 	data, err := h.fetchFromRemote(storagePath)
 	if err != nil {
 		log.Printf("[serveOriginal] Failed to get image %s (path: %s): %v", image.Identifier, storagePath, err)
@@ -85,6 +93,18 @@ func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 	}
 
 	h.serveImageData(c, image, data)
+}
+
+// serveByStreaming 使用流式传输（避免全量加载到内存）
+func (h *Handler) serveByStreaming(c *gin.Context, img *models.Image, streamer storage.StreamProvider) bool {
+	c.Header("Cache-Control", "public, max-age=86400")
+	c.Header("ETag", "\""+img.FileHash+"\"")
+
+	_, err := streamer.StreamTo(c.Request.Context(), img.StoragePath, c.Writer)
+	if err != nil {
+		return false
+	}
+	return true
 }
 
 // fetchFromRemote 从远程存储获取图片数据
@@ -121,11 +141,17 @@ func (h *Handler) fetchFromRemote(storagePath string) ([]byte, error) {
 
 		// 异步缓存（仅缓存较小的图片，避免缓存占用过多内存）
 		if len(data) < 5*1024*1024 { // 只缓存小于 5MB 的图片
-			go func() {
+			task := func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 				_ = h.cacheHelper.CacheImageData(ctx, storagePath, data)
-			}()
+			}
+			// 使用 worker pool 替代裸 goroutine
+			if pool := worker.GetGlobalPool(); pool != nil {
+				pool.Submit(task)
+			} else {
+				go task()
+			}
 		}
 
 		return data, nil
@@ -182,7 +208,14 @@ func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *i
 		}
 	}
 
-	// 从存储获取
+	// 尝试流式传输（避免全量加载到内存）
+	if streamer, ok := storage.GetDefault().(storage.StreamProvider); ok {
+		if h.serveVariantByStreaming(c, result, streamer) {
+			return
+		}
+	}
+
+	// 从存储获取（兜底方案）
 	stream, err := storage.GetDefault().GetWithContext(c.Request.Context(), result.StoragePath)
 	if err != nil {
 		log.Printf("[serveVariant] Failed to get variant %s (path: %s): %v", result.Identifier, result.StoragePath, err)
@@ -202,14 +235,32 @@ func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *i
 		return
 	}
 
-	// 异步缓存
-	go func() {
+	// 异步缓存（使用 worker pool）
+	task := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = h.cacheHelper.CacheImageData(ctx, result.StoragePath, data)
-	}()
+	}
+	if pool := worker.GetGlobalPool(); pool != nil {
+		pool.Submit(task)
+	} else {
+		go task()
+	}
 
 	h.serveVariantData(c, img, result, data)
+}
+
+// serveVariantByStreaming 使用流式传输格式变体
+func (h *Handler) serveVariantByStreaming(c *gin.Context, result *image.VariantResult, streamer storage.StreamProvider) bool {
+	c.Header("Cache-Control", "public, max-age=86400")
+	c.Header("Content-Type", result.MIMEType)
+	c.Header("X-Content-Type-Options", "nosniff")
+
+	_, err := streamer.StreamTo(c.Request.Context(), result.StoragePath, c.Writer)
+	if err != nil {
+		return false
+	}
+	return true
 }
 
 // serveVariantBySendfile 使用 sendfile 传输格式变体

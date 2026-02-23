@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 	imageSvc "github.com/anoixa/image-bed/internal/image"
 	"github.com/anoixa/image-bed/internal/worker"
 	"github.com/anoixa/image-bed/storage"
+	"github.com/anoixa/image-bed/utils"
 	"github.com/davidbyttow/govips/v2/vips"
 	"github.com/spf13/cobra"
 	"gorm.io/gorm"
@@ -134,10 +136,12 @@ func RunServer() {
 	config.InitConfig()
 	cfg := config.Get()
 
-	if err := os.MkdirAll("./data", os.ModePerm); err != nil {
+	dataDir := utils.GetDataDir()
+	
+	if err := os.MkdirAll(dataDir, os.ModePerm); err != nil {
 		log.Fatalf("Failed to create data directory: %v", err)
 	}
-	if err := os.MkdirAll("./data/temp", os.ModePerm); err != nil {
+	if err := os.MkdirAll(filepath.Join(dataDir, "temp"), os.ModePerm); err != nil {
 		log.Fatalf("Failed to create temp directory: %v", err)
 	}
 

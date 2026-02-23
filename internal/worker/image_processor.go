@@ -1,7 +1,6 @@
 package worker
 
 import (
-	"bytes"
 	"context"
 	"image"
 	_ "image/gif"
@@ -63,6 +62,7 @@ func (t *ImageDimensionsTask) Execute() {
 }
 
 // extractFromStorage 从存储提供者读取并提取尺寸
+// 使用 image.DecodeConfig 只读取图片头部元数据，避免全量加载到内存
 func (t *ImageDimensionsTask) extractFromStorage() (int, int, error) {
 	ctx := context.Background()
 
@@ -77,24 +77,13 @@ func (t *ImageDimensionsTask) extractFromStorage() (int, int, error) {
 		}
 	}()
 
-	// 读取数据到内存
-	data, err := io.ReadAll(reader)
+	// 使用 DecodeConfig 只读取图片头部元数据
+	config, _, err := image.DecodeConfig(reader)
 	if err != nil {
 		return 0, 0, err
 	}
 
-	return decodeImageDimensions(data)
-}
-
-// decodeImageDimensions 解码图片并提取尺寸
-func decodeImageDimensions(data []byte) (int, int, error) {
-	img, _, err := image.Decode(bytes.NewReader(data))
-	if err != nil {
-		return 0, 0, err
-	}
-
-	bounds := img.Bounds()
-	return bounds.Dx(), bounds.Dy(), nil
+	return config.Width, config.Height, nil
 }
 
 // ExtractImageDimensionsAsync 异步提取图片尺寸

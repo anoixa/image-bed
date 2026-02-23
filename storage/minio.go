@@ -9,10 +9,12 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	minio "github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/anoixa/image-bed/utils/pool"
 )
 
 // MinioConfig MinIO 配置结构
@@ -141,6 +143,46 @@ func (s *MinioStorage) Health(ctx context.Context) error {
 // Name 返回存储名称
 func (s *MinioStorage) Name() string {
 	return "minio"
+}
+
+// StreamTo 将 MinIO 对象直接流式传输到 ResponseWriter
+// 避免全量加载到内存，使用 buffer pool 复用缓冲区
+func (s *MinioStorage) StreamTo(ctx context.Context, storagePath string, w http.ResponseWriter) (int64, error) {
+	obj, err := s.client.GetObject(ctx, s.bucketName, storagePath, minio.GetObjectOptions{})
+	if err != nil {
+		errResponse := minio.ToErrorResponse(err)
+		if errResponse.Code == "NoSuchKey" {
+			return 0, fmt.Errorf("file not found in minio: %s", storagePath)
+		}
+		return 0, fmt.Errorf("failed to get object from minio for '%s': %w", storagePath, err)
+	}
+	defer obj.Close()
+
+	// 获取对象元数据
+	stat, err := obj.Stat()
+	if err != nil {
+		errResponse := minio.ToErrorResponse(err)
+		if errResponse.Code == "NoSuchKey" {
+			return 0, fmt.Errorf("file not found in minio: %s", storagePath)
+		}
+		return 0, fmt.Errorf("failed to stat object from minio for '%s': %w", storagePath, err)
+	}
+
+	// 设置响应头
+	w.Header().Set("Content-Type", stat.ContentType)
+	w.Header().Set("Content-Length", strconv.FormatInt(stat.Size, 10))
+	w.WriteHeader(http.StatusOK)
+
+	// 使用 buffer pool 复用缓冲区（默认 32KB）
+	bufPtr := pool.SharedBufferPool.Get().(*[]byte)
+	defer pool.SharedBufferPool.Put(bufPtr)
+
+	n, err := io.CopyBuffer(w, obj, *bufPtr)
+	if err != nil {
+		return n, fmt.Errorf("failed to stream object '%s': %w", storagePath, err)
+	}
+
+	return n, nil
 }
 
 // mustGetSystemCertPool 获取系统证书池

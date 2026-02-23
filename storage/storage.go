@@ -4,8 +4,12 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
+	"path/filepath"
 	"sync"
+
+	"github.com/anoixa/image-bed/utils"
 )
 
 var (
@@ -63,6 +67,12 @@ type Provider interface {
 type FileOpener interface {
 	OpenFile(ctx context.Context, name string) (*os.File, error)
 }
+
+// StreamProvider 流式传输到 ResponseWriter 的存储
+type StreamProvider interface {
+	Provider
+	StreamTo(ctx context.Context, storagePath string, w http.ResponseWriter) (int64, error)
+}
 	
 	// InitStorage 初始化存储层
 func InitStorage(configs []StorageConfig) error {
@@ -83,7 +93,8 @@ func InitStorage(configs []StorageConfig) error {
 
 	// 如果没有配置则使用默认本地存储
 	if defaultProvider == nil {
-		provider, err := NewLocalStorage("./data/upload")
+		dataDir := utils.GetDataDir()
+		provider, err := NewLocalStorage(filepath.Join(dataDir, "upload"))
 		if err != nil {
 			return fmt.Errorf("failed to create default storage: %w", err)
 		}

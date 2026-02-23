@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"time"
 
 	config "github.com/anoixa/image-bed/config/db"
@@ -14,6 +15,7 @@ import (
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/anoixa/image-bed/utils/generator"
+	"github.com/davidbyttow/govips/v2/vips"
 	"gorm.io/gorm"
 )
 
@@ -24,6 +26,7 @@ type ThumbnailResult struct {
 	StoragePath string
 	Width       int
 	Height      int
+	FileSize    int64
 	MIMEType    string
 }
 
@@ -81,6 +84,7 @@ func (s *ThumbnailService) GetThumbnail(ctx context.Context, image *models.Image
 		StoragePath: variant.StoragePath,
 		Width:       variant.Width,
 		Height:      variant.Height,
+		FileSize:    variant.FileSize,
 		MIMEType:    s.getMIMETypeFromFormat(format),
 	}, nil
 }
@@ -186,16 +190,24 @@ func (s *ThumbnailService) EnsureThumbnail(ctx context.Context, image *models.Im
 
 // GenerateThumbnailSync 同步生成缩略图
 func (s *ThumbnailService) GenerateThumbnailSync(ctx context.Context, image *models.Image, width int) (*ThumbnailResult, error) {
-	imageData, err := s.getImageData(ctx, image.StoragePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get image data: %w", err)
+	const maxThumbnailSourceSize = 50 * 1024 * 1024
+	if image.FileSize > maxThumbnailSourceSize {
+		return nil, fmt.Errorf("image too large for thumbnail generation: %d bytes (max %d)",
+			image.FileSize, maxThumbnailSourceSize)
 	}
 
-	// 生成缩略图
-	thumbnailData, height, err := s.resizeImage(imageData, width)
+	// 从存储获取流
+	reader, err := s.storage.GetWithContext(ctx, image.StoragePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get image reader: %w", err)
+	}
+
+	// 生成缩略图（流式处理）
+	thumbnailData, height, err := s.resizeImageFromReader(reader, width)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resize image: %w", err)
 	}
+
 	thumbIDs := s.GenerateThumbnailIdentifiers(image.StoragePath, width)
 
 	if err := s.storage.SaveWithContext(ctx, thumbIDs.StoragePath, bytes.NewReader(thumbnailData)); err != nil {
@@ -208,29 +220,59 @@ func (s *ThumbnailService) GenerateThumbnailSync(ctx context.Context, image *mod
 		StoragePath: thumbIDs.StoragePath,
 		Width:       width,
 		Height:      height,
+		FileSize:    int64(len(thumbnailData)),
 		MIMEType:    "image/webp",
 	}, nil
 }
 
-// getImageData 获取图片数据
-func (s *ThumbnailService) getImageData(ctx context.Context, storagePath string) ([]byte, error) {
-	reader, err := s.storage.GetWithContext(ctx, storagePath)
+// resizeImageFromReader 从 reader 流式生成缩略图
+func (s *ThumbnailService) resizeImageFromReader(reader io.Reader, targetWidth int) ([]byte, int, error) {
+	const maxImageSize = 50 * 1024 * 1024 // 50MB 最大限制
+	limitedReader := io.LimitReader(reader, maxImageSize)
+
+	img, err := vips.NewImageFromReader(limitedReader)
 	if err != nil {
-		return nil, err
+		return nil, 0, fmt.Errorf("failed to load image: %w", err)
+	}
+	defer img.Close()
+
+	// 获取图片尺寸
+	width := img.Width()
+	height := img.Height()
+
+	// 如果图片宽度小于等于目标宽度，直接转换为 WebP
+	if width <= targetWidth {
+		webpBytes, _, err := img.ExportWebp(&vips.WebpExportParams{
+			Quality:  85,
+			Lossless: false,
+		})
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to export webp: %w", err)
+		}
+		return webpBytes, height, nil
 	}
 
-	buf := new(bytes.Buffer)
-	if _, err := buf.ReadFrom(reader); err != nil {
-		return nil, err
+	// 计算目标高度保持比例
+	targetHeight := height * targetWidth / width
+
+	// 使用 Thumbnail 调整尺寸
+	err = img.Thumbnail(targetWidth, targetHeight, vips.InterestingCentre)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to thumbnail image: %w", err)
 	}
 
-	return buf.Bytes(), nil
+	// 导出为 WebP
+	webpBytes, _, err := img.ExportWebp(&vips.WebpExportParams{
+		Quality:  85,
+		Lossless: false,
+	})
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to export webp: %w", err)
+	}
+
+	return webpBytes, targetHeight, nil
 }
 
-// resizeImage 调整图片尺寸
-func (s *ThumbnailService) resizeImage(data []byte, width int) ([]byte, int, error) {
-	return data, 0, fmt.Errorf("resize not implemented yet")
-}
 
 // GenerateThumbnailIdentifiers 生成缩略图的 identifier 和 storage_path
 func (s *ThumbnailService) GenerateThumbnailIdentifiers(originalStoragePath string, width int) generator.StorageIdentifiers {

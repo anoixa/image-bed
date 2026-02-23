@@ -805,7 +805,7 @@ func (s *Service) GetImageWithVariant(ctx context.Context, identifier string, ac
 	}
 
 	if !variantResult.IsOriginal && variantResult.Variant == nil {
-		utils.SafeGo(func() {
+		s.submitBackgroundTask(func() {
 			s.converter.TriggerWebPConversion(image)
 		})
 	}

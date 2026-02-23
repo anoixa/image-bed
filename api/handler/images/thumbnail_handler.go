@@ -1,7 +1,6 @@
 package images
 
 import (
-	"io"
 	"net/http"
 	"strconv"
 
@@ -94,15 +93,8 @@ func (h *Handler) serveThumbnailImage(c *gin.Context, image *models.Image, resul
 		return
 	}
 
-	size, err := reader.Seek(0, io.SeekEnd)
-	if err != nil {
-		h.serveOriginalImage(c, image)
-		return
-	}
-	_, _ = reader.Seek(0, io.SeekStart)
-
-	c.Header("Content-Length", strconv.FormatInt(size, 10))
+	c.Header("Content-Length", strconv.FormatInt(result.FileSize, 10))
 
 	// 返回图片数据
-	c.DataFromReader(http.StatusOK, size, result.MIMEType, reader, nil)
+	c.DataFromReader(http.StatusOK, result.FileSize, result.MIMEType, reader, nil)
 }
