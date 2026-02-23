@@ -101,10 +101,7 @@ func (h *Handler) serveByStreaming(c *gin.Context, img *models.Image, streamer s
 	c.Header("ETag", "\""+img.FileHash+"\"")
 
 	_, err := streamer.StreamTo(c.Request.Context(), img.StoragePath, c.Writer)
-	if err != nil {
-		return false
-	}
-	return true
+	return err == nil
 }
 
 // fetchFromRemote 从远程存储获取图片数据
@@ -257,10 +254,7 @@ func (h *Handler) serveVariantByStreaming(c *gin.Context, result *image.VariantR
 	c.Header("X-Content-Type-Options", "nosniff")
 
 	_, err := streamer.StreamTo(c.Request.Context(), result.StoragePath, c.Writer)
-	if err != nil {
-		return false
-	}
-	return true
+	return err == nil
 }
 
 // serveVariantBySendfile 使用 sendfile 传输格式变体

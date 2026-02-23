@@ -156,7 +156,7 @@ func (s *MinioStorage) StreamTo(ctx context.Context, storagePath string, w http.
 		}
 		return 0, fmt.Errorf("failed to get object from minio for '%s': %w", storagePath, err)
 	}
-	defer obj.Close()
+	defer func() { _ = obj.Close() }()
 
 	// 获取对象元数据
 	stat, err := obj.Stat()
