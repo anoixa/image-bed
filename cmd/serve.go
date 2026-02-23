@@ -110,7 +110,8 @@ func InitDependencies(cfg *config.Config) (*Dependencies, error) {
 	// 初始化变体仓库和转换器
 	variantRepo := images.NewVariantRepository(db)
 	imageRepo := images.NewRepository(db)
-	converter := imageSvc.NewConverter(configManager, variantRepo, imageRepo, storage.GetDefault())
+	cacheHelper := cache.NewHelper(cache.GetDefault())
+	converter := imageSvc.NewConverter(configManager, variantRepo, imageRepo, storage.GetDefault(), cacheHelper)
 
 	return &Dependencies{
 		DB:            db,

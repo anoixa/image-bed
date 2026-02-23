@@ -75,7 +75,7 @@ var (
 	ErrForbidden        = errors.New("forbidden: access denied")
 )
 
-// ImageResultDTO 返回给 Handler 的 DTO
+// ImageResultDTO DTO
 type ImageResultDTO struct {
 	Image      *models.Image
 	Variant    *models.ImageVariant
@@ -226,15 +226,18 @@ func (s *Service) ProcessChunkedUpload(ctx context.Context, session *ChunkedUplo
 	ext := getSafeFileExtension(mimeType)
 
 	pg := generator.NewPathGenerator()
-	identifier := pg.GenerateOriginalIdentifier(fileHash, ext, time.Now())
+	ids := pg.GenerateOriginalIdentifiers(fileHash, ext, time.Now())
+	identifier := ids.Identifier
+	storagePath := ids.StoragePath
 
-	if err := storage.GetDefault().SaveWithContext(ctx, identifier, bytes.NewReader(fileBytes)); err != nil {
+	if err := storage.GetDefault().SaveWithContext(ctx, storagePath, bytes.NewReader(fileBytes)); err != nil {
 		return nil, fmt.Errorf("failed to save file to storage: %w", err)
 	}
 
 	// 创建数据库记录
 	newImage := &models.Image{
 		Identifier:      identifier,
+		StoragePath:     storagePath,
 		OriginalName:    session.FileName,
 		FileSize:        int64(len(fileBytes)),
 		MimeType:        mimeType,
@@ -244,7 +247,7 @@ func (s *Service) ProcessChunkedUpload(ctx context.Context, session *ChunkedUplo
 	}
 
 	if err := s.repo.SaveImage(newImage); err != nil {
-		_ = storage.GetDefault().DeleteWithContext(ctx, identifier)
+		_ = storage.GetDefault().DeleteWithContext(ctx, storagePath)
 		return nil, fmt.Errorf("failed to save image metadata: %w", err)
 	}
 
@@ -523,14 +526,17 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 	// 使用 PathGenerator 生成时间分层路径
 	pg := generator.NewPathGenerator()
 	ext := getSafeFileExtension(mimeType)
-	identifier := pg.GenerateOriginalIdentifier(fileHash, ext, time.Now())
-	if err := storageProvider.SaveWithContext(ctx, identifier, tmp); err != nil {
+	ids := pg.GenerateOriginalIdentifiers(fileHash, ext, time.Now())
+	identifier := ids.Identifier
+	storagePath := ids.StoragePath
+	if err := storageProvider.SaveWithContext(ctx, storagePath, tmp); err != nil {
 		return nil, false, errors.New("failed to save uploaded file")
 	}
 
 	// 创建数据库记录
 	img := &models.Image{
 		Identifier:      identifier,
+		StoragePath:     storagePath,
 		OriginalName:    fileHeader.Filename,
 		FileSize:        fileHeader.Size,
 		MimeType:        mimeType,
@@ -543,7 +549,7 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 	}
 
 	if err := s.repo.SaveImage(img); err != nil {
-		_ = storageProvider.DeleteWithContext(ctx, identifier)
+		_ = storageProvider.DeleteWithContext(ctx, storagePath)
 		return nil, false, errors.New("failed to save image metadata")
 	}
 
@@ -657,13 +663,20 @@ func (s *Service) GetCachedImageData(ctx context.Context, identifier string) ([]
 
 // GetImageStream 从存储获取图片流
 func (s *Service) GetImageStream(ctx context.Context, image *models.Image) (io.ReadSeeker, error) {
-	return storage.GetDefault().GetWithContext(ctx, image.Identifier)
+	provider, err := s.getStorageProviderByID(image.StorageConfigID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get storage provider: %w", err)
+	}
+	return provider.GetWithContext(ctx, image.StoragePath)
 }
 
 // GetVariantStream 从存储获取变体流
-func (s *Service) GetVariantStream(ctx context.Context, storageConfigID uint, identifier string) (io.ReadSeeker, error) {
-	// 简化后只使用默认存储
-	return storage.GetDefault().GetWithContext(ctx, identifier)
+func (s *Service) GetVariantStream(ctx context.Context, storageConfigID uint, storagePath string) (io.ReadSeeker, error) {
+	provider, err := s.getStorageProviderByID(storageConfigID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get storage provider: %w", err)
+	}
+	return provider.GetWithContext(ctx, storagePath)
 }
 
 // CacheImageData 缓存图片数据

@@ -8,7 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anoixa/image-bed/config/db"
+	"github.com/anoixa/image-bed/cache"
+	config "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
@@ -28,7 +29,7 @@ type ErrorType int
 // VariantRepository 接口
 type VariantRepository interface {
 	UpdateStatusCAS(id uint, expected, newStatus, errMsg string) (bool, error)
-	UpdateCompleted(id uint, identifier string, fileSize int64, width, height int) error
+	UpdateCompleted(id uint, identifier, storagePath string, fileSize int64, width, height int) error
 	UpdateFailed(id uint, errMsg string, allowRetry bool) error
 	GetByID(id uint) (*models.ImageVariant, error)
 }
@@ -64,24 +65,27 @@ func ClassifyError(err error) ErrorType {
 
 // conversionResult 转换结果
 type conversionResult struct {
-	identifier string
-	fileSize   int64
-	width      int
-	height     int
+	identifier  string
+	storagePath string
+	fileSize    int64
+	width       int
+	height      int
 }
 
 // WebPConversionTask WebP转换任务
 type WebPConversionTask struct {
-	VariantID        uint
-	ImageID          uint
-	SourceIdentifier string
-	SourceWidth      int
-	SourceHeight     int
-	ConfigManager    *config.Manager
-	VariantRepo      VariantRepository
-	ImageRepo        ImageRepository
-	Storage          storage.Provider
-	result           *conversionResult
+	VariantID       uint
+	ImageID         uint
+	ImageIdentifier string // 原图标识符，用于缓存失效
+	SourcePath      string // 原图存储路径
+	SourceWidth     int
+	SourceHeight    int
+	ConfigManager   *config.Manager
+	VariantRepo     VariantRepository
+	ImageRepo       ImageRepository
+	Storage         storage.Provider
+	CacheHelper     *cache.Helper // 缓存帮助器，用于任务完成后删除缓存
+	result          *conversionResult
 }
 
 // Execute 执行任务
@@ -119,7 +123,7 @@ func (t *WebPConversionTask) Execute() {
 	utils.LogIfDevf("[WebPConversion] CAS success: variant %d is now processing", t.VariantID)
 
 	// 执行转换
-	utils.LogIfDevf("[WebPConversion] Starting conversion for variant %d, image=%s", t.VariantID, t.SourceIdentifier)
+	utils.LogIfDevf("[WebPConversion] Starting conversion for variant %d, image=%s", t.VariantID, t.SourcePath)
 	err = t.doConversionWithTimeout(ctx, settings)
 
 	// 处理结果
@@ -166,7 +170,7 @@ func (t *WebPConversionTask) doConversionWithTimeout(ctx context.Context, settin
 // doConversion 执行转换
 func (t *WebPConversionTask) doConversion(ctx context.Context, settings *config.ConversionSettings) error {
 	// 读取原图
-	reader, err := t.Storage.GetWithContext(ctx, t.SourceIdentifier)
+	reader, err := t.Storage.GetWithContext(ctx, t.SourcePath)
 	if err != nil {
 		return fmt.Errorf("read source: %w", err)
 	}
@@ -198,23 +202,27 @@ func (t *WebPConversionTask) doConversion(ctx context.Context, settings *config.
 		return fmt.Errorf("convert: %w", err)
 	}
 
-	// 使用 PathGenerator 生成分层路径
+	// 使用 PathGenerator 生成存储路径
 	pathGen := generator.NewPathGenerator()
-	variantIdentifier := pathGen.GenerateConvertedIdentifier(t.SourceIdentifier, "webp")
+	ids := pathGen.GenerateConvertedIdentifiers(t.SourcePath, models.FormatWebP)
 
-	// 保存到存储
-	if err := t.Storage.SaveWithContext(ctx, variantIdentifier, bytes.NewReader(converted)); err != nil {
+	// 存储转换后的文件
+	if err := t.Storage.SaveWithContext(ctx, ids.StoragePath, bytes.NewReader(converted)); err != nil {
 		return fmt.Errorf("save: %w", err)
 	}
 
-	size, _ := bimg.NewImage(converted).Size()
+	// 获取图片尺寸
+	size, err := bimg.NewImage(converted).Size()
+	if err != nil {
+		return fmt.Errorf("get size: %w", err)
+	}
 
-	// 保存结果
 	t.result = &conversionResult{
-		identifier: variantIdentifier,
-		fileSize:   int64(len(converted)),
-		width:      size.Width,
-		height:     size.Height,
+		identifier:  ids.Identifier,
+		storagePath: ids.StoragePath,
+		fileSize:    int64(len(converted)),
+		width:       size.Width,
+		height:      size.Height,
 	}
 
 	return nil
@@ -223,82 +231,72 @@ func (t *WebPConversionTask) doConversion(ctx context.Context, settings *config.
 // handleSuccess 处理成功
 func (t *WebPConversionTask) handleSuccess() {
 	if t.result == nil {
-		utils.LogIfDevf("[WebPConversion] Result is nil for variant %d", t.VariantID)
 		return
 	}
 
-	utils.LogIfDevf("[WebPConversion] Updating completed status for variant %d, identifier=%s",
-		t.VariantID, t.result.identifier)
-	err := t.VariantRepo.UpdateCompleted(
+	if err := t.VariantRepo.UpdateCompleted(
 		t.VariantID,
 		t.result.identifier,
+		t.result.storagePath,
 		t.result.fileSize,
 		t.result.width,
 		t.result.height,
-	)
-	if err != nil {
-		// 清理已上传的文件
-		ctx := context.Background()
-		_ = t.Storage.DeleteWithContext(ctx, t.result.identifier)
-		utils.LogIfDevf("[WebPConversion] Failed to update completed status for variant %d: %v", t.VariantID, err)
+	); err != nil {
+		utils.LogIfDevf("[WebPConversion] Failed to update completed status: %v", err)
 		return
 	}
 
-	utils.LogIfDevf("[WebPConversion] Successfully completed variant %d", t.VariantID)
-
-	// 更新图片状态为 Completed
-	if t.ImageRepo != nil {
-		if err := t.ImageRepo.UpdateVariantStatus(t.ImageID, models.ImageVariantStatusCompleted); err != nil {
-			utils.LogIfDevf("[WebPConversion] Failed to update image status to completed: %v", err)
-		} else {
-			utils.LogIfDevf("[WebPConversion] Updated image %d status to completed", t.ImageID)
-		}
+	// 更新图片的变体状态
+	if err := t.ImageRepo.UpdateVariantStatus(t.ImageID, models.ImageVariantStatusCompleted); err != nil {
+		utils.LogIfDevf("[WebPConversion] Failed to update image status: %v", err)
 	}
+
+	// 删除缓存
+	t.deleteCacheOnTerminalState("success")
 }
 
 // handleFailure 处理失败
 func (t *WebPConversionTask) handleFailure(err error) {
-	errType := ClassifyError(err)
-	errMsg := err.Error()
-
-	switch errType {
-	case ErrorPermanent:
-		utils.LogIfDevf("[WebPConversion] Permanent error for variant %d: %s", t.VariantID, errMsg)
-		_, _ = t.VariantRepo.UpdateStatusCAS(
-			t.VariantID,
-			models.VariantStatusProcessing,
-			models.VariantStatusFailed,
-			errMsg,
-		)
-		// 更新图片状态为 Failed
-		t.updateImageStatusOnFailure()
-	case ErrorConfig:
-		utils.LogIfDevf("[WebPConversion] Config error for variant %d: %s", t.VariantID, errMsg)
-		_, _ = t.VariantRepo.UpdateStatusCAS(
-			t.VariantID,
-			models.VariantStatusProcessing,
-			models.VariantStatusFailed,
-			errMsg,
-		)
-		// 更新图片状态为 Failed
-		t.updateImageStatusOnFailure()
-	case ErrorTransient:
-		utils.LogIfDevf("[WebPConversion] Transient error for variant %d: %s", t.VariantID, errMsg)
-		// 临时错误，允许重试
-		_ = t.VariantRepo.UpdateFailed(t.VariantID, errMsg, true)
-	}
-}
-
-// updateImageStatusOnFailure 更新图片状态为 Failed
-func (t *WebPConversionTask) updateImageStatusOnFailure() {
-	if t.ImageRepo == nil {
+	// 获取当前变体信息
+	variant, getErr := t.VariantRepo.GetByID(t.VariantID)
+	if getErr != nil {
+		utils.LogIfDevf("[WebPConversion] Failed to get variant for error handling: %v", getErr)
 		return
 	}
 
-	if err := t.ImageRepo.UpdateVariantStatus(t.ImageID, models.ImageVariantStatusFailed); err != nil {
-		utils.LogIfDevf("[WebPConversion] Failed to update image status to failed: %v", err)
-	} else {
-		utils.LogIfDevf("[WebPConversion] Updated image %d status to failed", t.ImageID)
+	// 判断是否允许重试
+	allowRetry := variant.RetryCount < 3
+	errType := ClassifyError(err)
+
+	switch errType {
+	case ErrorPermanent:
+		// 永久错误，标记为失败，不重试
+		allowRetry = false
+	case ErrorConfig:
+		// 配置错误，可能是设置问题，也不重试
+		allowRetry = false
+	default:
+		// 可重试错误
+	}
+
+	if err := t.VariantRepo.UpdateFailed(t.VariantID, err.Error(), allowRetry); err != nil {
+		utils.LogIfDevf("[WebPConversion] Failed to update failed status: %v", err)
+	}
+
+	if !allowRetry {
+		t.deleteCacheOnTerminalState("failed")
+	}
+}
+
+// deleteCacheOnTerminalState 删除缓存
+func (t *WebPConversionTask) deleteCacheOnTerminalState(state string) {
+	if t.CacheHelper != nil && t.ImageIdentifier != "" {
+		ctx := context.Background()
+		if err := t.CacheHelper.DeleteCachedImage(ctx, t.ImageIdentifier); err != nil {
+			utils.LogIfDevf("[WebPConversion] Failed to delete image cache for %s on %s: %v", t.ImageIdentifier, state, err)
+		} else {
+			utils.LogIfDevf("[WebPConversion] Deleted image cache for %s after %s", t.ImageIdentifier, state)
+		}
 	}
 }
 

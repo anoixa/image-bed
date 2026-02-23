@@ -773,3 +773,25 @@ func (m *Manager) GetStorageConfigs(ctx context.Context) ([]storage.StorageConfi
 	return result, nil
 }
 
+// GetDefaultStorageConfigID 获取默认存储配置的 ID
+func (m *Manager) GetDefaultStorageConfigID(ctx context.Context) (uint, error) {
+	configs, err := m.GetStorageConfigs(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	// 查找默认配置
+	for _, cfg := range configs {
+		if cfg.IsDefault {
+			return cfg.ID, nil
+		}
+	}
+
+	// 没有默认配置，返回第一个启用的配置
+	if len(configs) > 0 {
+		return configs[0].ID, nil
+	}
+
+	return 0, fmt.Errorf("no storage config available")
+}
+

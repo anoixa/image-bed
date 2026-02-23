@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestGetThumbnailFormat(t *testing.T) {
+func TestFormatThumbnailSize(t *testing.T) {
 	tests := []struct {
 		name   string
 		width  int
@@ -20,13 +20,13 @@ func TestGetThumbnailFormat(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := GetThumbnailFormat(tt.width)
+			got := FormatThumbnailSize(tt.width)
 			assert.Equal(t, tt.expect, got)
 		})
 	}
 }
 
-func TestParseThumbnailWidth(t *testing.T) {
+func TestParseThumbnailSize(t *testing.T) {
 	tests := []struct {
 		name      string
 		format    string
@@ -45,60 +45,9 @@ func TestParseThumbnailWidth(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotWidth, gotOk := ParseThumbnailWidth(tt.format)
+			gotWidth, gotOk := ParseThumbnailSize(tt.format)
 			assert.Equal(t, tt.wantWidth, gotWidth)
 			assert.Equal(t, tt.wantOk, gotOk)
-		})
-	}
-}
-
-func TestIsThumbnailFormat(t *testing.T) {
-	tests := []struct {
-		name   string
-		format string
-		want   bool
-	}{
-		{"valid_small", "thumbnail_150", true},
-		{"valid_medium", "thumbnail_300", true},
-		{"invalid_webp", "webp", false},
-		{"invalid_avif", "avif", false},
-		{"empty", "", false},
-		{"just_prefix", "thumbnail", false},
-		{"similar_name", "thumbnail_backup", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := IsThumbnailFormat(tt.format)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
-
-func TestIsValidThumbnailWidth(t *testing.T) {
-	sizes := []ThumbnailSize{
-		{Name: "small", Width: 150},
-		{Name: "medium", Width: 300},
-		{Name: "large", Width: 600},
-	}
-
-	tests := []struct {
-		name  string
-		width int
-		want  bool
-	}{
-		{"valid_small", 150, true},
-		{"valid_medium", 300, true},
-		{"valid_large", 600, true},
-		{"invalid_200", 200, false},
-		{"invalid_0", 0, false},
-		{"invalid_negative", -100, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := IsValidThumbnailWidth(tt.width, sizes)
-			assert.Equal(t, tt.want, got)
 		})
 	}
 }

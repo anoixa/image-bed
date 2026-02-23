@@ -78,47 +78,47 @@ func NewMinioStorage(cfg MinioConfig) (*MinioStorage, error) {
 }
 
 // SaveWithContext 保存文件到 MinIO
-func (s *MinioStorage) SaveWithContext(ctx context.Context, identifier string, file io.Reader) error {
+func (s *MinioStorage) SaveWithContext(ctx context.Context, storagePath string, file io.Reader) error {
 	contentType := "application/octet-stream"
 
-	_, err := s.client.PutObject(ctx, s.bucketName, identifier, file, -1, minio.PutObjectOptions{
+	_, err := s.client.PutObject(ctx, s.bucketName, storagePath, file, -1, minio.PutObjectOptions{
 		ContentType: contentType,
 	})
 
 	if err != nil {
-		return fmt.Errorf("failed to upload object '%s' to minio: %w", identifier, err)
+		return fmt.Errorf("failed to upload object '%s' to minio: %w", storagePath, err)
 	}
 
 	return nil
 }
 
 // GetWithContext 从 MinIO 获取文件
-func (s *MinioStorage) GetWithContext(ctx context.Context, identifier string) (io.ReadSeeker, error) {
-	obj, err := s.client.GetObject(ctx, s.bucketName, identifier, minio.GetObjectOptions{})
+func (s *MinioStorage) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeeker, error) {
+	obj, err := s.client.GetObject(ctx, s.bucketName, storagePath, minio.GetObjectOptions{})
 	if err != nil {
 		errResponse := minio.ToErrorResponse(err)
 		if errResponse.Code == "NoSuchKey" {
-			return nil, fmt.Errorf("file not found in minio: %s", identifier)
+			return nil, fmt.Errorf("file not found in minio: %s", storagePath)
 		}
-		return nil, fmt.Errorf("failed to get object from minio for '%s': %w", identifier, err)
+		return nil, fmt.Errorf("failed to get object from minio for '%s': %w", storagePath, err)
 	}
 
 	return obj, nil
 }
 
 // DeleteWithContext 从 MinIO 删除文件
-func (s *MinioStorage) DeleteWithContext(ctx context.Context, identifier string) error {
-	err := s.client.RemoveObject(ctx, s.bucketName, identifier, minio.RemoveObjectOptions{})
+func (s *MinioStorage) DeleteWithContext(ctx context.Context, storagePath string) error {
+	err := s.client.RemoveObject(ctx, s.bucketName, storagePath, minio.RemoveObjectOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to delete object '%s' from minio: %w", identifier, err)
+		return fmt.Errorf("failed to delete object '%s' from minio: %w", storagePath, err)
 	}
 
 	return nil
 }
 
 // Exists 检查文件是否存在于 MinIO
-func (s *MinioStorage) Exists(ctx context.Context, identifier string) (bool, error) {
-	_, err := s.client.StatObject(ctx, s.bucketName, identifier, minio.StatObjectOptions{})
+func (s *MinioStorage) Exists(ctx context.Context, storagePath string) (bool, error) {
+	_, err := s.client.StatObject(ctx, s.bucketName, storagePath, minio.StatObjectOptions{})
 	if err != nil {
 		errResponse := minio.ToErrorResponse(err)
 		if errResponse.Code == "NoSuchKey" {

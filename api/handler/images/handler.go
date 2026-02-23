@@ -1,13 +1,11 @@
 package images
 
 import (
-	"context"
 	"time"
 
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
 	configSvc "github.com/anoixa/image-bed/config/db"
-	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/internal/image"
 	"github.com/anoixa/image-bed/storage"
@@ -74,11 +72,3 @@ func NewHandler(cacheProvider cache.Provider, imagesRepo *images.Repository, db 
 }
 
 
-// warmCache 预热图片缓存
-func (h *Handler) warmCache(image *models.Image) {
-	if h.cacheHelper == nil {
-		return
-	}
-	ctx := context.Background()
-	_ = h.cacheHelper.CacheImage(ctx, image)
-}

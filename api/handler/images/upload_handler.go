@@ -135,17 +135,14 @@ func (h *Handler) UploadImages(c *gin.Context) {
 }
 
 // resolveStorageConfigID 解析存储配置ID
-func (h *Handler) resolveStorageConfigID(c interface {
-	PostForm(string) string
-	Query(string) string
-}) (uint, error) {
+func (h *Handler) resolveStorageConfigID(c *gin.Context) (uint, error) {
 	// 优先从 form 中获取，如果不存在则从 query 中获取
 	strategyIDStr := c.PostForm("strategy_id")
 	if strategyIDStr == "" {
 		strategyIDStr = c.Query("strategy_id")
 	}
 
-	// 获取对应的存储配置ID
+	// 如果指定了 strategy_id，直接解析并返回
 	if strategyIDStr != "" {
 		strategyID, err := strconv.ParseUint(strategyIDStr, 10, 32)
 		if err != nil {
@@ -154,7 +151,11 @@ func (h *Handler) resolveStorageConfigID(c interface {
 		return uint(strategyID), nil
 	}
 
-	// 未指定 strategy_id，返回 0 表示使用默认存储
-	return 0, nil
+	// 未指定 strategy_id，从配置管理器获取默认存储配置ID
+	defaultID, err := h.configManager.GetDefaultStorageConfigID(c.Request.Context())
+	if err != nil {
+		// 如果获取失败，返回 0（表示使用默认存储）
+		return 0, nil
+	}
+	return defaultID, nil
 }
-

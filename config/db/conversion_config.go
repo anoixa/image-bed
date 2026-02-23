@@ -26,7 +26,7 @@ type ConversionSettings struct {
 // DefaultConversionSettings 默认配置
 func DefaultConversionSettings() *ConversionSettings {
 	return &ConversionSettings{
-		EnabledFormats:   []string{},
+		EnabledFormats:   []string{"webp"},
 		WebPQuality:      85,
 		WebPEffort:       4,
 		AVIFQuality:      80,

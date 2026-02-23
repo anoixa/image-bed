@@ -2,9 +2,10 @@ package image
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
-	"github.com/anoixa/image-bed/config/db"
+	config "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/utils/format"
@@ -12,12 +13,13 @@ import (
 
 // VariantResult 变体选择结果
 type VariantResult struct {
-	Format     format.FormatType
-	IsOriginal bool
-	Image      *models.Image
-	Variant    *models.ImageVariant
-	MIMEType   string
-	Identifier string
+	Format      format.FormatType
+	IsOriginal  bool
+	Image       *models.Image
+	Variant     *models.ImageVariant
+	MIMEType    string
+	Identifier  string
+	StoragePath string
 }
 
 // VariantService 变体服务
@@ -44,10 +46,13 @@ func (s *VariantService) SelectBestVariant(ctx context.Context, image *models.Im
 		return nil, err
 	}
 
+	fmt.Printf("[VariantNegotiation] image=%s, variantStatus=%d, acceptHeader=%s\n", image.Identifier, uint(image.VariantStatus), acceptHeader)
+	fmt.Printf("[VariantNegotiation] enabledFormats=%v\n", settings.EnabledFormats)
+
 	switch image.VariantStatus {
 	case models.ImageVariantStatusNone:
-		// 从未处理过，直接返回原图
-		return s.handleOriginalWithConversion(image, acceptHeader, settings, false)
+		// 从未处理过，触发转换并返回原图
+		return s.handleOriginalWithConversion(image, acceptHeader, settings, true)
 	case models.ImageVariantStatusProcessing:
 		// 正在处理中，返回原图
 		return s.handleOriginalWithConversion(image, acceptHeader, settings, false)
@@ -66,11 +71,12 @@ func (s *VariantService) SelectBestVariant(ctx context.Context, image *models.Im
 // handleOriginalWithConversion 返回原图，根据条件触发转换
 func (s *VariantService) handleOriginalWithConversion(image *models.Image, acceptHeader string, settings *config.ConversionSettings, allowTrigger bool) (*VariantResult, error) {
 	result := &VariantResult{
-		Format:     format.FormatOriginal,
-		IsOriginal: true,
-		Image:      image,
-		MIMEType:   image.MimeType,
-		Identifier: image.Identifier,
+		Format:      format.FormatOriginal,
+		IsOriginal:  true,
+		Image:       image,
+		MIMEType:    image.MimeType,
+		Identifier:  image.Identifier,
+		StoragePath: image.StoragePath,
 	}
 
 	// 检查是否需要触发 WebP 转换
@@ -101,9 +107,15 @@ func (s *VariantService) handleCompletedVariants(ctx context.Context, image *mod
 		}
 	}
 
+	// 调试日志
+	fmt.Printf("[VariantNegotiation] image=%s, variantStatus=%d, acceptHeader=%s\n", image.Identifier, uint(image.VariantStatus), acceptHeader)
+	fmt.Printf("[VariantNegotiation] availableVariants=%v, enabledFormats=%v\n", available, settings.EnabledFormats)
+
 	// 格式协商
 	negotiator := format.NewNegotiator(settings.EnabledFormats)
 	selectedFormat := negotiator.Negotiate(acceptHeader, available)
+
+	fmt.Printf("[VariantNegotiation] selectedFormat=%s\n", selectedFormat)
 
 	result := &VariantResult{
 		Format: selectedFormat,
@@ -114,6 +126,7 @@ func (s *VariantService) handleCompletedVariants(ctx context.Context, image *mod
 		result.IsOriginal = true
 		result.MIMEType = image.MimeType
 		result.Identifier = image.Identifier
+		result.StoragePath = image.StoragePath
 	} else {
 		variant := variantMap[selectedFormat]
 		result.Variant = variant
@@ -121,9 +134,11 @@ func (s *VariantService) handleCompletedVariants(ctx context.Context, image *mod
 
 		if variant != nil {
 			result.Identifier = variant.Identifier
+			result.StoragePath = variant.StoragePath
 		} else {
 			// 变体不存在（异常情况），降级返回原图
 			result.Identifier = image.Identifier
+			result.StoragePath = image.StoragePath
 			result.IsOriginal = true
 			result.MIMEType = image.MimeType
 		}

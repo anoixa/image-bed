@@ -53,7 +53,7 @@ func (h *Handler) GetThumbnail(c *gin.Context) {
 	}
 
 	// 检查是否为有效尺寸
-	if !models.IsValidThumbnailWidth(width, settings.Sizes) {
+	if !settings.IsValidWidth(width) {
 		width = 600
 	}
 
@@ -88,7 +88,7 @@ func (h *Handler) serveThumbnailImage(c *gin.Context, image *models.Image, resul
 	c.Header("Content-Type", "image/webp")
 
 	ctx := c.Request.Context()
-	reader, err := storage.GetDefault().GetWithContext(ctx, result.Identifier)
+	reader, err := storage.GetDefault().GetWithContext(ctx, result.StoragePath)
 	if err != nil {
 		h.serveOriginalImage(c, image)
 		return

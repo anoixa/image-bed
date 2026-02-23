@@ -41,28 +41,28 @@ type StorageConfig struct {
 // Provider 存储提供者接口
 type Provider interface {
 	// SaveWithContext 保存文件到存储
-	SaveWithContext(ctx context.Context, identifier string, file io.Reader) error
+	SaveWithContext(ctx context.Context, storagePath string, file io.Reader) error
 
 	// GetWithContext 从存储获取文件
-	GetWithContext(ctx context.Context, identifier string) (io.ReadSeeker, error)
+	GetWithContext(ctx context.Context, storagePath string) (io.ReadSeeker, error)
 
 	// DeleteWithContext 从存储删除文件
-	DeleteWithContext(ctx context.Context, identifier string) error
+	DeleteWithContext(ctx context.Context, storagePath string) error
 
 	// Exists 检查文件是否存在
-	Exists(ctx context.Context, identifier string) (bool, error)
+	Exists(ctx context.Context, storagePath string) (bool, error)
 
 	// Health 检查存储健康状态
 	Health(ctx context.Context) error
 
 	// Name 返回存储名称
-		Name() string
-	}
+	Name() string
+}
 	
-	// FileOpener 支持直接打开 *os.File 的存储（用于零拷贝传输）
-	type FileOpener interface {
-		OpenFile(ctx context.Context, name string) (*os.File, error)
-	}
+// FileOpener 支持直接打开 *os.File 的存储（用于零拷贝传输）
+type FileOpener interface {
+	OpenFile(ctx context.Context, name string) (*os.File, error)
+}
 	
 	// InitStorage 初始化存储层
 func InitStorage(configs []StorageConfig) error {

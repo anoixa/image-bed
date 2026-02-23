@@ -3,7 +3,8 @@ package image
 import (
 	"context"
 
-	"github.com/anoixa/image-bed/config/db"
+	"github.com/anoixa/image-bed/cache"
+	config "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/internal/worker"
@@ -17,15 +18,17 @@ type Converter struct {
 	variantRepo   *images.VariantRepository
 	imageRepo     *images.Repository
 	storage       storage.Provider
+	cacheHelper   *cache.Helper
 }
 
 // NewConverter 创建转换器
-func NewConverter(cm *config.Manager, variantRepo *images.VariantRepository, imageRepo *images.Repository, storage storage.Provider) *Converter {
+func NewConverter(cm *config.Manager, variantRepo *images.VariantRepository, imageRepo *images.Repository, storage storage.Provider, cacheHelper *cache.Helper) *Converter {
 	return &Converter{
 		configManager: cm,
 		variantRepo:   variantRepo,
 		imageRepo:     imageRepo,
 		storage:       storage,
+		cacheHelper:   cacheHelper,
 	}
 }
 
@@ -89,15 +92,17 @@ func (c *Converter) TriggerWebPConversion(image *models.Image) {
 
 	ok := pool.Submit(func() {
 		task := &worker.WebPConversionTask{
-			VariantID:        variant.ID,
-			ImageID:          image.ID,
-			SourceIdentifier: image.Identifier,
-			SourceWidth:      image.Width,
-			SourceHeight:     image.Height,
-			ConfigManager:    c.configManager,
-			VariantRepo:      c.variantRepo,
-			ImageRepo:        c.imageRepo,
-			Storage:          c.storage,
+			VariantID:       variant.ID,
+			ImageID:         image.ID,
+			ImageIdentifier: image.Identifier,
+			SourcePath:      image.StoragePath,
+			SourceWidth:     image.Width,
+			SourceHeight:    image.Height,
+			ConfigManager:   c.configManager,
+			VariantRepo:     c.variantRepo,
+			ImageRepo:       c.imageRepo,
+			Storage:         c.storage,
+			CacheHelper:     c.cacheHelper,
 		}
 		task.Execute()
 	})

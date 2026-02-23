@@ -16,61 +16,75 @@ func NewPathGenerator() *PathGenerator {
 	return &PathGenerator{}
 }
 
-// GenerateOriginalIdentifier 生成原图 identifier
-// 格式: original/2024/01/15/a1b2c3d4e5f6.jpg
-func (pg *PathGenerator) GenerateOriginalIdentifier(fileHash string, ext string, uploadTime time.Time) string {
+// StorageIdentifiers 存储标识对
+type StorageIdentifiers struct {
+	Identifier  string // 业务标识符，如 a1b2c3d4e5f6（不含扩展名）
+	StoragePath string // 存储路径，如 original/2024/01/15/a1b2c3d4e5f6.jpg
+}
+
+// GenerateOriginalIdentifiers 生成原图的 identifier 和 storage_path
+func (pg *PathGenerator) GenerateOriginalIdentifiers(fileHash string, ext string, uploadTime time.Time) StorageIdentifiers {
+	hash := fileHash[:12]
 	datePath := uploadTime.Format("2006/01/02")
-	return fmt.Sprintf("original/%s/%s%s", datePath, fileHash[:12], ext)
-}
 
-// GenerateThumbnailIdentifier 生成缩略图 identifier
-// 格式: thumbnails/2024/01/15/a1b2c3d4e5f6_300.webp
-func (pg *PathGenerator) GenerateThumbnailIdentifier(originalIdentifier string, width int) string {
-	hash := pg.extractHash(originalIdentifier)
-	datePath := pg.extractDatePath(originalIdentifier)
-	if datePath != "" {
-		return fmt.Sprintf("thumbnails/%s/%s_%d.webp", datePath, hash, width)
+	return StorageIdentifiers{
+		Identifier:  hash,
+		StoragePath: fmt.Sprintf("original/%s/%s%s", datePath, hash, ext),
 	}
-	return fmt.Sprintf("thumbnails/%s_%d.webp", hash, width)
 }
 
-// GenerateConvertedIdentifier 生成格式转换 identifier
-// 格式: converted/webp/2024/01/15/a1b2c3d4e5f6.webp
-func (pg *PathGenerator) GenerateConvertedIdentifier(originalIdentifier string, format string) string {
-	hash := pg.extractHash(originalIdentifier)
-	datePath := pg.extractDatePath(originalIdentifier)
+// GenerateThumbnailIdentifiers 生成缩略图的 identifier 和 storage_path
+func (pg *PathGenerator) GenerateThumbnailIdentifiers(originalStoragePath string, width int) StorageIdentifiers {
+	hash := pg.extractHashFromPath(originalStoragePath)
+	datePath := pg.extractDatePath(originalStoragePath)
+	identifier := fmt.Sprintf("%s_%d", hash, width)
+
+	return StorageIdentifiers{
+		Identifier:  identifier,
+		StoragePath: fmt.Sprintf("thumbnails/%s/%s.webp", datePath, identifier),
+	}
+}
+
+// GenerateConvertedIdentifiers 生成格式转换的 identifier 和 storage_path
+func (pg *PathGenerator) GenerateConvertedIdentifiers(originalStoragePath string, format string) StorageIdentifiers {
+	hash := pg.extractHashFromPath(originalStoragePath)
+	datePath := pg.extractDatePath(originalStoragePath)
 
 	switch format {
 	case "webp":
-		if datePath != "" {
-			return fmt.Sprintf("converted/webp/%s/%s.webp", datePath, hash)
+		return StorageIdentifiers{
+			Identifier:  hash,
+			StoragePath: fmt.Sprintf("converted/webp/%s/%s.webp", datePath, hash),
 		}
-		return fmt.Sprintf("converted/webp/%s.webp", hash)
 	case "avif":
-		if datePath != "" {
-			return fmt.Sprintf("converted/avif/%s/%s.avif", datePath, hash)
+		return StorageIdentifiers{
+			Identifier:  hash,
+			StoragePath: fmt.Sprintf("converted/avif/%s/%s.avif", datePath, hash),
 		}
-		return fmt.Sprintf("converted/avif/%s.avif", hash)
 	case "jpegxl", "jxl":
-		if datePath != "" {
-			return fmt.Sprintf("converted/jpegxl/%s/%s.jxl", datePath, hash)
+		return StorageIdentifiers{
+			Identifier:  hash,
+			StoragePath: fmt.Sprintf("converted/jpegxl/%s/%s.jxl", datePath, hash),
 		}
-		return fmt.Sprintf("converted/jpegxl/%s.jxl", hash)
 	default:
-		if datePath != "" {
-			return fmt.Sprintf("converted/%s/%s/%s.%s", format, datePath, hash, format)
+		return StorageIdentifiers{
+			Identifier:  hash,
+			StoragePath: fmt.Sprintf("converted/%s/%s/%s.%s", format, datePath, hash, format),
 		}
-		return fmt.Sprintf("converted/%s/%s.%s", format, hash, format)
 	}
 }
 
-// extractHash 从 identifier 中提取纯净的文件哈希
-func (pg *PathGenerator) extractHash(identifier string) string {
-	base := filepath.Base(identifier)
+// extractHashFromPath 从存储路径中提取文件哈希
+// 支持: original/2024/01/15/hash.jpg, thumbnails/2024/01/15/hash_300.webp 等格式
+func (pg *PathGenerator) extractHashFromPath(storagePath string) string {
+	// 取最后的文件名
+	base := filepath.Base(storagePath)
 
+	// 去除扩展名
 	ext := filepath.Ext(base)
 	hash := strings.TrimSuffix(base, ext)
 
+	// 针对缩略图去除 "_300" 等后缀
 	if idx := strings.LastIndex(hash, "_"); idx > 0 {
 		if _, err := strconv.Atoi(hash[idx+1:]); err == nil {
 			hash = hash[:idx]
@@ -79,16 +93,35 @@ func (pg *PathGenerator) extractHash(identifier string) string {
 	return hash
 }
 
-// extractDatePath 从 identifier 中提取日期路径
-func (pg *PathGenerator) extractDatePath(identifier string) string {
-	parts := strings.Split(identifier, "/")
-	if len(parts) >= 4 {
+// extractDatePath 从存储路径中提取日期路径
+func (pg *PathGenerator) extractDatePath(storagePath string) string {
+	parts := strings.Split(storagePath, "/")
+
+	if len(parts) >= 5 {
 		return strings.Join(parts[1:4], "/")
 	}
-	return ""
+	// 路径不包含日期，返回当前日期
+	return time.Now().Format("2006/01/02")
 }
 
-// IsHierarchicalPath 判断是否为分层路径格式
-func (pg *PathGenerator) IsHierarchicalPath(identifier string) bool {
-	return strings.Contains(identifier, "/")
+// ParseFormatFromStoragePath 从存储路径解析格式类型
+func (pg *PathGenerator) ParseFormatFromStoragePath(storagePath string) string {
+	parts := strings.Split(storagePath, "/")
+	if len(parts) == 0 {
+		return ""
+	}
+
+	// 根据目录结构判断格式
+	typeDir := parts[0]
+	switch typeDir {
+	case "original":
+		return "original"
+	case "thumbnails":
+		return "thumbnail"
+	case "converted":
+		if len(parts) >= 2 {
+			return parts[1] // webp, avif, etc.
+		}
+	}
+	return typeDir
 }

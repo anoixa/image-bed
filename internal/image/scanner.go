@@ -216,9 +216,8 @@ func (s *OrphanScanner) processOrphanVariant(variant models.ImageVariant) {
 	}
 
 	// 判断是 WebP 转换还是缩略图生成
-	if models.IsThumbnailFormat(variant.Format) {
+	if width, ok := models.ParseThumbnailSize(variant.Format); ok {
 		utils.LogIfDevf("[OrphanScanner] Triggering thumbnail generation for variant %d", variant.ID)
-		width, ok := models.ParseThumbnailWidth(variant.Format)
 		if ok && width > 0 && s.thumbnailService != nil {
 			s.thumbnailService.TriggerGeneration(img, width)
 		}

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/anoixa/image-bed/config/db"
+	config "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
@@ -15,15 +15,16 @@ import (
 
 // ThumbnailTask 缩略图生成任务
 type ThumbnailTask struct {
-	VariantID        uint
-	ImageID          uint
-	SourceIdentifier string
-	TargetIdentifier string
-	TargetWidth      int
-	ConfigManager    *config.Manager
-	VariantRepo      VariantRepository
-	ImageRepo        ImageRepository
-	Storage          storage.Provider
+	VariantID       uint
+	ImageID         uint
+	SourcePath      string // 原图存储路径
+	TargetPath      string // 缩略图存储路径
+	TargetIdentifier string // 缩略图标识符
+	TargetWidth     int
+	ConfigManager   *config.Manager
+	VariantRepo     VariantRepository
+	ImageRepo       ImageRepository
+	Storage         storage.Provider
 }
 
 // Execute 执行任务
@@ -41,7 +42,7 @@ func (t *ThumbnailTask) Execute() {
 	}
 
 	if !settings.Enabled {
-		utils.LogIfDevf("[ThumbnailTask] Thumbnail disabled, skipping variant %d", t.VariantID)
+		utils.LogIfDevf("[ThumbnailTask] Thumbnail generation disabled")
 		return
 	}
 
@@ -63,7 +64,7 @@ func (t *ThumbnailTask) Execute() {
 	}
 
 	utils.LogIfDevf("[ThumbnailTask] Processing variant %d: %s -> %s (width: %d)",
-		t.VariantID, t.SourceIdentifier, t.TargetIdentifier, t.TargetWidth)
+		t.VariantID, t.SourcePath, t.TargetPath, t.TargetWidth)
 
 	// 执行转换
 	result := t.process()
@@ -82,7 +83,7 @@ func (t *ThumbnailTask) process() *thumbnailResult {
 	defer cancel()
 
 	// 读取原图数据
-	imageData, err := t.getImageData(t.SourceIdentifier)
+	imageData, err := t.getImageData(t.SourcePath)
 	if err != nil {
 		return &thumbnailResult{Error: fmt.Errorf("failed to get source image: %w", err)}
 	}
@@ -94,7 +95,7 @@ func (t *ThumbnailTask) process() *thumbnailResult {
 	}
 
 	// 存储缩略图
-	if err := t.Storage.SaveWithContext(ctx, t.TargetIdentifier, bytes.NewReader(thumbnailData)); err != nil {
+	if err := t.Storage.SaveWithContext(ctx, t.TargetPath, bytes.NewReader(thumbnailData)); err != nil {
 		return &thumbnailResult{Error: fmt.Errorf("failed to store thumbnail: %w", err)}
 	}
 
@@ -114,9 +115,9 @@ type thumbnailResult struct {
 }
 
 // getImageData 获取图片数据
-func (t *ThumbnailTask) getImageData(identifier string) ([]byte, error) {
+func (t *ThumbnailTask) getImageData(storagePath string) ([]byte, error) {
 	ctx := context.Background()
-	reader, err := t.Storage.GetWithContext(ctx, identifier)
+	reader, err := t.Storage.GetWithContext(ctx, storagePath)
 	if err != nil {
 		return nil, err
 	}
@@ -148,86 +149,56 @@ func (t *ThumbnailTask) generateThumbnail(data []byte, targetWidth int) ([]byte,
 		return webpData, size.Width, size.Height, nil
 	}
 
-	newHeight := int(float64(targetWidth) * float64(size.Height) / float64(size.Width))
+	// 计算高度保持比例
+	targetHeight := size.Height * targetWidth / size.Width
 
-	options := bimg.Options{
+	// 调整尺寸并转换为 WebP
+	processed, err := img.Process(bimg.Options{
 		Width:   targetWidth,
-		Height:  newHeight,
-		Crop:    false,
-		Quality: 85,
+		Height:  targetHeight,
 		Type:    bimg.WEBP,
-	}
-
-	// 处理图片
-	processed, err := img.Process(options)
+		Quality: 85,
+	})
 	if err != nil {
-		return nil, 0, 0, fmt.Errorf("failed to process image: %w", err)
+		return nil, 0, 0, fmt.Errorf("failed to resize and convert: %w", err)
 	}
 
-	return processed, targetWidth, newHeight, nil
+	return processed, targetWidth, targetHeight, nil
 }
 
 // handleSuccess 处理成功
 func (t *ThumbnailTask) handleSuccess(result *thumbnailResult) {
-	utils.LogIfDevf("[ThumbnailTask] Success: variant %d (%dx%d, %d bytes)",
+	// 这里需要更新变体状态
+	utils.LogIfDevf("[ThumbnailTask] Success: variant %d, %dx%d, %d bytes",
 		t.VariantID, result.Width, result.Height, result.FileSize)
 
-	if err := t.VariantRepo.UpdateCompleted(t.VariantID, t.TargetIdentifier, result.FileSize, result.Width, result.Height); err != nil {
-		utils.LogIfDevf("[ThumbnailTask] Failed to update status: %v", err)
-		return
-	}
-
-	// 更新图片状态为 ThumbnailCompleted（缩略图优先级高，先完成缩略图即标记）
-	if t.ImageRepo != nil {
-		img, err := t.ImageRepo.GetImageByID(t.ImageID)
-		if err != nil {
-			utils.LogIfDevf("[ThumbnailTask] Failed to get image %d: %v", t.ImageID, err)
-			return
-		}
-
-		// 只有从未完成状态升级时才更新
-		if img.VariantStatus == models.ImageVariantStatusNone ||
-			img.VariantStatus == models.ImageVariantStatusProcessing {
-			if err := t.ImageRepo.UpdateVariantStatus(t.ImageID, models.ImageVariantStatusThumbnailCompleted); err != nil {
-				utils.LogIfDevf("[ThumbnailTask] Failed to update image status to thumbnail_completed: %v", err)
-			} else {
-				utils.LogIfDevf("[ThumbnailTask] Updated image %d status to thumbnail_completed", t.ImageID)
-			}
-		}
-	}
+	// 更新变体状态为完成
+	_ = t.VariantRepo.UpdateCompleted(
+		t.VariantID,
+		t.TargetIdentifier,
+		t.TargetPath,
+		result.FileSize,
+		result.Width,
+		result.Height,
+	)
 }
 
 // handleError 处理错误
 func (t *ThumbnailTask) handleError(err error, maxRetries int) {
-	utils.LogIfDevf("[ThumbnailTask] Error: variant %d - %v", t.VariantID, err)
-
-	errorType := ClassifyError(err)
-	shouldRetry := errorType == ErrorTransient && t.VariantID > 0
-
-	if shouldRetry {
-		variant, getErr := t.VariantRepo.GetByID(t.VariantID)
-		if getErr != nil {
-			utils.LogIfDevf("[ThumbnailTask] Failed to get variant for retry check: %v", getErr)
-			shouldRetry = false
-		} else if variant.RetryCount >= maxRetries {
-			utils.LogIfDevf("[ThumbnailTask] Max retries reached for variant %d", t.VariantID)
-			shouldRetry = false
-		}
-	}
-
-	if shouldRetry {
-		_ = t.VariantRepo.UpdateFailed(t.VariantID, err.Error(), true)
-	} else {
-		_ = t.VariantRepo.UpdateFailed(t.VariantID, err.Error(), false)
-	}
+	// 简化处理
+	utils.LogIfDevf("[ThumbnailTask] Error: variant %d, %v", t.VariantID, err)
+	_ = t.VariantRepo.UpdateFailed(t.VariantID, err.Error(), true)
 }
 
-// recovery 异常恢复
+// recovery 恢复 panic
 func (t *ThumbnailTask) recovery() {
-	if r := recover(); r != nil {
-		utils.LogIfDevf("[ThumbnailTask] Panic recovered: %v", r)
-		if t.VariantID > 0 {
-			_ = t.VariantRepo.UpdateFailed(t.VariantID, fmt.Sprintf("panic: %v", r), true)
-		}
+	if rec := recover(); rec != nil {
+		utils.LogIfDevf("[ThumbnailTask] Panic recovered: %v", rec)
+		_, _ = t.VariantRepo.UpdateStatusCAS(
+			t.VariantID,
+			models.VariantStatusProcessing,
+			models.VariantStatusFailed,
+			fmt.Sprintf("panic: %v", rec),
+		)
 	}
 }
