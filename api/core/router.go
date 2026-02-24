@@ -57,7 +57,7 @@ func RegisterRoutes(router *gin.Engine, deps *RouterDependencies) {
 // registerBasicRoutes 注册基础路由
 func registerBasicRoutes(router *gin.Engine, deps *RouterDependencies) {
 	healthHandler := NewHealthHandler(deps.DB)
-	router.GET("/health", healthHandler.Handle)
+	router.Any("/health", healthHandler.Handle)
 
 	router.GET("/version", func(context *gin.Context) {
 		common.RespondSuccess(context, gin.H{
