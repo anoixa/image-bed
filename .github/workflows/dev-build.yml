@@ -1,101 +1,29 @@
 name: Dev Build
 
 on:
-  push:
-    branches: [dev]
-  pull_request:
-    branches: [dev]
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Build version tag'
+        required: false
 
 jobs:
-
-########################################
-# Lint + Security
-########################################
-  lint:
-    name: Lint & Security Check
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.26"
-          cache: true
-
-      - run: |
-          go mod download
-          go mod verify
-
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v7
-        with:
-          version: v2.10.1
-          args: --timeout=5m
-
-      - name: Run govulncheck
-        uses: golang/govulncheck-action@v1
-        with:
-          go-version-input: "1.26"
-          go-package: ./...
-
-########################################
-# Tests
-########################################
-  test:
-    name: Run Tests
-    runs-on: ubuntu-latest
-    needs: lint
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.26"
-          cache: true
-
-      - name: Install libvips
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libvips-dev
-
-      - run: go mod download
-
-      - name: Run tests
-        run: |
-          go test -v -race -shuffle=on -coverprofile=coverage.out ./...
-          go tool cover -func=coverage.out
-
-########################################
-# Binary AMD64
-########################################
+  ########################################
+  # Binary AMD64
+  ########################################
   build-binary-amd64:
     name: Build Binary (amd64)
     runs-on: ubuntu-latest
-    needs: [lint, test]
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
           cache: true
-
       - name: Install libvips
         run: |
           sudo apt-get update
           sudo apt-get install -y libvips-dev pkg-config
-
       - name: Build
         env:
           GOOS: linux
@@ -103,35 +31,29 @@ jobs:
           CGO_ENABLED: 1
         run: |
           go build -trimpath \
-            -ldflags="-s -w -X 'github.com/anoixa/image-bed/config.Version=dev-${{ github.sha }}'" \
+            -ldflags="-s -w -X 'github.com/anoixa/image-bed/config.Version=manual-${{ github.sha }}'" \
             -o image-bed-linux-amd64 .
-
       - uses: actions/upload-artifact@v4
         with:
           name: image-bed-linux-amd64
           path: image-bed-linux-amd64
 
-########################################
-# Binary ARM64 (Native)
-########################################
+  ########################################
+  # Binary ARM64
+  ########################################
   build-binary-arm64:
     name: Build Binary (arm64)
     runs-on: ubuntu-24.04-arm
-    needs: [lint, test]
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
           cache: true
-
       - name: Install libvips
         run: |
           sudo apt-get update
           sudo apt-get install -y libvips-dev pkg-config
-          
       - name: Build
         env:
           GOOS: linux
@@ -139,124 +61,32 @@ jobs:
           CGO_ENABLED: 1
         run: |
           go build -trimpath \
-            -ldflags="-s -w -X 'github.com/anoixa/image-bed/config.Version=dev-${{ github.sha }}'" \
+            -ldflags="-s -w -X 'github.com/anoixa/image-bed/config.Version=manual-${{ github.sha }}'" \
             -o image-bed-linux-arm64 .
-
       - uses: actions/upload-artifact@v4
         with:
           name: image-bed-linux-arm64
           path: image-bed-linux-arm64
 
-########################################
-# Docker AMD64
-########################################
-  build-docker-amd64:
-    name: Docker (amd64)
+  ########################################
+  # Docker Multi-Arch
+  ########################################
+  build-docker:
+    name: Build Docker Multi-Arch
     runs-on: ubuntu-latest
-    needs: [lint, test]
-
-    permissions:
-      contents: read
-      packages: write
-
+    needs: [build-binary-amd64, build-binary-arm64]
     steps:
       - uses: actions/checkout@v4
-
       - uses: docker/setup-buildx-action@v3
-
       - uses: docker/login-action@v3
-        if: github.event_name == 'push'
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Build & Push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64
-          push: ${{ github.event_name == 'push' }}
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:dev-amd64
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:dev-${{ github.sha }}-amd64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-########################################
-# Docker ARM64 (Native)
-########################################
-  build-docker-arm64:
-    name: Docker (arm64)
-    runs-on: ubuntu-24.04-arm
-    needs: [lint, test]
-
-    permissions:
-      contents: read
-      packages: write
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: docker/setup-buildx-action@v3
-
-      - uses: docker/login-action@v3
-        if: github.event_name == 'push'
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build & Push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/arm64
-          push: ${{ github.event_name == 'push' }}
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:dev-arm64
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:dev-${{ github.sha }}-arm64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-########################################
-# Merge Multi-Arch
-########################################
-  merge-docker-manifest:
-    name: Merge Multi-Arch Image
-    runs-on: ubuntu-latest
-    needs: [build-docker-amd64, build-docker-arm64]
-    if: github.event_name == 'push'
-
-    permissions:
-      contents: read
-      packages: write
-
-    steps:
-      - uses: docker/setup-buildx-action@v3
-
-      - uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create manifest
         run: |
-          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          IMAGE="ghcr.io/${{ github.repository }}"
           SHA="${{ github.sha }}"
-
-          docker buildx imagetools create \
-            -t ${IMAGE}:dev \
-            ${IMAGE}:dev-amd64 \
-            ${IMAGE}:dev-arm64
-
-          docker buildx imagetools create \
-            -t ${IMAGE}:dev-${SHA} \
-            ${IMAGE}:dev-${SHA}-amd64 \
-            ${IMAGE}:dev-${SHA}-arm64
-
-      - name: Inspect
-        run: |
-          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
-          docker buildx imagetools inspect ${IMAGE}:dev
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            -t ${IMAGE}:manual -t ${IMAGE}:manual-${SHA} \
+            --push .
