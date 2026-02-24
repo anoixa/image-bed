@@ -7,14 +7,17 @@ import (
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/handler/admin"
 	handlerAlbums "github.com/anoixa/image-bed/api/handler/albums"
+	handlerDashboard "github.com/anoixa/image-bed/api/handler/dashboard"
 	handlerImages "github.com/anoixa/image-bed/api/handler/images"
 	"github.com/anoixa/image-bed/api/handler/key"
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
 	configSvc "github.com/anoixa/image-bed/config/db"
+	dashboardRepo "github.com/anoixa/image-bed/database/repo/dashboard"
 	svcAlbums "github.com/anoixa/image-bed/internal/albums"
 	"github.com/anoixa/image-bed/internal/auth"
+	svcDashboard "github.com/anoixa/image-bed/internal/dashboard"
 	imageSvc "github.com/anoixa/image-bed/internal/image"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -110,6 +113,10 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
 	keyHandler := key.NewHandler(keyService)
 	loginHandler := api.NewLoginHandlerWithService(deps.LoginService, cfg)
 
+	dashboardRepository := dashboardRepo.NewRepository(deps.DB)
+	dashboardService := svcDashboard.NewService(dashboardRepository, deps.CacheProvider)
+	dashboardHandler := handlerDashboard.NewHandler(dashboardService)
+
 	apiGroup := router.Group("/api")
 	apiGroup.Use(func(context *gin.Context) {
 		context.Header("Cache-Control", "no-store")
@@ -162,6 +169,13 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
 				albumsGroup.DELETE("/:id", albumHandler.DeleteAlbumHandler)
 				albumsGroup.POST("/:id/images", albumImageHandler.AddImagesToAlbumHandler)
 				albumsGroup.DELETE("/:id/images/:imageId", albumImageHandler.RemoveImageFromAlbumHandler)
+			}
+
+			dashboardGroup := v1.Group("/dashboard")
+			dashboardGroup.Use(middleware.Authorize("jwt"))
+			{
+				dashboardGroup.GET("/stats", dashboardHandler.GetStats)
+				dashboardGroup.POST("/stats/refresh", dashboardHandler.RefreshStats)
 			}
 
 			// Admin
