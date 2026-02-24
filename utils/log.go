@@ -36,14 +36,14 @@ func SanitizeLogUsername(username string) string {
 
 // LogIfDev 仅在开发版本时输出日志
 func LogIfDev(msg string) {
-	if config.CommitHash == "n/a" {
+	if config.IsDevelopment() {
 		log.Println(msg)
 	}
 }
 
 // LogIfDevf 仅在开发版本时格式化输出日志
 func LogIfDevf(format string, v ...interface{}) {
-	if config.CommitHash == "n/a" {
+	if config.IsDevelopment() {
 		log.Printf(format, v...)
 	}
 }

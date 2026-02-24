@@ -147,7 +147,7 @@ func RunServer() {
 	defer vips.Shutdown()
 
 	log.Println("[VIPS] Govips initialized with minimal cache (1 byte)")
-	if config.CommitHash == "n/a" {
+	if config.IsDevelopment() {
 		utils.LogMemoryStats("VIPS_INIT")
 	}
 

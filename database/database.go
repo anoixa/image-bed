@@ -97,7 +97,7 @@ func newGormLogger() logger.Interface {
 	logLevel := logger.Silent
 	colorful := false
 
-	if config.CommitHash == "n/a" {
+	if config.IsDevelopment() {
 		logLevel = logger.Info
 		colorful = true
 	}

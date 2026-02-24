@@ -54,7 +54,7 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	router := gin.New()
 
 	// 仅在开发版本时启用 gin 日志
-	if deps.ServerVersion.CommitHash == "n/a" {
+	if config.IsDevelopment() {
 		gin.SetMode(gin.DebugMode)
 		router.Use(gin.Logger())
 	} else {

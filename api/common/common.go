@@ -34,3 +34,12 @@ func RespondSuccessMessage(c *gin.Context, message string, data interface{}) {
 func RespondError(c *gin.Context, httpStatus int, message string) {
 	Respond(c, httpStatus, "error", message, nil)
 }
+
+// RespondErrorAbort 错误响应
+func RespondErrorAbort(c *gin.Context, httpStatus int, message string) {
+	c.AbortWithStatusJSON(httpStatus, Response{
+		Status: "error",
+		Msg:    message,
+		Data:   nil,
+	})
+}

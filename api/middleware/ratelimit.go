@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/anoixa/image-bed/api/common"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/time/rate"
 )
@@ -70,10 +71,7 @@ func (rl *IPRateLimiter) Middleware() gin.HandlerFunc {
 		client := rl.getClientLimiter(ip)
 
 		if !client.limiter.Allow() {
-			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
-				"code":    http.StatusTooManyRequests,
-				"message": "Too many requests",
-			})
+			common.RespondErrorAbort(c, http.StatusTooManyRequests, "Too many requests")
 			return
 		}
 

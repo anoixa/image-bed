@@ -52,7 +52,7 @@ func GetMemoryUsageMB() float64 {
 
 // LogMemoryStats 记录内存统计（仅在 dev 环境输出）
 func LogMemoryStats(prefix string) {
-	if config.CommitHash != "n/a" {
+	if !config.IsDevelopment() {
 		return
 	}
 	stats := GetMemoryStats()
@@ -69,7 +69,7 @@ func LogMemoryStats(prefix string) {
 
 // LogMemoryDiff 记录内存变化（仅在 dev 环境输出）
 func LogMemoryDiff(prefix string, before MemoryStats) {
-	if config.CommitHash != "n/a" {
+	if !config.IsDevelopment() {
 		return
 	}
 	after := GetMemoryStats()
@@ -91,7 +91,7 @@ func ForceGC() {
 
 // MonitorMemory 内存监控函数，用于在任务前后打印内存变化
 func MonitorMemory(operation string) func() {
-	if config.CommitHash != "n/a" {
+	if !config.IsDevelopment() {
 		return func() {}
 	}
 	before := GetMemoryStats()
