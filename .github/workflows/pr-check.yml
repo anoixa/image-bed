@@ -149,8 +149,7 @@ jobs:
       github.event.pull_request.user.login == 'anoixa' &&
       github.event.pull_request.draft == false &&
       !contains(github.event.pull_request.title, 'WIP') &&
-      !contains(github.event.pull_request.title, '[wip]') &&
-      github.event.pull_request.mergeable != false
+      !contains(github.event.pull_request.title, '[wip]')
 
     steps:
       - name: Merge PR
