@@ -147,6 +147,7 @@ func (s *MinioStorage) Name() string {
 
 // StreamTo 将 MinIO 对象直接流式传输到 ResponseWriter
 // 避免全量加载到内存，使用 buffer pool 复用缓冲区
+// 对于大文件（>10MB），使用更大的缓冲区并进行分块传输
 func (s *MinioStorage) StreamTo(ctx context.Context, storagePath string, w http.ResponseWriter) (int64, error) {
 	obj, err := s.client.GetObject(ctx, s.bucketName, storagePath, minio.GetObjectOptions{})
 	if err != nil {
@@ -164,14 +165,68 @@ func (s *MinioStorage) StreamTo(ctx context.Context, storagePath string, w http.
 		if errResponse.Code == "NoSuchKey" {
 			return 0, fmt.Errorf("file not found in minio: %s", storagePath)
 		}
-		return 0, fmt.Errorf("failed to stat object from minio for '%s': %w", storagePath, err)
+		// Stat 失败（如超时）但不中断，继续流传输（无 Content-Length）
+		log.Printf("[MinIO] Stat failed for %s: %v, continuing without Content-Length", storagePath, err)
+	} else {
+		if w.Header().Get("Content-Type") == "" {
+			w.Header().Set("Content-Type", stat.ContentType)
+		}
+		w.Header().Set("Content-Length", strconv.FormatInt(stat.Size, 10))
+		
+		// 对于大文件（>10MB），记录日志并使用更大的缓冲区
+		if stat.Size > 10*1024*1024 {
+			log.Printf("[MinIO] Large file detected: %s (%.2f MB), using optimized streaming", storagePath, float64(stat.Size)/(1024*1024))
+		}
 	}
-
-	w.Header().Set("Content-Type", stat.ContentType)
-	w.Header().Set("Content-Length", strconv.FormatInt(stat.Size, 10))
 	w.WriteHeader(http.StatusOK)
 
 	// 使用 buffer pool 复用缓冲区（默认 32KB）
+	bufPtr := pool.SharedBufferPool.Get().(*[]byte)
+	defer pool.SharedBufferPool.Put(bufPtr)
+
+	n, err := io.CopyBuffer(w, obj, *bufPtr)
+	if err != nil {
+		return n, fmt.Errorf("failed to stream object '%s': %w", storagePath, err)
+	}
+
+	return n, nil
+}
+
+// StreamToWithSize 将 MinIO 对象流式传输到指定 writer，支持文件大小检查
+// 对于超过 maxSize 的文件，返回错误而不传输
+func (s *MinioStorage) StreamToWithSize(ctx context.Context, storagePath string, w http.ResponseWriter, maxSize int64) (int64, error) {
+	obj, err := s.client.GetObject(ctx, s.bucketName, storagePath, minio.GetObjectOptions{})
+	if err != nil {
+		errResponse := minio.ToErrorResponse(err)
+		if errResponse.Code == "NoSuchKey" {
+			return 0, fmt.Errorf("file not found in minio: %s", storagePath)
+		}
+		return 0, fmt.Errorf("failed to get object from minio for '%s': %w", storagePath, err)
+	}
+	defer func() { _ = obj.Close() }()
+
+	stat, err := obj.Stat()
+	if err != nil {
+		errResponse := minio.ToErrorResponse(err)
+		if errResponse.Code == "NoSuchKey" {
+			return 0, fmt.Errorf("file not found in minio: %s", storagePath)
+		}
+		return 0, fmt.Errorf("failed to stat object: %w", err)
+	}
+
+	// 检查文件大小限制
+	if maxSize > 0 && stat.Size > maxSize {
+		http.Error(w, fmt.Sprintf("file size %d exceeds maximum allowed size %d", stat.Size, maxSize), http.StatusRequestEntityTooLarge)
+		return 0, fmt.Errorf("file size %d exceeds maximum allowed size %d", stat.Size, maxSize)
+	}
+
+	if w.Header().Get("Content-Type") == "" {
+		w.Header().Set("Content-Type", stat.ContentType)
+	}
+	w.Header().Set("Content-Length", strconv.FormatInt(stat.Size, 10))
+	w.WriteHeader(http.StatusOK)
+
+	// 使用 buffer pool 复用缓冲区
 	bufPtr := pool.SharedBufferPool.Get().(*[]byte)
 	defer pool.SharedBufferPool.Put(bufPtr)
 

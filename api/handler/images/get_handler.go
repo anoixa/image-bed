@@ -92,10 +92,15 @@ func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 
 func (h *Handler) serveByStreaming(c *gin.Context, img *models.Image, streamer storage.StreamProvider) bool {
 	c.Header("Cache-Control", "public, max-age=86400")
+	c.Header("Content-Type", img.MimeType)
 	c.Header("ETag", "\""+img.FileHash+"\"")
 
 	_, err := streamer.StreamTo(c.Request.Context(), img.StoragePath, c.Writer)
-	return err == nil
+	if err != nil {
+		log.Printf("[serveByStreaming] Failed to stream image %s (path: %s): %v", img.Identifier, img.StoragePath, err)
+		return false
+	}
+	return true
 }
 
 // fetchFromRemote 从远程存储获取图片数据
@@ -160,7 +165,6 @@ func (h *Handler) serveBySendfile(c *gin.Context, img *models.Image, opener stor
 
 	c.Header("Cache-Control", "public, max-age=86400")
 	c.Header("Content-Type", img.MimeType)
-	c.Header("Content-Length", strconv.FormatInt(img.FileSize, 10))
 	c.Header("ETag", "\""+img.FileHash+"\"")
 
 	http.ServeContent(c.Writer, c.Request, img.Identifier, time.Time{}, file)

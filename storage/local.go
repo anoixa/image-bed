@@ -4,12 +4,15 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/anoixa/image-bed/utils/pool"
 )
 
 // LocalStorage 本地文件存储实现
@@ -212,6 +215,48 @@ func (s *LocalStorage) Exists(ctx context.Context, storagePath string) (bool, er
 	}
 
 	return true, nil
+}
+
+// StreamTo 将本地文件流式传输到 ResponseWriter
+func (s *LocalStorage) StreamTo(ctx context.Context, storagePath string, w http.ResponseWriter) (int64, error) {
+	select {
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	default:
+	}
+
+	fullPath, err := s.validatePath(storagePath)
+	if err != nil {
+		return 0, fmt.Errorf("invalid storage path: %w", err)
+	}
+
+	file, err := os.Open(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, fmt.Errorf("file not found: %w", err)
+		}
+		return 0, fmt.Errorf("failed to open file: %w", err)
+	}
+	defer func() { _ = file.Close() }()
+
+	stat, err := file.Stat()
+	if err != nil {
+		return 0, fmt.Errorf("failed to stat file: %w", err)
+	}
+
+	w.Header().Set("Content-Length", strconv.FormatInt(stat.Size(), 10))
+	w.WriteHeader(http.StatusOK)
+
+	// 使用 buffer pool 复用缓冲区（默认 256KB）
+	bufPtr := pool.SharedBufferPool.Get().(*[]byte)
+	defer pool.SharedBufferPool.Put(bufPtr)
+
+	n, err := io.CopyBuffer(w, file, *bufPtr)
+	if err != nil {
+		return n, fmt.Errorf("failed to stream file '%s': %w", storagePath, err)
+	}
+
+	return n, nil
 }
 
 // Health 检查存储健康状态
