@@ -173,7 +173,7 @@ func (m *Manager) ensureDefaultConversionConfig() error {
 
 	configData := map[string]interface{}{
 		"enabled_formats":     []string{"webp"},
-		"webp_quality":        85,
+		"webp_quality":        75,
 		"avif_quality":        80,
 		"avif_effort":         4,
 		"max_dimension":       0,
@@ -399,6 +399,7 @@ func (m *Manager) ListConfigs(ctx context.Context, category models.ConfigCategor
 	for _, config := range configs {
 		resp, err := m.ToResponseWithMask(ctx, &config, maskSensitive)
 		if err != nil {
+			log.Printf("[ConfigManager] Failed to decrypt config ID=%d, Key=%s: %v", config.ID, config.Key, err)
 			continue
 		}
 		responses = append(responses, resp)
@@ -688,7 +689,7 @@ func (m *Manager) GetStorageConfigs(ctx context.Context) ([]storage.StorageConfi
 	for _, cfg := range configs {
 		configMap, err := m.DecryptConfig(cfg.ConfigJSON)
 		if err != nil {
-			log.Printf("[ConfigManager] Failed to decrypt storage config %s: %v", cfg.Key, err)
+			log.Printf("[ConfigManager] Failed to decrypt storage config ID=%d, Key=%s: %v", cfg.ID, cfg.Key, err)
 			continue
 		}
 
@@ -721,6 +722,11 @@ func (m *Manager) GetStorageConfigs(ctx context.Context) ([]storage.StorageConfi
 			} else {
 				storageCfg.UseSSL = true
 			}
+		case "webdav":
+			storageCfg.WebDAVURL = getStringFromMap(configMap, "webdav_url", "")
+			storageCfg.WebDAVUsername = getStringFromMap(configMap, "webdav_username", "")
+			storageCfg.WebDAVPassword = getStringFromMap(configMap, "webdav_password", "")
+			storageCfg.WebDAVRootPath = getStringFromMap(configMap, "webdav_root_path", "")
 		default:
 			log.Printf("[ConfigManager] Unknown storage type: %s", storageType)
 			continue

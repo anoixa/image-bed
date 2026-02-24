@@ -48,6 +48,11 @@ func (c *Converter) TriggerWebPConversion(image *models.Image) {
 		return
 	}
 
+	// 跳过 GIF 和 WebP 格式
+	if image.MimeType == "image/gif" || image.MimeType == "image/webp" {
+		return
+	}
+
 	if settings.SkipSmallerThan > 0 {
 		minSize := int64(settings.SkipSmallerThan * 1024)
 		if image.FileSize < minSize {

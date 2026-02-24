@@ -221,8 +221,10 @@ func (t *WebPConversionTask) doConversion(ctx context.Context, settings *config.
 
 	// 导出为 WebP
 	webpBytes, _, err := img.ExportWebp(&vips.WebpExportParams{
-		Quality:  settings.WebPQuality,
-		Lossless: false,
+		Quality:         settings.WebPQuality,
+		Lossless:        false,
+		ReductionEffort: settings.WebPEffort,
+		StripMetadata:   true,
 	})
 	if err != nil {
 		return fmt.Errorf("export webp: %w", err)

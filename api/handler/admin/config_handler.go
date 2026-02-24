@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/cache"
@@ -368,6 +369,39 @@ func (h *ConfigHandler) testStorageConfig(config map[string]interface{}) *models
 			Message: "MinIO storage connection successful",
 		}
 
+	case "webdav":
+		webdavCfg := storage.WebDAVConfig{
+			URL:      getString(config, "webdav_url"),
+			Username: getString(config, "webdav_username"),
+			Password: getString(config, "webdav_password"),
+			RootPath: getString(config, "webdav_root_path"),
+			Timeout:  10 * time.Second,
+		}
+		if webdavCfg.URL == "" {
+			return &models.TestConfigResponse{
+				Success: false,
+				Message: "WebDAV URL is required",
+			}
+		}
+		provider, err := storage.NewWebDAVStorage(webdavCfg)
+		if err != nil {
+			return &models.TestConfigResponse{
+				Success: false,
+				Message: fmt.Sprintf("Failed to create WebDAV storage: %v", err),
+			}
+		}
+		ctx := context.Background()
+		if err := provider.Health(ctx); err != nil {
+			return &models.TestConfigResponse{
+				Success: false,
+				Message: fmt.Sprintf("Health check failed: %v", err),
+			}
+		}
+		return &models.TestConfigResponse{
+			Success: true,
+			Message: "WebDAV storage connection successful",
+		}
+
 	default:
 		return &models.TestConfigResponse{
 			Success: false,
@@ -479,6 +513,14 @@ func (h *ConfigHandler) hotReloadStorageConfig(id uint, config map[string]interf
 		cfg.BucketName = getString(config, "bucket_name")
 		if cfg.Endpoint == "" || cfg.AccessKeyID == "" || cfg.SecretAccessKey == "" {
 			return fmt.Errorf("endpoint, access_key_id and secret_access_key are required for minio storage")
+		}
+	case "webdav":
+		cfg.WebDAVURL = getString(config, "webdav_url")
+		cfg.WebDAVUsername = getString(config, "webdav_username")
+		cfg.WebDAVPassword = getString(config, "webdav_password")
+		cfg.WebDAVRootPath = getString(config, "webdav_root_path")
+		if cfg.WebDAVURL == "" {
+			return fmt.Errorf("webdav_url is required for webdav storage")
 		}
 	default:
 		return fmt.Errorf("unsupported storage type: %s", storageType)

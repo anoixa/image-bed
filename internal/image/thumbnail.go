@@ -101,6 +101,11 @@ func (s *ThumbnailService) TriggerGeneration(image *models.Image, width int) {
 		utils.LogIfDevf("[Thumbnail] Thumbnail generation disabled")
 		return
 	}
+
+	// 跳过 GIF 格式
+	if image.MimeType == "image/gif" {
+		return
+	}
 	if !isValidThumbnailWidth(width, settings.Sizes) {
 		utils.LogIfDevf("[Thumbnail] Invalid thumbnail width: %d", width)
 		return
@@ -234,8 +239,10 @@ func (s *ThumbnailService) resizeImageFromReader(reader io.Reader, targetWidth i
 	// 如果图片宽度小于等于目标宽度，直接转换为 WebP
 	if width <= targetWidth {
 		webpBytes, _, err := img.ExportWebp(&vips.WebpExportParams{
-			Quality:  85,
-			Lossless: false,
+			Quality:         75,
+			Lossless:        false,
+			ReductionEffort: 4,
+			StripMetadata:   true,
 		})
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to export webp: %w", err)
@@ -253,8 +260,10 @@ func (s *ThumbnailService) resizeImageFromReader(reader io.Reader, targetWidth i
 
 	// 导出为 WebP
 	webpBytes, _, err := img.ExportWebp(&vips.WebpExportParams{
-		Quality:  85,
-		Lossless: false,
+		Quality:         75,
+		Lossless:        false,
+		ReductionEffort: 4,
+		StripMetadata:   true,
 	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to export webp: %w", err)

@@ -14,7 +14,7 @@ import (
 // ConversionSettings 格式转换配置
 type ConversionSettings struct {
 	EnabledFormats   []string `json:"enabled_formats" mapstructure:"enabled_formats"`     // ["webp"]
-	WebPQuality      int      `json:"webp_quality" mapstructure:"webp_quality"`           // 1-100, 默认 85
+	WebPQuality      int      `json:"webp_quality" mapstructure:"webp_quality"`           // 1-100, 默认 75
 	WebPEffort       int      `json:"webp_effort" mapstructure:"webp_effort"`             // 0-6, 默认 4
 	AVIFQuality      int      `json:"avif_quality" mapstructure:"avif_quality"`           // 1-100, 默认 80
 	AVIFSpeed        int      `json:"avif_speed" mapstructure:"avif_speed"`               // 0-10, 默认 4
@@ -28,7 +28,7 @@ type ConversionSettings struct {
 func DefaultConversionSettings() *ConversionSettings {
 	return &ConversionSettings{
 		EnabledFormats:   []string{"webp"},
-		WebPQuality:      85,
+		WebPQuality:      75,
 		WebPEffort:       4,
 		AVIFQuality:      80,
 		AVIFSpeed:        4,

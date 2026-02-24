@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/anoixa/image-bed/utils"
 )
@@ -30,7 +31,7 @@ type ImageStream struct {
 type StorageConfig struct {
 	ID        uint
 	Name      string
-	Type      string // "local" or "minio"
+	Type      string // "local" | "minio" | "webdav"
 	IsDefault bool
 	// Local
 	LocalPath string
@@ -40,6 +41,11 @@ type StorageConfig struct {
 	SecretAccessKey string
 	UseSSL          bool
 	BucketName      string
+	// WebDAV
+	WebDAVURL      string
+	WebDAVUsername string
+	WebDAVPassword string
+	WebDAVRootPath string
 }
 
 // Provider 存储提供者接口
@@ -214,6 +220,14 @@ func createProvider(cfg StorageConfig) (Provider, error) {
 			SecretAccessKey: cfg.SecretAccessKey,
 			UseSSL:          cfg.UseSSL,
 			BucketName:      cfg.BucketName,
+		})
+	case "webdav":
+		return NewWebDAVStorage(WebDAVConfig{
+			URL:      cfg.WebDAVURL,
+			Username: cfg.WebDAVUsername,
+			Password: cfg.WebDAVPassword,
+			RootPath: cfg.WebDAVRootPath,
+			Timeout:  30 * time.Second,
 		})
 	default:
 		return nil, fmt.Errorf("unsupported storage type: %s", cfg.Type)

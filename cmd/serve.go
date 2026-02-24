@@ -140,8 +140,8 @@ func RunServer() {
 	}
 
 	vips.Startup(&vips.Config{
-		MaxCacheMem:   64 << 20, // 64MB
-		MaxCacheSize:  100,
+		MaxCacheMem:   0,
+		MaxCacheSize:  0,
 		MaxCacheFiles: 0,
 	})
 	defer vips.Shutdown()

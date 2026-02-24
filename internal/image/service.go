@@ -628,6 +628,13 @@ func (s *Service) DeleteSingle(ctx context.Context, identifier string, userID ui
 		return &DeleteResult{Success: false, Error: errors.New("permission denied")}, nil
 	}
 
+	// 先删除原图文件
+	if img.StoragePath != "" {
+		if err := storage.GetDefault().DeleteWithContext(ctx, img.StoragePath); err != nil {
+			log.Printf("Failed to delete original image file %s: %v", img.StoragePath, err)
+		}
+	}
+
 	if err := s.repo.DeleteImageByIdentifierAndUser(identifier, userID); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return &DeleteResult{Success: false, Error: errors.New("image not found")}, nil
@@ -650,14 +657,19 @@ func (s *Service) DeleteBatch(ctx context.Context, identifiers []string, userID 
 		return &DeleteResult{Success: true, DeletedCount: 0}, nil
 	}
 
-	// 批量查询图片信息（避免 N+1 查询）
+	// 批量查询图片信息
 	imagesToDelete, err := s.repo.GetImagesByIdentifiersAndUser(identifiers, userID)
 	if err != nil {
 		log.Printf("Failed to get images for batch delete: %v", err)
 	}
 
-	// 级联删除变体
+	// 删除原图文件和变体
 	for _, img := range imagesToDelete {
+		if img.StoragePath != "" {
+			if err := storage.GetDefault().DeleteWithContext(ctx, img.StoragePath); err != nil {
+				log.Printf("Failed to delete original image file %s: %v", img.StoragePath, err)
+			}
+		}
 		deleteVariantsForImage(ctx, s.variantRepo, s.cacheHelper, img)
 	}
 
@@ -694,12 +706,12 @@ func deleteVariantsForImage(ctx context.Context, variantRepo *images.VariantRepo
 	}
 
 	for _, variant := range variants {
-		if variant.Identifier == "" || variant.Status != models.VariantStatusCompleted {
+		if variant.StoragePath == "" || variant.Status != models.VariantStatusCompleted {
 			continue
 		}
 
-		if err := storage.GetDefault().DeleteWithContext(ctx, variant.Identifier); err != nil {
-			log.Printf("Failed to delete variant file %s: %v", variant.Identifier, err)
+		if err := storage.GetDefault().DeleteWithContext(ctx, variant.StoragePath); err != nil {
+			log.Printf("Failed to delete variant file %s: %v", variant.StoragePath, err)
 		}
 
 		if err := cacheHelper.DeleteCachedImageData(ctx, variant.Identifier); err != nil {

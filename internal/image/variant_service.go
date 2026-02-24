@@ -48,6 +48,18 @@ func (s *VariantService) submitBackgroundTask(task func()) {
 
 // SelectBestVariant 选择最优格式变体
 func (s *VariantService) SelectBestVariant(ctx context.Context, image *models.Image, acceptHeader string) (*VariantResult, error) {
+	// GIF 和 WebP 格式直接返回原图，不进行格式协商
+	if image.MimeType == "image/gif" || image.MimeType == "image/webp" {
+		return &VariantResult{
+			Format:      format.FormatOriginal,
+			IsOriginal:  true,
+			Image:       image,
+			MIMEType:    image.MimeType,
+			Identifier:  image.Identifier,
+			StoragePath: image.StoragePath,
+		}, nil
+	}
+
 	settings, err := s.configManager.GetConversionSettings(ctx)
 	if err != nil {
 		return nil, err
