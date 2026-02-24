@@ -150,7 +150,7 @@ jobs:
       github.event.pull_request.draft == false &&
       !contains(github.event.pull_request.title, 'WIP') &&
       !contains(github.event.pull_request.title, '[wip]') &&
-      github.event.pull_request.mergeable == true
+      github.event.pull_request.mergeable != false
 
     steps:
       - name: Merge PR
