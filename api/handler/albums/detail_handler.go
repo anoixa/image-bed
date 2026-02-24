@@ -47,8 +47,7 @@ func (h *Handler) GetAlbumDetailHandler(c *gin.Context) {
 
 	userID := c.GetUint(middleware.ContextUserIDKey)
 
-	// 获取相册及其图片
-	album, err := h.repo.GetAlbumWithImagesByID(uint(albumID), userID)
+	album, err := h.svc.GetAlbumWithImagesByID(uint(albumID), userID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			common.RespondError(c, http.StatusNotFound, "Album not found")
@@ -58,10 +57,9 @@ func (h *Handler) GetAlbumDetailHandler(c *gin.Context) {
 		return
 	}
 
-	// 转换图片列表
 	images := make([]*AlbumImageDTO, len(album.Images))
 	for i, img := range album.Images {
-		images[i] = toAlbumImageDTO(img)
+		images[i] = h.toAlbumImageDTO(img)
 	}
 
 	common.RespondSuccess(c, AlbumDetailResponse{
@@ -75,12 +73,12 @@ func (h *Handler) GetAlbumDetailHandler(c *gin.Context) {
 	})
 }
 
-func toAlbumImageDTO(image *models.Image) *AlbumImageDTO {
+func (h *Handler) toAlbumImageDTO(image *models.Image) *AlbumImageDTO {
 	if image == nil {
 		return nil
 	}
 
-	imageUrl := utils.BuildImageURL(image.Identifier)
+	imageUrl := utils.BuildImageURL(h.baseURL, image.Identifier)
 
 	return &AlbumImageDTO{
 		ID:           image.ID,

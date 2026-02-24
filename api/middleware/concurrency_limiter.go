@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/anoixa/image-bed/api/common"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/sync/semaphore"
 )
@@ -24,10 +25,7 @@ func NewConcurrencyLimiter(maxConcurrency int64) *ConcurrencyLimiter {
 func (cl *ConcurrencyLimiter) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !cl.sem.TryAcquire(1) {
-			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
-				"code":    http.StatusServiceUnavailable,
-				"message": "Server is busy, please try again later.",
-			})
+			common.RespondErrorAbort(c, http.StatusServiceUnavailable, "Server is busy, please try again later")
 			return
 		}
 
@@ -45,10 +43,7 @@ func (cl *ConcurrencyLimiter) MiddlewareWithBlock(timeout time.Duration) gin.Han
 
 		err := cl.sem.Acquire(ctx, 1)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
-				"code":    http.StatusServiceUnavailable,
-				"message": "Request timed out waiting for server resources.",
-			})
+			common.RespondErrorAbort(c, http.StatusServiceUnavailable, "Request timed out waiting for server resources")
 			return
 		}
 

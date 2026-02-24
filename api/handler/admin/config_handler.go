@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/cache"
@@ -33,10 +34,9 @@ func NewConfigHandler(manager *configSvc.Manager) *ConfigHandler {
 func (h *ConfigHandler) ListConfigs(c *gin.Context) {
 	ctx := context.Background()
 
-	// 解析查询参数
 	category := c.Query("category")
 	enabledOnly := c.Query("enabled_only") == "true"
-	maskSensitive := c.Query("mask_sensitive") != "false" // 默认脱敏
+	maskSensitive := c.Query("mask_sensitive") != "false"
 
 	var cat models.ConfigCategory
 	if category != "" {
@@ -87,7 +87,7 @@ func (h *ConfigHandler) CreateConfig(c *gin.Context) {
 
 	userID := c.GetUint("user_id")
 
-	// 如果是存储配置，先测试连接再创建
+	// test connection
 	if req.Category == models.ConfigCategoryStorage {
 		testResult := h.testConfig(&models.TestConfigRequest{
 			Category: req.Category,
@@ -105,10 +105,8 @@ func (h *ConfigHandler) CreateConfig(c *gin.Context) {
 		return
 	}
 
-	// 如果是存储配置，热加载到存储层
 	if req.Category == models.ConfigCategoryStorage {
 		if err := h.hotReloadStorageConfig(config.ID, req.Config, config.IsDefault); err != nil {
-			// 热加载失败，回滚数据库操作
 			if rollbackErr := h.manager.DeleteConfig(ctx, config.ID); rollbackErr != nil {
 				log.Printf("Failed to rollback storage config creation: %v", rollbackErr)
 			}
@@ -137,7 +135,6 @@ func (h *ConfigHandler) UpdateConfig(c *gin.Context) {
 		return
 	}
 
-	// 如果是存储配置，先测试连接再更新
 	if req.Category == models.ConfigCategoryStorage {
 		testResult := h.testConfig(&models.TestConfigRequest{
 			Category: req.Category,
@@ -177,11 +174,9 @@ func (h *ConfigHandler) DeleteConfig(c *gin.Context) {
 		return
 	}
 
-	// 如果是存储配置，先从存储层移除
 	config, getErr := h.manager.GetConfig(ctx, uint(id), false)
 	if getErr == nil && config.Category == models.ConfigCategoryStorage {
 		if err := storage.RemoveProvider(uint(id)); err != nil {
-			// 如果不是"not found"错误，说明有其他问题
 			if !strings.Contains(err.Error(), "not found") {
 				log.Printf("Warning: failed to remove storage provider: %v", err)
 			}
@@ -207,14 +202,12 @@ func (h *ConfigHandler) SetDefaultConfig(c *gin.Context) {
 		return
 	}
 
-	// 获取配置信息，检查是否为存储配置
 	config, err := h.manager.GetConfig(ctx, uint(id), false)
 	if err != nil {
 		common.RespondError(c, http.StatusNotFound, fmt.Sprintf("Config not found: %v", err))
 		return
 	}
 
-	// 如果是存储配置，先检查存储提供者是否存在
 	if config.Category == models.ConfigCategoryStorage {
 		_, err := storage.GetByID(uint(id))
 		if err != nil {
@@ -228,7 +221,6 @@ func (h *ConfigHandler) SetDefaultConfig(c *gin.Context) {
 		return
 	}
 
-	// 如果是存储配置，同时切换存储层的默认存储
 	if config.Category == models.ConfigCategoryStorage {
 		if err := storage.SetDefaultID(uint(id)); err != nil {
 			common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to set default storage: %v", err))
@@ -377,6 +369,39 @@ func (h *ConfigHandler) testStorageConfig(config map[string]interface{}) *models
 			Message: "MinIO storage connection successful",
 		}
 
+	case "webdav":
+		webdavCfg := storage.WebDAVConfig{
+			URL:      getString(config, "webdav_url"),
+			Username: getString(config, "webdav_username"),
+			Password: getString(config, "webdav_password"),
+			RootPath: getString(config, "webdav_root_path"),
+			Timeout:  10 * time.Second,
+		}
+		if webdavCfg.URL == "" {
+			return &models.TestConfigResponse{
+				Success: false,
+				Message: "WebDAV URL is required",
+			}
+		}
+		provider, err := storage.NewWebDAVStorage(webdavCfg)
+		if err != nil {
+			return &models.TestConfigResponse{
+				Success: false,
+				Message: fmt.Sprintf("Failed to create WebDAV storage: %v", err),
+			}
+		}
+		ctx := context.Background()
+		if err := provider.Health(ctx); err != nil {
+			return &models.TestConfigResponse{
+				Success: false,
+				Message: fmt.Sprintf("Health check failed: %v", err),
+			}
+		}
+		return &models.TestConfigResponse{
+			Success: true,
+			Message: "WebDAV storage connection successful",
+		}
+
 	default:
 		return &models.TestConfigResponse{
 			Success: false,
@@ -394,7 +419,6 @@ func (h *ConfigHandler) testCacheConfig(config map[string]interface{}) *models.T
 
 	switch providerType {
 	case "memory":
-		// 内存缓存通常不会有连接问题
 		return &models.TestConfigResponse{
 			Success: true,
 			Message: "Memory cache configuration is valid",
@@ -490,6 +514,14 @@ func (h *ConfigHandler) hotReloadStorageConfig(id uint, config map[string]interf
 		if cfg.Endpoint == "" || cfg.AccessKeyID == "" || cfg.SecretAccessKey == "" {
 			return fmt.Errorf("endpoint, access_key_id and secret_access_key are required for minio storage")
 		}
+	case "webdav":
+		cfg.WebDAVURL = getString(config, "webdav_url")
+		cfg.WebDAVUsername = getString(config, "webdav_username")
+		cfg.WebDAVPassword = getString(config, "webdav_password")
+		cfg.WebDAVRootPath = getString(config, "webdav_root_path")
+		if cfg.WebDAVURL == "" {
+			return fmt.Errorf("webdav_url is required for webdav storage")
+		}
 	default:
 		return fmt.Errorf("unsupported storage type: %s", storageType)
 	}
@@ -497,7 +529,6 @@ func (h *ConfigHandler) hotReloadStorageConfig(id uint, config map[string]interf
 	return storage.AddOrUpdateProvider(cfg)
 }
 
-// 辅助函数
 func getString(m map[string]interface{}, key string) string {
 	if v, ok := m[key].(string); ok {
 		return v

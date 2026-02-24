@@ -22,284 +22,244 @@ permissions:
   packages: write
 
 jobs:
+  ########################################
+  # Lint + Security
+  ########################################
+  lint:
+    name: Lint & Security Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+      - name: Install native deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libvips-dev \
+            pkg-config \
+            libsqlite3-dev
+      - run: |
+          go mod download
+          go mod verify
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.10.1
+          args: --timeout=5m
+      - name: Run govulncheck
+        uses: golang/govulncheck-action@v1
+        with:
+          go-version-input: "1.26"
+          go-package: ./...
+
+  ########################################
+  # Test
+  ########################################
   test:
     name: Run Tests
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
+          go-version-file: go.mod
+          cache: true
 
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+      - run: go mod download
+      - run: go test -v -race -shuffle=on ./...
 
-      - name: Download dependencies
-        run: go mod download
-
-      - name: Run tests
-        run: go test -v -race ./...
-
-  build-binary:
-    name: Build Binary
+########################################
+# Build Binary AMD64
+########################################
+  build-binary-amd64:
+    name: Binary (amd64)
     runs-on: ubuntu-latest
     needs: test
-    strategy:
-      matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-            suffix: linux-amd64
-          - goos: linux
-            goarch: arm64
-            suffix: linux-arm64
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
+          go-version-file: go.mod
+          cache: true
 
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+      - name: Install libvips
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libvips-dev pkg-config
 
-      - name: Build binary
+      - name: Build
         env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 0
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: 1
+          VERSION: ${{ inputs.version }}
         run: |
-          go build -trimpath -ldflags="-s -w -X 'github.com/anoixa/image-bed/config.Version=${{ inputs.version }}'" \
-            -o image-bed-${{ matrix.suffix }} .
+          go build -trimpath \
+            -ldflags="-s -w \
+            -X 'github.com/anoixa/image-bed/config.Version=${VERSION}' \
+            -X 'github.com/anoixa/image-bed/config.CommitHash=${GITHUB_SHA}'" \
+            -o image-bed-linux-amd64 .
 
-      - name: Create tarball
-        run: |
-          tar -czf image-bed-${{ matrix.suffix }}.tar.gz image-bed-${{ matrix.suffix }}
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: image-bed-${{ matrix.suffix }}
-          path: image-bed-${{ matrix.suffix }}.tar.gz
+          name: image-bed-linux-amd64
+          path: image-bed-linux-amd64
 
-  build-docker:
-    name: Build Docker Image
+########################################
+# Build Binary ARM64
+########################################
+  build-binary-arm64:
+    name: Binary (arm64)
+    runs-on: ubuntu-24.04-arm
+    needs: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install libvips
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libvips-dev pkg-config
+
+      - name: Build
+        env:
+          GOOS: linux
+          GOARCH: arm64
+          CGO_ENABLED: 1
+          VERSION: ${{ inputs.version }}
+        run: |
+          go build -trimpath \
+            -ldflags="-s -w \
+            -X 'github.com/anoixa/image-bed/config.Version=${VERSION}' \
+            -X 'github.com/anoixa/image-bed/config.CommitHash=${GITHUB_SHA}'" \
+            -o image-bed-linux-arm64 .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image-bed-linux-arm64
+          path: image-bed-linux-arm64
+
+########################################
+# Docker AMD64
+########################################
+  docker-amd64:
+    name: Docker (amd64)
     runs-on: ubuntu-latest
     needs: test
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
+      - uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=${{ inputs.version }}
-            type=raw,value=latest
+      - name: Build & Push
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
 
-      - name: Build and push
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            VERSION=${{ inputs.version }}
+          docker buildx build \
+            --platform linux/amd64 \
+            --build-arg VERSION=${VERSION} \
+            --build-arg COMMIT_HASH=${GITHUB_SHA} \
+            -t ${IMAGE}:${VERSION}-amd64 \
+            --push .
 
-  release:
-    name: Create Release
-    runs-on: ubuntu-latest
-    needs: [build-binary, build-docker]
+########################################
+# Docker ARM64
+########################################
+  docker-arm64:
+    name: Docker (arm64)
+    runs-on: ubuntu-24.04-arm
+    needs: test
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
 
-      - name: Download all artifacts
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & Push
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
+          docker buildx build \
+            --platform linux/arm64 \
+            --build-arg VERSION=${VERSION} \
+            --build-arg COMMIT_HASH=${GITHUB_SHA} \
+            -t ${IMAGE}:${VERSION}-arm64 \
+            --push .
+
+########################################
+# Multi Arch
+########################################
+  docker-multi:
+    name: Multi-Arch Manifest
+    runs-on: ubuntu-latest
+    needs: [docker-amd64, docker-arm64]
+
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create manifest
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
+          docker buildx imagetools create \
+            -t ${IMAGE}:${VERSION} \
+            -t ${IMAGE}:latest \
+            ${IMAGE}:${VERSION}-amd64 \
+            ${IMAGE}:${VERSION}-arm64
+
+########################################
+# GitHub Release
+########################################
+  release:
+    name: GitHub Release
+    runs-on: ubuntu-latest
+    needs: [docker-multi, build-binary-amd64, build-binary-arm64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download binaries
         uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Generate changelog
-        id: changelog
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const { data: tags } = await github.rest.repos.listTags({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              per_page: 1
-            });
-
-            let previousTag = null;
-            if (tags.length > 0) {
-              previousTag = tags[0].name;
-            }
-
-            // 获取提交日志
-            const compareOptions = {
-              owner: context.repo.owner,
-              repo: context.repo.repo
-            };
-
-            if (previousTag) {
-              compareOptions.base = previousTag;
-              compareOptions.head = 'main';
-            } else {
-              // 如果没有之前的 tag，使用最近 30 天
-              const since = new Date();
-              since.setDate(since.getDate() - 30);
-              compareOptions.since = since.toISOString();
-            }
-
-            const { data: commits } = previousTag
-              ? await github.rest.repos.compareCommits(compareOptions)
-              : await github.rest.repos.listCommits(compareOptions);
-
-            const commitList = previousTag ? commits.commits : commits;
-
-            // 分类变更
-            const features = [];
-            const fixes = [];
-            const others = [];
-
-            for (const commit of commitList) {
-              const message = commit.commit.message.split('\n')[0];
-              const sha = commit.sha.substring(0, 7);
-              const author = commit.author?.login || commit.commit.author.name;
-              const prMatch = message.match(/#(\d+)/);
-              const prNumber = prMatch ? prMatch[1] : null;
-
-              const entry = {
-                message: message.replace(/\(#\d+\)/, '').trim(),
-                sha,
-                author,
-                prNumber,
-                url: commit.html_url
-              };
-
-              if (message.startsWith('feat:') || message.startsWith('feat(') || message.startsWith('feature:')) {
-                features.push(entry);
-              } else if (message.startsWith('fix:') || message.startsWith('fix(')) {
-                fixes.push(entry);
-              } else if (message.startsWith('chore:') || message.startsWith('docs:') || message.startsWith('refactor:')) {
-                others.push(entry);
-              } else {
-                others.push(entry);
-              }
-            }
-
-            // 生成 changelog
-            let changelog = '';
-
-            if (features.length > 0) {
-              changelog += '## ✨ Features\n\n';
-              for (const item of features) {
-                const prLink = item.prNumber ? ` in #${item.prNumber}` : '';
-                changelog += `- ${item.message}${prLink} by @${item.author}\n`;
-              }
-              changelog += '\n';
-            }
-
-            if (fixes.length > 0) {
-              changelog += '## 🐛 Bug Fixes\n\n';
-              for (const item of fixes) {
-                const prLink = item.prNumber ? ` in #${item.prNumber}` : '';
-                changelog += `- ${item.message}${prLink} by @${item.author}\n`;
-              }
-              changelog += '\n';
-            }
-
-            if (others.length > 0) {
-              changelog += '## 🔧 Other Changes\n\n';
-              for (const item of others) {
-                const prLink = item.prNumber ? ` in #${item.prNumber}` : '';
-                changelog += `- ${item.message}${prLink} by @${item.author}\n`;
-              }
-              changelog += '\n';
-            }
-
-            // 添加 Full Changelog 链接
-            if (previousTag) {
-              changelog += `## Full Changelog\n`;
-              changelog += `[${previousTag}...${{ inputs.version }}](https://github.com/${context.repo.owner}/${context.repo.repo}/compare/${previousTag}...${{ inputs.version }})\n`;
-            }
-
-            // Docker 镜像信息
-            changelog += `\n## 📦 Docker Images\n\n`;
-            changelog += `- \`ghcr.io/${context.repo.owner}/${context.repo.repo}:${{ inputs.version }}\`\n`;
-            changelog += `- \`ghcr.io/${context.repo.owner}/${context.repo.repo}:latest\`\n`;
-
-            core.setOutput('body', changelog);
 
       - name: Create Release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.version }}
-          release_name: ${{ inputs.version }}
-          body: ${{ steps.changelog.outputs.body }}
+          name: ${{ inputs.version }}
           prerelease: ${{ inputs.prerelease }}
-
-      - name: Upload Release Assets
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const path = require('path');
-
-            // 获取刚创建的 release
-            const { data: release } = await github.rest.repos.getReleaseByTag({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              tag: '${{ inputs.version }}'
-            });
-
-            // 上传二进制文件
-            const artifactsDir = './artifacts';
-            const files = fs.readdirSync(artifactsDir);
-
-            for (const file of files) {
-              const filePath = path.join(artifactsDir, file, file);
-              if (fs.existsSync(filePath)) {
-                const data = fs.readFileSync(filePath);
-                await github.rest.repos.uploadReleaseAsset({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  release_id: release.id,
-                  name: file,
-                  data: data
-                });
-                console.log(`Uploaded ${file}`);
-              }
-            }
+          files: |
+            image-bed-linux-amd64/image-bed-linux-amd64
+            image-bed-linux-arm64/image-bed-linux-arm64

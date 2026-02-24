@@ -4,11 +4,15 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+
+	"github.com/anoixa/image-bed/utils/pool"
 )
 
 // LocalStorage 本地文件存储实现
@@ -16,19 +20,36 @@ type LocalStorage struct {
 	absBasePath string
 }
 
+// BasePath 返回存储的基础路径
+func (s *LocalStorage) BasePath() string {
+	return s.absBasePath
+}
+
 // NewLocalStorage 创建本地存储提供者
 func NewLocalStorage(basePath string) (*LocalStorage, error) {
+	// 验证路径不为空
+	if basePath == "" {
+		return nil, fmt.Errorf("base path cannot be empty")
+	}
+
 	absPath, err := filepath.Abs(basePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get absolute path for '%s': %w", basePath, err)
 	}
 
-	// 创建目录
-	if err := os.MkdirAll(absPath, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create local storage directory '%s': %w", absPath, err)
+	resolvedPath, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		if err = os.MkdirAll(absPath, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create local storage directory '%s': %w", absPath, err)
+		}
+		resolvedPath, err = filepath.EvalSymlinks(absPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to evaluate symlinks for '%s': %w", absPath, err)
+		}
 	}
+	absPath = resolvedPath
 
-	// 检查目录是否可写
+	// 写权限测试
 	testFile := filepath.Join(absPath, ".write_test_"+strconv.FormatInt(time.Now().UnixNano(), 10))
 	f, err := os.Create(testFile)
 	if err != nil {
@@ -42,119 +63,225 @@ func NewLocalStorage(basePath string) (*LocalStorage, error) {
 	}, nil
 }
 
-// SaveWithContext 保存文件到本地存储
-func (s *LocalStorage) SaveWithContext(ctx context.Context, identifier string, file io.Reader) error {
-	if !IsValidIdentifier(identifier) {
-		return fmt.Errorf("invalid file identifier: %s", identifier)
+// validatePath 统一的路径验证和安全路径生成
+func (s *LocalStorage) validatePath(storagePath string) (string, error) {
+	if storagePath == "" {
+		return "", fmt.Errorf("storage path is empty")
 	}
 
-	dstPath := filepath.Join(s.absBasePath, identifier)
+	for _, r := range storagePath {
+		if unicode.IsControl(r) {
+			return "", fmt.Errorf("storage path contains control characters")
+		}
+	}
 
-	if !strings.HasPrefix(dstPath, s.absBasePath) {
-		return fmt.Errorf("invalid file path, potential directory traversal: %s", identifier)
+	if filepath.IsAbs(storagePath) {
+		return "", fmt.Errorf("storage path must be relative")
+	}
+
+	fullPath := filepath.Join(s.absBasePath, storagePath)
+	absPath, err := filepath.Abs(fullPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve absolute path: %w", err)
+	}
+
+	if !strings.HasPrefix(absPath, s.absBasePath) {
+		return "", fmt.Errorf("invalid path: directory traversal detected")
+	}
+
+	return absPath, nil
+}
+
+// SaveWithContext 保存文件到本地存储
+func (s *LocalStorage) SaveWithContext(ctx context.Context, storagePath string, file io.Reader) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	dstPath, err := s.validatePath(storagePath)
+	if err != nil {
+		return fmt.Errorf("invalid storage path: %w", err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
 	dst, err := os.Create(dstPath)
 	if err != nil {
-		return fmt.Errorf("failed to create destination file '%s': %w", dstPath, err)
+		return fmt.Errorf("failed to create file: %w", err)
 	}
 	defer func() { _ = dst.Close() }()
 
-	if _, err := io.Copy(dst, file); err != nil {
-		_ = os.Remove(dstPath)
-		return fmt.Errorf("failed to copy file content to '%s': %w", dstPath, err)
+	if _, err = io.Copy(dst, file); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
 	}
 
 	return nil
 }
 
 // GetWithContext 从本地存储获取文件
-func (s *LocalStorage) GetWithContext(ctx context.Context, identifier string) (io.ReadSeeker, error) {
-	if !IsValidIdentifier(identifier) {
-		return nil, fmt.Errorf("invalid file identifier: %s", identifier)
+func (s *LocalStorage) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeeker, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
 	}
 
-	fullPath := filepath.Join(s.absBasePath, identifier)
-
-	// 确保路径未越界
-	if !strings.HasPrefix(fullPath, s.absBasePath) {
-		return nil, fmt.Errorf("invalid file path, potential directory traversal: %s", identifier)
+	fullPath, err := s.validatePath(storagePath)
+	if err != nil {
+		return nil, fmt.Errorf("invalid storage path: %w", err)
 	}
 
 	file, err := os.Open(fullPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("file not found: %s", identifier)
+			return nil, fmt.Errorf("file not found: %w", err)
 		}
-		return nil, fmt.Errorf("failed to open file '%s': %w", identifier, err)
+		return nil, fmt.Errorf("failed to open file: %w", err)
 	}
 
 	return file, nil
 }
 
-// OpenFile 零拷贝传输
-func (s *LocalStorage) OpenFile(ctx context.Context, name string) (*os.File, error) {
-	if !IsValidIdentifier(name) {
-		return nil, fmt.Errorf("invalid file identifier: %s", name)
+// OpenFile 打开本地文件（用于零拷贝传输）
+func (s *LocalStorage) OpenFile(ctx context.Context, storagePath string) (*os.File, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
 	}
 
-	fullPath := filepath.Join(s.absBasePath, name)
-	if !strings.HasPrefix(fullPath, s.absBasePath) {
-		return nil, fmt.Errorf("invalid file path: %s", name)
+	fullPath, err := s.validatePath(storagePath)
+	if err != nil {
+		return nil, fmt.Errorf("invalid storage path: %w", err)
 	}
 
-	return os.Open(fullPath)
+	file, err := os.Open(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("file not found: %w", err)
+		}
+		return nil, fmt.Errorf("failed to open file: %w", err)
+	}
+
+	return file, nil
 }
 
 // DeleteWithContext 从本地存储删除文件
-func (s *LocalStorage) DeleteWithContext(ctx context.Context, identifier string) error {
-	if !IsValidIdentifier(identifier) {
-		return fmt.Errorf("invalid file identifier: %s", identifier)
+func (s *LocalStorage) DeleteWithContext(ctx context.Context, storagePath string) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
 	}
 
-	fullPath := filepath.Join(s.absBasePath, identifier)
-
-	// 确保路径不越界
-	if !strings.HasPrefix(fullPath, s.absBasePath) {
-		return fmt.Errorf("invalid file path: %s", identifier)
-	}
-
-	err := os.Remove(fullPath)
+	fullPath, err := s.validatePath(storagePath)
 	if err != nil {
+		return fmt.Errorf("invalid storage path: %w", err)
+	}
+
+	if err := os.Remove(fullPath); err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("file to delete not found: %s", identifier)
+			return nil // 文件不存在也算成功
 		}
-		return fmt.Errorf("failed to delete local file '%s': %w", fullPath, err)
+		return fmt.Errorf("failed to remove file: %w", err)
 	}
 
 	return nil
 }
 
 // Exists 检查文件是否存在
-func (s *LocalStorage) Exists(ctx context.Context, identifier string) (bool, error) {
-	if !IsValidIdentifier(identifier) {
-		return false, fmt.Errorf("invalid file identifier: %s", identifier)
+func (s *LocalStorage) Exists(ctx context.Context, storagePath string) (bool, error) {
+	select {
+	case <-ctx.Done():
+		return false, ctx.Err()
+	default:
 	}
 
-	fullPath := filepath.Join(s.absBasePath, identifier)
-	if !strings.HasPrefix(fullPath, s.absBasePath) {
-		return false, fmt.Errorf("invalid file path: %s", identifier)
+	fullPath, err := s.validatePath(storagePath)
+	if err != nil {
+		return false, fmt.Errorf("invalid storage path: %w", err)
 	}
 
-	_, err := os.Stat(fullPath)
+	_, err = os.Stat(fullPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return false, nil
 		}
-		return false, err
+		return false, fmt.Errorf("failed to check file existence: %w", err)
 	}
+
 	return true, nil
+}
+
+// StreamTo 将本地文件流式传输到 ResponseWriter
+func (s *LocalStorage) StreamTo(ctx context.Context, storagePath string, w http.ResponseWriter) (int64, error) {
+	select {
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	default:
+	}
+
+	fullPath, err := s.validatePath(storagePath)
+	if err != nil {
+		return 0, fmt.Errorf("invalid storage path: %w", err)
+	}
+
+	file, err := os.Open(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, fmt.Errorf("file not found: %w", err)
+		}
+		return 0, fmt.Errorf("failed to open file: %w", err)
+	}
+	defer func() { _ = file.Close() }()
+
+	stat, err := file.Stat()
+	if err != nil {
+		return 0, fmt.Errorf("failed to stat file: %w", err)
+	}
+
+	w.Header().Set("Content-Length", strconv.FormatInt(stat.Size(), 10))
+	w.WriteHeader(http.StatusOK)
+
+	// 使用 buffer pool 复用缓冲区（默认 256KB）
+	bufPtr := pool.SharedBufferPool.Get().(*[]byte)
+	defer pool.SharedBufferPool.Put(bufPtr)
+
+	n, err := io.CopyBuffer(w, file, *bufPtr)
+	if err != nil {
+		return n, fmt.Errorf("failed to stream file '%s': %w", storagePath, err)
+	}
+
+	return n, nil
 }
 
 // Health 检查存储健康状态
 func (s *LocalStorage) Health(ctx context.Context) error {
-	_, err := os.ReadDir(s.absBasePath)
-	return err
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	// 检查目录是否可访问
+	if _, err := os.Stat(s.absBasePath); err != nil {
+		return fmt.Errorf("storage directory not accessible: %w", err)
+	}
+
+	// 测试写权限
+	testFile := filepath.Join(s.absBasePath, ".health_check_"+strconv.FormatInt(time.Now().UnixNano(), 10))
+	f, err := os.Create(testFile)
+	if err != nil {
+		return fmt.Errorf("storage directory not writable: %w", err)
+	}
+	_ = f.Close()
+	_ = os.Remove(testFile)
+
+	return nil
 }
 
 // Name 返回存储名称
@@ -162,33 +289,18 @@ func (s *LocalStorage) Name() string {
 	return "local"
 }
 
-// BasePath 返回存储的基础路径
-func (s *LocalStorage) BasePath() string {
-	return s.absBasePath
+// 为了兼容性，保留原有的方法名
+// Save 保存文件到本地存储（已废弃，请使用 SaveWithContext）
+func (s *LocalStorage) Save(storagePath string, file io.Reader) error {
+	return s.SaveWithContext(context.Background(), storagePath, file)
 }
 
-// IsValidIdentifier 校验 identifier 是否合法
-func IsValidIdentifier(identifier string) bool {
-	if identifier == "" {
-		return false
-	}
+// Get 从本地存储获取文件（已废弃，请使用 GetWithContext）
+func (s *LocalStorage) Get(storagePath string) (io.ReadSeeker, error) {
+	return s.GetWithContext(context.Background(), storagePath)
+}
 
-	if filepath.IsAbs(identifier) {
-		return false
-	}
-
-	if strings.Contains(identifier, "..") {
-		return false
-	}
-
-	for _, r := range identifier {
-		if (r < 'a' || r > 'z') &&
-			(r < 'A' || r > 'Z') &&
-			(r < '0' || r > '9') &&
-			r != '-' && r != '_' && r != '.' {
-			return false
-		}
-	}
-
-	return true
+// Delete 从本地存储删除文件（已废弃，请使用 DeleteWithContext）
+func (s *LocalStorage) Delete(storagePath string) error {
+	return s.DeleteWithContext(context.Background(), storagePath)
 }

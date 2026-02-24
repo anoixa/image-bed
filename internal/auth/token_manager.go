@@ -32,7 +32,6 @@ func NewTokenManager(manager *configSvc.Manager) (*TokenManager, error) {
 		configManager: manager,
 	}
 
-	// 从配置管理器初始化
 	if err := tm.InitializeFromManager(); err != nil {
 		return nil, err
 	}
@@ -46,7 +45,6 @@ func (tm *TokenManager) InitializeFromManager() error {
 		return errors.New("config manager is nil")
 	}
 
-	// 获取 JWT 配置
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -55,12 +53,10 @@ func (tm *TokenManager) InitializeFromManager() error {
 		return fmt.Errorf("failed to get JWT config from database: %w", err)
 	}
 
-	// 应用配置
 	if err := tm.ApplyConfig(jwtConfig); err != nil {
 		return err
 	}
 
-	// 订阅配置变更事件（热重载）
 	tm.configManager.Subscribe(configSvc.EventConfigUpdated, func(event *configSvc.Event) {
 		if event.Config.Category == models.ConfigCategoryJWT {
 			log.Println("[JWT] Configuration updated, reloading...")
@@ -138,4 +134,3 @@ func (tm *TokenManager) SetConfig(config TokenConfig) {
 	defer tm.mutex.Unlock()
 	tm.config = config
 }
-

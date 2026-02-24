@@ -7,7 +7,6 @@ import (
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
-	"github.com/anoixa/image-bed/config"
 	"github.com/gin-gonic/gin"
 )
 
@@ -75,25 +74,22 @@ func (h *Handler) UploadImages(c *gin.Context) {
 		return
 	}
 
-	// 限制最大上传文件数量
 	if len(files) > 10 {
 		common.RespondError(c, http.StatusBadRequest, "Maximum 10 files allowed per upload")
 		return
 	}
 
-	// 检查总文件大小限制
 	var totalSize int64
 	for _, f := range files {
 		totalSize += f.Size
 	}
-	maxBatchTotalMB := config.Get().UploadMaxBatchTotalMB
+	maxBatchTotalMB := h.uploadMaxBatchTotalMB
 	maxTotalSize := int64(maxBatchTotalMB) * 1024 * 1024
 	if totalSize > maxTotalSize {
 		common.RespondError(c, http.StatusRequestEntityTooLarge, fmt.Sprintf("Total size of all files (%.2f MB) exceeds maximum allowed (%d MB)", float64(totalSize)/1024/1024, maxBatchTotalMB))
 		return
 	}
 
-	// 获取存储配置：优先使用 strategy_id，否则使用默认存储
 	storageConfigID, err := h.resolveStorageConfigID(c)
 	if err != nil {
 		common.RespondError(c, http.StatusBadRequest, err.Error())
@@ -109,7 +105,6 @@ func (h *Handler) UploadImages(c *gin.Context) {
 		return
 	}
 
-	// 转换结果
 	var successResults []gin.H
 	var errorResults []gin.H
 	for _, result := range results {
@@ -136,17 +131,12 @@ func (h *Handler) UploadImages(c *gin.Context) {
 }
 
 // resolveStorageConfigID 解析存储配置ID
-func (h *Handler) resolveStorageConfigID(c interface {
-	PostForm(string) string
-	Query(string) string
-}) (uint, error) {
-	// 优先从 form 中获取，如果不存在则从 query 中获取
+func (h *Handler) resolveStorageConfigID(c *gin.Context) (uint, error) {
 	strategyIDStr := c.PostForm("strategy_id")
 	if strategyIDStr == "" {
 		strategyIDStr = c.Query("strategy_id")
 	}
 
-	// 获取对应的存储配置ID
 	if strategyIDStr != "" {
 		strategyID, err := strconv.ParseUint(strategyIDStr, 10, 32)
 		if err != nil {
@@ -155,7 +145,10 @@ func (h *Handler) resolveStorageConfigID(c interface {
 		return uint(strategyID), nil
 	}
 
-	// 未指定 strategy_id，返回 0 表示使用默认存储
-	return 0, nil
+	defaultID, err := h.configManager.GetDefaultStorageConfigID(c.Request.Context())
+	if err != nil {
+		// 如果获取失败，返回 0（表示使用默认存储）
+		return 0, nil
+	}
+	return defaultID, nil
 }
-

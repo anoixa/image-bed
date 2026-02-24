@@ -18,6 +18,7 @@ import (
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/spf13/cobra"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // restoreCmd 数据库还原命令
@@ -60,7 +61,6 @@ func init() {
 	_ = restoreCmd.MarkFlagRequired("input")
 }
 
-
 // restoreStats 还原统计
 type restoreStats struct {
 	Restored             map[string]int64
@@ -79,7 +79,6 @@ func newRestoreStats() *restoreStats {
 
 // runRestore 执行还原
 func runRestore(inputFile string, tables []string, dryRun, truncate bool) error {
-	// 验证输入文件
 	if _, err := os.Stat(inputFile); err != nil {
 		return fmt.Errorf("backup file not found: %w", err)
 	}
@@ -93,7 +92,6 @@ func runRestore(inputFile string, tables []string, dryRun, truncate bool) error 
 	}
 	defer func() { _ = database.Close(db) }()
 
-	// 创建临时目录解压备份
 	tempDir := filepath.Join(os.TempDir(), fmt.Sprintf("image-bed-restore-%d", time.Now().Unix()))
 	if err := os.MkdirAll(tempDir, 0755); err != nil {
 		return fmt.Errorf("failed to create temp directory: %w", err)
@@ -107,7 +105,6 @@ func runRestore(inputFile string, tables []string, dryRun, truncate bool) error 
 		return fmt.Errorf("failed to extract backup: %w", err)
 	}
 
-	// 读取元数据
 	metadataPath := filepath.Join(tempDir, "metadata.json")
 	metadata, err := readMetadata(metadataPath)
 	if err != nil {
@@ -169,7 +166,6 @@ func runRestore(inputFile string, tables []string, dryRun, truncate bool) error 
 		}
 	}
 
-	// 更新自增序列
 	if !dryRun {
 		log.Println("Updating auto-increment sequences...")
 		if err := updateAutoIncrementSequences(db, cfg.DBType, stats); err != nil {
@@ -225,6 +221,18 @@ func extractTarGz(archivePath, destDir string) error {
 		}
 
 		targetPath := filepath.Join(destDir, header.Name)
+
+		destDirAbs, err := filepath.Abs(destDir)
+		if err != nil {
+			return fmt.Errorf("failed to get absolute path for destDir: %w", err)
+		}
+		targetPathAbs, err := filepath.Abs(targetPath)
+		if err != nil {
+			return fmt.Errorf("failed to get absolute path for target: %w", err)
+		}
+		if !strings.HasPrefix(targetPathAbs, destDirAbs+string(os.PathSeparator)) {
+			return fmt.Errorf("illegal file path in archive: %s", header.Name)
+		}
 
 		switch header.Typeflag {
 		case tar.TypeDir:
@@ -320,7 +328,6 @@ func restoreBatch(db *gorm.DB, scanner *bufio.Scanner, lineNum *int, batchSize i
 		}
 	}
 
-	// 处理剩余记录
 	if len(batch) > 0 {
 		insertBatch(db, batch, dryRun, stats, tableName)
 	}
@@ -361,7 +368,6 @@ func restoreBatchWithCleanup[T any](db *gorm.DB, scanner *bufio.Scanner, lineNum
 		}
 	}
 
-	// 处理剩余记录
 	if len(batch) > 0 && !dryRun {
 		if err := db.CreateInBatches(batch, len(batch)).Error; err != nil {
 			log.Printf("Warning: failed to insert final batch: %v", err)
@@ -399,38 +405,31 @@ func restoreAlbumImagesBatch(db *gorm.DB, scanner *bufio.Scanner, lineNum *int, 
 		}
 	}
 
-	// 处理剩余记录
 	if len(batch) > 0 {
 		insertAlbumImagesBatch(db, batch, dryRun, stats)
 	}
 }
 
-// insertBatch 插入批量记录（通用）
+// insertBatch 插入批量记录
 func insertBatch(db *gorm.DB, batch []interface{}, dryRun bool, stats *restoreStats, tableName string) {
 	if dryRun {
 		stats.Restored[tableName] += int64(len(batch))
 		return
 	}
 
-	// 使用事务批量插入
-	err := db.Transaction(func(tx *gorm.DB) error {
-		for _, record := range batch {
-			if err := tx.Create(record).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	if len(batch) == 0 {
+		return
+	}
 
-	if err != nil {
-		log.Printf("Warning: failed to insert batch: %v", err)
+	if err := db.CreateInBatches(batch, len(batch)).Error; err != nil {
+		log.Printf("Warning: failed to insert batch for %s: %v", tableName, err)
 		stats.Errors[tableName] += int64(len(batch))
 	} else {
 		stats.Restored[tableName] += int64(len(batch))
 	}
 }
 
-// insertAlbumImagesBatch 批量插入 album_images
+// insertAlbumImagesBatch 批量插入 album_images（跨数据库兼容版）
 func insertAlbumImagesBatch(db *gorm.DB, batch []albumImageRecord, dryRun bool, stats *restoreStats) {
 	if dryRun {
 		stats.Restored["album_images"] += int64(len(batch))
@@ -441,17 +440,15 @@ func insertAlbumImagesBatch(db *gorm.DB, batch []albumImageRecord, dryRun bool, 
 		return
 	}
 
-	// 构建批量插入 SQL
-	var values []string
-	var args []interface{}
-	for _, record := range batch {
-		values = append(values, "(?, ?)")
-		args = append(args, record.AlbumID, record.ImageID)
-	}
+	// 使用 GORM 的 OnConflict 实现跨数据库兼容的"存在则忽略"插入
+	// SQLite: INSERT OR IGNORE
+	// MySQL: INSERT IGNORE
+	// PostgreSQL: ON CONFLICT DO NOTHING
+	err := db.Table("album_images").
+		Clauses(clause.OnConflict{DoNothing: true}).
+		CreateInBatches(&batch, len(batch)).Error
 
-	sql := "INSERT OR IGNORE INTO album_images (album_id, image_id) VALUES " +
-		strings.Join(values, ", ")
-	if err := db.Exec(sql, args...).Error; err != nil {
+	if err != nil {
 		log.Printf("Warning: failed to insert album_images batch: %v", err)
 		stats.Errors["album_images"] += int64(len(batch))
 	} else {
@@ -460,27 +457,21 @@ func insertAlbumImagesBatch(db *gorm.DB, batch []albumImageRecord, dryRun bool, 
 }
 
 // truncateTables 清空表数据
-func truncateTables(db *gorm.DB, tables []string) error {
-	// 按依赖逆序清空
-	truncateOrder := []string{"album_images", "api_tokens", "images", "albums", "devices", "users"}
+func truncateTables(db *gorm.DB, tablesToClear []string) error {
+	truncateOrder := []string{
+		"album_images", "api_tokens", "images",
+		"albums", "devices", "users",
+	}
 
-	for _, table := range truncateOrder {
-		if !contains(tables, table) {
+	for _, safeTable := range truncateOrder {
+		if !contains(tablesToClear, safeTable) {
 			continue
 		}
 
-		log.Printf("Truncating table: %s", table)
+		log.Printf("Truncating table: %s", safeTable)
 
-		// 针对不同表使用不同的清空方式
-		switch table {
-		case "album_images":
-			if err := db.Exec("DELETE FROM album_images").Error; err != nil {
-				return fmt.Errorf("failed to truncate %s: %w", table, err)
-			}
-		default:
-			if err := db.Exec(fmt.Sprintf("DELETE FROM %s", table)).Error; err != nil {
-				return fmt.Errorf("failed to truncate %s: %w", table, err)
-			}
+		if err := db.Table(safeTable).Where("1 = 1").Delete(nil).Error; err != nil {
+			return fmt.Errorf("failed to truncate %s: %w", safeTable, err)
 		}
 	}
 

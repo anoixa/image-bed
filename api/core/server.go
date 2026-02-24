@@ -7,6 +7,7 @@ import (
 
 	"github.com/anoixa/image-bed/api"
 	"github.com/anoixa/image-bed/api/middleware"
+	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
 	configSvc "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/repo/accounts"
@@ -29,6 +30,12 @@ type Repositories struct {
 	KeysRepo     *keys.Repository
 }
 
+// ServerVersion 服务器版本信息
+type ServerVersion struct {
+	Version    string
+	CommitHash string
+}
+
 // ServerDependencies 服务器依赖项
 type ServerDependencies struct {
 	DB            *gorm.DB
@@ -36,15 +43,18 @@ type ServerDependencies struct {
 	ConfigManager *configSvc.Manager
 	Converter     *imageSvc.Converter
 	TokenManager  *auth.TokenManager
+	Config        *config.Config
+	CacheProvider cache.Provider
+	ServerVersion ServerVersion
 }
 
 // 启动gin
 func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
-	cfg := config.Get()
+	cfg := deps.Config
 	router := gin.New()
 
 	// 仅在开发版本时启用 gin 日志
-	if config.CommitHash == "n/a" {
+	if config.IsDevelopment() {
 		gin.SetMode(gin.DebugMode)
 		router.Use(gin.Logger())
 	} else {
@@ -52,18 +62,18 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	}
 	router.Use(gin.Recovery())
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{cfg.BaseURL()},
-		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Length", "Content-Type", "Authorization"},
-		AllowCredentials: true,
-		MaxAge:           12 * time.Hour,
+		AllowOrigins:              cfg.GetCorsOrigins(),
+		AllowMethods:              []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"},
+		AllowHeaders:              []string{"Origin", "Content-Length", "Content-Type", "Authorization"},
+		AllowCredentials:          true,
+		MaxAge:                    12 * time.Hour,
+		OptionsResponseStatusCode: 204,
 	}))
 
 	if err := router.SetTrustedProxies(nil); err != nil {
 		log.Printf("Warning: Failed to set trusted proxies: %v", err)
 	}
 
-	// 初始化限制器
 	router.MaxMultipartMemory = int64(cfg.UploadMaxSizeMB) << 20
 	concurrencyLimiter := middleware.NewConcurrencyLimiter(100)
 	router.Use(concurrencyLimiter.Middleware())
@@ -72,11 +82,7 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 		requestBodyLimit = 100 << 20 // 最小 100MB
 	}
 	router.Use(middleware.MaxBytesReader(requestBodyLimit))
-
-	// 请求ID追踪
 	router.Use(middleware.RequestID())
-
-	// 基础监控指标
 	router.Use(middleware.Metrics())
 
 	// 速率限制器
@@ -89,7 +95,6 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 		imageRateLimiter.StopCleanup()
 	}
 
-	// 初始化认证服务
 	var tokenManager *auth.TokenManager
 	var jwtService *auth.JWTService
 	var loginService *auth.LoginService
@@ -111,7 +116,6 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 		api.SetJWTService(jwtService)
 	}
 
-	// 注册路由
 	routerDeps := &RouterDependencies{
 		DB:               deps.DB,
 		Repositories:     deps.Repositories,
@@ -122,6 +126,9 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 		AuthRateLimiter:  authRateLimiter,
 		APIRateLimiter:   apiRateLimiter,
 		ImageRateLimiter: imageRateLimiter,
+		CacheProvider:    deps.CacheProvider,
+		ServerVersion:    deps.ServerVersion,
+		Config:           deps.Config,
 	}
 	RegisterRoutes(router, routerDeps)
 
@@ -130,7 +137,7 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 
 // StartServer 创建 http.Server
 func StartServer(deps *ServerDependencies) (*http.Server, func()) {
-	cfg := config.Get()
+	cfg := deps.Config
 	router, clean := setupRouter(deps)
 
 	srv := &http.Server{

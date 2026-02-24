@@ -24,12 +24,10 @@ func TestPanicRecovery(t *testing.T) {
 	pool.Submit(panicTask)
 	pool.Submit(panicTask)
 
-	// 提交正常任务
 	pool.Submit(normalTask)
 	pool.Submit(normalTask)
 	pool.Submit(normalTask)
 
-	// 等待任务执行完成
 	time.Sleep(200 * time.Millisecond)
 
 	// 验证：虽然有两个任务 panic，但 worker 应该继续运行
@@ -37,7 +35,6 @@ func TestPanicRecovery(t *testing.T) {
 		t.Errorf("Expected 3 completed tasks, got %d", completedTasks)
 	}
 
-	// 验证统计信息
 	stats := pool.GetStats()
 	if stats.Failed != 2 {
 		t.Errorf("Expected 2 failed tasks, got %d", stats.Failed)
@@ -55,7 +52,6 @@ func TestGracefulShutdown(t *testing.T) {
 	var taskStarted sync.WaitGroup
 	taskStarted.Add(1)
 
-	// 提交一个耗时任务
 	slowTask := func() {
 		taskStarted.Done()
 		time.Sleep(300 * time.Millisecond)
@@ -64,7 +60,6 @@ func TestGracefulShutdown(t *testing.T) {
 
 	pool.Submit(slowTask)
 
-	// 等待任务开始执行
 	taskStarted.Wait()
 
 	// 开始优雅关闭（此时任务应该还在执行中）
@@ -72,12 +67,10 @@ func TestGracefulShutdown(t *testing.T) {
 	pool.Stop()
 	duration := time.Since(startTime)
 
-	// 验证：关闭应该等待耗时任务完成
 	if duration < 250*time.Millisecond {
 		t.Errorf("Shutdown was too fast, expected to wait for slow task: %v", duration)
 	}
 
-	// 验证任务已完成
 	if atomic.LoadInt32(&completedTasks) != 1 {
 		t.Errorf("Expected slow task to complete, got %d completed tasks", completedTasks)
 	}
@@ -95,7 +88,6 @@ func TestQueueFullDropPolicy(t *testing.T) {
 		<-blocker // 阻塞直到测试结束
 	}
 
-	// 提交阻塞任务
 	pool.Submit(blockingTask)
 	time.Sleep(50 * time.Millisecond) // 等待任务被 worker 接收
 
@@ -147,7 +139,6 @@ func TestConcurrentSubmit(t *testing.T) {
 		t.Errorf("Expected %d completed tasks, got %d", expected, actual)
 	}
 
-	// 验证统计信息
 	stats := pool.GetStats()
 	if stats.Submitted != uint64(expected) {
 		t.Errorf("Expected %d submitted tasks in stats, got %d", expected, stats.Submitted)
@@ -159,7 +150,6 @@ func TestGetStats(t *testing.T) {
 	pool := NewPool(2, 10)
 	defer pool.Stop()
 
-	// 提交一些任务
 	for i := 0; i < 5; i++ {
 		pool.Submit(func() {
 			time.Sleep(10 * time.Millisecond)
@@ -190,7 +180,6 @@ func TestSubmitAfterStop(t *testing.T) {
 	// 先停止池
 	pool.Stop()
 
-	// 尝试提交任务，应该失败
 	result := pool.Submit(func() {})
 	if result {
 		t.Error("Expected Submit to return false after pool is stopped")
@@ -229,7 +218,6 @@ func TestPanicRecoveryConcurrent(t *testing.T) {
 	// 增加等待时间确保所有任务被处理
 	time.Sleep(500 * time.Millisecond)
 
-	// 验证：应该有约 2/3 的任务正常完成（允许更大误差范围）
 	expectedNormal := int32(numTasks * 2 / 3)
 	actualNormal := atomic.LoadInt32(&normalCompleted)
 	// CI 环境下允许更大误差
@@ -237,7 +225,6 @@ func TestPanicRecoveryConcurrent(t *testing.T) {
 		t.Logf("Warning: Expected ~%d normal tasks completed, got %d (may be due to CI environment)", expectedNormal, actualNormal)
 	}
 
-	// 验证失败统计（允许更大误差范围）
 	stats := pool.GetStats()
 	expectedPanic := uint64(numTasks / 3)
 	if stats.Failed < expectedPanic-15 || stats.Failed > expectedPanic+15 {
@@ -254,7 +241,6 @@ func TestPanicRecoveryConcurrent(t *testing.T) {
 func TestDoubleStop(t *testing.T) {
 	pool := NewPool(2, 10)
 
-	// 第一次停止
 	pool.Stop()
 
 	// 第二次停止，不应该 panic
@@ -263,7 +249,6 @@ func TestDoubleStop(t *testing.T) {
 
 // TestGlobalPool 测试全局池
 func TestGlobalPool(t *testing.T) {
-	// 初始化全局池
 	InitGlobalPool(2, 10)
 
 	pool := GetGlobalPool()
@@ -271,7 +256,6 @@ func TestGlobalPool(t *testing.T) {
 		t.Fatal("Expected global pool to be initialized")
 	}
 
-	// 提交任务
 	var completed int32
 	ok := pool.Submit(func() {
 		atomic.AddInt32(&completed, 1)
@@ -286,7 +270,6 @@ func TestGlobalPool(t *testing.T) {
 		t.Errorf("Expected 1 completed task, got %d", completed)
 	}
 
-	// 停止全局池
 	StopGlobalPool()
 
 	// 停止后再次调用不应 panic
@@ -327,7 +310,7 @@ func TestDefaultPoolConfig(t *testing.T) {
 	if stats.WorkerCount <= 0 {
 		t.Error("Expected worker count to be > 0 with default config")
 	}
-	if stats.QueueCap != 1000 {
-		t.Errorf("Expected default queue capacity 1000, got %d", stats.QueueCap)
+	if stats.QueueCap != 100 {
+		t.Errorf("Expected default queue capacity 100, got %d", stats.QueueCap)
 	}
 }

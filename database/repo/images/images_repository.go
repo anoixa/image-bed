@@ -2,6 +2,7 @@ package images
 
 import (
 	"context"
+	"time"
 
 	"github.com/anoixa/image-bed/database/models"
 	"gorm.io/gorm"
@@ -109,6 +110,16 @@ func (r *Repository) GetImageByIDAndUser(id, userID uint) (*models.Image, error)
 	return &image, err
 }
 
+// GetImagesByIDsAndUser 批量通过ID和用户ID获取图片
+func (r *Repository) GetImagesByIDsAndUser(ids []uint, userID uint) ([]*models.Image, error) {
+	if len(ids) == 0 {
+		return []*models.Image{}, nil
+	}
+	var images []*models.Image
+	err := r.db.Where("id IN ? AND user_id = ?", ids, userID).Find(&images).Error
+	return images, err
+}
+
 // UpdateImage 更新图片
 func (r *Repository) UpdateImage(image *models.Image) error {
 	return r.db.Save(image).Error
@@ -174,7 +185,7 @@ func (r *Repository) UpdateImageByIdentifier(identifier string, updates map[stri
 }
 
 // GetImageList 获取图片列表（支持搜索和过滤）
-func (r *Repository) GetImageList(storageType, identifier, search string, albumID *uint, page, pageSize, userID int) ([]*models.Image, int64, error) {
+func (r *Repository) GetImageList(storageType, identifier, search string, albumID *uint, startTime, endTime int64, page, pageSize, userID int) ([]*models.Image, int64, error) {
 	var imageList []*models.Image
 	var total int64
 
@@ -192,6 +203,13 @@ func (r *Repository) GetImageList(storageType, identifier, search string, albumI
 	if albumID != nil {
 		db = db.Joins("JOIN album_images ON album_images.image_id = images.id").
 			Where("album_images.album_id = ?", *albumID)
+	}
+	// 时间区间过滤（Unix时间戳秒）
+	if startTime > 0 {
+		db = db.Where("created_at >= ?", time.Unix(startTime, 0))
+	}
+	if endTime > 0 {
+		db = db.Where("created_at <= ?", time.Unix(endTime, 0))
 	}
 
 	if err := db.Count(&total).Error; err != nil {
@@ -229,4 +247,16 @@ func (r *Repository) WithContext(ctx context.Context) *Repository {
 // DB 返回底层 *gorm.DB 实例
 func (r *Repository) DB() *gorm.DB {
 	return r.db
+}
+
+// UpdateVariantStatus 更新图片变体状态
+func (r *Repository) UpdateVariantStatus(imageID uint, status models.ImageVariantStatus) error {
+	return r.db.Model(&models.Image{}).Where("id = ?", imageID).Update("variant_status", status).Error
+}
+
+// GetImagesByVariantStatus 根据变体状态获取图片列表
+func (r *Repository) GetImagesByVariantStatus(statuses []models.ImageVariantStatus, limit int) ([]*models.Image, error) {
+	var images []*models.Image
+	err := r.db.Where("variant_status IN ?", statuses).Limit(limit).Find(&images).Error
+	return images, err
 }

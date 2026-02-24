@@ -46,11 +46,11 @@ func init() {
 
 // cleanStats 清理统计信息
 type cleanStats struct {
-	orphanDBRecords     int // 数据库孤儿记录数
-	orphanStorageFiles  int // 存储孤儿文件数
-	deletedTempFiles    int // 删除的临时文件数
-	deletedDBRecords    int // 删除的数据库记录数
-	deletedStorageFiles int // 删除的存储文件数
+	orphanDBRecords     int
+	orphanStorageFiles  int
+	deletedTempFiles    int
+	deletedDBRecords    int
+	deletedStorageFiles int
 	errors              []string
 }
 
@@ -67,21 +67,18 @@ func runClean(dryRun, tempOnly, dbOnly, storageOnly bool) error {
 
 	stats := &cleanStats{}
 
-	// 数据库清理
 	if !tempOnly && !storageOnly {
 		if err := cleanOrphanDBRecords(db, stats, dryRun); err != nil {
 			stats.errors = append(stats.errors, fmt.Sprintf("clean orphan DB records failed: %v", err))
 		}
 	}
 
-	// 存储清理
 	if !tempOnly && !dbOnly {
 		if err := cleanOrphanStorageFiles(db, stats, dryRun); err != nil {
 			stats.errors = append(stats.errors, fmt.Sprintf("clean orphan storage files failed: %v", err))
 		}
 	}
 
-	// 文件清理
 	if !dbOnly && !storageOnly {
 		if err := cleanTempFiles(cfg, stats, dryRun); err != nil {
 			stats.errors = append(stats.errors, fmt.Sprintf("clean temp files failed: %v", err))
@@ -144,13 +141,11 @@ func cleanOrphanDBRecords(db *gorm.DB, stats *cleanStats, dryRun bool) error {
 func cleanOrphanStorageFiles(db *gorm.DB, stats *cleanStats, dryRun bool) error {
 	log.Println("Checking for orphan storage files...")
 
-	// 获取默认存储提供者
 	provider := storage.GetDefault()
 	if provider == nil {
 		return fmt.Errorf("no default storage provider")
 	}
 
-	// 检查是否为本地存储
 	localStorage, ok := provider.(*storage.LocalStorage)
 	if !ok {
 		log.Printf("Storage type '%s' does not support orphan file detection yet", provider.Name())

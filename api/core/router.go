@@ -7,17 +7,29 @@ import (
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/handler/admin"
 	handlerAlbums "github.com/anoixa/image-bed/api/handler/albums"
+	handlerDashboard "github.com/anoixa/image-bed/api/handler/dashboard"
 	handlerImages "github.com/anoixa/image-bed/api/handler/images"
 	"github.com/anoixa/image-bed/api/handler/key"
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
 	configSvc "github.com/anoixa/image-bed/config/db"
+	dashboardRepo "github.com/anoixa/image-bed/database/repo/dashboard"
+	svcAlbums "github.com/anoixa/image-bed/internal/albums"
 	"github.com/anoixa/image-bed/internal/auth"
+	svcDashboard "github.com/anoixa/image-bed/internal/dashboard"
 	imageSvc "github.com/anoixa/image-bed/internal/image"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
+
+// getBaseURL 从配置获取基础 URL
+func getBaseURL(cfg *config.Config) string {
+	if cfg != nil && cfg.ServerDomain != "" {
+		return cfg.ServerDomain
+	}
+	return ""
+}
 
 // RouterDependencies 路由注册依赖
 type RouterDependencies struct {
@@ -30,29 +42,27 @@ type RouterDependencies struct {
 	AuthRateLimiter  *middleware.IPRateLimiter
 	APIRateLimiter   *middleware.IPRateLimiter
 	ImageRateLimiter *middleware.IPRateLimiter
+	CacheProvider    cache.Provider
+	ServerVersion    ServerVersion
+	Config           *config.Config
 }
 
 // RegisterRoutes 注册所有路由
 func RegisterRoutes(router *gin.Engine, deps *RouterDependencies) {
-	// 基础路由
 	registerBasicRoutes(router, deps)
-
-	// 公共接口路由
 	registerPublicRoutes(router, deps)
-
-	// API 路由
 	registerAPIRoutes(router, deps)
 }
 
 // registerBasicRoutes 注册基础路由
 func registerBasicRoutes(router *gin.Engine, deps *RouterDependencies) {
 	healthHandler := NewHealthHandler(deps.DB)
-	router.GET("/health", healthHandler.Handle)
+	router.Any("/health", healthHandler.Handle)
 
 	router.GET("/version", func(context *gin.Context) {
 		common.RespondSuccess(context, gin.H{
-			"version": config.Version,
-			"commit":  config.CommitHash,
+			"version": deps.ServerVersion.Version,
+			"commit":  deps.ServerVersion.CommitHash,
 		})
 	})
 
@@ -63,9 +73,14 @@ func registerBasicRoutes(router *gin.Engine, deps *RouterDependencies) {
 
 // registerPublicRoutes 注册公共接口路由
 func registerPublicRoutes(router *gin.Engine, deps *RouterDependencies) {
-	// 创建处理器
-	cacheProvider := cache.GetDefault()
-	imageHandler := handlerImages.NewHandler(cacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager)
+	cfg := deps.Config
+	baseURL := getBaseURL(cfg)
+	uploadMaxBatchTotalMB := 500
+	if cfg != nil {
+		uploadMaxBatchTotalMB = cfg.UploadMaxBatchTotalMB
+	}
+
+	imageHandler := handlerImages.NewHandler(deps.CacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager, cfg, baseURL, uploadMaxBatchTotalMB)
 
 	// 公共图片访问
 	publicGroup := router.Group("/images")
@@ -74,7 +89,6 @@ func registerPublicRoutes(router *gin.Engine, deps *RouterDependencies) {
 		publicGroup.GET("/:identifier", imageHandler.GetImage)
 	}
 
-	// 缩略图公共访问
 	thumbnailGroup := router.Group("/thumbnails")
 	thumbnailGroup.Use(deps.ImageRateLimiter.Middleware())
 	{
@@ -84,12 +98,24 @@ func registerPublicRoutes(router *gin.Engine, deps *RouterDependencies) {
 
 // registerAPIRoutes 注册 API 路由
 func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
-	cacheProvider := cache.GetDefault()
-	imageHandler := handlerImages.NewHandler(cacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager)
-	albumHandler := handlerAlbums.NewHandler(deps.Repositories.AlbumsRepo, cacheProvider)
-	albumImageHandler := handlerAlbums.NewAlbumImageHandler(deps.Repositories.AlbumsRepo, deps.Repositories.ImagesRepo, cacheProvider)
-	keyHandler := key.NewHandler(deps.Repositories.KeysRepo)
-	loginHandler := api.NewLoginHandlerWithService(deps.LoginService)
+	cfg := deps.Config
+	baseURL := getBaseURL(cfg)
+	uploadMaxBatchTotalMB := 500
+	if cfg != nil {
+		uploadMaxBatchTotalMB = cfg.UploadMaxBatchTotalMB
+	}
+
+	imageHandler := handlerImages.NewHandler(deps.CacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager, cfg, baseURL, uploadMaxBatchTotalMB)
+	albumService := svcAlbums.NewService(deps.Repositories.AlbumsRepo)
+	albumHandler := handlerAlbums.NewHandler(albumService, deps.CacheProvider, baseURL)
+	albumImageHandler := handlerAlbums.NewAlbumImageHandler(albumService, deps.Repositories.ImagesRepo, deps.CacheProvider, cfg)
+	keyService := auth.NewKeyService(deps.Repositories.KeysRepo)
+	keyHandler := key.NewHandler(keyService)
+	loginHandler := api.NewLoginHandlerWithService(deps.LoginService, cfg)
+
+	dashboardRepository := dashboardRepo.NewRepository(deps.DB)
+	dashboardService := svcDashboard.NewService(dashboardRepository, deps.CacheProvider)
+	dashboardHandler := handlerDashboard.NewHandler(dashboardService)
 
 	apiGroup := router.Group("/api")
 	apiGroup.Use(func(context *gin.Context) {
@@ -97,7 +123,6 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
 		context.Next()
 	})
 	{
-		// 认证路由
 		authGroup := apiGroup.Group("/auth")
 		authGroup.Use(deps.AuthRateLimiter.Middleware())
 		{
@@ -116,10 +141,6 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
 			{
 				imagesGroup.POST("/upload", imageHandler.UploadImage)
 				imagesGroup.POST("/uploads", imageHandler.UploadImages)
-				imagesGroup.POST("/upload/chunked/init", imageHandler.InitChunkedUpload)
-				imagesGroup.POST("/upload/chunked", imageHandler.UploadChunk)
-				imagesGroup.GET("/upload/chunked/status", imageHandler.GetChunkedUploadStatus)
-				imagesGroup.POST("/upload/chunked/complete", imageHandler.CompleteChunkedUpload)
 				imagesGroup.POST("", imageHandler.ListImages)
 				imagesGroup.POST("/delete", imageHandler.DeleteImages)
 				imagesGroup.DELETE("/:identifier", imageHandler.DeleteSingleImage)
@@ -148,6 +169,13 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
 				albumsGroup.DELETE("/:id", albumHandler.DeleteAlbumHandler)
 				albumsGroup.POST("/:id/images", albumImageHandler.AddImagesToAlbumHandler)
 				albumsGroup.DELETE("/:id/images/:imageId", albumImageHandler.RemoveImageFromAlbumHandler)
+			}
+
+			dashboardGroup := v1.Group("/dashboard")
+			dashboardGroup.Use(middleware.Authorize("jwt"))
+			{
+				dashboardGroup.GET("/stats", dashboardHandler.GetStats)
+				dashboardGroup.POST("/stats/refresh", dashboardHandler.RefreshStats)
 			}
 
 			// Admin

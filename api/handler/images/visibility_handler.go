@@ -1,6 +1,7 @@
 package images
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/anoixa/image-bed/api/common"
@@ -35,10 +36,9 @@ func (h *Handler) UpdateImageVisibility(c *gin.Context) {
 		return
 	}
 
-	// 获取图片信息
-	image, err := h.repo.GetImageByIdentifier(identifier)
+	image, err := h.imageService.GetImageByIdentifier(identifier)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			common.RespondError(c, http.StatusNotFound, "Image not found")
 			return
 		}
@@ -46,25 +46,22 @@ func (h *Handler) UpdateImageVisibility(c *gin.Context) {
 		return
 	}
 
-	// 检查权限（只能修改自己的图片）
 	if image.UserID != userID {
 		common.RespondError(c, http.StatusForbidden, "You don't have permission to update this image")
 		return
 	}
 
-	// 更新可见性
 	updates := map[string]interface{}{
 		"is_public": req.IsPublic,
 	}
-	updatedImage, err := h.repo.UpdateImageByIdentifier(identifier, updates)
+	updatedImage, err := h.imageService.UpdateImageByIdentifier(identifier, updates)
 	if err != nil {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to update image visibility")
 		return
 	}
 
-	// 更新缓存
 	ctx := c.Request.Context()
-	_ = h.cacheHelper.CacheImage(ctx, updatedImage) // 缓存更新失败不影响主流程
+	_ = h.cacheHelper.CacheImage(ctx, updatedImage)
 
 	visibility := "private"
 	if updatedImage.IsPublic {
@@ -72,9 +69,9 @@ func (h *Handler) UpdateImageVisibility(c *gin.Context) {
 	}
 
 	common.RespondSuccessMessage(c, "Image visibility updated successfully", gin.H{
-		"identifier":   updatedImage.Identifier,
-		"is_public":    updatedImage.IsPublic,
-		"visibility":   visibility,
-		"url":          utils.BuildImageURL(updatedImage.Identifier),
+		"identifier": updatedImage.Identifier,
+		"is_public":  updatedImage.IsPublic,
+		"visibility": visibility,
+		"url":        utils.BuildImageURL(h.baseURL, updatedImage.Identifier),
 	})
 }

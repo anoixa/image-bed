@@ -47,7 +47,6 @@ func init() {
 func runCacheClear(imageOnly, all bool, pattern string) error {
 	config.InitConfig()
 
-	// 初始化缓存（使用默认内存缓存）
 	if err := cache.InitDefault(); err != nil {
 		return fmt.Errorf("failed to initialize cache: %w", err)
 	}
@@ -59,7 +58,6 @@ func runCacheClear(imageOnly, all bool, pattern string) error {
 
 	ctx := context.Background()
 
-	// 默认清理图片缓存
 	if !all && pattern == "" {
 		imageOnly = true
 	}
@@ -67,7 +65,6 @@ func runCacheClear(imageOnly, all bool, pattern string) error {
 	log.Printf("Cache provider: %s", provider.Name())
 
 	if all {
-		// 清理所有缓存
 		log.Println("Clearing all cache...")
 		if err := clearAllCache(ctx, provider); err != nil {
 			return fmt.Errorf("failed to clear all cache: %w", err)
@@ -81,7 +78,6 @@ func runCacheClear(imageOnly, all bool, pattern string) error {
 		}
 		log.Printf("Cache matching pattern '%s' cleared successfully", pattern)
 	} else if imageOnly {
-		// 清理图片缓存
 		log.Println("Clearing image cache...")
 		if err := clearImageCache(ctx, provider); err != nil {
 			return fmt.Errorf("failed to clear image cache: %w", err)
@@ -94,7 +90,6 @@ func runCacheClear(imageOnly, all bool, pattern string) error {
 
 // clearAllCache 清理所有缓存
 func clearAllCache(ctx context.Context, provider interface{}) error {
-	// 检查是否支持批量清理接口
 	type ClearAll interface {
 		ClearAll(ctx context.Context) error
 	}
@@ -109,7 +104,6 @@ func clearAllCache(ctx context.Context, provider interface{}) error {
 
 // clearCacheByPattern 按模式清理缓存
 func clearCacheByPattern(ctx context.Context, provider interface{}, pattern string) error {
-	// 检查是否支持模式匹配清理
 	type ClearByPattern interface {
 		ClearByPattern(ctx context.Context, pattern string) error
 	}
@@ -124,7 +118,6 @@ func clearCacheByPattern(ctx context.Context, provider interface{}, pattern stri
 
 // clearImageCache 清理图片缓存
 func clearImageCache(ctx context.Context, provider interface{}) error {
-	// 图片缓存键前缀
 	imageCachePrefixes := []string{
 		"image:",
 		"image_meta:",

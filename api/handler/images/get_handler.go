@@ -4,38 +4,26 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
-	"net/url"
-	"strings"
+	"strconv"
 	"time"
-	"unicode"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/internal/image"
+	"github.com/anoixa/image-bed/internal/worker"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/sync/singleflight"
-	"gorm.io/gorm"
 )
 
-var (
-	imageGroup        singleflight.Group
-	fileDownloadGroup singleflight.Group
-	metaFetchTimeout  = 30 * time.Second
-)
+var fileDownloadGroup singleflight.Group
 
-var (
-	ErrTemporaryFailure = errors.New("temporary failure, should be retried")
-)
-
-
-// GetImage 获取图片（支持格式协商）
+// GetImage 获取图片（支持格式协商和重定向）
 func (h *Handler) GetImage(c *gin.Context) {
 	identifier := c.Param("identifier")
 	if identifier == "" {
@@ -43,66 +31,58 @@ func (h *Handler) GetImage(c *gin.Context) {
 		return
 	}
 
-	image, err := h.fetchImageMetadata(c.Request.Context(), identifier)
+	userID := c.GetUint(middleware.ContextUserIDKey)
+	acceptHeader := c.GetHeader("Accept")
+
+	result, err := h.imageService.GetImageWithVariant(c.Request.Context(), identifier, acceptHeader, userID)
 	if err != nil {
+		if errors.Is(err, image.ErrForbidden) {
+			common.RespondError(c, http.StatusForbidden, "This image is private")
+			return
+		}
 		h.handleMetadataError(c, utils.SanitizeLogMessage(identifier), err)
 		return
 	}
 
-	// 检查私有图片权限
-	if !image.IsPublic {
-		userID := c.GetUint(middleware.ContextUserIDKey)
-		if userID == 0 || userID != image.UserID {
-			common.RespondError(c, http.StatusForbidden, "This image is private")
-			return
-		}
-	}
-
-	// 格式协商
-	acceptHeader := c.GetHeader("Accept")
-	variantResult, err := h.variantService.SelectBestVariant(context.Background(), image, acceptHeader)
-	if err != nil {
-		log.Printf("[GetImage] Format negotiation failed for %s: %v", identifier, err)
-		h.serveOriginalImage(c, image)
-		return
-	}
-
-	if !variantResult.IsOriginal && variantResult.Variant == nil {
-		go h.converter.TriggerWebPConversion(image)
-
-		h.serveOriginalImage(c, image)
-		return
-	}
-
-	if variantResult.IsOriginal {
-		h.serveOriginalImage(c, image)
+	if result.IsOriginal {
+		h.serveOriginalImage(c, result.Image)
 	} else {
-		h.serveVariantImage(c, image, variantResult)
+		variantResult := &image.VariantResult{
+			IsOriginal:  false,
+			Variant:     result.Variant,
+			MIMEType:    result.MIMEType,
+			Identifier:  result.Variant.Identifier,
+			StoragePath: result.Variant.StoragePath,
+		}
+		h.serveVariantImage(c, result.Image, variantResult)
 	}
 }
 
 // serveOriginalImage 提供原图
 func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
-	identifier := image.Identifier
+	storagePath := image.StoragePath
 
-	// 检查缓存
-	imageData, err := h.cacheHelper.GetCachedImageData(c.Request.Context(), identifier)
+	imageData, err := h.cacheHelper.GetCachedImageData(c.Request.Context(), image.Identifier)
 	if err == nil {
 		h.serveImageData(c, image, imageData)
 		return
 	}
 
-	// 本地存储
 	if opener, ok := storage.GetDefault().(storage.FileOpener); ok {
 		if h.serveBySendfile(c, image, opener) {
 			return
 		}
 	}
 
-	// 远程存储
-	data, err := h.fetchFromRemote(identifier)
+	if streamer, ok := storage.GetDefault().(storage.StreamProvider); ok {
+		if h.serveByStreaming(c, image, streamer) {
+			return
+		}
+	}
+
+	data, err := h.fetchFromRemote(storagePath)
 	if err != nil {
-		log.Printf("[serveOriginal] Failed to get image %s: %v", identifier, err)
+		log.Printf("[serveOriginal] Failed to get image %s (path: %s): %v", image.Identifier, storagePath, err)
 		common.RespondError(c, http.StatusNotFound, "Image file not found")
 		return
 	}
@@ -110,16 +90,28 @@ func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 	h.serveImageData(c, image, data)
 }
 
-// fetchFromRemote 从远程存储获取图片数据（带 singleflight 防击穿）
-func (h *Handler) fetchFromRemote(identifier string) ([]byte, error) {
-	v, err, _ := fileDownloadGroup.Do(identifier, func() (interface{}, error) {
-		// 双重检查缓存
-		if data, err := h.cacheHelper.GetCachedImageData(context.Background(), identifier); err == nil {
+func (h *Handler) serveByStreaming(c *gin.Context, img *models.Image, streamer storage.StreamProvider) bool {
+	c.Header("Cache-Control", "public, max-age=86400")
+	c.Header("Content-Type", img.MimeType)
+	c.Header("ETag", "\""+img.FileHash+"\"")
+
+	_, err := streamer.StreamTo(c.Request.Context(), img.StoragePath, c.Writer)
+	if err != nil {
+		log.Printf("[serveByStreaming] Failed to stream image %s (path: %s): %v", img.Identifier, img.StoragePath, err)
+		return false
+	}
+	return true
+}
+
+// fetchFromRemote 从远程存储获取图片数据
+func (h *Handler) fetchFromRemote(storagePath string) ([]byte, error) {
+	v, err, _ := fileDownloadGroup.Do(storagePath, func() (interface{}, error) {
+		if data, err := h.cacheHelper.GetCachedImageData(context.Background(), storagePath); err == nil {
 			return data, nil
 		}
 
 		// 从存储获取
-		stream, err := storage.GetDefault().GetWithContext(context.Background(), identifier)
+		stream, err := storage.GetDefault().GetWithContext(context.Background(), storagePath)
 		if err != nil {
 			return nil, err
 		}
@@ -129,18 +121,30 @@ func (h *Handler) fetchFromRemote(identifier string) ([]byte, error) {
 			}
 		}()
 
-		// 读取数据到内存
-		data, err := io.ReadAll(stream)
+		const maxImageSize = 50 * 1024 * 1024
+		limitedReader := io.LimitReader(stream, maxImageSize)
+		data, err := io.ReadAll(limitedReader)
 		if err != nil {
 			return nil, err
 		}
 
-		// 异步缓存
-		go func() {
-			if h.cacheHelper != nil {
-				_ = h.cacheHelper.CacheImageData(context.Background(), identifier, data)
+		// 记录大图片日志
+		if len(data) > 10*1024*1024 {
+			log.Printf("[fetchFromRemote] Large image loaded: %d bytes, path: %s", len(data), storagePath)
+		}
+
+		if len(data) < 5*1024*1024 { // 只缓存小于 5MB 的图片
+			task := func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = h.cacheHelper.CacheImageData(ctx, storagePath, data)
 			}
-		}()
+			if pool := worker.GetGlobalPool(); pool != nil {
+				pool.Submit(task)
+			} else {
+				go task()
+			}
+		}
 
 		return data, nil
 	})
@@ -148,13 +152,101 @@ func (h *Handler) fetchFromRemote(identifier string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	return v.([]byte), nil
 }
 
 // serveBySendfile 使用 sendfile 零拷贝传输
-func (h *Handler) serveBySendfile(c *gin.Context, image *models.Image, opener storage.FileOpener) bool {
-	file, err := opener.OpenFile(c.Request.Context(), image.Identifier)
+func (h *Handler) serveBySendfile(c *gin.Context, img *models.Image, opener storage.FileOpener) bool {
+	file, err := opener.OpenFile(c.Request.Context(), img.StoragePath)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = file.Close() }()
+
+	c.Header("Cache-Control", "public, max-age=86400")
+	c.Header("Content-Type", img.MimeType)
+	c.Header("ETag", "\""+img.FileHash+"\"")
+
+	http.ServeContent(c.Writer, c.Request, img.Identifier, time.Time{}, file)
+	return true
+}
+
+// serveImageData 从内存提供图片数据
+func (h *Handler) serveImageData(c *gin.Context, img *models.Image, data []byte) {
+	c.Header("Cache-Control", "public, max-age=86400")
+	c.Header("Content-Type", img.MimeType)
+	c.Header("Content-Length", strconv.Itoa(len(data)))
+	c.Header("ETag", "\""+img.FileHash+"\"")
+
+	c.Data(http.StatusOK, img.MimeType, data)
+}
+
+// serveVariantImage 提供格式变体
+func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *image.VariantResult) {
+	imageData, err := h.cacheHelper.GetCachedImageData(c.Request.Context(), result.StoragePath)
+	if err == nil {
+		h.serveVariantData(c, img, result, imageData)
+		return
+	}
+
+	if opener, ok := storage.GetDefault().(storage.FileOpener); ok {
+		if h.serveVariantBySendfile(c, img, result, opener) {
+			return
+		}
+	}
+
+	if streamer, ok := storage.GetDefault().(storage.StreamProvider); ok {
+		if h.serveVariantByStreaming(c, result, streamer) {
+			return
+		}
+	}
+
+	stream, err := storage.GetDefault().GetWithContext(c.Request.Context(), result.StoragePath)
+	if err != nil {
+		log.Printf("[serveVariant] Failed to get variant %s (path: %s): %v", result.Identifier, result.StoragePath, err)
+		// 降级到原图
+		h.serveOriginalImage(c, img)
+		return
+	}
+	defer func() {
+		if closer, ok := stream.(io.Closer); ok {
+			_ = closer.Close()
+		}
+	}()
+
+	data, err := io.ReadAll(stream)
+	if err != nil {
+		h.serveOriginalImage(c, img)
+		return
+	}
+
+	task := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = h.cacheHelper.CacheImageData(ctx, result.StoragePath, data)
+	}
+	if pool := worker.GetGlobalPool(); pool != nil {
+		pool.Submit(task)
+	} else {
+		go task()
+	}
+
+	h.serveVariantData(c, img, result, data)
+}
+
+// serveVariantByStreaming 使用流式传输格式变体
+func (h *Handler) serveVariantByStreaming(c *gin.Context, result *image.VariantResult, streamer storage.StreamProvider) bool {
+	c.Header("Cache-Control", "public, max-age=86400")
+	c.Header("Content-Type", result.MIMEType)
+	c.Header("X-Content-Type-Options", "nosniff")
+
+	_, err := streamer.StreamTo(c.Request.Context(), result.StoragePath, c.Writer)
+	return err == nil
+}
+
+// serveVariantBySendfile 使用 sendfile 传输格式变体
+func (h *Handler) serveVariantBySendfile(c *gin.Context, img *models.Image, result *image.VariantResult, opener storage.FileOpener) bool {
+	file, err := opener.OpenFile(c.Request.Context(), result.StoragePath)
 	if err != nil {
 		return false
 	}
@@ -165,208 +257,46 @@ func (h *Handler) serveBySendfile(c *gin.Context, image *models.Image, opener st
 		return false
 	}
 
-	// 设置响应头
-	contentType := image.MimeType
-	if contentType == "" {
-		contentType = "application/octet-stream"
-	}
-	c.Header("Content-Type", contentType)
-	c.Header("Cache-Control", "public, max-age=2592000, immutable")
-	if image.OriginalName != "" {
-		asciiName := toASCII(image.OriginalName)
-		rfc5987Name := url.QueryEscape(image.OriginalName)
-		c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s"; filename*=UTF-8''%s`, asciiName, rfc5987Name))
-	}
+	c.Header("Cache-Control", "public, max-age=86400")
+	c.Header("Content-Type", result.MIMEType)
+	c.Header("Content-Length", strconv.FormatInt(stat.Size(), 10))
+	c.Header("X-Content-Type-Options", "nosniff")
 
-	http.ServeContent(c.Writer, c.Request, image.OriginalName, stat.ModTime(), file)
-
-	// 异步预热缓存
-	go h.warmCache(image)
-
+	http.ServeContent(c.Writer, c.Request, result.Identifier, stat.ModTime(), file)
 	return true
 }
 
-// serveVariantImage 提供格式变体
-func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *image.VariantResult) {
-	variant := result.Variant
-	identifier := variant.Identifier
-
-	// 尝试从缓存获取
-	imageData, err := h.cacheHelper.GetCachedImageData(context.Background(), identifier)
-	if err == nil {
-		h.serveVariantData(c, img, result, imageData)
-		return
-	}
-
-	// 判断是否为本地存储
-	if opener, ok := storage.GetDefault().(storage.FileOpener); ok {
-		file, err := opener.OpenFile(c.Request.Context(), identifier)
-		if err == nil {
-			defer func() { _ = file.Close() }()
-			if stat, err := file.Stat(); err == nil {
-				c.Header("Content-Type", result.MIMEType)
-				c.Header("Cache-Control", "public, max-age=2592000, immutable")
-				c.Header("Vary", "Accept")
-				http.ServeContent(c.Writer, c.Request, "", stat.ModTime(), file)
-				return
-			}
-		}
-	}
-
-	// 远程存储
-	data, err := h.fetchFromRemote(identifier)
-	if err != nil {
-		log.Printf("[serveVariant] Failed to get variant %s: %v", identifier, err)
-		h.serveOriginalImage(c, img)
-		return
-	}
-
-	h.serveVariantData(c, img, result, data)
-}
-
-// serveVariantData 提供变体数据
+// serveVariantData 从内存提供格式变体数据
 func (h *Handler) serveVariantData(c *gin.Context, img *models.Image, result *image.VariantResult, data []byte) {
-	reader := bytes.NewReader(data)
-	contentType := result.MIMEType
-	if contentType == "" {
-		contentType = "image/webp"
-	}
-	c.Header("Content-Type", contentType)
-	c.Header("Cache-Control", "public, max-age=2592000, immutable")
-	c.Header("Vary", "Accept")
-	http.ServeContent(c.Writer, c.Request, "", time.Time{}, reader)
-}
+	c.Header("Cache-Control", "public, max-age=86400")
+	c.Header("Content-Type", result.MIMEType)
+	c.Header("Content-Length", strconv.Itoa(len(data)))
+	c.Header("X-Content-Type-Options", "nosniff")
 
-// fetchImageMetadata 查询图片信息
-func (h *Handler) fetchImageMetadata(ctx context.Context, identifier string) (*models.Image, error) {
-	var image models.Image
-
-	// 缓存命中
-	if err := h.cacheHelper.GetCachedImage(ctx, identifier, &image); err == nil {
-		return &image, nil
-	}
-
-	resultChan := imageGroup.DoChan(identifier, func() (interface{}, error) {
-		imagePtr, err := h.repo.GetImageByIdentifier(identifier)
-		if err != nil {
-			if isTransientError(err) {
-				return nil, ErrTemporaryFailure
-			}
-			return nil, err
-		}
-
-		go func(img *models.Image) {
-			if h.cacheHelper == nil {
-				return
-			}
-			cacheCtx := context.Background()
-			if cacheErr := h.cacheHelper.CacheImage(cacheCtx, img); cacheErr != nil {
-				log.Printf("Failed to cache image metadata for '%s': %v", img.Identifier, cacheErr)
-			}
-		}(imagePtr)
-
-		return imagePtr, nil
-	})
-
-	select {
-	case result := <-resultChan:
-		if result.Err != nil {
-			if errors.Is(result.Err, ErrTemporaryFailure) {
-				imageGroup.Forget(identifier)
-			}
-			return nil, result.Err
-		}
-		return result.Val.(*models.Image), nil
-	case <-time.After(metaFetchTimeout):
-		imageGroup.Forget(identifier)
-		return nil, ErrTemporaryFailure
-	}
+	// 输出数据
+	c.DataFromReader(http.StatusOK, int64(len(data)), result.MIMEType, bytes.NewReader(data), nil)
 }
 
 // handleMetadataError 处理元数据查询错误
 func (h *Handler) handleMetadataError(c *gin.Context, identifier string, err error) {
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		log.Printf("Image not found: %s", identifier)
-		common.RespondError(c, http.StatusNotFound, "Image not found")
+	if errors.Is(err, context.DeadlineExceeded) {
+		log.Printf("Timeout fetching image metadata for '%s'", identifier)
+		common.RespondError(c, http.StatusGatewayTimeout, "Request timeout")
 		return
 	}
 
-	if errors.Is(err, ErrTemporaryFailure) {
-		log.Printf("Temporary failure fetching image metadata for '%s': %v", identifier, err)
-		common.RespondError(c, http.StatusServiceUnavailable, "Service temporarily unavailable, please retry")
+	if errors.Is(err, image.ErrForbidden) {
+		common.RespondError(c, http.StatusForbidden, "This image is private")
+		return
+	}
+
+	// 临时错误返回 503
+	if errors.Is(err, image.ErrTemporaryFailure) {
+		log.Printf("Temporary failure fetching metadata for '%s': %v", identifier, err)
+		common.RespondError(c, http.StatusServiceUnavailable, "Service temporarily unavailable")
 		return
 	}
 
 	log.Printf("Failed to fetch image metadata for '%s': %v", identifier, err)
-	common.RespondError(c, http.StatusInternalServerError, "Error retrieving image")
+	common.RespondError(c, http.StatusNotFound, "Image not found")
 }
-
-// isTransientError 检查是否为临时错误
-func isTransientError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	errStr := err.Error()
-	timeoutPatterns := []string{
-		"timeout",
-		"deadline exceeded",
-		"connection refused",
-		"connection reset",
-		"temporary",
-		"i/o timeout",
-		"context deadline exceeded",
-		"connection timed out",
-		"no such host",
-		"network is unreachable",
-	}
-
-	for _, pattern := range timeoutPatterns {
-		if strings.Contains(strings.ToLower(errStr), pattern) {
-			return true
-		}
-	}
-	return false
-}
-
-
-// serveImageData 直接提供图片数据
-func (h *Handler) serveImageData(c *gin.Context, image *models.Image, data []byte) {
-	reader := bytes.NewReader(data)
-	h.serveImageStream(c, image, reader)
-}
-
-// serveImageStream 流式提供图片
-func (h *Handler) serveImageStream(c *gin.Context, image *models.Image, reader io.ReadSeeker) {
-	contentType := image.MimeType
-	if contentType == "" {
-		contentType = "application/octet-stream"
-	}
-	c.Header("Content-Type", contentType)
-	c.Header("Cache-Control", "public, max-age=2592000, immutable")
-	if image.OriginalName != "" {
-		asciiName := toASCII(image.OriginalName)
-		rfc5987Name := url.QueryEscape(image.OriginalName)
-		if asciiName == image.OriginalName {
-			c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, asciiName))
-		} else {
-			c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s"; filename*=UTF-8''%s`, asciiName, rfc5987Name))
-		}
-	}
-	http.ServeContent(c.Writer, c.Request, image.OriginalName, time.Time{}, reader)
-}
-
-
-// toASCII 将字符串转换为 ASCII 表示（非 ASCII 字符转为下划线）
-func toASCII(s string) string {
-	var result []rune
-	for _, r := range s {
-		if r > unicode.MaxASCII {
-			result = append(result, '_')
-		} else {
-			result = append(result, r)
-		}
-	}
-	return string(result)
-}
-

@@ -54,7 +54,7 @@ func InitDefault() error {
 	return Init(Config{
 		Type:        "memory",
 		NumCounters: 1000000,
-		MaxCost:     1073741824, // 1GB
+		MaxCost:     268435456, // 256MB（原 1GB 占用过高）
 		BufferItems: 64,
 		Metrics:     true,
 	})
@@ -79,7 +79,7 @@ func createProvider(cfg Config) (Provider, error) {
 			memConfig.NumCounters = 1000000
 		}
 		if memConfig.MaxCost == 0 {
-			memConfig.MaxCost = 1073741824
+			memConfig.MaxCost = 268435456 // 256MB（原 1GB 占用过高）
 		}
 		if memConfig.BufferItems == 0 {
 			memConfig.BufferItems = 64

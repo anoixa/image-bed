@@ -20,7 +20,6 @@ func TestIsImage_JPEG(t *testing.T) {
 	assert.True(t, isValid)
 	assert.Equal(t, "image/jpeg", mimeType)
 
-	// 验证流被重置
 	pos, _ := reader.Seek(0, 1)
 	assert.Equal(t, int64(0), pos)
 }
@@ -127,11 +126,9 @@ func TestIsImage_StreamReset(t *testing.T) {
 	data := []byte{0xFF, 0xD8, 0xFF, 0xE0}
 	reader := bytes.NewReader(data)
 
-	// 第一次调用
 	_, _, err := IsImage(reader)
 	require.NoError(t, err)
 
-	// 读取流位置
 	pos, _ := reader.Seek(0, 1)
 	assert.Equal(t, int64(0), pos, "Stream should be reset to beginning")
 

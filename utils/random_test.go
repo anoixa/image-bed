@@ -22,9 +22,9 @@ func TestGenerateRandomToken_Length(t *testing.T) {
 		inputLength int
 		minLength   int // base64编码后的最小长度
 	}{
-		{16, 22},  // 16字节 -> base64 URL编码后约22字符
-		{32, 43},  // 32字节
-		{64, 86},  // 64字节
+		{16, 22}, // 16字节 -> base64 URL编码后约22字符
+		{32, 43}, // 32字节
+		{64, 86}, // 64字节
 		{128, 171},
 	}
 
@@ -47,7 +47,6 @@ func TestGenerateRandomToken_Uniqueness(t *testing.T) {
 		token, err := GenerateRandomToken(32)
 		require.NoError(t, err)
 
-		// 检查是否重复
 		if tokens[token] {
 			t.Errorf("Duplicate token generated: %s", token)
 		}

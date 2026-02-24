@@ -5,9 +5,10 @@ import (
 	"net/url"
 	"testing"
 
-	imageSvc "github.com/anoixa/image-bed/internal/image"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
+
+	imageSvc "github.com/anoixa/image-bed/internal/image"
 )
 
 func TestParseThumbnailWidth(t *testing.T) {
@@ -56,16 +57,10 @@ func TestGetThumbnailURL(t *testing.T) {
 		want       string
 	}{
 		{
-			name:       "simple",
-			identifier: "abc123.png",
-			width:      300,
-			want:       "thumbnails/abc123.png_300.webp",
-		},
-		{
-			name:       "with_path",
-			identifier: "2024/01/image.jpg",
+			name:       "new_format",
+			identifier: "original/2024/01/15/image.jpg",
 			width:      150,
-			want:       "thumbnails/2024/01/image.jpg_150.webp",
+			want:       "thumbnails/2024/01/15/image_150.webp",
 		},
 	}
 

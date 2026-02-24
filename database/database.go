@@ -45,7 +45,6 @@ func New(cfg *config.Config) (*gorm.DB, error) {
 		return nil, err
 	}
 
-	// 配置连接池
 	configurePool(db, cfg)
 
 	return db, nil
@@ -98,7 +97,7 @@ func newGormLogger() logger.Interface {
 	logLevel := logger.Silent
 	colorful := false
 
-	if config.CommitHash == "n/a" {
+	if config.IsDevelopment() {
 		logLevel = logger.Info
 		colorful = true
 	}

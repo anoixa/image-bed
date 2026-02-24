@@ -28,7 +28,7 @@ func (h *Handler) GetToken(context *gin.Context) {
 		return
 	}
 
-	apiTokens, err := h.repo.GetAllApiTokensByUser(userID)
+	apiTokens, err := h.svc.GetAllApiTokensByUser(userID)
 	if err != nil {
 		log.Printf("Failed to get API tokens for user %d: %v", userID, err)
 

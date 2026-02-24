@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 
@@ -13,21 +14,21 @@ import (
 // ConversionSettings 格式转换配置
 type ConversionSettings struct {
 	EnabledFormats   []string `json:"enabled_formats" mapstructure:"enabled_formats"`     // ["webp"]
-	WebPQuality      int      `json:"webp_quality" mapstructure:"webp_quality"`           // 1-100, 默认 85
+	WebPQuality      int      `json:"webp_quality" mapstructure:"webp_quality"`           // 1-100, 默认 75
 	WebPEffort       int      `json:"webp_effort" mapstructure:"webp_effort"`             // 0-6, 默认 4
 	AVIFQuality      int      `json:"avif_quality" mapstructure:"avif_quality"`           // 1-100, 默认 80
 	AVIFSpeed        int      `json:"avif_speed" mapstructure:"avif_speed"`               // 0-10, 默认 4
 	AVIFExperimental bool     `json:"avif_experimental" mapstructure:"avif_experimental"` // 实验性标记
 	SkipSmallerThan  int      `json:"skip_smaller_than" mapstructure:"skip_smaller_than"` // KB, 默认 10
-	MaxDimension     int      `json:"max_dimension" mapstructure:"max_dimension"`         // 默认 4096
-	MaxRetries       int      `json:"max_retries" mapstructure:"max_retries"`             // 默认 3
+	MaxDimension     int      `json:"max_dimension" mapstructure:"max_dimension"`
+	MaxRetries       int      `json:"max_retries" mapstructure:"max_retries"`
 }
 
 // DefaultConversionSettings 默认配置
 func DefaultConversionSettings() *ConversionSettings {
 	return &ConversionSettings{
-		EnabledFormats:   []string{},
-		WebPQuality:      85,
+		EnabledFormats:   []string{"webp"},
+		WebPQuality:      75,
 		WebPEffort:       4,
 		AVIFQuality:      80,
 		AVIFSpeed:        4,
@@ -50,9 +51,24 @@ func (s *ConversionSettings) IsFormatEnabled(format string) bool {
 
 // GetConversionSettings 获取转换配置
 func (m *Manager) GetConversionSettings(ctx context.Context) (*ConversionSettings, error) {
+	m.cacheMutex.RLock()
+	if val, exists := m.localCache[cacheKeyConversion]; exists {
+		m.cacheMutex.RUnlock()
+		return val.(*ConversionSettings), nil
+	}
+	m.cacheMutex.RUnlock()
+
+	m.cacheMutex.Lock()
+	defer m.cacheMutex.Unlock()
+
+	// 双重检查
+	if val, exists := m.localCache[cacheKeyConversion]; exists {
+		return val.(*ConversionSettings), nil
+	}
+
 	config, err := m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryConversion)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			if err := m.EnsureDefaultConversionConfig(ctx); err != nil {
 				return nil, fmt.Errorf("failed to create default conversion config: %w", err)
 			}
@@ -66,7 +82,6 @@ func (m *Manager) GetConversionSettings(ctx context.Context) (*ConversionSetting
 		}
 	}
 
-	// 解密配置
 	configMap, err := m.DecryptConfig(config.ConfigJSON)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt conversion config: %w", err)
@@ -77,12 +92,13 @@ func (m *Manager) GetConversionSettings(ctx context.Context) (*ConversionSetting
 		return nil, fmt.Errorf("failed to decode conversion settings: %w", err)
 	}
 
+	m.localCache[cacheKeyConversion] = settings
+
 	return settings, nil
 }
 
 // EnsureDefaultConversionConfig 确保默认转换配置存在
 func (m *Manager) EnsureDefaultConversionConfig(ctx context.Context) error {
-	// 检查是否已存在
 	count, err := m.repo.CountByCategory(ctx, models.ConfigCategoryConversion)
 	if err != nil {
 		return err
@@ -124,11 +140,9 @@ func (m *Manager) EnsureDefaultConversionConfig(ctx context.Context) error {
 
 // SaveConversionSettings 保存转换配置
 func (m *Manager) SaveConversionSettings(ctx context.Context, settings *ConversionSettings, userID uint) error {
-	// 获取现有配置
 	config, err := m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryConversion)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			// 创建新配置
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return m.EnsureDefaultConversionConfig(ctx)
 		}
 		return err

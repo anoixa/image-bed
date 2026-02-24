@@ -13,18 +13,20 @@ func setupTestDir(t *testing.T) string {
 	return tempDir
 }
 
-// TestConcurrentAccess 测试并发访问 providers map
-func TestConcurrentAccess(t *testing.T) {
-	tempDir := setupTestDir(t)
-
-	// 清理测试环境
+// resetStorage 重置存储状态用于测试隔离
+func resetStorage(t *testing.T) {
+	t.Helper()
 	providersMu.Lock()
+	defer providersMu.Unlock()
 	providers = make(map[uint]Provider)
 	defaultProvider = nil
 	defaultID = 0
-	providersMu.Unlock()
+}
 
-	// 初始化默认存储
+// TestConcurrentAccess 测试并发访问 providers map
+func TestConcurrentAccess(t *testing.T) {
+	tempDir := setupTestDir(t)
+	resetStorage(t)
 	_ = InitStorage([]StorageConfig{})
 
 	var wg sync.WaitGroup
@@ -81,13 +83,7 @@ func TestConcurrentAccess(t *testing.T) {
 // TestAddOrUpdateProvider 测试添加/更新存储提供者
 func TestAddOrUpdateProvider(t *testing.T) {
 	tempDir := setupTestDir(t)
-
-	// 清理测试环境
-	providersMu.Lock()
-	providers = make(map[uint]Provider)
-	defaultProvider = nil
-	defaultID = 0
-	providersMu.Unlock()
+	resetStorage(t)
 
 	// 添加本地存储
 	cfg := StorageConfig{
@@ -103,7 +99,6 @@ func TestAddOrUpdateProvider(t *testing.T) {
 		t.Fatalf("Failed to add provider: %v", err)
 	}
 
-	// 验证存储已添加
 	provider, err := GetByID(1)
 	if err != nil {
 		t.Fatalf("Failed to get provider: %v", err)
@@ -112,14 +107,12 @@ func TestAddOrUpdateProvider(t *testing.T) {
 		t.Fatal("Provider should not be nil")
 	}
 
-	// 更新为默认存储
 	cfg.IsDefault = true
 	err = AddOrUpdateProvider(cfg)
 	if err != nil {
 		t.Fatalf("Failed to update provider: %v", err)
 	}
 
-	// 验证默认存储已更新
 	if GetDefaultID() != 1 {
 		t.Fatalf("Default ID should be 1, got %d", GetDefaultID())
 	}
@@ -128,13 +121,7 @@ func TestAddOrUpdateProvider(t *testing.T) {
 // TestRemoveProvider 测试移除存储提供者
 func TestRemoveProvider(t *testing.T) {
 	tempDir := setupTestDir(t)
-
-	// 清理测试环境
-	providersMu.Lock()
-	providers = make(map[uint]Provider)
-	defaultProvider = nil
-	defaultID = 0
-	providersMu.Unlock()
+	resetStorage(t)
 
 	// 添加测试存储
 	cfg := StorageConfig{
@@ -150,7 +137,6 @@ func TestRemoveProvider(t *testing.T) {
 		t.Fatalf("Failed to add provider: %v", err)
 	}
 
-	// 验证存储存在
 	_, err = GetByID(2)
 	if err != nil {
 		t.Fatalf("Provider should exist: %v", err)
@@ -162,7 +148,6 @@ func TestRemoveProvider(t *testing.T) {
 		t.Fatalf("Failed to remove provider: %v", err)
 	}
 
-	// 验证存储已移除
 	_, err = GetByID(2)
 	if err == nil {
 		t.Fatal("Provider should not exist after removal")
@@ -171,19 +156,11 @@ func TestRemoveProvider(t *testing.T) {
 
 // TestRemoveDefaultProvider 测试移除默认存储（应该失败）
 func TestRemoveDefaultProvider(t *testing.T) {
-	// 清理测试环境
-	providersMu.Lock()
-	providers = make(map[uint]Provider)
-	defaultProvider = nil
-	defaultID = 0
-	providersMu.Unlock()
-
-	// 初始化默认存储
+	resetStorage(t)
 	_ = InitStorage([]StorageConfig{})
 
 	defaultID := GetDefaultID()
 
-	// 尝试移除默认存储
 	err := RemoveProvider(defaultID)
 	if err == nil {
 		t.Fatal("Should not be able to remove default provider")
@@ -193,13 +170,7 @@ func TestRemoveDefaultProvider(t *testing.T) {
 // TestSetDefaultID 测试切换默认存储
 func TestSetDefaultID(t *testing.T) {
 	tempDir := setupTestDir(t)
-
-	// 清理测试环境
-	providersMu.Lock()
-	providers = make(map[uint]Provider)
-	defaultProvider = nil
-	defaultID = 0
-	providersMu.Unlock()
+	resetStorage(t)
 
 	// 添加两个存储
 	cfg1 := StorageConfig{
@@ -220,7 +191,6 @@ func TestSetDefaultID(t *testing.T) {
 	_ = AddOrUpdateProvider(cfg1)
 	_ = AddOrUpdateProvider(cfg2)
 
-	// 验证默认存储
 	if GetDefaultID() != 10 {
 		t.Fatalf("Default ID should be 10, got %d", GetDefaultID())
 	}
@@ -245,13 +215,7 @@ func TestSetDefaultID(t *testing.T) {
 // TestListProviderIDs 测试列出所有存储ID
 func TestListProviderIDs(t *testing.T) {
 	tempDir := setupTestDir(t)
-
-	// 清理测试环境
-	providersMu.Lock()
-	providers = make(map[uint]Provider)
-	defaultProvider = nil
-	defaultID = 0
-	providersMu.Unlock()
+	resetStorage(t)
 
 	// 添加多个存储
 	for i := uint(20); i < 25; i++ {
@@ -273,13 +237,7 @@ func TestListProviderIDs(t *testing.T) {
 // TestGetProviderCount 测试获取存储数量
 func TestGetProviderCount(t *testing.T) {
 	tempDir := setupTestDir(t)
-
-	// 清理测试环境
-	providersMu.Lock()
-	providers = make(map[uint]Provider)
-	defaultProvider = nil
-	defaultID = 0
-	providersMu.Unlock()
+	resetStorage(t)
 
 	if GetProviderCount() != 0 {
 		t.Fatalf("Should have 0 providers initially, got %d", GetProviderCount())
@@ -297,4 +255,3 @@ func TestGetProviderCount(t *testing.T) {
 		t.Fatalf("Should have 1 provider, got %d", GetProviderCount())
 	}
 }
-

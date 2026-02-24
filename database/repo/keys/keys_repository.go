@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anoixa/image-bed/database/models"
+	"github.com/anoixa/image-bed/utils"
 	"gorm.io/gorm"
 )
 
@@ -45,13 +46,16 @@ func (r *Repository) GetUserByApiToken(token string) (*models.User, error) {
 		return nil, errors.New("invalid or non-existent API token")
 	}
 
-	go r.updateTokenLastUsed(apiToken.ID)
+	utils.SafeGo(func() {
+		r.updateTokenLastUsed(apiToken.ID)
+	})
 	return &apiToken.User, nil
 }
 
 // updateTokenLastUsed 更新 Token 最后使用时间
 func (r *Repository) updateTokenLastUsed(tokenID uint) {
-	err := r.db.Model(&models.ApiToken{}).Where("id = ?", tokenID).Update("last_used_at", time.Now()).Error
+	ctx := context.Background()
+	err := r.db.WithContext(ctx).Model(&models.ApiToken{}).Where("id = ?", tokenID).Update("last_used_at", time.Now()).Error
 	if err != nil {
 		log.Printf("Failed to update last_used_at for token ID %d: %v", tokenID, err)
 	}

@@ -1,7 +1,6 @@
 package worker
 
 import (
-	"bytes"
 	"context"
 	"image"
 	_ "image/gif"
@@ -20,7 +19,7 @@ type ImageDimensionsTask struct {
 	Identifier string
 	StorageKey string
 	DB         *gorm.DB
-	Storage    storage.Provider // 存储提供者，支持任意存储后端
+	Storage    storage.Provider
 }
 
 // Execute 执行任务
@@ -44,7 +43,6 @@ func (t *ImageDimensionsTask) Execute() {
 		return
 	}
 
-	// 更新数据库
 	result := t.DB.Model(&models.Image{}).
 		Where("identifier = ?", t.Identifier).
 		UpdateColumns(map[string]interface{}{
@@ -66,7 +64,6 @@ func (t *ImageDimensionsTask) Execute() {
 func (t *ImageDimensionsTask) extractFromStorage() (int, int, error) {
 	ctx := context.Background()
 
-	// 获取文件流
 	reader, err := t.Storage.GetWithContext(ctx, t.Identifier)
 	if err != nil {
 		return 0, 0, err
@@ -77,24 +74,12 @@ func (t *ImageDimensionsTask) extractFromStorage() (int, int, error) {
 		}
 	}()
 
-	// 读取数据到内存
-	data, err := io.ReadAll(reader)
+	config, _, err := image.DecodeConfig(reader)
 	if err != nil {
 		return 0, 0, err
 	}
 
-	return decodeImageDimensions(data)
-}
-
-// decodeImageDimensions 解码图片并提取尺寸
-func decodeImageDimensions(data []byte) (int, int, error) {
-	img, _, err := image.Decode(bytes.NewReader(data))
-	if err != nil {
-		return 0, 0, err
-	}
-
-	bounds := img.Bounds()
-	return bounds.Dx(), bounds.Dy(), nil
+	return config.Width, config.Height, nil
 }
 
 // ExtractImageDimensionsAsync 异步提取图片尺寸

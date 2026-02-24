@@ -5,8 +5,10 @@ import (
 	"hash/fnv"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/anoixa/image-bed/api/common"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/time/rate"
 )
@@ -32,6 +34,7 @@ type IPRateLimiter struct {
 	numShards  int
 	maxSize    int
 	stopChan   chan struct{}
+	stopOnce   atomic.Bool
 }
 
 // NewIPRateLimiter 创建分片 IP 限流器
@@ -68,10 +71,7 @@ func (rl *IPRateLimiter) Middleware() gin.HandlerFunc {
 		client := rl.getClientLimiter(ip)
 
 		if !client.limiter.Allow() {
-			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
-				"code":    http.StatusTooManyRequests,
-				"message": "Too many requests",
-			})
+			common.RespondErrorAbort(c, http.StatusTooManyRequests, "Too many requests")
 			return
 		}
 
@@ -81,7 +81,9 @@ func (rl *IPRateLimiter) Middleware() gin.HandlerFunc {
 
 // StopCleanup 停止清理 goroutine
 func (rl *IPRateLimiter) StopCleanup() {
-	close(rl.stopChan)
+	if rl.stopOnce.CompareAndSwap(false, true) {
+		close(rl.stopChan)
+	}
 }
 
 // getShardIndex 使用 FNV 哈希获取 IP 对应的分片索引
@@ -110,12 +112,10 @@ func (rl *IPRateLimiter) getClientLimiter(ip string) *clientLimiter {
 		}
 	}
 
-	// 检查总容量，如果超过则清理过期条目
 	if len(shard.limiters) >= rl.maxSize/rl.numShards {
 		rl.evictExpiredLocked(shard)
 	}
 
-	// 创建新的限流器
 	limiter := rate.NewLimiter(rl.rps, rl.burst)
 	client := &clientLimiter{
 		limiter:  limiter,

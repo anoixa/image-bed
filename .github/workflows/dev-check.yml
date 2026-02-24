@@ -1,0 +1,64 @@
+name: Dev CI
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [dev]
+
+jobs:
+  ########################################
+  # Lint + Security
+  ########################################
+  lint:
+    name: Lint & Security Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+      - name: Install native deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libvips-dev \
+            pkg-config \
+            libsqlite3-dev
+      - run: |
+          go mod download
+          go mod verify
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.10.1
+          args: --timeout=5m
+      - name: Run govulncheck
+        uses: golang/govulncheck-action@v1
+        with:
+          go-version-input: "1.26"
+          go-package: ./...
+
+  ########################################
+  # Tests
+  ########################################
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+      - name: Install libvips
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libvips-dev
+      - run: go mod download
+      - name: Run tests
+        run: |
+          go test -v -race -shuffle=on -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out

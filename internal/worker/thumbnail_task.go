@@ -4,24 +4,28 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"runtime"
 	"time"
 
-	"github.com/anoixa/image-bed/config/db"
+	config "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
-	"github.com/h2non/bimg"
+	"github.com/davidbyttow/govips/v2/vips"
 )
 
 // ThumbnailTask 缩略图生成任务
 type ThumbnailTask struct {
 	VariantID        uint
 	ImageID          uint
-	SourceIdentifier string
+	SourcePath       string
+	TargetPath       string
 	TargetIdentifier string
 	TargetWidth      int
 	ConfigManager    *config.Manager
 	VariantRepo      VariantRepository
+	ImageRepo        ImageRepository
 	Storage          storage.Provider
 }
 
@@ -32,7 +36,6 @@ func (t *ThumbnailTask) Execute() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	// 读取配置
 	settings, err := t.ConfigManager.GetThumbnailSettings(ctx)
 	if err != nil {
 		utils.LogIfDevf("[ThumbnailTask] Failed to get config: %v", err)
@@ -40,7 +43,7 @@ func (t *ThumbnailTask) Execute() {
 	}
 
 	if !settings.Enabled {
-		utils.LogIfDevf("[ThumbnailTask] Thumbnail disabled, skipping variant %d", t.VariantID)
+		utils.LogIfDevf("[ThumbnailTask] Thumbnail generation disabled")
 		return
 	}
 
@@ -62,12 +65,10 @@ func (t *ThumbnailTask) Execute() {
 	}
 
 	utils.LogIfDevf("[ThumbnailTask] Processing variant %d: %s -> %s (width: %d)",
-		t.VariantID, t.SourceIdentifier, t.TargetIdentifier, t.TargetWidth)
+		t.VariantID, t.SourcePath, t.TargetPath, t.TargetWidth)
 
-	// 执行转换
 	result := t.process()
 
-	// 更新状态
 	if result.Error != nil {
 		t.handleError(result.Error, settings.MaxRetries)
 	} else {
@@ -80,20 +81,18 @@ func (t *ThumbnailTask) process() *thumbnailResult {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	// 读取原图数据
-	imageData, err := t.getImageData(t.SourceIdentifier)
+	// 从存储获取图片 reader
+	reader, err := t.Storage.GetWithContext(ctx, t.SourcePath)
 	if err != nil {
 		return &thumbnailResult{Error: fmt.Errorf("failed to get source image: %w", err)}
 	}
 
-	// 生成缩略图
-	thumbnailData, width, height, err := t.generateThumbnail(imageData, t.TargetWidth)
+	thumbnailData, width, height, err := t.generateThumbnail(reader, t.TargetWidth)
 	if err != nil {
 		return &thumbnailResult{Error: fmt.Errorf("failed to generate thumbnail: %w", err)}
 	}
 
-	// 存储缩略图
-	if err := t.Storage.SaveWithContext(ctx, t.TargetIdentifier, bytes.NewReader(thumbnailData)); err != nil {
+	if err := t.Storage.SaveWithContext(ctx, t.TargetPath, bytes.NewReader(thumbnailData)); err != nil {
 		return &thumbnailResult{Error: fmt.Errorf("failed to store thumbnail: %w", err)}
 	}
 
@@ -112,101 +111,109 @@ type thumbnailResult struct {
 	Error    error
 }
 
-// getImageData 获取图片数据
-func (t *ThumbnailTask) getImageData(identifier string) ([]byte, error) {
-	ctx := context.Background()
-	reader, err := t.Storage.GetWithContext(ctx, identifier)
-	if err != nil {
-		return nil, err
-	}
-
-	buf := new(bytes.Buffer)
-	if _, err := buf.ReadFrom(reader); err != nil {
-		return nil, err
-	}
-
-	return buf.Bytes(), nil
-}
-
 // generateThumbnail 生成缩略图
-func (t *ThumbnailTask) generateThumbnail(data []byte, targetWidth int) ([]byte, int, int, error) {
-	// 使用 bimg (libvips) 进行图片处理
-	img := bimg.NewImage(data)
-
-	// 获取图片尺寸
-	size, err := img.Size()
-	if err != nil {
-		return nil, 0, 0, fmt.Errorf("failed to get image size: %w", err)
+func (t *ThumbnailTask) generateThumbnail(reader io.Reader, targetWidth int) ([]byte, int, int, error) {
+	ctx := context.Background()
+	semaphore := GetGlobalSemaphore()
+	if err := semaphore.Acquire(ctx); err != nil {
+		return nil, 0, 0, fmt.Errorf("acquire semaphore: %w", err)
 	}
+	defer semaphore.Release()
 
-	if size.Width <= targetWidth {
-		webpData, err := img.Convert(bimg.WEBP)
+	memBefore := utils.GetMemoryStats()
+	utils.LogIfDevf("[ThumbnailTask][%d] Starting thumbnail generation, heap: %.2fMB",
+		t.VariantID, memBefore.HeapAllocMB)
+
+	const maxImageSize = 50 * 1024 * 1024 // 50MB 最大限制
+	limitedReader := io.LimitReader(reader, maxImageSize)
+
+	utils.LogIfDevf("[ThumbnailTask] Loading image for variant %d, source=%s", t.VariantID, t.SourcePath)
+
+	img, err := vips.NewImageFromReader(limitedReader)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("failed to load image: %w", err)
+	}
+	defer func() {
+		img.Close()
+		runtime.GC()
+
+		memAfter := utils.GetMemoryStats()
+		delta := memAfter.HeapAllocMB - memBefore.HeapAllocMB
+		utils.LogIfDevf("[ThumbnailTask][%d] Image closed, heap delta: %+.2fMB (before: %.2fMB, after: %.2fMB)",
+			t.VariantID, delta, memBefore.HeapAllocMB, memAfter.HeapAllocMB)
+	}()
+
+	memAfterLoad := utils.GetMemoryStats()
+	utils.LogIfDevf("[ThumbnailTask] Image loaded, heap delta: +%.2fMB",
+		memAfterLoad.HeapAllocMB-memBefore.HeapAllocMB)
+
+	width := img.Width()
+	height := img.Height()
+
+	if width <= targetWidth {
+		webpBytes, _, err := img.ExportWebp(&vips.WebpExportParams{
+			Quality:         75,
+			Lossless:        false,
+			ReductionEffort: 4,
+			StripMetadata:   true,
+		})
 		if err != nil {
-			return nil, 0, 0, fmt.Errorf("failed to convert to WebP: %w", err)
+			return nil, 0, 0, fmt.Errorf("failed to export webp: %w", err)
 		}
-		return webpData, size.Width, size.Height, nil
+		return webpBytes, width, height, nil
 	}
 
-	newHeight := int(float64(targetWidth) * float64(size.Height) / float64(size.Width))
+	targetHeight := height * targetWidth / width
 
-	options := bimg.Options{
-		Width:   targetWidth,
-		Height:  newHeight,
-		Crop:    false,
-		Quality: 85,
-		Type:    bimg.WEBP,
-	}
-
-	// 处理图片
-	processed, err := img.Process(options)
+	err = img.Thumbnail(targetWidth, targetHeight, vips.InterestingCentre)
 	if err != nil {
-		return nil, 0, 0, fmt.Errorf("failed to process image: %w", err)
+		return nil, 0, 0, fmt.Errorf("failed to thumbnail image: %w", err)
 	}
 
-	return processed, targetWidth, newHeight, nil
+	// 导出为 WebP
+	webpBytes, _, err := img.ExportWebp(&vips.WebpExportParams{
+		Quality:         75,
+		Lossless:        false,
+		ReductionEffort: 4,
+		StripMetadata:   true,
+	})
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("failed to export webp: %w", err)
+	}
+
+	return webpBytes, targetWidth, targetHeight, nil
 }
 
 // handleSuccess 处理成功
 func (t *ThumbnailTask) handleSuccess(result *thumbnailResult) {
-	utils.LogIfDevf("[ThumbnailTask] Success: variant %d (%dx%d, %d bytes)",
+	utils.LogIfDevf("[ThumbnailTask] Success: variant %d, %dx%d, %d bytes",
 		t.VariantID, result.Width, result.Height, result.FileSize)
 
-	if err := t.VariantRepo.UpdateCompleted(t.VariantID, t.TargetIdentifier, result.FileSize, result.Width, result.Height); err != nil {
-		utils.LogIfDevf("[ThumbnailTask] Failed to update status: %v", err)
-	}
+	_ = t.VariantRepo.UpdateCompleted(
+		t.VariantID,
+		t.TargetIdentifier,
+		t.TargetPath,
+		result.FileSize,
+		result.Width,
+		result.Height,
+	)
 }
 
 // handleError 处理错误
 func (t *ThumbnailTask) handleError(err error, maxRetries int) {
-	utils.LogIfDevf("[ThumbnailTask] Error: variant %d - %v", t.VariantID, err)
-
-	errorType := ClassifyError(err)
-	shouldRetry := errorType == ErrorTransient && t.VariantID > 0
-
-	if shouldRetry {
-		variant, getErr := t.VariantRepo.GetByID(t.VariantID)
-		if getErr != nil {
-			utils.LogIfDevf("[ThumbnailTask] Failed to get variant for retry check: %v", getErr)
-			shouldRetry = false
-		} else if variant.RetryCount >= maxRetries {
-			utils.LogIfDevf("[ThumbnailTask] Max retries reached for variant %d", t.VariantID)
-			shouldRetry = false
-		}
-	}
-
-	if shouldRetry {
-		_ = t.VariantRepo.UpdateFailed(t.VariantID, err.Error(), true)
-	} else {
-		_ = t.VariantRepo.UpdateFailed(t.VariantID, err.Error(), false)
-	}
+	utils.LogIfDevf("[ThumbnailTask] Error: variant %d, %v", t.VariantID, err)
+	_ = t.VariantRepo.UpdateFailed(t.VariantID, err.Error(), true)
 }
 
-// recovery 异常恢复
+// recovery 恢复 panic
 func (t *ThumbnailTask) recovery() {
-	if r := recover(); r != nil {
-		utils.LogIfDevf("[ThumbnailTask] Panic recovered: %v", r)
-		if t.VariantID > 0 {
-			_ = t.VariantRepo.UpdateFailed(t.VariantID, fmt.Sprintf("panic: %v", r), true)
-		}
+	if rec := recover(); rec != nil {
+		utils.LogIfDevf("[ThumbnailTask] Panic recovered: %v", rec)
+		_, _ = t.VariantRepo.UpdateStatusCAS(
+			t.VariantID,
+			models.VariantStatusProcessing,
+			models.VariantStatusFailed,
+			fmt.Sprintf("panic: %v", rec),
+		)
 	}
 }

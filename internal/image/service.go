@@ -12,8 +12,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,48 +19,16 @@ import (
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
+	"github.com/anoixa/image-bed/internal/worker"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
+	"github.com/anoixa/image-bed/utils/generator"
 	"github.com/anoixa/image-bed/utils/pool"
 	"github.com/anoixa/image-bed/utils/validator"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 )
-
-// ChunkedUploadSession 分片上传会话
-type ChunkedUploadSession struct {
-	SessionID       string
-	FileName        string
-	FileHash        string
-	TotalSize       int64
-	ChunkSize       int64
-	TotalChunks     int
-	ReceivedChunks  map[int]bool
-	StorageConfigID uint
-	UserID          uint
-	TempDir         string
-	CreatedAt       time.Time
-	IsProcessing    bool
-}
-
-// ChunkedUploadInitResult 初始化分片上传结果
-type ChunkedUploadInitResult struct {
-	SessionID     string
-	TotalChunks   int
-	ChunkSize     int64
-	InstantUpload bool
-	Identifier    string
-	Links         utils.LinkFormats
-}
-
-// ChunkedUploadCompleteResult 完成分片上传结果
-type ChunkedUploadCompleteResult struct {
-	SessionID   string
-	Message     string
-	Identifier  string
-	Links       utils.LinkFormats
-}
 
 var (
 	imageGroup       singleflight.Group
@@ -71,7 +37,17 @@ var (
 
 var (
 	ErrTemporaryFailure = errors.New("temporary failure, should be retried")
+	ErrForbidden        = errors.New("forbidden: access denied")
 )
+
+// ImageResultDTO DTO
+type ImageResultDTO struct {
+	Image      *models.Image
+	Variant    *models.ImageVariant
+	IsOriginal bool
+	URL        string
+	MIMEType   string
+}
 
 // UploadResult 上传结果
 type UploadResult struct {
@@ -122,6 +98,8 @@ type Service struct {
 	thumbnailSvc   *ThumbnailService
 	variantService *VariantService
 	cacheHelper    *cache.Helper
+	baseURL        string
+	pathGenerator  *generator.PathGenerator
 }
 
 // NewService 创建图片服务
@@ -132,6 +110,7 @@ func NewService(
 	thumbnailSvc *ThumbnailService,
 	variantService *VariantService,
 	cacheHelper *cache.Helper,
+	baseURL string,
 ) *Service {
 	return &Service{
 		repo:           repo,
@@ -140,121 +119,18 @@ func NewService(
 		thumbnailSvc:   thumbnailSvc,
 		variantService: variantService,
 		cacheHelper:    cacheHelper,
+		baseURL:        baseURL,
+		pathGenerator:  generator.NewPathGenerator(),
 	}
 }
 
-// InitChunkedUpload 初始化分片上传
-func (s *Service) InitChunkedUpload(ctx context.Context, fileName, fileHash string, totalSize, chunkSize int64, userID uint) (*ChunkedUploadInitResult, error) {
-	// 检查文件是否已存在（秒传）
-	if existingImage, err := s.repo.GetImageByHash(fileHash); err == nil {
-		return &ChunkedUploadInitResult{
-			InstantUpload: true,
-			Identifier:    existingImage.Identifier,
-			Links:         utils.BuildLinkFormats(existingImage.Identifier),
-		}, nil
+// submitBackgroundTask 提交后台任务到 worker pool，避免 goroutine 风暴
+func (s *Service) submitBackgroundTask(task func()) {
+	if pool := worker.GetGlobalPool(); pool != nil {
+		pool.Submit(task)
+	} else {
+		go task()
 	}
-
-	totalChunks := int((totalSize + chunkSize - 1) / chunkSize)
-	sessionID := generateSessionID()
-
-	return &ChunkedUploadInitResult{
-		SessionID:   sessionID,
-		TotalChunks: totalChunks,
-		ChunkSize:   chunkSize,
-	}, nil
-}
-
-// ProcessChunkedUpload 处理分片上传完成后的合并和保存
-func (s *Service) ProcessChunkedUpload(ctx context.Context, session *ChunkedUploadSession) (*models.Image, error) {
-	// 合并所有分片
-	mergedFile := filepath.Join(session.TempDir, "merged")
-	outFile, err := os.Create(mergedFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create merged file: %w", err)
-	}
-
-	hasher := sha256.New()
-	writer := io.MultiWriter(outFile, hasher)
-
-	for i := 0; i < session.TotalChunks; i++ {
-		chunkPath := filepath.Join(session.TempDir, strconv.Itoa(i))
-		chunkFile, err := os.Open(chunkPath)
-		if err != nil {
-			_ = outFile.Close()
-			return nil, fmt.Errorf("failed to open chunk %d: %w", i, err)
-		}
-
-		if _, err := io.Copy(writer, chunkFile); err != nil {
-			_ = chunkFile.Close()
-			_ = outFile.Close()
-			return nil, fmt.Errorf("failed to copy chunk %d: %w", i, err)
-		}
-		_ = chunkFile.Close()
-	}
-
-	_ = outFile.Close()
-
-	// 验证哈希
-	fileHash := hex.EncodeToString(hasher.Sum(nil))
-	if fileHash != session.FileHash {
-		return nil, fmt.Errorf("file hash mismatch: expected %s, got %s", session.FileHash, fileHash)
-	}
-
-	fileBytes, err := os.ReadFile(mergedFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read merged file: %w", err)
-	}
-
-	isImage, mimeType := validator.IsImageBytes(fileBytes)
-	if !isImage {
-		return nil, fmt.Errorf("uploaded file is not a valid image")
-	}
-
-	storageConfigID := storage.GetDefaultID()
-	ext := getSafeFileExtension(mimeType)
-	identifier := fmt.Sprintf("%d-%s%s", time.Now().UnixNano(), fileHash[:16], ext)
-
-	if err := storage.GetDefault().SaveWithContext(ctx, identifier, bytes.NewReader(fileBytes)); err != nil {
-		return nil, fmt.Errorf("failed to save file to storage: %w", err)
-	}
-
-	// 创建数据库记录
-	newImage := &models.Image{
-		Identifier:      identifier,
-		OriginalName:    session.FileName,
-		FileSize:        int64(len(fileBytes)),
-		MimeType:        mimeType,
-		StorageConfigID: storageConfigID,
-		FileHash:        fileHash,
-		UserID:          session.UserID,
-	}
-
-	if err := s.repo.SaveImage(newImage); err != nil {
-		_ = storage.GetDefault().DeleteWithContext(ctx, identifier)
-		return nil, fmt.Errorf("failed to save image metadata: %w", err)
-	}
-
-	// 异步处理：缓存预热、WebP转换、缩略图生成
-	go s.warmCache(newImage)
-	go s.converter.TriggerWebPConversion(newImage)
-	go s.thumbnailSvc.TriggerGenerationForAllSizes(newImage)
-
-	return newImage, nil
-}
-
-// generateSessionID 生成会话ID
-func generateSessionID() string {
-	return fmt.Sprintf("%d-%s", time.Now().UnixNano(), generateRandomString(8))
-}
-
-// generateRandomString 生成随机字符串
-func generateRandomString(length int) string {
-	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	b := make([]byte, length)
-	for i := range b {
-		b[i] = charset[time.Now().UnixNano()%int64(len(charset))]
-	}
-	return string(b)
 }
 
 // getSafeFileExtension 根据MIME类型获取安全的文件扩展名
@@ -265,7 +141,6 @@ func getSafeFileExtension(mimeType string) string {
 	}
 	return ext
 }
-
 
 // UploadSingle 单文件上传
 func (s *Service) UploadSingle(
@@ -291,7 +166,7 @@ func (s *Service) UploadSingle(
 		Identifier:  image.Identifier,
 		FileName:    image.OriginalName,
 		FileSize:    image.FileSize,
-		Links:       utils.BuildLinkFormats(image.Identifier),
+		Links:       utils.BuildLinkFormats(s.baseURL, image.Identifier),
 	}, nil
 }
 
@@ -325,7 +200,7 @@ func (s *Service) UploadBatch(ctx context.Context, userID uint, files []*multipa
 					result.Image = image
 					result.Identifier = image.Identifier
 					result.FileSize = image.FileSize
-					result.Links = utils.BuildLinkFormats(image.Identifier)
+					result.Links = utils.BuildLinkFormats(s.baseURL, image.Identifier)
 				}
 
 				resultsMutex.Lock()
@@ -361,7 +236,7 @@ func (s *Service) UploadSingleWithName(ctx context.Context, userID uint, fileHea
 		Identifier:  image.Identifier,
 		FileName:    image.OriginalName,
 		FileSize:    image.FileSize,
-		Links:       utils.BuildLinkFormats(image.Identifier),
+		Links:       utils.BuildLinkFormats(s.baseURL, image.Identifier),
 	}, nil
 }
 
@@ -401,7 +276,7 @@ func (s *Service) UploadBatchWithName(
 					result.Image = image
 					result.Identifier = image.Identifier
 					result.FileSize = image.FileSize
-					result.Links = utils.BuildLinkFormats(image.Identifier)
+					result.Links = utils.BuildLinkFormats(s.baseURL, image.Identifier)
 				}
 
 				resultsMutex.Lock()
@@ -439,7 +314,6 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 
 	reader := io.MultiReader(bytes.NewReader(header), src)
 
-	// 创建临时文件
 	tmp, err := os.CreateTemp("./data/temp", "upload-*")
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to create temp file: %w", err)
@@ -463,18 +337,14 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 
 	fileHash := hex.EncodeToString(hash.Sum(nil))
 
-	// 检查重复文件
-	if img, err := s.repo.GetImageByHash(fileHash); err == nil {
-		go s.warmCache(img)
-		go s.converter.TriggerWebPConversion(img)
-		go s.thumbnailSvc.TriggerGenerationForAllSizes(img)
-		return img, true, nil
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+	img, err := s.repo.GetImageByHash(fileHash)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, false, errors.New("database error during hash check")
 	}
 
-	// 检查软删除的文件
-	if softDeleted, err := s.repo.GetSoftDeletedImageByHash(fileHash); err == nil {
+	// 如果找到记录，检查是否软删除
+	if err == nil && img.DeletedAt.Valid {
+		// 软删除的文件，恢复它
 		updates := map[string]interface{}{
 			"deleted_at":        nil,
 			"original_name":     fileHeader.Filename,
@@ -482,40 +352,50 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 			"is_public":         isPublic,
 			"storage_config_id": storageConfigID,
 		}
-		restored, err := s.repo.UpdateImageByIdentifier(softDeleted.Identifier, updates)
+		restored, err := s.repo.UpdateImageByIdentifier(img.Identifier, updates)
 		if err != nil {
 			return nil, false, errors.New("failed to restore existing image data")
 		}
-		go s.warmCache(restored)
-		go s.converter.TriggerWebPConversion(restored)
-		go s.thumbnailSvc.TriggerGenerationForAllSizes(restored)
+
+		s.submitBackgroundTask(func() { s.warmCache(restored) })
+		s.submitBackgroundTask(func() { s.converter.TriggerWebPConversion(restored) })
+		s.submitBackgroundTask(func() { s.thumbnailSvc.TriggerGenerationForAllSizes(restored) })
 		return restored, true, nil
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, false, errors.New("database error during hash check")
 	}
 
-	// 只需一次 Seek 获取尺寸并保存
+	// 如果找到未删除的记录，直接返回
+	if err == nil {
+		s.submitBackgroundTask(func() { s.warmCache(img) })
+		s.submitBackgroundTask(func() { s.converter.TriggerWebPConversion(img) })
+		s.submitBackgroundTask(func() { s.thumbnailSvc.TriggerGenerationForAllSizes(img) })
+		return img, true, nil
+	}
+
 	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
 		return nil, false, fmt.Errorf("failed to seek temp file: %w", err)
 	}
 
 	width, height := utils.GetImageDimensions(tmp)
 
-	// 重新定位到开头用于保存
-	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-		return nil, false, fmt.Errorf("failed to seek temp file: %w", err)
-	}
-
-	identifier := fileHash[:12]
-	if err := storageProvider.SaveWithContext(ctx, identifier, tmp); err != nil {
+	ext := getSafeFileExtension(mimeType)
+	ids := s.pathGenerator.GenerateOriginalIdentifiers(fileHash, ext, time.Now())
+	identifier := ids.Identifier
+	storagePath := ids.StoragePath
+	if err := storageProvider.SaveWithContext(ctx, storagePath, tmp); err != nil {
 		return nil, false, errors.New("failed to save uploaded file")
 	}
 
-	// 创建数据库记录
-	img := &models.Image{
+	fileInfo, err := tmp.Stat()
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to get file size: %w", err)
+	}
+	actualFileSize := fileInfo.Size()
+
+	newImg := &models.Image{
 		Identifier:      identifier,
+		StoragePath:     storagePath,
 		OriginalName:    fileHeader.Filename,
-		FileSize:        fileHeader.Size,
+		FileSize:        actualFileSize,
 		MimeType:        mimeType,
 		StorageConfigID: storageConfigID,
 		FileHash:        fileHash,
@@ -525,16 +405,16 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 		UserID:          userID,
 	}
 
-	if err := s.repo.SaveImage(img); err != nil {
-		_ = storageProvider.DeleteWithContext(ctx, identifier)
+	if err := s.repo.SaveImage(newImg); err != nil {
+		_ = storageProvider.DeleteWithContext(ctx, storagePath)
 		return nil, false, errors.New("failed to save image metadata")
 	}
 
-	go s.warmCache(img)
-	go s.converter.TriggerWebPConversion(img)
-	go s.thumbnailSvc.TriggerGenerationForAllSizes(img)
+	s.submitBackgroundTask(func() { s.warmCache(newImg) })
+	s.submitBackgroundTask(func() { s.converter.TriggerWebPConversion(newImg) })
+	s.submitBackgroundTask(func() { s.thumbnailSvc.TriggerGenerationForAllSizes(newImg) })
 
-	return img, false, nil
+	return newImg, false, nil
 }
 
 func (s *Service) getStorageProvider(storageName string) (storage.Provider, uint, error) {
@@ -569,14 +449,13 @@ func (s *Service) warmCache(image *models.Image) {
 		return
 	}
 	ctx := context.Background()
-	_ = s.cacheHelper.CacheImage(ctx, image) // 缓存失败只记录日志
+	_ = s.cacheHelper.CacheImage(ctx, image)
 }
 
 // GetImageMetadata 获取图片元数据
 func (s *Service) GetImageMetadata(ctx context.Context, identifier string) (*models.Image, error) {
 	var image models.Image
 
-	// 尝试从缓存获取
 	if err := s.cacheHelper.GetCachedImage(ctx, identifier, &image); err == nil {
 		return &image, nil
 	}
@@ -595,7 +474,8 @@ func (s *Service) GetImageMetadata(ctx context.Context, identifier string) (*mod
 			if s.cacheHelper == nil {
 				return
 			}
-			cacheCtx := context.Background()
+			cacheCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
 			if cacheErr := s.cacheHelper.CacheImage(cacheCtx, img); cacheErr != nil {
 				log.Printf("Failed to cache image metadata for '%s': %v", img.Identifier, cacheErr)
 			}
@@ -639,13 +519,20 @@ func (s *Service) GetCachedImageData(ctx context.Context, identifier string) ([]
 
 // GetImageStream 从存储获取图片流
 func (s *Service) GetImageStream(ctx context.Context, image *models.Image) (io.ReadSeeker, error) {
-	return storage.GetDefault().GetWithContext(ctx, image.Identifier)
+	provider, err := s.getStorageProviderByID(image.StorageConfigID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get storage provider: %w", err)
+	}
+	return provider.GetWithContext(ctx, image.StoragePath)
 }
 
 // GetVariantStream 从存储获取变体流
-func (s *Service) GetVariantStream(ctx context.Context, storageConfigID uint, identifier string) (io.ReadSeeker, error) {
-	// 简化后只使用默认存储
-	return storage.GetDefault().GetWithContext(ctx, identifier)
+func (s *Service) GetVariantStream(ctx context.Context, storageConfigID uint, storagePath string) (io.ReadSeeker, error) {
+	provider, err := s.getStorageProviderByID(storageConfigID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get storage provider: %w", err)
+	}
+	return provider.GetWithContext(ctx, storagePath)
 }
 
 // CacheImageData 缓存图片数据
@@ -657,7 +544,7 @@ func (s *Service) CacheImageData(ctx context.Context, identifier string, data []
 }
 
 // ListImages 获取图片列表
-func (s *Service) ListImages(storageType string, identifier string, search string, albumID *uint, page int, limit int, userID int) (*ListImagesResult, error) {
+func (s *Service) ListImages(storageType string, identifier string, search string, albumID *uint, startTime, endTime int64, page int, limit int, userID int) (*ListImagesResult, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -671,7 +558,7 @@ func (s *Service) ListImages(storageType string, identifier string, search strin
 		limit = maxLimit
 	}
 
-	list, total, err := s.repo.GetImageList(storageType, identifier, search, albumID, page, limit, userID)
+	list, total, err := s.repo.GetImageList(storageType, identifier, search, albumID, startTime, endTime, page, limit, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get image list: %w", err)
 	}
@@ -729,7 +616,6 @@ func isTransientError(err error) bool {
 
 // DeleteSingle 删除单张图片
 func (s *Service) DeleteSingle(ctx context.Context, identifier string, userID uint) (*DeleteResult, error) {
-	// 获取图片信息
 	img, err := s.repo.GetImageByIdentifier(identifier)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -738,12 +624,17 @@ func (s *Service) DeleteSingle(ctx context.Context, identifier string, userID ui
 		return nil, fmt.Errorf("failed to get image info: %w", err)
 	}
 
-	// 检查权限
 	if img.UserID != userID {
 		return &DeleteResult{Success: false, Error: errors.New("permission denied")}, nil
 	}
 
-	// 删除数据库记录
+	// 先删除原图文件
+	if img.StoragePath != "" {
+		if err := storage.GetDefault().DeleteWithContext(ctx, img.StoragePath); err != nil {
+			log.Printf("Failed to delete original image file %s: %v", img.StoragePath, err)
+		}
+	}
+
 	if err := s.repo.DeleteImageByIdentifierAndUser(identifier, userID); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return &DeleteResult{Success: false, Error: errors.New("image not found")}, nil
@@ -766,18 +657,22 @@ func (s *Service) DeleteBatch(ctx context.Context, identifiers []string, userID 
 		return &DeleteResult{Success: true, DeletedCount: 0}, nil
 	}
 
-	// 批量查询图片信息（避免 N+1 查询）
+	// 批量查询图片信息
 	imagesToDelete, err := s.repo.GetImagesByIdentifiersAndUser(identifiers, userID)
 	if err != nil {
 		log.Printf("Failed to get images for batch delete: %v", err)
 	}
 
-	// 级联删除变体
+	// 删除原图文件和变体
 	for _, img := range imagesToDelete {
+		if img.StoragePath != "" {
+			if err := storage.GetDefault().DeleteWithContext(ctx, img.StoragePath); err != nil {
+				log.Printf("Failed to delete original image file %s: %v", img.StoragePath, err)
+			}
+		}
 		deleteVariantsForImage(ctx, s.variantRepo, s.cacheHelper, img)
 	}
 
-	// 删除数据库记录
 	affectedCount, err := s.repo.DeleteImagesByIdentifiersAndUser(identifiers, userID)
 	if err != nil {
 		log.Printf("Failed to delete image records: %v", err)
@@ -804,21 +699,19 @@ func (s *Service) ClearImageCache(ctx context.Context, identifier string) error 
 }
 
 func deleteVariantsForImage(ctx context.Context, variantRepo *images.VariantRepository, cacheHelper *cache.Helper, img *models.Image) {
-	// 获取所有变体
 	variants, err := variantRepo.GetVariantsByImageID(img.ID)
 	if err != nil {
 		log.Printf("Failed to get variants for image %d: %v", img.ID, err)
 		return
 	}
 
-	// 删除每个变体的文件和缓存
 	for _, variant := range variants {
-		if variant.Identifier == "" || variant.Status != models.VariantStatusCompleted {
+		if variant.StoragePath == "" || variant.Status != models.VariantStatusCompleted {
 			continue
 		}
 
-		if err := storage.GetDefault().DeleteWithContext(ctx, variant.Identifier); err != nil {
-			log.Printf("Failed to delete variant file %s: %v", variant.Identifier, err)
+		if err := storage.GetDefault().DeleteWithContext(ctx, variant.StoragePath); err != nil {
+			log.Printf("Failed to delete variant file %s: %v", variant.StoragePath, err)
 		}
 
 		if err := cacheHelper.DeleteCachedImageData(ctx, variant.Identifier); err != nil {
@@ -826,7 +719,6 @@ func deleteVariantsForImage(ctx context.Context, variantRepo *images.VariantRepo
 		}
 	}
 
-	// 删除数据库中的变体记录
 	if err := variantRepo.DeleteByImageID(img.ID); err != nil {
 		log.Printf("Failed to delete variant records for image %d: %v", img.ID, err)
 	}
@@ -871,4 +763,67 @@ func ReadImageData(reader io.ReadSeeker) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// GetImageByIdentifier 获取图片
+func (s *Service) GetImageByIdentifier(identifier string) (*models.Image, error) {
+	return s.repo.GetImageByIdentifier(identifier)
+}
+
+// UpdateImageByIdentifier 更新图片
+func (s *Service) UpdateImageByIdentifier(identifier string, updates map[string]interface{}) (*models.Image, error) {
+	return s.repo.UpdateImageByIdentifier(identifier, updates)
+}
+
+// GetImageWithVariant 获取图片（包含完整的业务逻辑）
+func (s *Service) GetImageWithVariant(ctx context.Context, identifier string, acceptHeader string, userID uint) (*ImageResultDTO, error) {
+	// 使用 GetImageMetadata 以启用缓存和防击穿
+	image, err := s.GetImageMetadata(ctx, identifier)
+	if err != nil {
+		return nil, err
+	}
+
+	if !image.IsPublic && image.UserID != userID {
+		return nil, ErrForbidden
+	}
+
+	// 选择最优变体
+	variantResult, err := s.variantService.SelectBestVariant(ctx, image, acceptHeader)
+	if err != nil {
+		return &ImageResultDTO{
+			Image:      image,
+			IsOriginal: true,
+			URL:        utils.BuildImageURL(s.baseURL, image.Identifier),
+			MIMEType:   image.MimeType,
+		}, nil
+	}
+
+	if !variantResult.IsOriginal && variantResult.Variant == nil {
+		s.submitBackgroundTask(func() {
+			s.converter.TriggerWebPConversion(image)
+		})
+	}
+
+	result := &ImageResultDTO{
+		Image:      image,
+		IsOriginal: variantResult.IsOriginal,
+		MIMEType:   variantResult.MIMEType,
+	}
+
+	if variantResult.IsOriginal {
+		result.URL = utils.BuildImageURL(s.baseURL, image.Identifier)
+		result.MIMEType = image.MimeType
+	} else {
+		result.Variant = variantResult.Variant
+		if variantResult.Variant != nil {
+			result.URL = utils.BuildImageURL(s.baseURL, variantResult.Variant.Identifier)
+		} else {
+
+			result.IsOriginal = true
+			result.URL = utils.BuildImageURL(s.baseURL, image.Identifier)
+			result.MIMEType = image.MimeType
+		}
+	}
+
+	return result, nil
 }

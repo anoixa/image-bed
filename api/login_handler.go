@@ -14,12 +14,14 @@ import (
 // LoginHandler 登录处理器
 type LoginHandler struct {
 	loginService *auth.LoginService
+	cfg          *config.Config
 }
 
 // NewLoginHandlerWithService 使用 LoginService 创建登录处理器
-func NewLoginHandlerWithService(loginService *auth.LoginService) *LoginHandler {
+func NewLoginHandlerWithService(loginService *auth.LoginService, cfg *config.Config) *LoginHandler {
 	return &LoginHandler{
 		loginService: loginService,
+		cfg:          cfg,
 	}
 }
 
@@ -55,7 +57,6 @@ func (h *LoginHandler) LoginHandlerFunc(context *gin.Context) {
 		return
 	}
 
-	// 执行登录
 	result, err := h.loginService.Login(req.Username, req.Password)
 	if err != nil {
 		if err.Error() == "invalid credentials" {
@@ -124,7 +125,7 @@ func (h *LoginHandler) LogoutHandlerFunc(context *gin.Context) {
 		_ = h.loginService.Logout(deviceID)
 	}
 
-	clearAuthCookies(context)
+	h.clearAuthCookies(context)
 
 	common.RespondSuccessMessage(context, "Logout successful", nil)
 }
@@ -163,11 +164,12 @@ func setAuthCookies(c *gin.Context, refreshToken, deviceID string, maxAge int) {
 }
 
 // clearAuthCookies 清除认证相关的 cookie
-func clearAuthCookies(c *gin.Context) {
-	cfg := config.Get()
-
+func (h *LoginHandler) clearAuthCookies(c *gin.Context) {
 	path := "/api/auth/"
-	domain := cfg.ServerDomain
+	domain := ""
+	if h.cfg != nil {
+		domain = h.cfg.ServerDomain
+	}
 
 	// 将 MaxAge 设置为 -1 来让浏览器删除 Cookie
 	c.SetCookie("refresh_token", "", -1, path, domain, false, true)

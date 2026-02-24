@@ -4,20 +4,23 @@ import (
 	"context"
 	"strings"
 
-	"github.com/anoixa/image-bed/config/db"
+	config "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
+	"github.com/anoixa/image-bed/internal/worker"
+	"github.com/anoixa/image-bed/utils"
 	"github.com/anoixa/image-bed/utils/format"
 )
 
 // VariantResult 变体选择结果
 type VariantResult struct {
-	Format     format.FormatType
-	IsOriginal bool
-	Image      *models.Image
-	Variant    *models.ImageVariant
-	MIMEType   string
-	Identifier string
+	Format      format.FormatType
+	IsOriginal  bool
+	Image       *models.Image
+	Variant     *models.ImageVariant
+	MIMEType    string
+	Identifier  string
+	StoragePath string
 }
 
 // VariantService 变体服务
@@ -36,21 +39,78 @@ func NewVariantService(repo *images.VariantRepository, cm *config.Manager, conve
 	}
 }
 
+// submitBackgroundTask 提交后台任务到 worker pool，避免 goroutine 风暴
+func (s *VariantService) submitBackgroundTask(task func()) {
+	if pool := worker.GetGlobalPool(); pool != nil {
+		pool.Submit(task)
+	}
+}
+
 // SelectBestVariant 选择最优格式变体
 func (s *VariantService) SelectBestVariant(ctx context.Context, image *models.Image, acceptHeader string) (*VariantResult, error) {
-	// 读取配置
+	// GIF 和 WebP 格式直接返回原图，不进行格式协商
+	if image.MimeType == "image/gif" || image.MimeType == "image/webp" {
+		return &VariantResult{
+			Format:      format.FormatOriginal,
+			IsOriginal:  true,
+			Image:       image,
+			MIMEType:    image.MimeType,
+			Identifier:  image.Identifier,
+			StoragePath: image.StoragePath,
+		}, nil
+	}
+
 	settings, err := s.configManager.GetConversionSettings(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	// 查询可用变体
+	// utils.LogIfDevf("[VariantNegotiation] image=%s, variantStatus=%d, acceptHeader=%s", image.Identifier, uint(image.VariantStatus), acceptHeader)
+	// utils.LogIfDevf("[VariantNegotiation] enabledFormats=%v", settings.EnabledFormats)
+
+	switch image.VariantStatus {
+	case models.ImageVariantStatusNone:
+		// 从未处理过，触发转换并返回原图
+		return s.handleOriginalWithConversion(image, acceptHeader, settings, true)
+	case models.ImageVariantStatusProcessing:
+		// 正在处理中，返回原图
+		return s.handleOriginalWithConversion(image, acceptHeader, settings, false)
+	case models.ImageVariantStatusFailed:
+		return s.handleOriginalWithConversion(image, acceptHeader, settings, true)
+	case models.ImageVariantStatusThumbnailCompleted, models.ImageVariantStatusCompleted:
+
+		return s.handleCompletedVariants(ctx, image, acceptHeader, settings)
+	default:
+		// 默认按 None 处理
+		return s.handleOriginalWithConversion(image, acceptHeader, settings, false)
+	}
+}
+
+// handleOriginalWithConversion 返回原图，根据条件触发转换
+func (s *VariantService) handleOriginalWithConversion(image *models.Image, acceptHeader string, settings *config.ConversionSettings, allowTrigger bool) (*VariantResult, error) {
+	result := &VariantResult{
+		Format:      format.FormatOriginal,
+		IsOriginal:  true,
+		Image:       image,
+		MIMEType:    image.MimeType,
+		Identifier:  image.Identifier,
+		StoragePath: image.StoragePath,
+	}
+
+	if allowTrigger && strings.Contains(acceptHeader, "image/webp") {
+		s.submitBackgroundTask(func() { s.converter.TriggerWebPConversion(image) })
+	}
+
+	return result, nil
+}
+
+// handleCompletedVariants 处理已完成变体的情况
+func (s *VariantService) handleCompletedVariants(ctx context.Context, image *models.Image, acceptHeader string, settings *config.ConversionSettings) (*VariantResult, error) {
 	variants, err := s.variantRepo.GetVariantsByImageID(image.ID)
 	if err != nil {
 		return nil, err
 	}
 
-	// 构建可用格式映射
 	available := make(map[format.FormatType]bool)
 	variantMap := make(map[format.FormatType]*models.ImageVariant)
 
@@ -62,9 +122,14 @@ func (s *VariantService) SelectBestVariant(ctx context.Context, image *models.Im
 		}
 	}
 
-	// 格式协商
+	// 调试日志（仅在 dev 环境显示）
+	utils.LogIfDevf("[VariantNegotiation] image=%s, variantStatus=%d, acceptHeader=%s", image.Identifier, uint(image.VariantStatus), acceptHeader)
+	utils.LogIfDevf("[VariantNegotiation] availableVariants=%v, enabledFormats=%v", available, settings.EnabledFormats)
+
 	negotiator := format.NewNegotiator(settings.EnabledFormats)
 	selectedFormat := negotiator.Negotiate(acceptHeader, available)
+
+	utils.LogIfDevf("[VariantNegotiation] selectedFormat=%s", selectedFormat)
 
 	result := &VariantResult{
 		Format: selectedFormat,
@@ -75,10 +140,7 @@ func (s *VariantService) SelectBestVariant(ctx context.Context, image *models.Im
 		result.IsOriginal = true
 		result.MIMEType = image.MimeType
 		result.Identifier = image.Identifier
-
-		if !available[format.FormatWebP] && strings.Contains(acceptHeader, "image/webp") {
-			go s.converter.TriggerWebPConversion(image)
-		}
+		result.StoragePath = image.StoragePath
 	} else {
 		variant := variantMap[selectedFormat]
 		result.Variant = variant
@@ -86,10 +148,13 @@ func (s *VariantService) SelectBestVariant(ctx context.Context, image *models.Im
 
 		if variant != nil {
 			result.Identifier = variant.Identifier
+			result.StoragePath = variant.StoragePath
 		} else {
-			// 变体不存在，触发后台转换
+
 			result.Identifier = image.Identifier
-			go s.converter.TriggerWebPConversion(image)
+			result.StoragePath = image.StoragePath
+			result.IsOriginal = true
+			result.MIMEType = image.MimeType
 		}
 	}
 

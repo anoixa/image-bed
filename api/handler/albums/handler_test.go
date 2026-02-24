@@ -69,8 +69,8 @@ func TestCreateAlbumRequest_Binding(t *testing.T) {
 			wantStatus: http.StatusBadRequest,
 		},
 		{
-			name: "empty body",
-			body: map[string]interface{}{},
+			name:       "empty body",
+			body:       map[string]interface{}{},
 			wantStatus: http.StatusBadRequest,
 		},
 	}
@@ -176,8 +176,8 @@ func TestAddImagesToAlbumRequest_Binding(t *testing.T) {
 			wantStatus: http.StatusBadRequest,
 		},
 		{
-			name: "missing image_ids",
-			body: map[string]interface{}{},
+			name:       "missing image_ids",
+			body:       map[string]interface{}{},
 			wantStatus: http.StatusBadRequest,
 		},
 	}

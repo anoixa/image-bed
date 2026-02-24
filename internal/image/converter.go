@@ -3,7 +3,8 @@ package image
 import (
 	"context"
 
-	"github.com/anoixa/image-bed/config/db"
+	"github.com/anoixa/image-bed/cache"
+	config "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/internal/worker"
@@ -15,15 +16,19 @@ import (
 type Converter struct {
 	configManager *config.Manager
 	variantRepo   *images.VariantRepository
+	imageRepo     *images.Repository
 	storage       storage.Provider
+	cacheHelper   *cache.Helper
 }
 
 // NewConverter 创建转换器
-func NewConverter(cm *config.Manager, repo *images.VariantRepository, storage storage.Provider) *Converter {
+func NewConverter(cm *config.Manager, variantRepo *images.VariantRepository, imageRepo *images.Repository, storage storage.Provider, cacheHelper *cache.Helper) *Converter {
 	return &Converter{
 		configManager: cm,
-		variantRepo:   repo,
+		variantRepo:   variantRepo,
+		imageRepo:     imageRepo,
 		storage:       storage,
+		cacheHelper:   cacheHelper,
 	}
 }
 
@@ -32,7 +37,6 @@ func NewConverter(cm *config.Manager, repo *images.VariantRepository, storage st
 func (c *Converter) TriggerWebPConversion(image *models.Image) {
 	ctx := context.Background()
 
-	// 读取配置
 	settings, err := c.configManager.GetConversionSettings(ctx)
 	if err != nil {
 		utils.LogIfDevf("[Converter] Failed to get settings: %v", err)
@@ -44,10 +48,23 @@ func (c *Converter) TriggerWebPConversion(image *models.Image) {
 		return
 	}
 
+	// 跳过 GIF 和 WebP 格式
+	if image.MimeType == "image/gif" || image.MimeType == "image/webp" {
+		return
+	}
+
 	if settings.SkipSmallerThan > 0 {
 		minSize := int64(settings.SkipSmallerThan * 1024)
 		if image.FileSize < minSize {
 			return
+		}
+	}
+
+	if image.VariantStatus == models.ImageVariantStatusNone || image.VariantStatus == models.ImageVariantStatusFailed {
+		if err := c.imageRepo.UpdateVariantStatus(image.ID, models.ImageVariantStatusProcessing); err != nil {
+			utils.LogIfDevf("[Converter] Failed to update image status to processing: %v", err)
+		} else {
+			image.VariantStatus = models.ImageVariantStatusProcessing
 		}
 	}
 
@@ -69,7 +86,6 @@ func (c *Converter) TriggerWebPConversion(image *models.Image) {
 		return
 	}
 
-	// 提交任务
 	pool := worker.GetGlobalPool()
 	if pool == nil {
 		return
@@ -77,14 +93,17 @@ func (c *Converter) TriggerWebPConversion(image *models.Image) {
 
 	ok := pool.Submit(func() {
 		task := &worker.WebPConversionTask{
-			VariantID:        variant.ID,
-			ImageID:          image.ID,
-			SourceIdentifier: image.Identifier,
-			SourceWidth:      image.Width,
-			SourceHeight:     image.Height,
-			ConfigManager:    c.configManager,
-			VariantRepo:      c.variantRepo,
-			Storage:          c.storage,
+			VariantID:       variant.ID,
+			ImageID:         image.ID,
+			ImageIdentifier: image.Identifier,
+			SourcePath:      image.StoragePath,
+			SourceWidth:     image.Width,
+			SourceHeight:    image.Height,
+			ConfigManager:   c.configManager,
+			VariantRepo:     c.variantRepo,
+			ImageRepo:       c.imageRepo,
+			Storage:         c.storage,
+			CacheHelper:     c.cacheHelper,
 		}
 		task.Execute()
 	})

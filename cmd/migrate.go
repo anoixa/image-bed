@@ -82,12 +82,10 @@ type migrateStats struct {
 
 // runMigration 执行数据库迁移
 func runMigration(fromType, toType, fromDSN, toDSN, fromSQLite, toPostgres string, skipConfirm bool, batchSize int, onConflict string) error {
-	// 验证冲突处理策略
 	if onConflict != "skip" && onConflict != "overwrite" && onConflict != "error" {
 		return fmt.Errorf("invalid on-conflict strategy: %s (must be skip, overwrite, or error)", onConflict)
 	}
 
-	// 处理快捷方式参数
 	if fromSQLite != "" {
 		fromType = "sqlite"
 		fromDSN = fromSQLite
@@ -97,7 +95,6 @@ func runMigration(fromType, toType, fromDSN, toDSN, fromSQLite, toPostgres strin
 		toDSN = toPostgres
 	}
 
-	// 验证参数
 	if fromType == "" || toType == "" {
 		return fmt.Errorf("both --from-type and --to-type are required")
 	}
@@ -105,7 +102,6 @@ func runMigration(fromType, toType, fromDSN, toDSN, fromSQLite, toPostgres strin
 		return fmt.Errorf("both --from-dsn and --to-dsn (or shortcuts) are required")
 	}
 
-	// 检查源和目标是否相同
 	if fromType == toType && fromDSN == toDSN {
 		return fmt.Errorf("source and target databases are the same")
 	}
@@ -115,7 +111,6 @@ func runMigration(fromType, toType, fromDSN, toDSN, fromSQLite, toPostgres strin
 	log.Printf("Target: %s", maskDSN(toDSN))
 	log.Printf("Conflict strategy: %s", onConflict)
 
-	// 连接源数据库
 	sourceDB, err := openDatabase(fromType, fromDSN)
 	if err != nil {
 		return fmt.Errorf("failed to connect to source database: %w", err)
@@ -123,7 +118,6 @@ func runMigration(fromType, toType, fromDSN, toDSN, fromSQLite, toPostgres strin
 	sqlDB, _ := sourceDB.DB()
 	defer func() { _ = sqlDB.Close() }()
 
-	// 连接目标数据库
 	targetDB, err := openDatabase(toType, toDSN)
 	if err != nil {
 		return fmt.Errorf("failed to connect to target database: %w", err)
@@ -239,7 +233,6 @@ func openDatabase(dbType, dsn string) (*gorm.DB, error) {
 		return nil, err
 	}
 
-	// 设置连接池
 	sqlDB, err := db.DB()
 	if err != nil {
 		return nil, err
@@ -313,7 +306,6 @@ func migrateUsers(ctx context.Context, sourceDB, targetDB *gorm.DB, stats *migra
 		}
 
 		if shouldCreate {
-			// 处理软删除时间
 			if user.DeletedAt.Valid {
 				user.DeletedAt = gorm.DeletedAt{Valid: true, Time: user.DeletedAt.Time}
 			}
@@ -324,7 +316,6 @@ func migrateUsers(ctx context.Context, sourceDB, targetDB *gorm.DB, stats *migra
 			}
 			stats.users++
 		} else if shouldOverwrite {
-			// 删除旧记录，插入新记录
 			targetDB.WithContext(ctx).Where("id = ?", user.ID).Delete(&models.User{})
 			if err := targetDB.WithContext(ctx).Create(&user).Error; err != nil {
 				stats.errors = append(stats.errors, fmt.Sprintf("failed to overwrite user %d: %v", user.ID, err))
@@ -495,7 +486,6 @@ func migrateAlbums(ctx context.Context, sourceDB, targetDB *gorm.DB, stats *migr
 
 // migrateAlbumImages 迁移相册-图片关联关系
 func migrateAlbumImages(ctx context.Context, sourceDB, targetDB *gorm.DB, stats *migrateStats, onConflict string) error {
-	// 获取源数据库中的所有关联关系
 	type AlbumImage struct {
 		AlbumID uint
 		ImageID uint
@@ -508,7 +498,6 @@ func migrateAlbumImages(ctx context.Context, sourceDB, targetDB *gorm.DB, stats 
 	}
 
 	for _, rel := range relations {
-		// 检查目标数据库是否已存在此关联
 		var count int64
 		targetDB.WithContext(ctx).Raw(
 			"SELECT COUNT(*) FROM album_images WHERE album_id = ? AND image_id = ?",
@@ -523,7 +512,6 @@ func migrateAlbumImages(ctx context.Context, sourceDB, targetDB *gorm.DB, stats 
 			continue
 		}
 
-		// 检查关联的相册和图片是否存在
 		var albumCount, imageCount int64
 		targetDB.WithContext(ctx).Model(&models.Album{}).Where("id = ?", rel.AlbumID).Count(&albumCount)
 		targetDB.WithContext(ctx).Model(&models.Image{}).Where("id = ?", rel.ImageID).Count(&imageCount)

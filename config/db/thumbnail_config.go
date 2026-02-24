@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 
@@ -50,11 +51,24 @@ func (s *ThumbnailSettings) GetSizeByWidth(width int) *models.ThumbnailSize {
 
 // GetThumbnailSettings 获取缩略图配置
 func (m *Manager) GetThumbnailSettings(ctx context.Context) (*ThumbnailSettings, error) {
-	// 获取默认缩略图配置
+	m.cacheMutex.RLock()
+	if val, exists := m.localCache[cacheKeyThumbnail]; exists {
+		m.cacheMutex.RUnlock()
+		return val.(*ThumbnailSettings), nil
+	}
+	m.cacheMutex.RUnlock()
+
+	m.cacheMutex.Lock()
+	defer m.cacheMutex.Unlock()
+
+	// 双重检查
+	if val, exists := m.localCache[cacheKeyThumbnail]; exists {
+		return val.(*ThumbnailSettings), nil
+	}
+
 	config, err := m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryThumbnail)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			// 创建默认配置
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			if err := m.ensureDefaultThumbnailConfig(ctx); err != nil {
 				return nil, fmt.Errorf("failed to create default thumbnail config: %w", err)
 			}
@@ -68,7 +82,6 @@ func (m *Manager) GetThumbnailSettings(ctx context.Context) (*ThumbnailSettings,
 		}
 	}
 
-	// 解密配置
 	configMap, err := m.DecryptConfig(config.ConfigJSON)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt thumbnail config: %w", err)
@@ -79,12 +92,13 @@ func (m *Manager) GetThumbnailSettings(ctx context.Context) (*ThumbnailSettings,
 		return nil, fmt.Errorf("failed to decode thumbnail settings: %w", err)
 	}
 
+	m.localCache[cacheKeyThumbnail] = settings
+
 	return settings, nil
 }
 
 // ensureDefaultThumbnailConfig 确保默认缩略图配置存在
 func (m *Manager) ensureDefaultThumbnailConfig(ctx context.Context) error {
-	// 检查是否已存在
 	count, err := m.repo.CountByCategory(ctx, models.ConfigCategoryThumbnail)
 	if err != nil {
 		return err
@@ -121,17 +135,14 @@ func (m *Manager) ensureDefaultThumbnailConfig(ctx context.Context) error {
 
 // SaveThumbnailSettings 保存缩略图配置
 func (m *Manager) SaveThumbnailSettings(ctx context.Context, settings *ThumbnailSettings) error {
-	// 获取现有配置
 	config, err := m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryThumbnail)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			// 创建新配置
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return m.ensureDefaultThumbnailConfig(ctx)
 		}
 		return err
 	}
 
-	// 构建更新请求
 	req := &models.SystemConfigStoreRequest{
 		Category: models.ConfigCategoryThumbnail,
 		Name:     "Thumbnail Configuration",

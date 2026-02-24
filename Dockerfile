@@ -1,32 +1,42 @@
-FROM golang:1.26-alpine AS builder
+FROM golang:1.26 AS builder
 
-RUN apk add --no-cache git ca-certificates tzdata build-base vips-dev
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    ca-certificates \
+    tzdata \
+    build-essential \
+    pkg-config \
+    libvips-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY go.mod go.sum ./
-
 RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=1 GOOS=linux go build -trimpath -ldflags="-s -w" -o image-bed .
+RUN CGO_ENABLED=1 GOOS=linux go build \
+    -trimpath \
+    -ldflags="-s -w" \
+    -o image-bed .
 
-FROM alpine:edge
+FROM debian:13-slim
 
-RUN apk add --no-cache \
-    vips \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libvips42 \
     ca-certificates \
     tzdata \
-    && rm -rf /var/cache/apk/*
+    wget \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN adduser -D -s /bin/sh appuser
+RUN useradd -m -u 10001 -s /usr/sbin/nologin appuser
 
 WORKDIR /app
 
 COPY --from=builder /app/image-bed .
 
-RUN mkdir -p /app/data && chown -R appuser:appuser /app
+RUN mkdir -p /app/data && chown -R appuser:appuser /app/data
 
 USER appuser
 

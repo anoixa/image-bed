@@ -4,8 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
+	"path/filepath"
 	"sync"
+	"time"
+
+	"github.com/anoixa/image-bed/utils"
 )
 
 var (
@@ -26,7 +31,7 @@ type ImageStream struct {
 type StorageConfig struct {
 	ID        uint
 	Name      string
-	Type      string // "local" or "minio"
+	Type      string // "local" | "minio" | "webdav"
 	IsDefault bool
 	// Local
 	LocalPath string
@@ -36,35 +41,46 @@ type StorageConfig struct {
 	SecretAccessKey string
 	UseSSL          bool
 	BucketName      string
+	// WebDAV
+	WebDAVURL      string
+	WebDAVUsername string
+	WebDAVPassword string
+	WebDAVRootPath string
 }
 
 // Provider 存储提供者接口
 type Provider interface {
 	// SaveWithContext 保存文件到存储
-	SaveWithContext(ctx context.Context, identifier string, file io.Reader) error
+	SaveWithContext(ctx context.Context, storagePath string, file io.Reader) error
 
 	// GetWithContext 从存储获取文件
-	GetWithContext(ctx context.Context, identifier string) (io.ReadSeeker, error)
+	GetWithContext(ctx context.Context, storagePath string) (io.ReadSeeker, error)
 
 	// DeleteWithContext 从存储删除文件
-	DeleteWithContext(ctx context.Context, identifier string) error
+	DeleteWithContext(ctx context.Context, storagePath string) error
 
 	// Exists 检查文件是否存在
-	Exists(ctx context.Context, identifier string) (bool, error)
+	Exists(ctx context.Context, storagePath string) (bool, error)
 
 	// Health 检查存储健康状态
 	Health(ctx context.Context) error
 
 	// Name 返回存储名称
-		Name() string
-	}
-	
-	// FileOpener 支持直接打开 *os.File 的存储（用于零拷贝传输）
-	type FileOpener interface {
-		OpenFile(ctx context.Context, name string) (*os.File, error)
-	}
-	
-	// InitStorage 初始化存储层
+	Name() string
+}
+
+// FileOpener 支持直接打开 *os.File 的存储（用于零拷贝传输）
+type FileOpener interface {
+	OpenFile(ctx context.Context, name string) (*os.File, error)
+}
+
+// StreamProvider 流式传输到 ResponseWriter 的存储
+type StreamProvider interface {
+	Provider
+	StreamTo(ctx context.Context, storagePath string, w http.ResponseWriter) (int64, error)
+}
+
+// InitStorage 初始化存储层
 func InitStorage(configs []StorageConfig) error {
 	providersMu.Lock()
 	defer providersMu.Unlock()
@@ -83,7 +99,8 @@ func InitStorage(configs []StorageConfig) error {
 
 	// 如果没有配置则使用默认本地存储
 	if defaultProvider == nil {
-		provider, err := NewLocalStorage("./data/upload")
+		dataDir := utils.GetDataDir()
+		provider, err := NewLocalStorage(filepath.Join(dataDir, "upload"))
 		if err != nil {
 			return fmt.Errorf("failed to create default storage: %w", err)
 		}
@@ -203,6 +220,14 @@ func createProvider(cfg StorageConfig) (Provider, error) {
 			SecretAccessKey: cfg.SecretAccessKey,
 			UseSSL:          cfg.UseSSL,
 			BucketName:      cfg.BucketName,
+		})
+	case "webdav":
+		return NewWebDAVStorage(WebDAVConfig{
+			URL:      cfg.WebDAVURL,
+			Username: cfg.WebDAVUsername,
+			Password: cfg.WebDAVPassword,
+			RootPath: cfg.WebDAVRootPath,
+			Timeout:  30 * time.Second,
 		})
 	default:
 		return nil, fmt.Errorf("unsupported storage type: %s", cfg.Type)

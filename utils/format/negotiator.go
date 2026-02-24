@@ -68,11 +68,9 @@ func NewNegotiator(enabled []string) *Negotiator {
 func (n *Negotiator) Negotiate(acceptHeader string, available map[FormatType]bool) FormatType {
 	clientPrefs := parseAcceptHeader(acceptHeader)
 
-	// 按优先级检查：AVIF > WebP > Original
 	candidates := []FormatType{FormatAVIF, FormatWebP}
 
 	for _, format := range candidates {
-		// 服务器启用且客户端支持且变体可用
 		if n.enabledFormats[format] && available[format] && clientSupports(clientPrefs, format) {
 			return format
 		}
