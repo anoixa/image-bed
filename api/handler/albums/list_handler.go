@@ -54,7 +54,6 @@ func (h *Handler) ListAlbumsHandler(c *gin.Context) {
 
 	userID := c.GetUint(middleware.ContextUserIDKey)
 
-	// 尝试从缓存获取
 	var cachedList CachedAlbumList
 	if err := h.cacheHelper.GetCachedAlbumList(c.Request.Context(), userID, req.Page, req.Limit, &cachedList); err == nil {
 		common.RespondSuccess(c, ListAlbumsResponse{

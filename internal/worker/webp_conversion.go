@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"runtime"
-	"runtime/debug"
 	"strings"
 	"time"
 
@@ -22,7 +21,7 @@ import (
 const (
 	ErrorTransient ErrorType = iota // 可重试
 	ErrorPermanent                  // 永久错误
-	ErrorConfig                     // 配置错误
+	ErrorConfig
 )
 
 // ErrorType 错误类型
@@ -54,14 +53,12 @@ func ClassifyError(err error) ErrorType {
 		return ErrorPermanent
 	}
 
-	// 配置错误
 	if strings.Contains(errStr, "invalid quality") ||
 		strings.Contains(errStr, "quality out of range") ||
 		strings.Contains(errStr, "effort out of range") {
 		return ErrorConfig
 	}
 
-	// 默认可重试
 	return ErrorTransient
 }
 
@@ -78,15 +75,15 @@ type conversionResult struct {
 type WebPConversionTask struct {
 	VariantID       uint
 	ImageID         uint
-	ImageIdentifier string // 原图标识符，用于缓存失效
-	SourcePath      string // 原图存储路径
+	ImageIdentifier string
+	SourcePath      string
 	SourceWidth     int
 	SourceHeight    int
 	ConfigManager   *config.Manager
 	VariantRepo     VariantRepository
 	ImageRepo       ImageRepository
 	Storage         storage.Provider
-	CacheHelper     *cache.Helper // 缓存帮助器，用于任务完成后删除缓存
+	CacheHelper     *cache.Helper
 	result          *conversionResult
 }
 
@@ -96,7 +93,6 @@ func (t *WebPConversionTask) Execute() {
 
 	ctx := context.Background()
 
-	// 读取配置
 	settings, err := t.ConfigManager.GetConversionSettings(ctx)
 	if err != nil {
 		utils.LogIfDevf("[WebPConversion] Failed to get config: %v", err)
@@ -124,11 +120,9 @@ func (t *WebPConversionTask) Execute() {
 	}
 	utils.LogIfDevf("[WebPConversion] CAS success: variant %d is now processing", t.VariantID)
 
-	// 执行转换
 	utils.LogIfDevf("[WebPConversion] Starting conversion for variant %d, image=%s", t.VariantID, t.SourcePath)
 	err = t.doConversionWithTimeout(ctx, settings)
 
-	// 处理结果
 	if err != nil {
 		utils.LogIfDevf("[WebPConversion] Conversion failed for variant %d: %v", t.VariantID, err)
 		t.handleFailure(err)
@@ -171,64 +165,54 @@ func (t *WebPConversionTask) doConversionWithTimeout(ctx context.Context, settin
 
 // doConversion 执行转换
 func (t *WebPConversionTask) doConversion(ctx context.Context, settings *config.ConversionSettings) error {
-	// 获取信号量，限制并发处理的图片数量
 	semaphore := GetGlobalSemaphore()
 	if err := semaphore.Acquire(ctx); err != nil {
 		return fmt.Errorf("acquire semaphore: %w", err)
 	}
 	defer semaphore.Release()
 
-	// 记录处理前的内存状态
 	memBefore := utils.GetMemoryStats()
 	utils.LogIfDevf("[WebPConversion][%d] Starting conversion, heap: %.2fMB",
 		t.VariantID, memBefore.HeapAllocMB)
 
-	// 读取原图
 	reader, err := t.Storage.GetWithContext(ctx, t.SourcePath)
 	if err != nil {
 		return fmt.Errorf("read source: %w", err)
 	}
 
-	const maxMemorySize = 10 * 1024 * 1024 // 10MB 阈值
+	const maxMemorySize = 10 * 1024 * 1024
 
 	// 限制读取大小
-	limitedReader := io.LimitReader(reader, maxMemorySize*5) // 允许稍大的输入
+	limitedReader := io.LimitReader(reader, maxMemorySize*5)
 
 	utils.LogIfDevf("[WebPConversion] Loading image for variant %d, source=%s", t.VariantID, t.SourcePath)
 
-	// 使用 govips 从 reader 加载图片
 	img, err := vips.NewImageFromReader(limitedReader)
 	if err != nil {
 		return fmt.Errorf("load image: %w", err)
 	}
 	defer func() {
 		img.Close()
-		// 强制 GC 以释放内存
 		runtime.GC()
-		// 释放内存给操作系统
-		debug.FreeOSMemory()
-		// 记录处理后的内存状态
+
 		memAfter := utils.GetMemoryStats()
 		delta := memAfter.HeapAllocMB - memBefore.HeapAllocMB
 		utils.LogIfDevf("[WebPConversion][%d] Image closed, heap delta: %+.2fMB (before: %.2fMB, after: %.2fMB)",
 			t.VariantID, delta, memBefore.HeapAllocMB, memAfter.HeapAllocMB)
 	}()
 
-	// 打印加载后的内存状态
 	memAfterLoad := utils.GetMemoryStats()
 	utils.LogIfDevf("[WebPConversion] Image loaded, heap delta: +%.2fMB",
 		memAfterLoad.HeapAllocMB-memBefore.HeapAllocMB)
 
-	// 获取图片尺寸（如果需要）
 	width := img.Width()
 	height := img.Height()
 
 	// 记录大图片警告
-	if width*height > 10000*10000 { // 约 100MP
+	if width*height > 10000*10000 {
 		utils.LogIfDevf("[WebPConversion] Processing large image: %dx%d, path: %s", width, height, t.SourcePath)
 	}
 
-	// 检查最大尺寸限制
 	if settings.MaxDimension > 0 {
 		if width > settings.MaxDimension || height > settings.MaxDimension {
 			return fmt.Errorf("image exceeds max dimension: %dx%d", width, height)
@@ -244,11 +228,9 @@ func (t *WebPConversionTask) doConversion(ctx context.Context, settings *config.
 		return fmt.Errorf("export webp: %w", err)
 	}
 
-	// 使用 PathGenerator 生成存储路径
 	pathGen := generator.NewPathGenerator()
 	ids := pathGen.GenerateConvertedIdentifiers(t.SourcePath, models.FormatWebP)
 
-	// 存储转换后的文件
 	if err := t.Storage.SaveWithContext(ctx, ids.StoragePath, bytes.NewReader(webpBytes)); err != nil {
 		return fmt.Errorf("save: %w", err)
 	}
@@ -282,18 +264,15 @@ func (t *WebPConversionTask) handleSuccess() {
 		return
 	}
 
-	// 更新图片的变体状态
 	if err := t.ImageRepo.UpdateVariantStatus(t.ImageID, models.ImageVariantStatusCompleted); err != nil {
 		utils.LogIfDevf("[WebPConversion] Failed to update image status: %v", err)
 	}
 
-	// 删除缓存
 	t.deleteCacheOnTerminalState("success")
 }
 
 // handleFailure 处理失败
 func (t *WebPConversionTask) handleFailure(err error) {
-	// 获取当前变体信息
 	variant, getErr := t.VariantRepo.GetByID(t.VariantID)
 	if getErr != nil {
 		utils.LogIfDevf("[WebPConversion] Failed to get variant for error handling: %v", getErr)
@@ -309,7 +288,6 @@ func (t *WebPConversionTask) handleFailure(err error) {
 		// 永久错误，标记为失败，不重试
 		allowRetry = false
 	case ErrorConfig:
-		// 配置错误，可能是设置问题，也不重试
 		allowRetry = false
 	default:
 		// 可重试错误

@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 
@@ -65,11 +66,9 @@ func (m *Manager) GetThumbnailSettings(ctx context.Context) (*ThumbnailSettings,
 		return val.(*ThumbnailSettings), nil
 	}
 
-	// 获取默认缩略图配置
 	config, err := m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryThumbnail)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			// 创建默认配置
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			if err := m.ensureDefaultThumbnailConfig(ctx); err != nil {
 				return nil, fmt.Errorf("failed to create default thumbnail config: %w", err)
 			}
@@ -83,7 +82,6 @@ func (m *Manager) GetThumbnailSettings(ctx context.Context) (*ThumbnailSettings,
 		}
 	}
 
-	// 解密配置
 	configMap, err := m.DecryptConfig(config.ConfigJSON)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt thumbnail config: %w", err)
@@ -94,7 +92,6 @@ func (m *Manager) GetThumbnailSettings(ctx context.Context) (*ThumbnailSettings,
 		return nil, fmt.Errorf("failed to decode thumbnail settings: %w", err)
 	}
 
-	// 写入缓存
 	m.localCache[cacheKeyThumbnail] = settings
 
 	return settings, nil
@@ -102,7 +99,6 @@ func (m *Manager) GetThumbnailSettings(ctx context.Context) (*ThumbnailSettings,
 
 // ensureDefaultThumbnailConfig 确保默认缩略图配置存在
 func (m *Manager) ensureDefaultThumbnailConfig(ctx context.Context) error {
-	// 检查是否已存在
 	count, err := m.repo.CountByCategory(ctx, models.ConfigCategoryThumbnail)
 	if err != nil {
 		return err
@@ -139,17 +135,14 @@ func (m *Manager) ensureDefaultThumbnailConfig(ctx context.Context) error {
 
 // SaveThumbnailSettings 保存缩略图配置
 func (m *Manager) SaveThumbnailSettings(ctx context.Context, settings *ThumbnailSettings) error {
-	// 获取现有配置
 	config, err := m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryThumbnail)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			// 创建新配置
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return m.ensureDefaultThumbnailConfig(ctx)
 		}
 		return err
 	}
 
-	// 构建更新请求
 	req := &models.SystemConfigStoreRequest{
 		Category: models.ConfigCategoryThumbnail,
 		Name:     "Thumbnail Configuration",

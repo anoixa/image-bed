@@ -58,7 +58,6 @@ func (s *RetryScanner) Stop() {
 func (s *RetryScanner) scanAndRetry() {
 	now := time.Now()
 
-	// 首先扫描 VariantStatus 为 Failed 的图片
 	if s.imageRepo != nil {
 		failedImages, err := s.imageRepo.GetImagesByVariantStatus(
 			[]models.ImageVariantStatus{models.ImageVariantStatusFailed},
@@ -74,7 +73,6 @@ func (s *RetryScanner) scanAndRetry() {
 		}
 	}
 
-	// 查询可重试的变体
 	variants, err := s.variantRepo.GetRetryableVariants(now, s.batchSize)
 	if err != nil {
 		utils.LogIfDevf("[RetryScanner] Failed to get retryable variants: %v", err)
@@ -91,7 +89,6 @@ func (s *RetryScanner) scanAndRetry() {
 		utils.LogIfDevf("[RetryScanner] Processing variant %d: status=%s, retry_count=%d",
 			variant.ID, variant.Status, variant.RetryCount)
 
-		// 使用 ResetForRetry: failed → pending，同时增加 retry_count 和设置 next_retry_at
 		err := s.variantRepo.ResetForRetry(variant.ID, s.interval)
 		if err != nil {
 			utils.LogIfDevf("[RetryScanner] ResetForRetry failed for variant %d: %v", variant.ID, err)
@@ -99,7 +96,6 @@ func (s *RetryScanner) scanAndRetry() {
 		}
 		utils.LogIfDevf("[RetryScanner] ResetForRetry success: variant %d status changed from failed to pending, retry_count incremented", variant.ID)
 
-		// 获取图片信息
 		img, err := s.variantRepo.GetImageByID(variant.ImageID)
 		if err != nil {
 			utils.LogIfDevf("[RetryScanner] Failed to get image %d: %v", variant.ImageID, err)
@@ -137,8 +133,6 @@ type OrphanScanner struct {
 }
 
 // NewOrphanScanner 创建孤儿任务扫描器
-// threshold: 超过多长时间视为孤儿任务（如 10 分钟）
-// interval: 扫描间隔（如 5 分钟）
 func NewOrphanScanner(repo *images.VariantRepository, converter *Converter, thumbnailService ThumbnailServiceAccessor, threshold, interval time.Duration) *OrphanScanner {
 	return &OrphanScanner{
 		variantRepo:      repo,
@@ -155,7 +149,6 @@ func NewOrphanScanner(repo *images.VariantRepository, converter *Converter, thum
 func (s *OrphanScanner) Start() {
 	ticker := time.NewTicker(s.interval)
 	go func() {
-		// 启动时立即执行一次扫描
 		s.scan()
 
 		for {
@@ -208,17 +201,15 @@ func (s *OrphanScanner) processOrphanVariant(variant models.ImageVariant) {
 	}
 	utils.LogIfDevf("[OrphanScanner] Reset variant %d from processing to pending", variant.ID)
 
-	// 获取图片信息
 	img, err := s.variantRepo.GetImageByID(variant.ImageID)
 	if err != nil {
 		utils.LogIfDevf("[OrphanScanner] Failed to get image %d: %v", variant.ImageID, err)
 		return
 	}
 
-	// 判断是 WebP 转换还是缩略图生成
 	if width, ok := models.ParseThumbnailSize(variant.Format); ok {
 		utils.LogIfDevf("[OrphanScanner] Triggering thumbnail generation for variant %d", variant.ID)
-		if ok && width > 0 && s.thumbnailService != nil {
+		if width > 0 && s.thumbnailService != nil {
 			s.thumbnailService.TriggerGeneration(img, width)
 		}
 	} else {

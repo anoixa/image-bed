@@ -63,17 +63,15 @@ func NewThumbnailService(
 func (s *ThumbnailService) GetThumbnail(ctx context.Context, image *models.Image, width int) (*ThumbnailResult, error) {
 	format := formatThumbnailSize(width)
 
-	// 查询是否存在该尺寸的缩略图
 	variant, err := s.variantRepo.GetVariantByImageIDAndFormat(image.ID, format)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			// 缩略图不存在
+
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get thumbnail variant: %w", err)
 	}
 
-	// 缩略图生成未成功
 	if variant.Status != models.VariantStatusCompleted {
 		return nil, nil
 	}
@@ -93,14 +91,12 @@ func (s *ThumbnailService) GetThumbnail(ctx context.Context, image *models.Image
 func (s *ThumbnailService) TriggerGeneration(image *models.Image, width int) {
 	ctx := context.Background()
 
-	// 读取配置，失败时使用默认配置
 	settings, err := s.configManager.GetThumbnailSettings(ctx)
 	if err != nil {
 		utils.LogIfDevf("[Thumbnail] Failed to get settings, using defaults: %v", err)
 		settings = config.DefaultThumbnailSettings()
 	}
 
-	// 检查图片
 	if !settings.Enabled {
 		utils.LogIfDevf("[Thumbnail] Thumbnail generation disabled")
 		return
@@ -112,7 +108,6 @@ func (s *ThumbnailService) TriggerGeneration(image *models.Image, width int) {
 
 	format := formatThumbnailSize(width)
 
-	// 创建或获取变体记录
 	variant, err := s.variantRepo.UpsertPending(image.ID, format)
 	if err != nil {
 		utils.LogIfDevf("[Thumbnail] Failed to upsert variant: %v", err)
@@ -131,7 +126,6 @@ func (s *ThumbnailService) TriggerGeneration(image *models.Image, width int) {
 
 	thumbIDs := s.GenerateThumbnailIdentifiers(image.StoragePath, width)
 
-	// 提交任务
 	pool := worker.GetGlobalPool()
 	if pool == nil {
 		return
@@ -183,7 +177,6 @@ func (s *ThumbnailService) EnsureThumbnail(ctx context.Context, image *models.Im
 		return result, true, nil
 	}
 
-	// 缩略图不存在，触发生成
 	s.TriggerGeneration(image, width)
 	return nil, false, nil
 }
@@ -202,7 +195,6 @@ func (s *ThumbnailService) GenerateThumbnailSync(ctx context.Context, image *mod
 		return nil, fmt.Errorf("failed to get image reader: %w", err)
 	}
 
-	// 生成缩略图（流式处理）
 	thumbnailData, height, err := s.resizeImageFromReader(reader, width)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resize image: %w", err)
@@ -236,7 +228,6 @@ func (s *ThumbnailService) resizeImageFromReader(reader io.Reader, targetWidth i
 	}
 	defer img.Close()
 
-	// 获取图片尺寸
 	width := img.Width()
 	height := img.Height()
 
@@ -252,7 +243,6 @@ func (s *ThumbnailService) resizeImageFromReader(reader io.Reader, targetWidth i
 		return webpBytes, height, nil
 	}
 
-	// 计算目标高度保持比例
 	targetHeight := height * targetWidth / width
 
 	// 使用 Thumbnail 调整尺寸
@@ -333,7 +323,6 @@ func NewThumbnailScanner(
 func (s *ThumbnailScanner) Start() error {
 	settings, err := s.configManager.GetThumbnailScannerSettings()
 	if err != nil {
-		// 获取失败时使用默认配置
 		settings = config.GetDefaultThumbnailScannerSettings()
 	}
 
@@ -382,7 +371,6 @@ func (s *ThumbnailScanner) runOnce() {
 
 	settings, err := s.configManager.GetThumbnailScannerSettings()
 	if err != nil {
-		// 获取失败时使用默认配置
 		settings = config.GetDefaultThumbnailScannerSettings()
 	}
 
@@ -390,7 +378,6 @@ func (s *ThumbnailScanner) runOnce() {
 		return
 	}
 
-	// 获取需要生成缩略图的图片
 	images, err := s.getImagesNeedingThumbnails(settings.BatchSize)
 	if err != nil {
 		utils.LogIfDevf("[ThumbnailScanner] Failed to get images: %v", err)
@@ -428,7 +415,6 @@ func (s *ThumbnailScanner) getImagesNeedingThumbnails(limit int) ([]*models.Imag
 		return nil, err
 	}
 
-	// 获取已启用缩略图但未完成的图片
 	var images []*models.Image
 	err = s.db.Where("variant_status IN ?", []models.ImageVariantStatus{
 		models.ImageVariantStatusNone,
@@ -439,7 +425,6 @@ func (s *ThumbnailScanner) getImagesNeedingThumbnails(limit int) ([]*models.Imag
 		return nil, err
 	}
 
-	// 过滤掉不需要生成缩略图的图片
 	var result []*models.Image
 	for _, img := range images {
 		if settings.Enabled && img.FileSize > 0 {

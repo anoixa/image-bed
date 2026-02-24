@@ -79,7 +79,6 @@ func newRestoreStats() *restoreStats {
 
 // runRestore 执行还原
 func runRestore(inputFile string, tables []string, dryRun, truncate bool) error {
-	// 验证输入文件
 	if _, err := os.Stat(inputFile); err != nil {
 		return fmt.Errorf("backup file not found: %w", err)
 	}
@@ -93,7 +92,6 @@ func runRestore(inputFile string, tables []string, dryRun, truncate bool) error 
 	}
 	defer func() { _ = database.Close(db) }()
 
-	// 创建临时目录解压备份
 	tempDir := filepath.Join(os.TempDir(), fmt.Sprintf("image-bed-restore-%d", time.Now().Unix()))
 	if err := os.MkdirAll(tempDir, 0755); err != nil {
 		return fmt.Errorf("failed to create temp directory: %w", err)
@@ -107,7 +105,6 @@ func runRestore(inputFile string, tables []string, dryRun, truncate bool) error 
 		return fmt.Errorf("failed to extract backup: %w", err)
 	}
 
-	// 读取元数据
 	metadataPath := filepath.Join(tempDir, "metadata.json")
 	metadata, err := readMetadata(metadataPath)
 	if err != nil {
@@ -169,7 +166,6 @@ func runRestore(inputFile string, tables []string, dryRun, truncate bool) error 
 		}
 	}
 
-	// 更新自增序列
 	if !dryRun {
 		log.Println("Updating auto-increment sequences...")
 		if err := updateAutoIncrementSequences(db, cfg.DBType, stats); err != nil {
@@ -332,7 +328,6 @@ func restoreBatch(db *gorm.DB, scanner *bufio.Scanner, lineNum *int, batchSize i
 		}
 	}
 
-	// 处理剩余记录
 	if len(batch) > 0 {
 		insertBatch(db, batch, dryRun, stats, tableName)
 	}
@@ -373,7 +368,6 @@ func restoreBatchWithCleanup[T any](db *gorm.DB, scanner *bufio.Scanner, lineNum
 		}
 	}
 
-	// 处理剩余记录
 	if len(batch) > 0 && !dryRun {
 		if err := db.CreateInBatches(batch, len(batch)).Error; err != nil {
 			log.Printf("Warning: failed to insert final batch: %v", err)
@@ -411,7 +405,6 @@ func restoreAlbumImagesBatch(db *gorm.DB, scanner *bufio.Scanner, lineNum *int, 
 		}
 	}
 
-	// 处理剩余记录
 	if len(batch) > 0 {
 		insertAlbumImagesBatch(db, batch, dryRun, stats)
 	}

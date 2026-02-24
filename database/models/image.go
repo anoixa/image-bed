@@ -2,7 +2,6 @@ package models
 
 import "gorm.io/gorm"
 
-// 图片变体状态常量
 type ImageVariantStatus int8
 
 const (
@@ -10,7 +9,7 @@ const (
 	ImageVariantStatusProcessing         ImageVariantStatus = 1 // 有变体正在处理中
 	ImageVariantStatusThumbnailCompleted ImageVariantStatus = 2 // 缩略图已完成，WebP 未完成（缩略图优先级高）
 	ImageVariantStatusCompleted          ImageVariantStatus = 3 // 所有变体（缩略图+WebP）都已完成
-	ImageVariantStatusFailed             ImageVariantStatus = 4 // 变体处理失败/部分失败
+	ImageVariantStatusFailed             ImageVariantStatus = 4
 )
 
 // IsVariantAvailable 检查变体是否可用（已完成状态）

@@ -30,7 +30,6 @@ func TestSniffContentType_JPEG(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "image/jpeg", contentType)
 
-	// 验证流被重置
 	pos, _ := reader.Seek(0, 1)
 	assert.Equal(t, int64(0), pos, "Stream should be reset to beginning")
 }
@@ -89,7 +88,6 @@ func TestSniffContentType_Empty(t *testing.T) {
 
 // TestSniffContentType_LargeData 测试大数据
 func TestSniffContentType_LargeData(t *testing.T) {
-	// 创建一个大于512字节的数据
 	largeData := make([]byte, 1024)
 	copy(largeData, jpegMagic) // 以JPEG开头
 

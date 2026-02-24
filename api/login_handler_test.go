@@ -177,7 +177,6 @@ func TestTokenParse_InvalidToken(t *testing.T) {
 
 // TestTokenParse_MalformedToken 测试错误格式 Token
 func TestTokenParse_MalformedToken(t *testing.T) {
-	// 初始化
 	err := InitTestJWT("test-secret-key-at-least-32-characters-long", "30m", "10080m")
 	assert.NoError(t, err)
 
@@ -190,7 +189,6 @@ func TestTokenParse_MalformedToken(t *testing.T) {
 
 // TestGenerateRefreshToken 测试刷新令牌生成
 func TestGenerateRefreshToken(t *testing.T) {
-	// 初始化
 	err := InitTestJWT("test-secret-key-at-least-32-characters-long", "30m", "10080m")
 	assert.NoError(t, err)
 
@@ -222,19 +220,16 @@ func TestGenerateStaticToken(t *testing.T) {
 func TestPasswordHash(t *testing.T) {
 	password := "mysecretpassword123"
 
-	// 生成哈希
 	hash, err := cryptopackage.GenerateFromPassword(password)
 	assert.NoError(t, err)
 
 	assert.NotEmpty(t, hash)
 	assert.NotEqual(t, password, hash)
 
-	// 验证正确密码
 	ok, err := cryptopackage.ComparePasswordAndHash(password, hash)
 	assert.NoError(t, err)
 	assert.True(t, ok)
 
-	// 验证错误密码
 	ok, err = cryptopackage.ComparePasswordAndHash("wrongpassword", hash)
 	assert.NoError(t, err)
 	assert.False(t, ok)

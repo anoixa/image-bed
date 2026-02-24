@@ -97,10 +97,9 @@ func handleJwtAuth(c *gin.Context, token string) error {
 
 	role, _ := claims["role"].(string)
 	if role == "" {
-		role = "user" // 默认角色为普通用户
+		role = "user"
 	}
 
-	// 验证成功，将用户信息存入上下文
 	c.Set(ContextUserIDKey, uint(userID))
 	c.Set(ContextUsernameKey, username)
 	c.Set(ContextRoleKey, role)
@@ -121,7 +120,7 @@ func handleStaticTokenAuth(c *gin.Context, token string) error {
 
 	role := user.Role
 	if role == "" {
-		role = "user" // 默认角色为普通用户
+		role = "user"
 	}
 
 	//将用户信息存入上下文

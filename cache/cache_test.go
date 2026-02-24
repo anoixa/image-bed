@@ -42,7 +42,6 @@ func (m *mockProvider) Set(ctx context.Context, key string, value interface{}, e
 	} else if bytes, ok := value.([]byte); ok {
 		m.data[key] = bytes
 	} else {
-		// 序列化其他类型
 		data, _ := json.Marshal(value)
 		m.data[key] = data
 	}

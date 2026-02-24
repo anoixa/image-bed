@@ -36,7 +36,6 @@ const (
 
 // GenerateFromPassword 使用 Argon2id 算法哈希密码
 func GenerateFromPassword(password string) (string, error) {
-	// 生成随机盐值
 	salt := make([]byte, argon2SaltLength)
 	if _, err := io.ReadFull(rand.Reader, salt); err != nil {
 		return "", fmt.Errorf("failed to generate salt: %w", err)
@@ -62,21 +61,18 @@ func ComparePasswordAndHash(password, encodedHash string) (bool, error) {
 	// 使用 strings.Split 更安全地解析哈希字符串
 	parts := strings.Split(encodedHash, "$")
 
-	// 检查分割后的部分是否正确
 	// 期望格式: "", "argon2id", "v=...", "m=...,t=...,p=...", "salt", "hash"
 	if len(parts) != 6 || parts[0] != "" || parts[1] != "argon2id" {
 		return false, errors.New("invalid Argon2id hash format: incorrect number of parts or missing prefix")
 	}
 
 	var version int
-	// 解析版本号部分
 	_, err := fmt.Sscanf(parts[2], "v=%d", &version)
 	if err != nil {
 		return false, fmt.Errorf("invalid Argon2id version format: %w", err)
 	}
 
 	var memory, iterations, parallelism uint32
-	// 解析成本参数部分
 	_, err = fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &memory, &iterations, &parallelism)
 	if err != nil {
 		return false, fmt.Errorf("invalid Argon2id cost parameters format: %w", err)

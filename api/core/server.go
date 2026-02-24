@@ -74,7 +74,6 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 		log.Printf("Warning: Failed to set trusted proxies: %v", err)
 	}
 
-	// 初始化限制器
 	router.MaxMultipartMemory = int64(cfg.UploadMaxSizeMB) << 20
 	concurrencyLimiter := middleware.NewConcurrencyLimiter(100)
 	router.Use(concurrencyLimiter.Middleware())
@@ -83,11 +82,7 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 		requestBodyLimit = 100 << 20 // 最小 100MB
 	}
 	router.Use(middleware.MaxBytesReader(requestBodyLimit))
-
-	// 请求ID追踪
 	router.Use(middleware.RequestID())
-
-	// 基础监控指标
 	router.Use(middleware.Metrics())
 
 	// 速率限制器
@@ -100,7 +95,6 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 		imageRateLimiter.StopCleanup()
 	}
 
-	// 初始化认证服务
 	var tokenManager *auth.TokenManager
 	var jwtService *auth.JWTService
 	var loginService *auth.LoginService
@@ -122,7 +116,6 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 		api.SetJWTService(jwtService)
 	}
 
-	// 注册路由
 	routerDeps := &RouterDependencies{
 		DB:               deps.DB,
 		Repositories:     deps.Repositories,

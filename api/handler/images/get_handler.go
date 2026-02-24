@@ -47,7 +47,6 @@ func (h *Handler) GetImage(c *gin.Context) {
 	if result.IsOriginal {
 		h.serveOriginalImage(c, result.Image)
 	} else {
-		// 构建 VariantResult 供 serveVariantImage 使用
 		variantResult := &image.VariantResult{
 			IsOriginal:  false,
 			Variant:     result.Variant,
@@ -102,7 +101,6 @@ func (h *Handler) serveByStreaming(c *gin.Context, img *models.Image, streamer s
 // fetchFromRemote 从远程存储获取图片数据
 func (h *Handler) fetchFromRemote(storagePath string) ([]byte, error) {
 	v, err, _ := fileDownloadGroup.Do(storagePath, func() (interface{}, error) {
-		// 双重检查缓存
 		if data, err := h.cacheHelper.GetCachedImageData(context.Background(), storagePath); err == nil {
 			return data, nil
 		}
@@ -118,7 +116,6 @@ func (h *Handler) fetchFromRemote(storagePath string) ([]byte, error) {
 			}
 		}()
 
-		// 读取数据到内存（限制最大 50MB，避免超大图片导致 OOM）
 		const maxImageSize = 50 * 1024 * 1024
 		limitedReader := io.LimitReader(stream, maxImageSize)
 		data, err := io.ReadAll(limitedReader)
@@ -131,14 +128,12 @@ func (h *Handler) fetchFromRemote(storagePath string) ([]byte, error) {
 			log.Printf("[fetchFromRemote] Large image loaded: %d bytes, path: %s", len(data), storagePath)
 		}
 
-		// 异步缓存（仅缓存较小的图片，避免缓存占用过多内存）
 		if len(data) < 5*1024*1024 { // 只缓存小于 5MB 的图片
 			task := func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 				_ = h.cacheHelper.CacheImageData(ctx, storagePath, data)
 			}
-			// 使用 worker pool 替代裸 goroutine
 			if pool := worker.GetGlobalPool(); pool != nil {
 				pool.Submit(task)
 			} else {
@@ -163,13 +158,11 @@ func (h *Handler) serveBySendfile(c *gin.Context, img *models.Image, opener stor
 	}
 	defer func() { _ = file.Close() }()
 
-	// 设置响应头
 	c.Header("Cache-Control", "public, max-age=86400")
 	c.Header("Content-Type", img.MimeType)
 	c.Header("Content-Length", strconv.FormatInt(img.FileSize, 10))
 	c.Header("ETag", "\""+img.FileHash+"\"")
 
-	// 使用 http.ServeContent 支持范围请求和缓存验证
 	http.ServeContent(c.Writer, c.Request, img.Identifier, time.Time{}, file)
 	return true
 }
@@ -186,28 +179,24 @@ func (h *Handler) serveImageData(c *gin.Context, img *models.Image, data []byte)
 
 // serveVariantImage 提供格式变体
 func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *image.VariantResult) {
-	// 检查缓存
 	imageData, err := h.cacheHelper.GetCachedImageData(c.Request.Context(), result.StoragePath)
 	if err == nil {
 		h.serveVariantData(c, img, result, imageData)
 		return
 	}
 
-	// 本地存储
 	if opener, ok := storage.GetDefault().(storage.FileOpener); ok {
 		if h.serveVariantBySendfile(c, img, result, opener) {
 			return
 		}
 	}
 
-	// 尝试流式传输（避免全量加载到内存）
 	if streamer, ok := storage.GetDefault().(storage.StreamProvider); ok {
 		if h.serveVariantByStreaming(c, result, streamer) {
 			return
 		}
 	}
 
-	// 从存储获取（兜底方案）
 	stream, err := storage.GetDefault().GetWithContext(c.Request.Context(), result.StoragePath)
 	if err != nil {
 		log.Printf("[serveVariant] Failed to get variant %s (path: %s): %v", result.Identifier, result.StoragePath, err)
@@ -227,7 +216,6 @@ func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *i
 		return
 	}
 
-	// 异步缓存（使用 worker pool）
 	task := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -293,7 +281,6 @@ func (h *Handler) handleMetadataError(c *gin.Context, identifier string, err err
 		return
 	}
 
-	// 检查是否是权限错误
 	if errors.Is(err, image.ErrForbidden) {
 		common.RespondError(c, http.StatusForbidden, "This image is private")
 		return

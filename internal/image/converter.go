@@ -37,7 +37,6 @@ func NewConverter(cm *config.Manager, variantRepo *images.VariantRepository, ima
 func (c *Converter) TriggerWebPConversion(image *models.Image) {
 	ctx := context.Background()
 
-	// 读取配置
 	settings, err := c.configManager.GetConversionSettings(ctx)
 	if err != nil {
 		utils.LogIfDevf("[Converter] Failed to get settings: %v", err)
@@ -56,11 +55,9 @@ func (c *Converter) TriggerWebPConversion(image *models.Image) {
 		}
 	}
 
-	// 更新图片状态为 Processing（如果当前是 None 或 Failed）
 	if image.VariantStatus == models.ImageVariantStatusNone || image.VariantStatus == models.ImageVariantStatusFailed {
 		if err := c.imageRepo.UpdateVariantStatus(image.ID, models.ImageVariantStatusProcessing); err != nil {
 			utils.LogIfDevf("[Converter] Failed to update image status to processing: %v", err)
-			// 继续尝试，不中断流程
 		} else {
 			image.VariantStatus = models.ImageVariantStatusProcessing
 		}
@@ -84,7 +81,6 @@ func (c *Converter) TriggerWebPConversion(image *models.Image) {
 		return
 	}
 
-	// 提交任务
 	pool := worker.GetGlobalPool()
 	if pool == nil {
 		return

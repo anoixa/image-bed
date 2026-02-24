@@ -47,7 +47,6 @@ func (h *Handler) GetAlbumDetailHandler(c *gin.Context) {
 
 	userID := c.GetUint(middleware.ContextUserIDKey)
 
-	// 获取相册及其图片
 	album, err := h.svc.GetAlbumWithImagesByID(uint(albumID), userID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -58,7 +57,6 @@ func (h *Handler) GetAlbumDetailHandler(c *gin.Context) {
 		return
 	}
 
-	// 转换图片列表
 	images := make([]*AlbumImageDTO, len(album.Images))
 	for i, img := range album.Images {
 		images[i] = h.toAlbumImageDTO(img)

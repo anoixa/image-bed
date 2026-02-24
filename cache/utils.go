@@ -143,7 +143,6 @@ func (h *Helper) GetCachedUser(ctx context.Context, userID uint, user *models.Us
 
 	key := UserCachePrefix + fmt.Sprintf("%d", userID)
 
-	// 检查是否为空值
 	if isEmpty, err := h.IsEmptyValue(ctx, key); err == nil && isEmpty {
 		return ErrCacheMiss
 	}
@@ -169,7 +168,6 @@ func (h *Helper) GetCachedDevice(ctx context.Context, deviceID string, device *m
 
 	key := DeviceCachePrefix + deviceID
 
-	// 检查是否为空值
 	if isEmpty, err := h.IsEmptyValue(ctx, key); err == nil && isEmpty {
 		return ErrCacheMiss
 	}
@@ -225,7 +223,6 @@ func (h *Helper) GetCachedStaticToken(ctx context.Context, token string, user *m
 
 	key := StaticTokenCachePrefix + token
 
-	// 检查是否为空值
 	if isEmpty, err := h.IsEmptyValue(ctx, key); err == nil && isEmpty {
 		return ErrCacheMiss
 	}
@@ -285,7 +282,6 @@ func (h *Helper) CacheImageData(ctx context.Context, identifier string, imageDat
 		return fmt.Errorf("cache provider not initialized")
 	}
 
-	// 检查图片大小，超过限制则不缓存
 	if int64(len(imageData)) > h.config.MaxCacheableImageSize {
 		return nil
 	}

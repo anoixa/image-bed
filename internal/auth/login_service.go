@@ -70,7 +70,6 @@ func (s *LoginService) ValidateCredentials(username, password string) (*models.U
 
 // Login 执行登录操作
 func (s *LoginService) Login(username, password string) (*LoginResult, error) {
-	// 验证用户凭据
 	user, valid, err := s.ValidateCredentials(username, password)
 	if err != nil {
 		return nil, fmt.Errorf("failed to validate credentials: %w", err)
@@ -85,7 +84,6 @@ func (s *LoginService) Login(username, password string) (*LoginResult, error) {
 		return nil, fmt.Errorf("failed to generate tokens: %w", err)
 	}
 
-	// 创建设备记录
 	deviceID := uuid.New().String()
 	err = s.devicesRepo.CreateLoginDevice(user.ID, deviceID, tokenPair.RefreshToken, tokenPair.RefreshTokenExpiry)
 	if err != nil {
@@ -104,7 +102,6 @@ func (s *LoginService) Login(username, password string) (*LoginResult, error) {
 
 // RefreshToken 刷新访问令牌
 func (s *LoginService) RefreshToken(refreshToken, deviceID string) (*RefreshResult, error) {
-	// 查询设备信息与用户信息
 	device, err := s.devicesRepo.GetDeviceByRefreshTokenAndDeviceID(refreshToken, deviceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get device: %w", err)
@@ -121,7 +118,6 @@ func (s *LoginService) RefreshToken(refreshToken, deviceID string) (*RefreshResu
 		return nil, fmt.Errorf("user not found")
 	}
 
-	// 生成新的刷新令牌
 	newRefreshToken, newRefreshTokenExpiry, err := s.jwtService.GenerateRefreshToken()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate new refresh token: %w", err)
@@ -133,7 +129,6 @@ func (s *LoginService) RefreshToken(refreshToken, deviceID string) (*RefreshResu
 		return nil, fmt.Errorf("failed to update device token: %w", err)
 	}
 
-	// 生成新的访问令牌
 	accessToken, accessTokenExpiry, err := s.jwtService.GenerateAccessToken(user.Username, user.ID, user.Role)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate new access token: %w", err)
@@ -155,8 +150,6 @@ func (s *LoginService) Logout(deviceID string) error {
 
 // GetDeviceExpiry 获取设备令牌的过期时间
 func (s *LoginService) GetDeviceExpiry(deviceID string) (time.Time, error) {
-	// 这里可以通过 devicesRepo 获取设备信息
-	// 目前简单返回当前时间 + 刷新令牌过期时间
 	config := s.jwtService.tokenManager.GetConfig()
 	return time.Now().Add(config.RefreshExpiresIn), nil
 }

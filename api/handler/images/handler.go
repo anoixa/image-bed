@@ -28,11 +28,9 @@ type Handler struct {
 
 // NewHandler 图片处理器
 func NewHandler(cacheProvider cache.Provider, imagesRepo *images.Repository, db *gorm.DB, converter *image.Converter, configManager *configSvc.Manager, cfg *config.Config, baseURL string, uploadMaxBatchTotalMB int) *Handler {
-	// 创建变体仓库和服务
 	variantRepo := images.NewVariantRepository(db)
 	variantService := image.NewVariantService(variantRepo, configManager, converter)
 
-	// 创建缩略图服务
 	imageRepo := images.NewRepository(db)
 	thumbnailService := image.NewThumbnailService(variantRepo, imageRepo, configManager, storage.GetDefault(), converter)
 
@@ -53,7 +51,6 @@ func NewHandler(cacheProvider cache.Provider, imagesRepo *images.Repository, db 
 		}
 	}
 
-	// 创建图片服务
 	cacheHelper := cache.NewHelper(cacheProvider, helperCfg)
 	imageService := image.NewService(imagesRepo, variantRepo, converter, thumbnailService, variantService, cacheHelper, baseURL)
 

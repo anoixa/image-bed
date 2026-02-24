@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -43,12 +44,12 @@ func (c *ThumbnailScannerConfig) Validate() error {
 // GetDefaultThumbnailScannerSettings 获取默认缩略图扫描器配置
 func GetDefaultThumbnailScannerSettings() *ThumbnailScannerConfig {
 	return &ThumbnailScannerConfig{
-		Enabled:          true,          // 默认启用
-		Interval:         2 * time.Hour, // 默认2小时扫描一次（减少数据库压力）
-		BatchSize:        50,            // 每批处理50张图片
-		MaxFileSizeMB:    100,           // 默认只处理小于100MB的图片
-		MaxAgeDays:       30,            // 默认只处理30天内的图片
-		OnlyPublicImages: false,         // 默认只处理公开图片
+		Enabled:          true,
+		Interval:         2 * time.Hour,
+		BatchSize:        50,  // 每批处理50张图片
+		MaxFileSizeMB:    100, // 默认只处理小于100MB的图片
+		MaxAgeDays:       30,
+		OnlyPublicImages: false,
 	}
 }
 
@@ -71,10 +72,9 @@ func (m *Manager) GetThumbnailScannerSettings() (*ThumbnailScannerConfig, error)
 		return val.(*ThumbnailScannerConfig), nil
 	}
 
-	// 获取默认扫描器配置
 	config, err := m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryThumbnailScanner)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			// 不存在，返回默认配置
 			settings := GetDefaultThumbnailScannerSettings()
 			m.localCache[cacheKeyThumbnailScanner] = settings
@@ -83,10 +83,8 @@ func (m *Manager) GetThumbnailScannerSettings() (*ThumbnailScannerConfig, error)
 		return nil, fmt.Errorf("failed to get thumbnail scanner config: %w", err)
 	}
 
-	// 解密配置
 	configMap, err := m.DecryptConfig(config.ConfigJSON)
 	if err != nil {
-		// 解密失败，返回默认配置
 		settings := GetDefaultThumbnailScannerSettings()
 		m.localCache[cacheKeyThumbnailScanner] = settings
 		return settings, nil
@@ -94,13 +92,11 @@ func (m *Manager) GetThumbnailScannerSettings() (*ThumbnailScannerConfig, error)
 
 	settings := &ThumbnailScannerConfig{}
 	if err := mapstructure.Decode(configMap, settings); err != nil {
-		// 解析失败，返回默认配置
 		settings := GetDefaultThumbnailScannerSettings()
 		m.localCache[cacheKeyThumbnailScanner] = settings
 		return settings, nil
 	}
 
-	// 写入缓存
 	m.localCache[cacheKeyThumbnailScanner] = settings
 
 	return settings, nil
@@ -114,17 +110,14 @@ func (m *Manager) SaveThumbnailScannerSettings(settings *ThumbnailScannerConfig)
 
 	ctx := context.Background()
 
-	// 获取现有配置
 	config, err := m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryThumbnailScanner)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			// 创建新配置
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return m.createDefaultThumbnailScannerConfig(settings)
 		}
 		return err
 	}
 
-	// 构建更新请求
 	req := &models.SystemConfigStoreRequest{
 		Category: models.ConfigCategoryThumbnailScanner,
 		Name:     "Thumbnail Scanner Configuration",

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"time"
 
 	"github.com/anoixa/image-bed/database/models"
@@ -44,7 +45,7 @@ func (r *DeviceRepository) GetDeviceByRefreshTokenAndDeviceID(refreshToken strin
 	var device models.Device
 	err := r.db.Where("refresh_token = ? AND device_id = ? AND expiry > ?", hashedToken, deviceID, time.Now()).First(&device).Error
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
 		return nil, err

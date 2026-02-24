@@ -57,7 +57,6 @@ func (h *LoginHandler) LoginHandlerFunc(context *gin.Context) {
 		return
 	}
 
-	// 执行登录
 	result, err := h.loginService.Login(req.Username, req.Password)
 	if err != nil {
 		if err.Error() == "invalid credentials" {

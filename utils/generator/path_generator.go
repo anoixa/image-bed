@@ -18,8 +18,8 @@ func NewPathGenerator() *PathGenerator {
 
 // StorageIdentifiers 存储标识对
 type StorageIdentifiers struct {
-	Identifier  string // 业务标识符，如 a1b2c3d4e5f6（不含扩展名）
-	StoragePath string // 存储路径，如 original/2024/01/15/a1b2c3d4e5f6.jpg
+	Identifier  string
+	StoragePath string
 }
 
 // GenerateOriginalIdentifiers 生成原图的 identifier 和 storage_path
@@ -75,16 +75,12 @@ func (pg *PathGenerator) GenerateConvertedIdentifiers(originalStoragePath string
 }
 
 // extractHashFromPath 从存储路径中提取文件哈希
-// 支持: original/2024/01/15/hash.jpg, thumbnails/2024/01/15/hash_300.webp 等格式
 func (pg *PathGenerator) extractHashFromPath(storagePath string) string {
-	// 取最后的文件名
 	base := filepath.Base(storagePath)
 
-	// 去除扩展名
 	ext := filepath.Ext(base)
 	hash := strings.TrimSuffix(base, ext)
 
-	// 针对缩略图去除 "_300" 等后缀
 	if idx := strings.LastIndex(hash, "_"); idx > 0 {
 		if _, err := strconv.Atoi(hash[idx+1:]); err == nil {
 			hash = hash[:idx]
@@ -100,7 +96,6 @@ func (pg *PathGenerator) extractDatePath(storagePath string) string {
 	if len(parts) >= 5 {
 		return strings.Join(parts[1:4], "/")
 	}
-	// 路径不包含日期，返回当前日期
 	return time.Now().Format("2006/01/02")
 }
 
@@ -111,7 +106,6 @@ func (pg *PathGenerator) ParseFormatFromStoragePath(storagePath string) string {
 		return ""
 	}
 
-	// 根据目录结构判断格式
 	typeDir := parts[0]
 	switch typeDir {
 	case "original":

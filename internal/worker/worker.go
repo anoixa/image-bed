@@ -131,11 +131,10 @@ func StopGlobalPool() {
 // NewPool 创建新的任务池
 func NewPool(workers, queueSize int) *Pool {
 	if queueSize <= 0 {
-		queueSize = 100 // 降低队列大小以减少内存占用（原 1000）
+		queueSize = 100
 	}
 	if workers <= 0 {
-		// 限制最大 worker 数量，避免高 CPU 核心服务器占用过多内存
-		workers = min(runtime.NumCPU(), 4) // 最多 4 个 worker（原 CPU*2 无上限）
+		workers = min(runtime.NumCPU(), 4)
 	}
 
 	p := &Pool{
@@ -178,7 +177,6 @@ func (p *Pool) executeTaskWithRecovery(task func()) {
 }
 
 // Submit 提交异步任务到队列
-// 返回 false 表示队列已满或池已关闭
 func (p *Pool) Submit(task func()) (ok bool) {
 	if p.isClosed.Load() {
 		return false

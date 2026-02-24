@@ -45,7 +45,6 @@ func New(cfg *config.Config) (*gorm.DB, error) {
 		return nil, err
 	}
 
-	// 配置连接池
 	configurePool(db, cfg)
 
 	return db, nil

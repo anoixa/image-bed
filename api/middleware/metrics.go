@@ -22,7 +22,6 @@ func Metrics() gin.HandlerFunc {
 
 		c.Next()
 
-		// 计算请求耗时
 		duration := time.Since(startTime)
 		requestDuration += duration.Milliseconds()
 		requestCount++

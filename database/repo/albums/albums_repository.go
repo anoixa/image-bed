@@ -30,10 +30,14 @@ type AlbumInfo struct {
 func (r *Repository) GetUserAlbums(userID uint, page, pageSize int) ([]*AlbumInfo, int64, error) {
 	var albums []*models.Album
 	var total int64
-	db := r.db.Model(&models.Album{}).Where("user_id = ?", userID)
 
+	db := r.db.Model(&models.Album{}).Where("user_id = ?", userID)
 	if err := db.Count(&total).Error; err != nil {
 		return nil, 0, err
+	}
+
+	if total == 0 {
+		return []*AlbumInfo{}, 0, nil
 	}
 
 	offset := (page - 1) * pageSize
@@ -45,7 +49,6 @@ func (r *Repository) GetUserAlbums(userID uint, page, pageSize int) ([]*AlbumInf
 		return []*AlbumInfo{}, total, nil
 	}
 
-	// 批量获取相册ID列表
 	albumIDs := make([]uint, len(albums))
 	for i, album := range albums {
 		albumIDs[i] = album.ID
@@ -55,13 +58,15 @@ func (r *Repository) GetUserAlbums(userID uint, page, pageSize int) ([]*AlbumInf
 		AlbumID uint
 		Count   int64
 	}
-	r.db.Table("album_images").
+	if err := r.db.Table("album_images").
 		Select("album_id, COUNT(*) as count").
 		Where("album_id IN ?", albumIDs).
 		Group("album_id").
-		Scan(&imageCounts)
+		Scan(&imageCounts).Error; err != nil {
+		return nil, 0, err
+	}
 
-	countMap := make(map[uint]int64)
+	countMap := make(map[uint]int64, len(imageCounts))
 	for _, c := range imageCounts {
 		countMap[c.AlbumID] = c.Count
 	}
@@ -70,15 +75,19 @@ func (r *Repository) GetUserAlbums(userID uint, page, pageSize int) ([]*AlbumInf
 		AlbumID    uint
 		Identifier string
 	}
-	r.db.Raw(`
-		SELECT DISTINCT ON (ai.album_id) ai.album_id, i.identifier
-		FROM album_images ai
-		JOIN images i ON ai.image_id = i.id
-		WHERE ai.album_id IN ?
-		ORDER BY ai.album_id, i.created_at DESC
-	`, albumIDs).Scan(&covers)
 
-	coverMap := make(map[uint]string)
+	subQuery := r.db.Table("album_images ai").
+		Select("ai.album_id, i.identifier, ROW_NUMBER() OVER (PARTITION BY ai.album_id ORDER BY i.created_at DESC) as rn").
+		Joins("JOIN images i ON ai.image_id = i.id").
+		Where("ai.album_id IN ?", albumIDs)
+
+	if err := r.db.Table("(?) as ranked", subQuery).
+		Where("rn = 1").
+		Scan(&covers).Error; err != nil {
+		return nil, 0, err
+	}
+
+	coverMap := make(map[uint]string, len(covers))
 	for _, c := range covers {
 		coverMap[c.AlbumID] = c.Identifier
 	}

@@ -31,7 +31,6 @@ func (ImageVariant) TableName() string {
 	return "image_variants"
 }
 
-// 状态常量
 const (
 	VariantStatusPending    = "pending"
 	VariantStatusProcessing = "processing"

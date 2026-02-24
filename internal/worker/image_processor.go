@@ -19,7 +19,7 @@ type ImageDimensionsTask struct {
 	Identifier string
 	StorageKey string
 	DB         *gorm.DB
-	Storage    storage.Provider // 存储提供者，支持任意存储后端
+	Storage    storage.Provider
 }
 
 // Execute 执行任务
@@ -43,7 +43,6 @@ func (t *ImageDimensionsTask) Execute() {
 		return
 	}
 
-	// 更新数据库
 	result := t.DB.Model(&models.Image{}).
 		Where("identifier = ?", t.Identifier).
 		UpdateColumns(map[string]interface{}{
@@ -62,11 +61,9 @@ func (t *ImageDimensionsTask) Execute() {
 }
 
 // extractFromStorage 从存储提供者读取并提取尺寸
-// 使用 image.DecodeConfig 只读取图片头部元数据，避免全量加载到内存
 func (t *ImageDimensionsTask) extractFromStorage() (int, int, error) {
 	ctx := context.Background()
 
-	// 获取文件流
 	reader, err := t.Storage.GetWithContext(ctx, t.Identifier)
 	if err != nil {
 		return 0, 0, err
@@ -77,7 +74,6 @@ func (t *ImageDimensionsTask) extractFromStorage() (int, int, error) {
 		}
 	}()
 
-	// 使用 DecodeConfig 只读取图片头部元数据
 	config, _, err := image.DecodeConfig(reader)
 	if err != nil {
 		return 0, 0, err

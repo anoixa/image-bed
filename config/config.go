@@ -27,7 +27,6 @@ type Config struct {
 
 	CorsOrigins string `mapstructure:"cors_origins"`
 
-	// 数据库配置
 	DBType            string `mapstructure:"db_type"`
 	DBHost            string `mapstructure:"db_host"`
 	DBPort            int    `mapstructure:"db_port"`
@@ -39,14 +38,12 @@ type Config struct {
 	DBMaxIdleConns    int    `mapstructure:"db_max_idle_conns"`
 	DBConnMaxLifetime int    `mapstructure:"db_conn_max_lifetime"`
 
-	// 缓存配置
 	CacheMaxImageCacheSizeMB   int64 `mapstructure:"cache_max_image_cache_size_mb"`
 	CacheEnableImageCaching    bool  `mapstructure:"cache_enable_image_caching"`
 	CacheImageCacheTTL         int   `mapstructure:"cache_image_cache_ttl"`
 	CacheImageDataCacheTTL     int   `mapstructure:"cache_image_data_cache_ttl"`
 	CacheMaxCacheableImageSize int64 `mapstructure:"cache_max_cacheable_image_size"` // 默认 10MB
 
-	// 缓存提供者配置
 	CacheType          string `mapstructure:"cache_type"`
 	CacheRedisAddr     string `mapstructure:"cache_redis_addr"`
 	CacheRedisPassword string `mapstructure:"cache_redis_password"`
@@ -61,7 +58,6 @@ type Config struct {
 	RateLimitAuthBurst  int           `mapstructure:"rate_limit_auth_burst"`
 	RateLimitExpireTime time.Duration `mapstructure:"rate_limit_expire_time"`
 
-	// 上传配置
 	UploadMaxSizeMB       int `mapstructure:"upload_max_size_mb"`
 	UploadMaxBatchTotalMB int `mapstructure:"upload_max_batch_total_mb"`
 
@@ -107,12 +103,9 @@ func loadConfig() {
 	// WorkerCount: -1 = 使用 CPU 线程数, 0 = 使用默认值 (max(2, CPU核心数)), >0 = 使用指定值
 	switch {
 	case globalConfig.WorkerCount < 0:
-		// 使用当前 CPU 线程数
 		globalConfig.WorkerCount = runtime.GOMAXPROCS(0)
 	case globalConfig.WorkerCount == 0:
-		// 使用默认值
 		globalConfig.WorkerCount = getCpus()
-		// default: 使用配置文件中指定的值
 	}
 }
 
@@ -128,7 +121,6 @@ func setDefaults() {
 
 	viper.SetDefault("cors_origins", "http://localhost:5173,http://127.0.0.1:5173")
 
-	// 数据库配置默认值（降低连接池大小以减少内存占用）
 	viper.SetDefault("db_type", "sqlite")
 	viper.SetDefault("db_host", "localhost")
 	viper.SetDefault("db_port", 5432)
@@ -140,13 +132,11 @@ func setDefaults() {
 	viper.SetDefault("db_max_idle_conns", 5)
 	viper.SetDefault("db_conn_max_lifetime", 3600)
 
-	// 缓存配置默认值
 	viper.SetDefault("cache_max_image_cache_size_mb", 10)
 	viper.SetDefault("cache_enable_image_caching", false)
 	viper.SetDefault("cache_image_cache_ttl", 3600)
 	viper.SetDefault("cache_image_data_cache_ttl", 3600)
 
-	// 缓存提供者配置默认值
 	viper.SetDefault("cache_type", "memory")
 	viper.SetDefault("cache_redis_addr", "localhost:6379")
 	viper.SetDefault("cache_redis_password", "")
@@ -161,21 +151,12 @@ func setDefaults() {
 	viper.SetDefault("rate_limit_auth_burst", 5)
 	viper.SetDefault("rate_limit_expire_time", "10m")
 
-	// 上传配置默认值
 	viper.SetDefault("upload_max_size_mb", 50)
 	viper.SetDefault("upload_max_batch_total_mb", 500)
 
 	// Worker 配置默认值
 	viper.SetDefault("worker_count", 0)             // 0 表示使用默认值
 	viper.SetDefault("worker_memory_limit_mb", 512) // Worker 内存限制，默认 512MB
-}
-
-// GetWorkerMemoryLimitMB 返回 Worker 内存限制（MB），默认 512
-func (c *Config) GetWorkerMemoryLimitMB() int {
-	if c.WorkerMemoryLimitMB <= 0 {
-		return 512
-	}
-	return c.WorkerMemoryLimitMB
 }
 
 // Addr 返回监听地址，格式为 "host:port"
@@ -217,8 +198,8 @@ func (c *Config) GetCorsOrigins() []string {
 	if c.CorsOrigins == "" {
 		return []string{"http://localhost:5173", "http://127.0.0.1:5173"}
 	}
-	// 按逗号分割
-	origins := []string{}
+
+	var origins []string
 	for _, origin := range splitAndTrim(c.CorsOrigins, ",") {
 		if origin != "" {
 			origins = append(origins, origin)
@@ -229,7 +210,7 @@ func (c *Config) GetCorsOrigins() []string {
 
 // splitAndTrim 分割字符串并去除空白
 func splitAndTrim(s, sep string) []string {
-	parts := []string{}
+	var parts []string
 	for _, part := range splitString(s, sep) {
 		trimmed := trimSpace(part)
 		if trimmed != "" {
@@ -241,7 +222,7 @@ func splitAndTrim(s, sep string) []string {
 
 // splitString 简单字符串分割
 func splitString(s, sep string) []string {
-	result := []string{}
+	var result []string
 	start := 0
 	for i := 0; i < len(s); i++ {
 		if i+len(sep) <= len(s) && s[i:i+len(sep)] == sep {

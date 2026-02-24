@@ -2,6 +2,7 @@ package albums
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"strconv"
@@ -45,10 +46,9 @@ func (h *Handler) UpdateAlbumHandler(c *gin.Context) {
 
 	userID := c.GetUint(middleware.ContextUserIDKey)
 
-	// 获取相册
 	album, err := h.svc.GetAlbumWithImagesByID(uint(albumID), userID)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			common.RespondError(c, http.StatusNotFound, "Album not found or access denied")
 			return
 		}
@@ -56,7 +56,6 @@ func (h *Handler) UpdateAlbumHandler(c *gin.Context) {
 		return
 	}
 
-	// 更新相册信息
 	album.Name = req.Name
 	album.Description = req.Description
 

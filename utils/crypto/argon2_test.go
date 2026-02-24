@@ -16,7 +16,6 @@ func TestGenerateFromPassword_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, hash)
 
-	// 验证哈希格式
 	assert.True(t, strings.HasPrefix(hash, "$argon2id$"))
 	assert.Contains(t, hash, "$v=")
 	assert.Contains(t, hash, "$m=")
@@ -82,7 +81,7 @@ func TestComparePasswordAndHash_InvalidFormat(t *testing.T) {
 
 // TestComparePasswordAndHash_InvalidVersion 测试无效版本
 func TestComparePasswordAndHash_InvalidVersion(t *testing.T) {
-	// 格式正确但版本错误
+
 	hash := "$argon2id$vx=19$m=65536,t=2,p=4$c2FsdA$hash"
 	match, err := ComparePasswordAndHash("password", hash)
 	assert.Error(t, err)
@@ -91,7 +90,7 @@ func TestComparePasswordAndHash_InvalidVersion(t *testing.T) {
 
 // TestComparePasswordAndHash_InvalidCostParams 测试无效成本参数
 func TestComparePasswordAndHash_InvalidCostParams(t *testing.T) {
-	// 格式正确但成本参数错误
+
 	hash := "$argon2id$v=19$invalid_params$c2FsdA$hash"
 	match, err := ComparePasswordAndHash("password", hash)
 	assert.Error(t, err)
@@ -121,12 +120,10 @@ func TestPasswordHashRoundTrip(t *testing.T) {
 		hash, err := GenerateFromPassword(password)
 		require.NoError(t, err, "password: %s", password)
 
-		// 验证正确密码
 		match, err := ComparePasswordAndHash(password, hash)
 		require.NoError(t, err, "password: %s", password)
 		assert.True(t, match, "password: %s", password)
 
-		// 验证错误密码
 		match, err = ComparePasswordAndHash(password+"wrong", hash)
 		require.NoError(t, err, "password: %s", password)
 		assert.False(t, match, "password: %s", password)
@@ -135,14 +132,12 @@ func TestPasswordHashRoundTrip(t *testing.T) {
 
 // TestArgon2Parameters 测试Argon2参数常量
 func TestArgon2Parameters(t *testing.T) {
-	// 验证参数在合理范围内
 	assert.Equal(t, uint32(65536), argon2Memory)  // 64 MB
 	assert.Equal(t, uint32(3), argon2Iterations)  // 2 iterations
 	assert.Equal(t, uint8(4), argon2Parallelism)  // 4 threads
 	assert.Equal(t, uint32(16), argon2SaltLength) // 16 bytes
 	assert.Equal(t, uint32(32), argon2KeyLength)  // 32 bytes
 
-	// 验证参数安全性
 	assert.GreaterOrEqual(t, argon2Memory, uint32(65536), "memory should be at least 64MB")
 	assert.GreaterOrEqual(t, argon2SaltLength, uint32(16), "salt length should be at least 16 bytes")
 	assert.GreaterOrEqual(t, argon2KeyLength, uint32(32), "key length should be at least 32 bytes")

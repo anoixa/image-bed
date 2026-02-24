@@ -18,37 +18,37 @@ func NewService(repo *albums.Repository) *Service {
 	return &Service{repo: repo}
 }
 
-// GetAlbumWithImagesByID 获取相册及其图片（透传）
+// GetAlbumWithImagesByID 获取相册及其图片
 func (s *Service) GetAlbumWithImagesByID(albumID, userID uint) (*models.Album, error) {
 	return s.repo.GetAlbumWithImagesByID(albumID, userID)
 }
 
-// CreateAlbum 创建相册（透传）
+// CreateAlbum 创建相册
 func (s *Service) CreateAlbum(album *models.Album) error {
 	return s.repo.CreateAlbum(album)
 }
 
-// UpdateAlbum 更新相册（透传）
+// UpdateAlbum 更新相册
 func (s *Service) UpdateAlbum(album *models.Album) error {
 	return s.repo.UpdateAlbum(album)
 }
 
-// DeleteAlbum 删除相册（透传）
+// DeleteAlbum 删除相册
 func (s *Service) DeleteAlbum(albumID, userID uint) error {
 	return s.repo.DeleteAlbum(albumID, userID)
 }
 
-// GetUserAlbums 获取用户相册列表（透传）
+// GetUserAlbums 获取用户相册列表
 func (s *Service) GetUserAlbums(userID uint, page, limit int) ([]*AlbumInfo, int64, error) {
 	return s.repo.GetUserAlbums(userID, page, limit)
 }
 
-// AddImagesToAlbum 批量添加图片到相册（透传）
+// AddImagesToAlbum 批量添加图片到相册
 func (s *Service) AddImagesToAlbum(albumID, userID uint, imageIDs []uint) error {
 	return s.repo.AddImagesToAlbum(albumID, userID, imageIDs)
 }
 
-// RemoveImageFromAlbum 从相册移除图片（透传）
+// RemoveImageFromAlbum 从相册移除图片
 func (s *Service) RemoveImageFromAlbum(albumID, userID uint, image *models.Image) error {
 	return s.repo.RemoveImageFromAlbum(albumID, userID, image)
 }

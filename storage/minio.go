@@ -158,7 +158,6 @@ func (s *MinioStorage) StreamTo(ctx context.Context, storagePath string, w http.
 	}
 	defer func() { _ = obj.Close() }()
 
-	// 获取对象元数据
 	stat, err := obj.Stat()
 	if err != nil {
 		errResponse := minio.ToErrorResponse(err)
@@ -168,7 +167,6 @@ func (s *MinioStorage) StreamTo(ctx context.Context, storagePath string, w http.
 		return 0, fmt.Errorf("failed to stat object from minio for '%s': %w", storagePath, err)
 	}
 
-	// 设置响应头
 	w.Header().Set("Content-Type", stat.ContentType)
 	w.Header().Set("Content-Length", strconv.FormatInt(stat.Size, 10))
 	w.WriteHeader(http.StatusOK)

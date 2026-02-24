@@ -9,7 +9,6 @@ import (
 // EventType 事件类型
 type EventType string
 
-// 配置事件类型
 const (
 	EventConfigCreated EventType = "config:created"
 	EventConfigUpdated EventType = "config:updated"

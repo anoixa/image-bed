@@ -74,13 +74,11 @@ func (h *Handler) UploadImages(c *gin.Context) {
 		return
 	}
 
-	// 限制最大上传文件数量
 	if len(files) > 10 {
 		common.RespondError(c, http.StatusBadRequest, "Maximum 10 files allowed per upload")
 		return
 	}
 
-	// 检查总文件大小限制
 	var totalSize int64
 	for _, f := range files {
 		totalSize += f.Size
@@ -92,7 +90,6 @@ func (h *Handler) UploadImages(c *gin.Context) {
 		return
 	}
 
-	// 获取存储配置：优先使用 strategy_id，否则使用默认存储
 	storageConfigID, err := h.resolveStorageConfigID(c)
 	if err != nil {
 		common.RespondError(c, http.StatusBadRequest, err.Error())
@@ -108,7 +105,6 @@ func (h *Handler) UploadImages(c *gin.Context) {
 		return
 	}
 
-	// 转换结果
 	var successResults []gin.H
 	var errorResults []gin.H
 	for _, result := range results {
@@ -136,13 +132,11 @@ func (h *Handler) UploadImages(c *gin.Context) {
 
 // resolveStorageConfigID 解析存储配置ID
 func (h *Handler) resolveStorageConfigID(c *gin.Context) (uint, error) {
-	// 优先从 form 中获取，如果不存在则从 query 中获取
 	strategyIDStr := c.PostForm("strategy_id")
 	if strategyIDStr == "" {
 		strategyIDStr = c.Query("strategy_id")
 	}
 
-	// 如果指定了 strategy_id，直接解析并返回
 	if strategyIDStr != "" {
 		strategyID, err := strconv.ParseUint(strategyIDStr, 10, 32)
 		if err != nil {
@@ -151,7 +145,6 @@ func (h *Handler) resolveStorageConfigID(c *gin.Context) (uint, error) {
 		return uint(strategyID), nil
 	}
 
-	// 未指定 strategy_id，从配置管理器获取默认存储配置ID
 	defaultID, err := h.configManager.GetDefaultStorageConfigID(c.Request.Context())
 	if err != nil {
 		// 如果获取失败，返回 0（表示使用默认存储）

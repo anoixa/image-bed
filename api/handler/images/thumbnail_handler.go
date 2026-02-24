@@ -20,7 +20,6 @@ func (h *Handler) GetThumbnail(c *gin.Context) {
 		return
 	}
 
-	// 解析宽度参数
 	width := h.parseThumbnailWidth(c)
 
 	// 使用 Service 层获取图片并检查权限
@@ -30,14 +29,12 @@ func (h *Handler) GetThumbnail(c *gin.Context) {
 		return
 	}
 
-	// 检查私有图片权限
 	userID := c.GetUint(middleware.ContextUserIDKey)
 	if !h.imageService.CheckImagePermission(image, userID) {
 		common.RespondError(c, http.StatusForbidden, "This image is private")
 		return
 	}
 
-	// 获取缩略图配置
 	ctx := c.Request.Context()
 	settings, err := h.configManager.GetThumbnailSettings(ctx)
 	if err != nil {
@@ -51,7 +48,6 @@ func (h *Handler) GetThumbnail(c *gin.Context) {
 		return
 	}
 
-	// 检查是否为有效尺寸
 	if !settings.IsValidWidth(width) {
 		width = 600
 	}
@@ -82,7 +78,6 @@ func (h *Handler) parseThumbnailWidth(c *gin.Context) int {
 
 // serveThumbnailImage 提供缩略图
 func (h *Handler) serveThumbnailImage(c *gin.Context, image *models.Image, result *image.ThumbnailResult) {
-	// 设置缓存头
 	c.Header("Cache-Control", "public, max-age=86400")
 	c.Header("Content-Type", "image/webp")
 
@@ -95,6 +90,5 @@ func (h *Handler) serveThumbnailImage(c *gin.Context, image *models.Image, resul
 
 	c.Header("Content-Length", strconv.FormatInt(result.FileSize, 10))
 
-	// 返回图片数据
 	c.DataFromReader(http.StatusOK, result.FileSize, result.MIMEType, reader, nil)
 }

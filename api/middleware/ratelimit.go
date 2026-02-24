@@ -114,12 +114,10 @@ func (rl *IPRateLimiter) getClientLimiter(ip string) *clientLimiter {
 		}
 	}
 
-	// 检查总容量，如果超过则清理过期条目
 	if len(shard.limiters) >= rl.maxSize/rl.numShards {
 		rl.evictExpiredLocked(shard)
 	}
 
-	// 创建新的限流器
 	limiter := rate.NewLimiter(rl.rps, rl.burst)
 	client := &clientLimiter{
 		limiter:  limiter,

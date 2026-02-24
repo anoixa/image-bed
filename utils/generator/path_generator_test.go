@@ -195,18 +195,14 @@ func TestPathGenerator_Consistency(t *testing.T) {
 	fileHash := "a1b2c3d4e5f6abcdef123456"
 	ext := ".jpg"
 
-	// 生成原图标识
 	orig := pg.GenerateOriginalIdentifiers(fileHash, ext, uploadTime)
 
-	// 验证原图路径格式
 	if !strings.HasPrefix(orig.StoragePath, "original/2024/01/15/") {
 		t.Errorf("Original storage path has wrong date: %s", orig.StoragePath)
 	}
 
-	// 生成缩略图标识
 	thumb := pg.GenerateThumbnailIdentifiers(orig.StoragePath, 300)
 
-	// 验证缩略图路径包含相同的日期
 	if !strings.Contains(thumb.StoragePath, "2024/01/15") {
 		t.Errorf("Thumbnail storage path missing date: %s", thumb.StoragePath)
 	}
@@ -216,10 +212,8 @@ func TestPathGenerator_Consistency(t *testing.T) {
 		t.Errorf("Thumbnail identifier missing width: %s", thumb.Identifier)
 	}
 
-	// 生成转换格式标识
 	webp := pg.GenerateConvertedIdentifiers(orig.StoragePath, "webp")
 
-	// 验证转换路径包含相同的日期
 	if !strings.Contains(webp.StoragePath, "2024/01/15") {
 		t.Errorf("WebP storage path missing date: %s", webp.StoragePath)
 	}

@@ -32,7 +32,6 @@ type RedisConfig struct {
 
 // NewRedisCache 创建新的 Redis 缓存
 func NewRedisCache(cfg RedisConfig) (*RedisCache, error) {
-	// 解析时间配置
 	var maxConnAge, poolTimeout, idleTimeout, idleCheckFrequency time.Duration
 
 	if cfg.MaxConnAge != "" {

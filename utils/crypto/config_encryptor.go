@@ -73,7 +73,6 @@ func (m *MasterKeyManager) Initialize(checkDataExists func() (bool, error)) erro
 	var key []byte
 	var err error
 
-	// 1. 检查环境变量
 	if envKey := os.Getenv("CONFIG_ENCRYPTION_KEY"); envKey != "" {
 		key, err = base64.StdEncoding.DecodeString(envKey)
 		if err != nil {
@@ -84,7 +83,6 @@ func (m *MasterKeyManager) Initialize(checkDataExists func() (bool, error)) erro
 		}
 		m.source = "env"
 	} else {
-		// 2. 检查文件
 		keyPath := filepath.Join(m.dataPath, KeyDir, MasterKeyFile)
 		if data, err := os.ReadFile(keyPath); err == nil {
 			key, err = base64.StdEncoding.DecodeString(string(data))
@@ -96,7 +94,6 @@ func (m *MasterKeyManager) Initialize(checkDataExists func() (bool, error)) erro
 			}
 			m.source = "file"
 		} else {
-			// 3. 检查数据库是否已有加密数据
 			if checkDataExists != nil {
 				exists, err := checkDataExists()
 				if err != nil {
@@ -107,13 +104,11 @@ func (m *MasterKeyManager) Initialize(checkDataExists func() (bool, error)) erro
 				}
 			}
 
-			// 4. 生成新密钥
 			key = make([]byte, 32)
 			if _, err := rand.Read(key); err != nil {
 				return fmt.Errorf("failed to generate master key: %w", err)
 			}
 
-			// 写入文件
 			if err := os.MkdirAll(filepath.Dir(keyPath), 0755); err != nil {
 				return fmt.Errorf("failed to create key directory: %w", err)
 			}
@@ -168,7 +163,6 @@ func (e *ConfigEncryptor) Encrypt(plaintext string) string {
 		return plaintext
 	}
 
-	// 检查是否已加密
 	if strings.HasPrefix(plaintext, EncPrefixV1) || strings.HasPrefix(plaintext, EncPrefixV2) {
 		return plaintext
 	}

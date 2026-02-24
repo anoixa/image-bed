@@ -2,6 +2,7 @@ package key
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -12,95 +13,64 @@ import (
 	"gorm.io/gorm"
 )
 
-func (h *Handler) DisableToken(context *gin.Context) {
-	userID := context.GetUint(middleware.ContextUserIDKey)
-	if userID == 0 {
-		common.RespondError(context, http.StatusUnauthorized, "Invalid user session")
-		return
-	}
+// TokenAction token 操作函数
+type TokenAction func(tokenID, userID uint) error
 
-	tokenIDStr := context.Param("id")
-	tokenID64, err := strconv.ParseUint(tokenIDStr, 10, 32)
-	if err != nil {
-		common.RespondError(context, http.StatusBadRequest, "Invalid token ID format.")
-		return
-	}
-	tokenID := uint(tokenID64)
-
-	err = h.svc.DisableApiToken(tokenID, userID)
-
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			common.RespondError(context, http.StatusNotFound, "API token not found or you do not have permission to modify it.")
-			return
-		}
-
-		log.Printf("Failed to disable API token %d for user %d: %v", tokenID, userID, err)
-		common.RespondError(context, http.StatusInternalServerError, "Failed to disable the API token due to an internal error.")
-		return
-	}
-
-	common.RespondSuccessMessage(context, "API token has been successfully disabled.", nil)
+// getUserID 从上下文获取用户ID
+func getUserID(c *gin.Context) uint {
+	return c.GetUint(middleware.ContextUserIDKey)
 }
 
-func (h *Handler) RevokeToken(context *gin.Context) {
-	userID := context.GetUint(middleware.ContextUserIDKey)
-	if userID == 0 {
-		common.RespondError(context, http.StatusUnauthorized, "Invalid user session")
-		return
-	}
-
-	tokenIDStr := context.Param("id")
+// parseTokenID 从路径参数解析 token ID
+func parseTokenID(c *gin.Context) (uint, bool) {
+	tokenIDStr := c.Param("id")
 	tokenID64, err := strconv.ParseUint(tokenIDStr, 10, 32)
 	if err != nil {
-		common.RespondError(context, http.StatusBadRequest, "Invalid token ID format.")
-		return
+		common.RespondError(c, http.StatusBadRequest, "Invalid token ID format.")
+		return 0, false
 	}
-	tokenID := uint(tokenID64)
-
-	err = h.svc.RevokeApiToken(tokenID, userID)
-
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			common.RespondError(context, http.StatusNotFound, "API token not found or you do not have permission to revoke it.")
-			return
-		}
-
-		log.Printf("Failed to revoke API token %d for user %d: %v", tokenID, userID, err)
-		common.RespondError(context, http.StatusInternalServerError, "Failed to revoke the API token due to an internal error.")
-		return
-	}
-
-	common.RespondSuccessMessage(context, "API token has been successfully revoked", nil)
+	return uint(tokenID64), true
 }
 
-func (h *Handler) EnableToken(context *gin.Context) {
-	userID := context.GetUint(middleware.ContextUserIDKey)
+// executeTokenAction 执行 token 操作的通用处理
+func (h *Handler) executeTokenAction(c *gin.Context, action TokenAction, actionVerb, actionPast string) {
+	userID := getUserID(c)
 	if userID == 0 {
-		common.RespondError(context, http.StatusUnauthorized, "Invalid user session")
+		common.RespondError(c, http.StatusUnauthorized, "Invalid user session.")
 		return
 	}
 
-	tokenIDStr := context.Param("id")
-	tokenID64, err := strconv.ParseUint(tokenIDStr, 10, 32)
-	if err != nil {
-		common.RespondError(context, http.StatusBadRequest, "Invalid token ID format.")
+	tokenID, ok := parseTokenID(c)
+	if !ok {
 		return
 	}
-	tokenID := uint(tokenID64)
 
-	err = h.svc.EnableApiToken(tokenID, userID)
-
-	if err != nil {
+	if err := action(tokenID, userID); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			common.RespondError(context, http.StatusNotFound, "API token not found or you do not have permission to modify it.")
+			common.RespondError(c, http.StatusNotFound, 
+				fmt.Sprintf("API token not found or you do not have permission to %s it.", actionVerb))
 			return
 		}
 
-		log.Printf("Failed to enable API token %d for user %d: %v", tokenID, userID, err)
-		common.RespondError(context, http.StatusInternalServerError, "Failed to enable the API token due to an internal error.")
+		log.Printf("Failed to %s API token %d for user %d: %v", actionVerb, tokenID, userID, err)
+		common.RespondError(c, http.StatusInternalServerError, 
+			fmt.Sprintf("Failed to %s the API token due to an internal error.", actionVerb))
 		return
 	}
 
-	common.RespondSuccessMessage(context, "API token has been successfully enabled.", nil)
+	common.RespondSuccessMessage(c, 
+		fmt.Sprintf("API token has been successfully %s.", actionPast), nil)
+}
+
+
+func (h *Handler) DisableToken(c *gin.Context) {
+	h.executeTokenAction(c, h.svc.DisableApiToken, "disable", "disabled")
+}
+
+func (h *Handler) RevokeToken(c *gin.Context) {
+	h.executeTokenAction(c, h.svc.RevokeApiToken, "revoke", "revoked")
+}
+
+func (h *Handler) EnableToken(c *gin.Context) {
+	h.executeTokenAction(c, h.svc.EnableApiToken, "enable", "enabled")
 }

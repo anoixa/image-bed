@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 
@@ -19,8 +20,8 @@ type ConversionSettings struct {
 	AVIFSpeed        int      `json:"avif_speed" mapstructure:"avif_speed"`               // 0-10, 默认 4
 	AVIFExperimental bool     `json:"avif_experimental" mapstructure:"avif_experimental"` // 实验性标记
 	SkipSmallerThan  int      `json:"skip_smaller_than" mapstructure:"skip_smaller_than"` // KB, 默认 10
-	MaxDimension     int      `json:"max_dimension" mapstructure:"max_dimension"`         // 默认 4096
-	MaxRetries       int      `json:"max_retries" mapstructure:"max_retries"`             // 默认 3
+	MaxDimension     int      `json:"max_dimension" mapstructure:"max_dimension"`
+	MaxRetries       int      `json:"max_retries" mapstructure:"max_retries"`
 }
 
 // DefaultConversionSettings 默认配置
@@ -67,7 +68,7 @@ func (m *Manager) GetConversionSettings(ctx context.Context) (*ConversionSetting
 
 	config, err := m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryConversion)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			if err := m.EnsureDefaultConversionConfig(ctx); err != nil {
 				return nil, fmt.Errorf("failed to create default conversion config: %w", err)
 			}
@@ -81,7 +82,6 @@ func (m *Manager) GetConversionSettings(ctx context.Context) (*ConversionSetting
 		}
 	}
 
-	// 解密配置
 	configMap, err := m.DecryptConfig(config.ConfigJSON)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt conversion config: %w", err)
@@ -92,7 +92,6 @@ func (m *Manager) GetConversionSettings(ctx context.Context) (*ConversionSetting
 		return nil, fmt.Errorf("failed to decode conversion settings: %w", err)
 	}
 
-	// 写入缓存
 	m.localCache[cacheKeyConversion] = settings
 
 	return settings, nil
@@ -100,7 +99,6 @@ func (m *Manager) GetConversionSettings(ctx context.Context) (*ConversionSetting
 
 // EnsureDefaultConversionConfig 确保默认转换配置存在
 func (m *Manager) EnsureDefaultConversionConfig(ctx context.Context) error {
-	// 检查是否已存在
 	count, err := m.repo.CountByCategory(ctx, models.ConfigCategoryConversion)
 	if err != nil {
 		return err
@@ -142,11 +140,9 @@ func (m *Manager) EnsureDefaultConversionConfig(ctx context.Context) error {
 
 // SaveConversionSettings 保存转换配置
 func (m *Manager) SaveConversionSettings(ctx context.Context, settings *ConversionSettings, userID uint) error {
-	// 获取现有配置
 	config, err := m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryConversion)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			// 创建新配置
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return m.EnsureDefaultConversionConfig(ctx)
 		}
 		return err

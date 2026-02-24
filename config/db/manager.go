@@ -32,7 +32,6 @@ type Manager struct {
 	cacheMutex sync.RWMutex
 }
 
-// 缓存键常量
 const (
 	cacheKeyConversion       = "config:conversion"
 	cacheKeyThumbnail        = "config:thumbnail"
@@ -141,12 +140,10 @@ func (m *Manager) Initialize() error {
 		return fmt.Errorf("failed to ensure canary: %w", err)
 	}
 
-	// 创建默认转换配置（如果不存在）
 	if err := m.ensureDefaultConversionConfig(); err != nil {
 		return fmt.Errorf("failed to ensure conversion config: %w", err)
 	}
 
-	// 创建默认缩略图配置（如果不存在）
 	ctx := context.Background()
 	if err := m.ensureDefaultThumbnailConfig(ctx); err != nil {
 		return fmt.Errorf("failed to ensure thumbnail config: %w", err)
@@ -160,7 +157,6 @@ func (m *Manager) Initialize() error {
 func (m *Manager) ensureDefaultConversionConfig() error {
 	ctx := context.Background()
 
-	// 检查是否已有转换配置
 	count, err := m.repo.CountByCategory(ctx, models.ConfigCategoryConversion)
 	if err != nil {
 		if strings.Contains(err.Error(), "no such table") || // SQLite
@@ -175,7 +171,6 @@ func (m *Manager) ensureDefaultConversionConfig() error {
 		return nil
 	}
 
-	// 创建默认配置
 	configData := map[string]interface{}{
 		"enabled_formats":     []string{"webp"},
 		"webp_quality":        85,
@@ -210,7 +205,7 @@ func (m *Manager) ensureCanary() error {
 
 	canary, err := m.repo.GetByKey(ctx, "system:encryption_canary")
 	if err != nil {
-		if err == gorm.ErrRecordNotFound ||
+		if errors.Is(err, gorm.ErrRecordNotFound) ||
 			strings.Contains(err.Error(), "no such table") || // SQLite
 			strings.Contains(err.Error(), "relation") && strings.Contains(err.Error(), "does not exist") { // PostgreSQL
 			return m.createCanary(ctx)
@@ -276,13 +271,11 @@ func (m *Manager) CreateConfig(ctx context.Context, req *models.SystemConfigStor
 		return nil, err
 	}
 
-	// 加密配置
 	encrypted, err := m.EncryptConfig(req.Config)
 	if err != nil {
 		return nil, err
 	}
 
-	// 创建配置
 	config := &models.SystemConfig{
 		Category:    req.Category,
 		Name:        req.Name,
@@ -306,10 +299,7 @@ func (m *Manager) CreateConfig(ctx context.Context, req *models.SystemConfigStor
 		return nil, fmt.Errorf("failed to create config: %w", err)
 	}
 
-	// 使对应类别的缓存失效
 	m.invalidateCache(req.Category)
-
-	// 触发事件
 	m.eventBus.Publish(EventConfigCreated, config)
 
 	return m.ToResponse(ctx, config)
@@ -317,18 +307,15 @@ func (m *Manager) CreateConfig(ctx context.Context, req *models.SystemConfigStor
 
 // UpdateConfig 更新配置
 func (m *Manager) UpdateConfig(ctx context.Context, id uint, req *models.SystemConfigStoreRequest) (*models.ConfigResponse, error) {
-	// 获取现有配置
 	config, err := m.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("config not found: %w", err)
 	}
 
-	// 处理配置更新（敏感字段保留）
-	if err := m.mergeConfig(ctx, config, req.Config); err != nil {
+	if err := m.mergeConfig(config, req.Config); err != nil {
 		return nil, err
 	}
 
-	// 更新其他字段
 	config.Name = req.Name
 	config.Description = req.Description
 	if req.IsEnabled != nil {
@@ -342,28 +329,23 @@ func (m *Manager) UpdateConfig(ctx context.Context, id uint, req *models.SystemC
 		return nil, fmt.Errorf("failed to update config: %w", err)
 	}
 
-	// 使对应类别的缓存失效
 	m.invalidateCache(config.Category)
-
-	// 触发事件
 	m.eventBus.Publish(EventConfigUpdated, config)
 
 	return m.ToResponse(ctx, config)
 }
 
-// mergeConfig 合并配置（处理敏感字段）
-func (m *Manager) mergeConfig(ctx context.Context, config *models.SystemConfig, newConfig map[string]interface{}) error {
-	// 解密现有配置
+// mergeConfig 合并配置
+func (m *Manager) mergeConfig(config *models.SystemConfig, newConfig map[string]interface{}) error {
 	existingConfig, err := m.DecryptConfig(config.ConfigJSON)
 	if err != nil {
 		return fmt.Errorf("failed to decrypt existing config: %w", err)
 	}
 
-	// 合并配置（保留敏感字段）
+	// 合并配置
 	for key, value := range newConfig {
 		strValue, ok := value.(string)
 		if ok && strValue == "******" {
-			// 敏感字段保留原值
 			continue
 		}
 		existingConfig[key] = value
@@ -390,10 +372,7 @@ func (m *Manager) DeleteConfig(ctx context.Context, id uint) error {
 		return err
 	}
 
-	// 使对应类别的缓存失效
 	m.invalidateCache(config.Category)
-
-	// 触发事件
 	m.eventBus.Publish(EventConfigDeleted, config)
 
 	return nil
@@ -439,10 +418,7 @@ func (m *Manager) SetDefault(ctx context.Context, id uint) error {
 		return err
 	}
 
-	// 使对应类别的缓存失效
 	m.invalidateCache(config.Category)
-
-	// 触发事件
 	m.eventBus.Publish(EventConfigUpdated, config)
 
 	return nil
@@ -456,7 +432,6 @@ func (m *Manager) Enable(ctx context.Context, id uint) error {
 
 	config, _ := m.repo.GetByID(ctx, id)
 	if config != nil {
-		// 使对应类别的缓存失效
 		m.invalidateCache(config.Category)
 	}
 	m.eventBus.Publish(EventConfigUpdated, config)
@@ -472,7 +447,6 @@ func (m *Manager) Disable(ctx context.Context, id uint) error {
 
 	config, _ := m.repo.GetByID(ctx, id)
 	if config != nil {
-		// 使对应类别的缓存失效
 		m.invalidateCache(config.Category)
 	}
 	m.eventBus.Publish(EventConfigUpdated, config)
@@ -485,9 +459,8 @@ func (m *Manager) ToResponse(ctx context.Context, config *models.SystemConfig) (
 	return m.ToResponseWithMask(ctx, config, false)
 }
 
-// ToResponseWithMask 转换为响应（可选择脱敏）
+// ToResponseWithMask 转换为响应
 func (m *Manager) ToResponseWithMask(ctx context.Context, config *models.SystemConfig, maskSensitive bool) (*models.ConfigResponse, error) {
-	// 解密配置
 	configMap, err := m.DecryptConfig(config.ConfigJSON)
 	if err != nil {
 		return nil, err
@@ -556,7 +529,6 @@ func (m *Manager) GetRepo() configs.Repository {
 }
 
 // GetJWTConfig 获取 JWT 配置
-// 如果不存在，会自动创建默认配置
 func (m *Manager) GetJWTConfig(ctx context.Context) (*JWTConfig, error) {
 	m.cacheMutex.RLock()
 	if val, exists := m.localCache[cacheKeyJWT]; exists {
@@ -568,7 +540,6 @@ func (m *Manager) GetJWTConfig(ctx context.Context) (*JWTConfig, error) {
 	m.cacheMutex.Lock()
 	defer m.cacheMutex.Unlock()
 
-	// 双重检查
 	if val, exists := m.localCache[cacheKeyJWT]; exists {
 		return val.(*JWTConfig), nil
 	}
@@ -576,12 +547,10 @@ func (m *Manager) GetJWTConfig(ctx context.Context) (*JWTConfig, error) {
 	// 尝试获取默认 JWT 配置
 	config, err := m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryJWT)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			// 不存在，创建默认配置
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			if err := m.EnsureDefaultJWTConfig(ctx); err != nil {
 				return nil, fmt.Errorf("failed to create default JWT config: %w", err)
 			}
-			// 重新获取
 			config, err = m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryJWT)
 			if err != nil {
 				return nil, fmt.Errorf("failed to get JWT config after creation: %w", err)
@@ -591,7 +560,6 @@ func (m *Manager) GetJWTConfig(ctx context.Context) (*JWTConfig, error) {
 		}
 	}
 
-	// 解密配置
 	configMap, err := m.DecryptConfig(config.ConfigJSON)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt JWT config: %w", err)
@@ -603,7 +571,6 @@ func (m *Manager) GetJWTConfig(ctx context.Context) (*JWTConfig, error) {
 		RefreshTokenTTL: getStringFromMap(configMap, "refresh_token_ttl", "168h"),
 	}
 
-	// 写入缓存
 	m.localCache[cacheKeyJWT] = jwtConfig
 
 	return jwtConfig, nil
@@ -621,7 +588,6 @@ func (m *Manager) EnsureDefaultJWTConfig(ctx context.Context) error {
 		return nil // 已存在
 	}
 
-	// 生成随机密钥
 	secret := cryptoutils.GenerateRandomKey(32)
 
 	configData := map[string]interface{}{
@@ -650,17 +616,15 @@ func (m *Manager) EnsureDefaultJWTConfig(ctx context.Context) error {
 
 // UpdateJWTConfig 更新 JWT 配置
 func (m *Manager) UpdateJWTConfig(ctx context.Context, jwtConfig *JWTConfig) error {
-	// 获取现有配置
 	config, err := m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryJWT)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			// 不存在，创建新配置
 			return m.EnsureDefaultJWTConfig(ctx)
 		}
 		return fmt.Errorf("failed to get JWT config: %w", err)
 	}
 
-	// 构建新配置
 	configData := map[string]interface{}{
 		"secret":            jwtConfig.Secret,
 		"access_token_ttl":  jwtConfig.AccessTokenTTL,
@@ -707,7 +671,6 @@ func (m *Manager) GetStorageConfigs(ctx context.Context) ([]storage.StorageConfi
 	}
 	m.cacheMutex.RUnlock()
 
-	// 缓存未命中，加写锁查数据库
 	m.cacheMutex.Lock()
 	defer m.cacheMutex.Unlock()
 
@@ -723,7 +686,6 @@ func (m *Manager) GetStorageConfigs(ctx context.Context) ([]storage.StorageConfi
 
 	result := make([]storage.StorageConfig, 0, len(configs))
 	for _, cfg := range configs {
-		// 解密配置
 		configMap, err := m.DecryptConfig(cfg.ConfigJSON)
 		if err != nil {
 			log.Printf("[ConfigManager] Failed to decrypt storage config %s: %v", cfg.Key, err)
@@ -767,7 +729,6 @@ func (m *Manager) GetStorageConfigs(ctx context.Context) ([]storage.StorageConfi
 		result = append(result, storageCfg)
 	}
 
-	// 写入缓存
 	m.localCache[cacheKeyStorage] = result
 
 	return result, nil

@@ -1,97 +1,13 @@
 package utils
 
 import (
-	"errors"
 	"log"
 	"runtime"
 	"runtime/debug"
-	"sync"
 	"time"
 
 	"github.com/anoixa/image-bed/config"
 )
-
-// 默认内存限制 512MB
-const defaultMemoryLimitMB = 512
-
-// ErrMemoryLimitExceeded 内存限制超出错误
-var ErrMemoryLimitExceeded = errors.New("memory limit exceeded")
-
-// 内存限制变量（线程安全）
-var (
-	memoryLimitMB    = defaultMemoryLimitMB
-	memoryLimitMutex sync.RWMutex
-)
-
-// GetMemoryLimitMB 获取当前内存限制（MB）
-func GetMemoryLimitMB() int {
-	memoryLimitMutex.RLock()
-	defer memoryLimitMutex.RUnlock()
-	return memoryLimitMB
-}
-
-// SetMemoryLimitMB 设置内存限制（MB）
-func SetMemoryLimitMB(limitMB int) {
-	memoryLimitMutex.Lock()
-	defer memoryLimitMutex.Unlock()
-	if limitMB > 0 {
-		memoryLimitMB = limitMB
-	}
-}
-
-// CheckMemoryLimit 检查当前内存是否超过限制
-// 返回 error 如果内存使用超过限制
-func CheckMemoryLimit() error {
-	limit := GetMemoryLimitMB()
-	if limit <= 0 {
-		return nil // 无限制
-	}
-
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-
-	// 使用 HeapAlloc 作为当前内存使用量
-	currentMB := float64(m.HeapAlloc) / 1024 / 1024
-	if currentMB >= float64(limit) {
-		return ErrMemoryLimitExceeded
-	}
-	return nil
-}
-
-// CheckMemoryLimitWithGC 检查内存限制，如果超过则先尝试 GC
-// 如果 GC 后仍然超过限制，返回错误
-func CheckMemoryLimitWithGC() error {
-	limit := GetMemoryLimitMB()
-	if limit <= 0 {
-		return nil // 无限制
-	}
-
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-
-	currentMB := float64(m.HeapAlloc) / 1024 / 1024
-	if currentMB < float64(limit) {
-		return nil
-	}
-
-	// 超过限制，尝试 GC
-	ForceGC()
-
-	// 重新检查
-	runtime.ReadMemStats(&m)
-	currentMB = float64(m.HeapAlloc) / 1024 / 1024
-	if currentMB >= float64(limit) {
-		return ErrMemoryLimitExceeded
-	}
-	return nil
-}
-
-// GetMemoryUsageMB 获取当前内存使用量（MB）
-func GetMemoryUsageMB() float64 {
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	return float64(m.HeapAlloc) / 1024 / 1024
-}
 
 // MemoryStats 内存统计
 type MemoryStats struct {
@@ -125,6 +41,13 @@ func GetMemoryStats() MemoryStats {
 		LastGCTime:  time.Unix(0, int64(m.LastGC)),
 		Goroutines:  runtime.NumGoroutine(),
 	}
+}
+
+// GetMemoryUsageMB 获取当前内存使用量（MB）
+func GetMemoryUsageMB() float64 {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	return float64(m.HeapAlloc) / 1024 / 1024
 }
 
 // LogMemoryStats 记录内存统计（仅在 dev 环境输出）

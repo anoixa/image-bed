@@ -47,7 +47,6 @@ func TestGenerateRandomToken_Uniqueness(t *testing.T) {
 		token, err := GenerateRandomToken(32)
 		require.NoError(t, err)
 
-		// 检查是否重复
 		if tokens[token] {
 			t.Errorf("Duplicate token generated: %s", token)
 		}

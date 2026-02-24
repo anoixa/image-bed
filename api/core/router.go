@@ -46,13 +46,8 @@ type RouterDependencies struct {
 
 // RegisterRoutes 注册所有路由
 func RegisterRoutes(router *gin.Engine, deps *RouterDependencies) {
-	// 基础路由
 	registerBasicRoutes(router, deps)
-
-	// 公共接口路由
 	registerPublicRoutes(router, deps)
-
-	// API 路由
 	registerAPIRoutes(router, deps)
 }
 
@@ -77,12 +72,11 @@ func registerBasicRoutes(router *gin.Engine, deps *RouterDependencies) {
 func registerPublicRoutes(router *gin.Engine, deps *RouterDependencies) {
 	cfg := deps.Config
 	baseURL := getBaseURL(cfg)
-	uploadMaxBatchTotalMB := 500 // 默认值
+	uploadMaxBatchTotalMB := 500
 	if cfg != nil {
 		uploadMaxBatchTotalMB = cfg.UploadMaxBatchTotalMB
 	}
 
-	// 创建处理器
 	imageHandler := handlerImages.NewHandler(deps.CacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager, cfg, baseURL, uploadMaxBatchTotalMB)
 
 	// 公共图片访问
@@ -92,7 +86,6 @@ func registerPublicRoutes(router *gin.Engine, deps *RouterDependencies) {
 		publicGroup.GET("/:identifier", imageHandler.GetImage)
 	}
 
-	// 缩略图公共访问
 	thumbnailGroup := router.Group("/thumbnails")
 	thumbnailGroup.Use(deps.ImageRateLimiter.Middleware())
 	{
@@ -104,7 +97,7 @@ func registerPublicRoutes(router *gin.Engine, deps *RouterDependencies) {
 func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
 	cfg := deps.Config
 	baseURL := getBaseURL(cfg)
-	uploadMaxBatchTotalMB := 500 // 默认值
+	uploadMaxBatchTotalMB := 500
 	if cfg != nil {
 		uploadMaxBatchTotalMB = cfg.UploadMaxBatchTotalMB
 	}
@@ -123,7 +116,6 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
 		context.Next()
 	})
 	{
-		// 认证路由
 		authGroup := apiGroup.Group("/auth")
 		authGroup.Use(deps.AuthRateLimiter.Middleware())
 		{

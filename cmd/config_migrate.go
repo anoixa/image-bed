@@ -32,7 +32,6 @@ func init() {
 }
 
 func runConfigMigration() error {
-	// 加载配置
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath(".")
@@ -41,7 +40,6 @@ func runConfigMigration() error {
 		return fmt.Errorf("failed to read config.yaml: %w", err)
 	}
 
-	// 连接到数据库
 	db, err := connectDatabaseFromViper()
 	if err != nil {
 		return fmt.Errorf("failed to connect to database: %w", err)
@@ -52,7 +50,6 @@ func runConfigMigration() error {
 		return fmt.Errorf("failed to migrate database: %w", err)
 	}
 
-	// 创建配置管理器
 	manager := configSvc.NewManager(db, "./data")
 	if err := manager.Initialize(); err != nil {
 		return fmt.Errorf("failed to initialize config manager: %w", err)
@@ -60,7 +57,6 @@ func runConfigMigration() error {
 
 	ctx := context.Background()
 
-	// 检查是否已有配置
 	count, err := manager.GetRepo().Count(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to check existing configs: %w", err)

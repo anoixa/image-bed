@@ -11,7 +11,6 @@ import (
 func (m *Manager) MigrateFromLegacy(legacyStorage, legacyCache map[string]interface{}) error {
 	ctx := context.Background()
 
-	// 检查是否已有存储配置
 	storageCount, err := m.repo.CountByCategory(ctx, models.ConfigCategoryStorage)
 	if err != nil {
 		return err
@@ -189,13 +188,11 @@ func (m *Manager) migrateCache(ctx context.Context, legacy map[string]interface{
 func (m *Manager) CreateDefaultConfigs() error {
 	ctx := context.Background()
 
-	// 检查是否已有存储配置
 	storageCount, err := m.repo.CountByCategory(ctx, models.ConfigCategoryStorage)
 	if err != nil {
 		return err
 	}
 
-	// 检查是否已有缓存配置
 	cacheCount, err := m.repo.CountByCategory(ctx, models.ConfigCategoryCache)
 	if err != nil {
 		return err
@@ -207,7 +204,6 @@ func (m *Manager) CreateDefaultConfigs() error {
 		return err
 	}
 
-	// 创建默认配置
 	if storageCount == 0 {
 		if err := m.createDefaultStorage(ctx); err != nil {
 			log.Printf("[ConfigMigration] Failed to create default storage config: %v", err)

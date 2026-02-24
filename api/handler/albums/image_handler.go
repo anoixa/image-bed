@@ -2,6 +2,7 @@ package albums
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"strconv"
@@ -74,7 +75,6 @@ func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 
 	userID := c.GetUint(middleware.ContextUserIDKey)
 
-	// 验证相册存在且属于当前用户
 	_, err = h.svc.GetAlbumWithImagesByID(uint(albumID), userID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -86,16 +86,15 @@ func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 	}
 
 	// 批量查询图片
-	images, err := h.imageRepo.GetImagesByIDsAndUser(req.ImageIDs, userID)
+	imgs, err := h.imageRepo.GetImagesByIDsAndUser(req.ImageIDs, userID)
 	if err != nil {
-		common.RespondError(c, http.StatusInternalServerError, "Failed to get images")
+		common.RespondError(c, http.StatusInternalServerError, "Failed to get imgs")
 		return
 	}
 
-	// 找出有效的图片ID和不存在的图片ID
 	foundIDs := make(map[uint]bool)
-	imageIDsToAdd := make([]uint, 0, len(images))
-	for _, img := range images {
+	imageIDsToAdd := make([]uint, 0, len(imgs))
+	for _, img := range imgs {
 		foundIDs[img.ID] = true
 		imageIDsToAdd = append(imageIDsToAdd, img.ID)
 	}
@@ -111,7 +110,7 @@ func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 	addedCount := 0
 	if len(imageIDsToAdd) > 0 {
 		if err := h.svc.AddImagesToAlbum(uint(albumID), userID, imageIDsToAdd); err != nil {
-			common.RespondError(c, http.StatusInternalServerError, "Failed to add images to album")
+			common.RespondError(c, http.StatusInternalServerError, "Failed to add imgs to album")
 			return
 		}
 		addedCount = len(imageIDsToAdd)
@@ -123,7 +122,6 @@ func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 		"failed_ids":  failedIDs,
 	})
 
-	// 如果成功添加了图片，清除相关缓存
 	if addedCount > 0 {
 		utils.SafeGo(func() {
 			ctx := context.Background()
@@ -147,7 +145,6 @@ func (h *AlbumImageHandler) RemoveImageFromAlbumHandler(c *gin.Context) {
 		return
 	}
 
-	// 获取图片 ID
 	imageIDStr := c.Param("imageId")
 	imageID, err := strconv.ParseUint(imageIDStr, 10, 32)
 	if err != nil {
@@ -157,10 +154,9 @@ func (h *AlbumImageHandler) RemoveImageFromAlbumHandler(c *gin.Context) {
 
 	userID := c.GetUint(middleware.ContextUserIDKey)
 
-	// 获取图片
 	image, err := h.imageRepo.GetImageByIDAndUser(uint(imageID), userID)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			common.RespondError(c, http.StatusNotFound, "Image not found")
 			return
 		}
@@ -170,7 +166,7 @@ func (h *AlbumImageHandler) RemoveImageFromAlbumHandler(c *gin.Context) {
 
 	// 从相册移除图片
 	if err := h.svc.RemoveImageFromAlbum(uint(albumID), userID, image); err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			common.RespondError(c, http.StatusNotFound, "Album not found or access denied")
 			return
 		}

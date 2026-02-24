@@ -45,14 +45,13 @@ func NewMemoryCache(config MemoryConfig) (*MemoryCache, error) {
 
 // Set 设置缓存项
 func (m *MemoryCache) Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error {
-	size := int64(1) // 默认大小
+	size := int64(1)
 	if data, ok := value.([]byte); ok {
 		size = int64(len(data))
 	}
 
 	set := m.client.SetWithTTL(key, value, size, expiration)
 	if set {
-		// 等待值被实际设置
 		m.client.Wait()
 	}
 	return nil

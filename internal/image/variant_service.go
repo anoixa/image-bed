@@ -48,14 +48,13 @@ func (s *VariantService) submitBackgroundTask(task func()) {
 
 // SelectBestVariant 选择最优格式变体
 func (s *VariantService) SelectBestVariant(ctx context.Context, image *models.Image, acceptHeader string) (*VariantResult, error) {
-	// 读取配置
 	settings, err := s.configManager.GetConversionSettings(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	utils.LogIfDevf("[VariantNegotiation] image=%s, variantStatus=%d, acceptHeader=%s", image.Identifier, uint(image.VariantStatus), acceptHeader)
-	utils.LogIfDevf("[VariantNegotiation] enabledFormats=%v", settings.EnabledFormats)
+	// utils.LogIfDevf("[VariantNegotiation] image=%s, variantStatus=%d, acceptHeader=%s", image.Identifier, uint(image.VariantStatus), acceptHeader)
+	// utils.LogIfDevf("[VariantNegotiation] enabledFormats=%v", settings.EnabledFormats)
 
 	switch image.VariantStatus {
 	case models.ImageVariantStatusNone:
@@ -65,10 +64,9 @@ func (s *VariantService) SelectBestVariant(ctx context.Context, image *models.Im
 		// 正在处理中，返回原图
 		return s.handleOriginalWithConversion(image, acceptHeader, settings, false)
 	case models.ImageVariantStatusFailed:
-		// 处理失败，可触发重试
 		return s.handleOriginalWithConversion(image, acceptHeader, settings, true)
 	case models.ImageVariantStatusThumbnailCompleted, models.ImageVariantStatusCompleted:
-		// 缩略图或全部已完成，查询变体表
+
 		return s.handleCompletedVariants(ctx, image, acceptHeader, settings)
 	default:
 		// 默认按 None 处理
@@ -87,9 +85,7 @@ func (s *VariantService) handleOriginalWithConversion(image *models.Image, accep
 		StoragePath: image.StoragePath,
 	}
 
-	// 检查是否需要触发 WebP 转换
 	if allowTrigger && strings.Contains(acceptHeader, "image/webp") {
-		// 使用 worker pool 提交后台任务，避免 goroutine 风暴
 		s.submitBackgroundTask(func() { s.converter.TriggerWebPConversion(image) })
 	}
 
@@ -98,13 +94,11 @@ func (s *VariantService) handleOriginalWithConversion(image *models.Image, accep
 
 // handleCompletedVariants 处理已完成变体的情况
 func (s *VariantService) handleCompletedVariants(ctx context.Context, image *models.Image, acceptHeader string, settings *config.ConversionSettings) (*VariantResult, error) {
-	// 查询可用变体
 	variants, err := s.variantRepo.GetVariantsByImageID(image.ID)
 	if err != nil {
 		return nil, err
 	}
 
-	// 构建可用格式映射
 	available := make(map[format.FormatType]bool)
 	variantMap := make(map[format.FormatType]*models.ImageVariant)
 
@@ -120,7 +114,6 @@ func (s *VariantService) handleCompletedVariants(ctx context.Context, image *mod
 	utils.LogIfDevf("[VariantNegotiation] image=%s, variantStatus=%d, acceptHeader=%s", image.Identifier, uint(image.VariantStatus), acceptHeader)
 	utils.LogIfDevf("[VariantNegotiation] availableVariants=%v, enabledFormats=%v", available, settings.EnabledFormats)
 
-	// 格式协商
 	negotiator := format.NewNegotiator(settings.EnabledFormats)
 	selectedFormat := negotiator.Negotiate(acceptHeader, available)
 
@@ -145,7 +138,7 @@ func (s *VariantService) handleCompletedVariants(ctx context.Context, image *mod
 			result.Identifier = variant.Identifier
 			result.StoragePath = variant.StoragePath
 		} else {
-			// 变体不存在（异常情况），降级返回原图
+
 			result.Identifier = image.Identifier
 			result.StoragePath = image.StoragePath
 			result.IsOriginal = true
