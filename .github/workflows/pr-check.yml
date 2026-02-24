@@ -36,6 +36,14 @@ jobs:
           go-version: '1.26'
           cache: true
 
+      - name: Install native deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libvips-dev \
+            pkg-config \
+            libsqlite3-dev
+
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:
@@ -164,3 +172,4 @@ jobs:
             });
 
             console.log(`PR #${pr.number} merged successfully`);
+
