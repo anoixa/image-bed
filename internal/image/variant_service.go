@@ -2,7 +2,6 @@ package image
 
 import (
 	"context"
-	"strings"
 
 	config "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
@@ -97,9 +96,8 @@ func (s *VariantService) handleOriginalWithConversion(image *models.Image, accep
 		StoragePath: image.StoragePath,
 	}
 
-	if allowTrigger && strings.Contains(acceptHeader, "image/webp") {
-		s.submitBackgroundTask(func() { s.converter.TriggerWebPConversion(image) })
-	}
+	_ = allowTrigger
+	_ = acceptHeader
 
 	return result, nil
 }

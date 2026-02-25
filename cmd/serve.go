@@ -10,7 +10,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
-	"time"
 
 	"github.com/anoixa/image-bed/api"
 	"github.com/anoixa/image-bed/api/core"
@@ -140,9 +139,10 @@ func RunServer() {
 	}
 
 	vips.Startup(&vips.Config{
-		MaxCacheMem:   0,
-		MaxCacheSize:  0,
-		MaxCacheFiles: 0,
+		MaxCacheMem:      0,
+		MaxCacheSize:     0,
+		MaxCacheFiles:    0,
+		ConcurrencyLevel: 2,
 	})
 	defer vips.Shutdown()
 
@@ -161,28 +161,7 @@ func RunServer() {
 
 	worker.InitGlobalPool(cfg.WorkerCount, 1000)
 
-	variantRepo := images.NewVariantRepository(deps.DB)
-	imageRepo := images.NewRepository(deps.DB)
-
-	retryScanner := imageSvc.NewRetryScanner(variantRepo, imageRepo, deps.Converter, 5*time.Minute)
-	retryScanner.Start()
-	defer retryScanner.Stop()
-
-	thumbnailSvc := imageSvc.NewThumbnailService(variantRepo, imageRepo, deps.ConfigManager, storage.GetDefault(), deps.Converter)
-
-	thumbnailScanner := imageSvc.NewThumbnailScanner(deps.DB, deps.ConfigManager, thumbnailSvc)
-	if err := thumbnailScanner.Start(); err != nil {
-		log.Fatalf("Failed to start thumbnail scanner: %v", err)
-	}
-	defer thumbnailScanner.Stop()
-
-	orphanScanner := imageSvc.NewOrphanScanner(
-		variantRepo, deps.Converter, thumbnailSvc,
-		10*time.Minute, // 10分钟视为孤儿任务
-		5*time.Minute,  // 每5分钟扫描一次
-	)
-	orphanScanner.Start()
-	defer orphanScanner.Stop()
+	// 注意：所有后台扫描器已移除，流水线只在上传时触发
 
 	// 初始化 JWT
 	if err := api.TokenInitFromManager(deps.ConfigManager); err != nil {

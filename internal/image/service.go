@@ -358,16 +358,15 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 		}
 
 		s.submitBackgroundTask(func() { s.warmCache(restored) })
-		s.submitBackgroundTask(func() { s.converter.TriggerWebPConversion(restored) })
-		s.submitBackgroundTask(func() { s.thumbnailSvc.TriggerGenerationForAllSizes(restored) })
+		s.submitBackgroundTask(func() { s.converter.TriggerConversion(restored) })
+		
 		return restored, true, nil
 	}
 
 	// 如果找到未删除的记录，直接返回
 	if err == nil {
 		s.submitBackgroundTask(func() { s.warmCache(img) })
-		s.submitBackgroundTask(func() { s.converter.TriggerWebPConversion(img) })
-		s.submitBackgroundTask(func() { s.thumbnailSvc.TriggerGenerationForAllSizes(img) })
+		s.submitBackgroundTask(func() { s.converter.TriggerConversion(img) })
 		return img, true, nil
 	}
 
@@ -411,7 +410,7 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 	}
 
 	s.submitBackgroundTask(func() { s.warmCache(newImg) })
-	s.submitBackgroundTask(func() { s.converter.TriggerWebPConversion(newImg) })
+	s.submitBackgroundTask(func() { s.converter.TriggerConversion(newImg) })
 	s.submitBackgroundTask(func() { s.thumbnailSvc.TriggerGenerationForAllSizes(newImg) })
 
 	return newImg, false, nil
@@ -800,7 +799,7 @@ func (s *Service) GetImageWithVariant(ctx context.Context, identifier string, ac
 
 	if !variantResult.IsOriginal && variantResult.Variant == nil {
 		s.submitBackgroundTask(func() {
-			s.converter.TriggerWebPConversion(image)
+			s.converter.TriggerConversion(image)
 		})
 	}
 

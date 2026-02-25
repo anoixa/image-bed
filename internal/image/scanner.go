@@ -68,7 +68,7 @@ func (s *RetryScanner) scanAndRetry() {
 		} else if len(failedImages) > 0 {
 			utils.LogIfDevf("[RetryScanner] Found %d images with failed variant status", len(failedImages))
 			for _, img := range failedImages {
-				s.converter.TriggerWebPConversion(img)
+				s.converter.TriggerConversion(img)
 			}
 		}
 	}
@@ -105,7 +105,7 @@ func (s *RetryScanner) scanAndRetry() {
 		// 触发转换
 		utils.LogIfDevf("[RetryScanner] Triggering conversion for variant %d (image: %s)",
 			variant.ID, img.Identifier)
-		s.converter.TriggerWebPConversion(img)
+		s.converter.TriggerConversion(img)
 	}
 }
 
@@ -215,7 +215,7 @@ func (s *OrphanScanner) processOrphanVariant(variant models.ImageVariant) {
 	} else {
 		// WebP 转换任务
 		utils.LogIfDevf("[OrphanScanner] Triggering WebP conversion for variant %d", variant.ID)
-		s.converter.TriggerWebPConversion(img)
+		s.converter.TriggerConversion(img)
 	}
 }
 

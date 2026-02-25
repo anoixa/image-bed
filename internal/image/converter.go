@@ -32,9 +32,9 @@ func NewConverter(cm *config.Manager, variantRepo *images.VariantRepository, ima
 	}
 }
 
-// TriggerWebPConversion 触发 WebP 转换
-// 用于：1.上传新图片 2.重试失败任务 3.用户访问时按需触发
-func (c *Converter) TriggerWebPConversion(image *models.Image) {
+// TriggerConversion 触发图片转换（统一流水线）
+// 使用 PipelineTask 同时生成缩略图和 WebP 原图
+func (c *Converter) TriggerConversion(image *models.Image) {
 	ctx := context.Background()
 
 	settings, err := c.configManager.GetConversionSettings(ctx)
@@ -43,16 +43,17 @@ func (c *Converter) TriggerWebPConversion(image *models.Image) {
 		return
 	}
 
-	// 检查 WebP 是否启用
+	// 检查是否启用任意转换
 	if !settings.IsFormatEnabled(models.FormatWebP) {
 		return
 	}
 
-	// 跳过 GIF 和 WebP 格式
-	if image.MimeType == "image/gif" || image.MimeType == "image/webp" {
+	// 跳过 GIF 格式
+	if image.MimeType == "image/gif" {
 		return
 	}
 
+	// 跳过小于阈值的图片
 	if settings.SkipSmallerThan > 0 {
 		minSize := int64(settings.SkipSmallerThan * 1024)
 		if image.FileSize < minSize {
@@ -60,14 +61,16 @@ func (c *Converter) TriggerWebPConversion(image *models.Image) {
 		}
 	}
 
+	// 更新图片状态为处理中
 	if image.VariantStatus == models.ImageVariantStatusNone || image.VariantStatus == models.ImageVariantStatusFailed {
 		if err := c.imageRepo.UpdateVariantStatus(image.ID, models.ImageVariantStatusProcessing); err != nil {
-			utils.LogIfDevf("[Converter] Failed to update image status to processing: %v", err)
+			utils.LogIfDevf("[Converter] Failed to update image status: %v", err)
 		} else {
 			image.VariantStatus = models.ImageVariantStatusProcessing
 		}
 	}
 
+	// 创建 WebP 变体记录
 	variant, err := c.variantRepo.UpsertPending(image.ID, models.FormatWebP)
 	if err != nil {
 		utils.LogIfDevf("[Converter] Failed to upsert variant: %v", err)
@@ -75,14 +78,12 @@ func (c *Converter) TriggerWebPConversion(image *models.Image) {
 	}
 
 	if variant.Status != models.VariantStatusPending {
-		utils.LogIfDevf("[Converter] Variant %d status=%s, skip submission (retry_count=%d)",
-			variant.ID, variant.Status, variant.RetryCount)
+		utils.LogIfDevf("[Converter] Variant %d status=%s, skip submission", variant.ID, variant.Status)
 		return
 	}
 
 	if variant.RetryCount >= settings.MaxRetries {
-		utils.LogIfDevf("[Converter] Variant %d reached max retries (%d >= %d), skip submission",
-			variant.ID, variant.RetryCount, settings.MaxRetries)
+		utils.LogIfDevf("[Converter] Variant %d reached max retries", variant.ID)
 		return
 	}
 
@@ -91,25 +92,24 @@ func (c *Converter) TriggerWebPConversion(image *models.Image) {
 		return
 	}
 
+	// 提交统一流水线任务
 	ok := pool.Submit(func() {
-		task := &worker.WebPConversionTask{
+		task := &worker.ImagePipelineTask{
 			VariantID:       variant.ID,
 			ImageID:         image.ID,
+			StoragePath:     image.StoragePath,
 			ImageIdentifier: image.Identifier,
-			SourcePath:      image.StoragePath,
-			SourceWidth:     image.Width,
-			SourceHeight:    image.Height,
+			Storage:         c.storage,
 			ConfigManager:   c.configManager,
 			VariantRepo:     c.variantRepo,
 			ImageRepo:       c.imageRepo,
-			Storage:         c.storage,
 			CacheHelper:     c.cacheHelper,
 		}
 		task.Execute()
 	})
 
 	if !ok {
-		utils.LogIfDevf("[Converter] Failed to submit task for %s", image.Identifier)
+		utils.LogIfDevf("[Converter] Failed to submit pipeline task for %s", image.Identifier)
 	}
 }
 
@@ -130,6 +130,6 @@ func (c *Converter) TriggerRetry(variant *models.ImageVariant, image *models.Ima
 		return
 	}
 
-	// 重新触发
-	c.TriggerWebPConversion(image)
+	// 重新触发统一转换
+	c.TriggerConversion(image)
 }
