@@ -18,6 +18,20 @@ import (
 	"github.com/davidbyttow/govips/v2/vips"
 )
 
+// VariantRepository 变体仓库接口
+type VariantRepository interface {
+	UpdateStatusCAS(id uint, expected, newStatus, errMsg string) (bool, error)
+	UpdateCompleted(id uint, identifier, storagePath string, fileSize int64, width, height int) error
+	UpdateFailed(id uint, errMsg string, allowRetry bool) error
+	GetByID(id uint) (*models.ImageVariant, error)
+}
+
+// ImageRepository 图片仓库接口
+type ImageRepository interface {
+	UpdateVariantStatus(imageID uint, status models.ImageVariantStatus) error
+	GetImageByID(id uint) (*models.Image, error)
+}
+
 // readWithLimit 读取流并检查大小限制
 // 多读 1 字节探测是否超限，避免 io.LimitReader 的静默截断
 func readWithLimit(r io.Reader, limit int64) ([]byte, error) {

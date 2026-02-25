@@ -210,7 +210,7 @@ func (s *OrphanScanner) processOrphanVariant(variant models.ImageVariant) {
 	if width, ok := models.ParseThumbnailSize(variant.Format); ok {
 		utils.LogIfDevf("[OrphanScanner] Triggering thumbnail generation for variant %d", variant.ID)
 		if width > 0 && s.thumbnailService != nil {
-			s.thumbnailService.TriggerGeneration(img, width)
+			// 缩略图由 PipelineTask 处理
 		}
 	} else {
 		// WebP 转换任务

@@ -411,7 +411,6 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 
 	s.submitBackgroundTask(func() { s.warmCache(newImg) })
 	s.submitBackgroundTask(func() { s.converter.TriggerConversion(newImg) })
-	s.submitBackgroundTask(func() { s.thumbnailSvc.TriggerGenerationForAllSizes(newImg) })
 
 	return newImg, false, nil
 }
