@@ -5,7 +5,7 @@ import (
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
-	"github.com/anoixa/image-bed/config/db"
+	config "github.com/anoixa/image-bed/config/db"
 	"github.com/gin-gonic/gin"
 )
 
@@ -22,7 +22,7 @@ func NewConversionHandler(cm *config.Manager) *ConversionHandler {
 // GetConfig 获取转换配置
 func (h *ConversionHandler) GetConfig(c *gin.Context) {
 	ctx := c.Request.Context()
-	settings, err := h.configManager.GetConversionSettings(ctx)
+	settings, err := h.configManager.GetImageProcessingSettings(ctx)
 	if err != nil {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to get config")
 		return
@@ -33,7 +33,7 @@ func (h *ConversionHandler) GetConfig(c *gin.Context) {
 
 // UpdateConfig 更新转换配置
 func (h *ConversionHandler) UpdateConfig(c *gin.Context) {
-	var req config.ConversionSettings
+	var req config.ImageProcessingSettings
 	if err := c.ShouldBindJSON(&req); err != nil {
 		common.RespondError(c, http.StatusBadRequest, "Invalid request")
 		return
@@ -42,7 +42,7 @@ func (h *ConversionHandler) UpdateConfig(c *gin.Context) {
 	ctx := c.Request.Context()
 	userID := c.GetUint(middleware.ContextUserIDKey)
 
-	if err := h.configManager.SaveConversionSettings(ctx, &req, userID); err != nil {
+	if err := h.configManager.SaveImageProcessingSettings(ctx, &req, userID); err != nil {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to save config")
 		return
 	}

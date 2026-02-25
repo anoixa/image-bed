@@ -4,13 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
-
-	"github.com/anoixa/image-bed/utils"
 )
 
 var (
@@ -85,10 +83,17 @@ func InitStorage(configs []StorageConfig) error {
 	providersMu.Lock()
 	defer providersMu.Unlock()
 
-	for _, cfg := range configs {
-		provider, err := createProvider(cfg)
+	var initErrors []error
+
+	for i := range configs {
+		cfg := &configs[i]
+
+		provider, err := createProvider(*cfg)
 		if err != nil {
-			return fmt.Errorf("failed to create storage %s: %w", cfg.Name, err)
+			// 记录错误但继续处理其他配置，不中断整个初始化
+			log.Printf("[Storage] Failed to create storage %s (ID=%d): %v", cfg.Name, cfg.ID, err)
+			initErrors = append(initErrors, fmt.Errorf("%s: %w", cfg.Name, err))
+			continue
 		}
 		providers[cfg.ID] = provider
 		if cfg.IsDefault {
@@ -97,16 +102,15 @@ func InitStorage(configs []StorageConfig) error {
 		}
 	}
 
-	// 如果没有配置则使用默认本地存储
 	if defaultProvider == nil {
-		dataDir := utils.GetDataDir()
-		provider, err := NewLocalStorage(filepath.Join(dataDir, "upload"))
-		if err != nil {
-			return fmt.Errorf("failed to create default storage: %w", err)
-		}
-		providers[0] = provider
-		defaultProvider = provider
-		defaultID = 0
+		return fmt.Errorf("no default storage available, please check database storage configs")
+	}
+
+	log.Printf("[Storage] Default storage: ID=%d (%s)", defaultID, defaultProvider.Name())
+
+	// 如果有部分配置失败，记录警告但不返回错误
+	if len(initErrors) > 0 {
+		log.Printf("[Storage] Warning: %d of %d storage configs failed to initialize", len(initErrors), len(configs))
 	}
 
 	return nil
@@ -200,6 +204,31 @@ func ListProviderIDs() []uint {
 		ids = append(ids, id)
 	}
 	return ids
+}
+
+// ProviderInfo 存储提供者信息
+type ProviderInfo struct {
+	ID        uint
+	Name      string
+	Type      string
+	IsDefault bool
+}
+
+// ListProviders 列出所有存储提供者信息
+func ListProviders() []ProviderInfo {
+	providersMu.RLock()
+	defer providersMu.RUnlock()
+
+	result := make([]ProviderInfo, 0, len(providers))
+	for id, provider := range providers {
+		result = append(result, ProviderInfo{
+			ID:        id,
+			Name:      provider.Name(),
+			Type:      "unknown",
+			IsDefault: id == defaultID,
+		})
+	}
+	return result
 }
 
 // GetProviderCount 获取存储提供者数量

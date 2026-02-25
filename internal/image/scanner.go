@@ -8,8 +8,6 @@ import (
 	"github.com/anoixa/image-bed/utils"
 )
 
-// ==================== RetryScanner 重试扫描器 ====================
-
 // RetryScanner 重试扫描器
 type RetryScanner struct {
 	variantRepo *images.VariantRepository
@@ -207,11 +205,9 @@ func (s *OrphanScanner) processOrphanVariant(variant models.ImageVariant) {
 		return
 	}
 
-	if width, ok := models.ParseThumbnailSize(variant.Format); ok {
+	if _, ok := models.ParseThumbnailSize(variant.Format); ok {
 		utils.LogIfDevf("[OrphanScanner] Triggering thumbnail generation for variant %d", variant.ID)
-		if width > 0 && s.thumbnailService != nil {
-			// 缩略图由 PipelineTask 处理
-		}
+
 	} else {
 		// WebP 转换任务
 		utils.LogIfDevf("[OrphanScanner] Triggering WebP conversion for variant %d", variant.ID)

@@ -79,12 +79,12 @@ func (s *ThumbnailService) GetThumbnail(ctx context.Context, image *models.Image
 	}, nil
 }
 
-// TriggerGeneration 触发缩略图生成（已迁移至 PipelineTask）
+// TriggerGeneration 触发缩略图生成
 func (s *ThumbnailService) TriggerGeneration(image *models.Image, width int) {
 	// 缩略图生成已完全迁移至 ImagePipelineTask
 }
 
-// TriggerGenerationForAllSizes 为所有配置尺寸生成缩略图（已迁移）
+// TriggerGenerationForAllSizes 为所有配置尺寸生成缩略图
 func (s *ThumbnailService) TriggerGenerationForAllSizes(image *models.Image) {
 	// 缩略图生成已完全迁移至 ImagePipelineTask
 }
@@ -122,14 +122,4 @@ func (s *ThumbnailService) GetThumbnailURL(originalStoragePath string, width int
 // formatThumbnailSize 生成缩略图格式标识
 func formatThumbnailSize(width int) string {
 	return fmt.Sprintf("thumbnail_%d", width)
-}
-
-// isValidThumbnailWidth 检查缩略图宽度是否有效
-func isValidThumbnailWidth(width int, sizes []models.ThumbnailSize) bool {
-	for _, size := range sizes {
-		if size.Width == width {
-			return true
-		}
-	}
-	return false
 }

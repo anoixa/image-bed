@@ -87,11 +87,8 @@ func InitDependencies(cfg *config.Config) (*Dependencies, error) {
 		return nil, err
 	}
 
-	cacheProvider := cache.GetDefault()
-	if cacheProvider != nil {
-		configManager.SetCache(cacheProvider, 0)
-		log.Println("[Dependencies] Config cache enabled")
-	}
+	// 缓存层已在 Manager 初始化时自动启用
+	log.Println("[Dependencies] Config cache enabled")
 
 	storageConfigs, err := configManager.GetStorageConfigs(context.Background())
 	if err == nil && len(storageConfigs) > 0 {
@@ -100,8 +97,15 @@ func InitDependencies(cfg *config.Config) (*Dependencies, error) {
 		} else {
 			log.Println("[Dependencies] Storage initialized from database configs")
 		}
-	} else if err != nil {
-		log.Printf("[Dependencies] Warning: Failed to get storage configs: %v", err)
+	} else {
+		if err != nil {
+			log.Printf("[Dependencies] Warning: Failed to get storage configs: %v", err)
+		}
+		if err := storage.InitStorage([]storage.StorageConfig{}); err != nil {
+			log.Printf("[Dependencies] Warning: Failed to init default storage: %v", err)
+		} else {
+			log.Println("[Dependencies] Default storage initialized")
+		}
 	}
 
 	variantRepo := images.NewVariantRepository(db)
@@ -161,9 +165,8 @@ func RunServer() {
 
 	worker.InitGlobalPool(cfg.WorkerCount, 1000)
 
-	// 注意：所有后台扫描器已移除，流水线只在上传时触发
-
 	// 初始化 JWT
+	api.SetAuthKeysRepo(deps.Repositories.KeysRepo)
 	if err := api.TokenInitFromManager(deps.ConfigManager); err != nil {
 		log.Fatalf("Failed to initialize JWT: %s", err)
 	}
@@ -173,7 +176,7 @@ func RunServer() {
 		Repositories:  deps.Repositories,
 		ConfigManager: deps.ConfigManager,
 		Converter:     deps.Converter,
-		TokenManager:  api.GetTokenManager(),
+		JWTService:    api.GetJWTService(),
 		Config:        cfg,
 		CacheProvider: cache.GetDefault(),
 		ServerVersion: core.ServerVersion{

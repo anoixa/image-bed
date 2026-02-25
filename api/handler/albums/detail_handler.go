@@ -1,6 +1,7 @@
 package albums
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -49,7 +50,7 @@ func (h *Handler) GetAlbumDetailHandler(c *gin.Context) {
 
 	album, err := h.svc.GetAlbumWithImagesByID(uint(albumID), userID)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			common.RespondError(c, http.StatusNotFound, "Album not found")
 			return
 		}

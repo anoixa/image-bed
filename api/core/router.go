@@ -37,7 +37,7 @@ type RouterDependencies struct {
 	Repositories     *Repositories
 	ConfigManager    *configSvc.Manager
 	Converter        *imageSvc.Converter
-	TokenManager     *auth.TokenManager
+	JWTService       *auth.JWTService
 	LoginService     *auth.LoginService
 	AuthRateLimiter  *middleware.IPRateLimiter
 	APIRateLimiter   *middleware.IPRateLimiter

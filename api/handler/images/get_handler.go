@@ -97,6 +97,9 @@ func (h *Handler) serveByStreaming(c *gin.Context, img *models.Image, streamer s
 
 	_, err := streamer.StreamTo(c.Request.Context(), img.StoragePath, c.Writer)
 	if err != nil {
+		if utils.IsClientDisconnect(err) {
+			return true
+		}
 		log.Printf("[serveByStreaming] Failed to stream image %s (path: %s): %v", img.Identifier, img.StoragePath, err)
 		return false
 	}
@@ -241,7 +244,11 @@ func (h *Handler) serveVariantByStreaming(c *gin.Context, result *image.VariantR
 	c.Header("X-Content-Type-Options", "nosniff")
 
 	_, err := streamer.StreamTo(c.Request.Context(), result.StoragePath, c.Writer)
-	return err == nil
+	if err != nil {
+		// 客户端断开连接是正常情况
+		return utils.IsClientDisconnect(err)
+	}
+	return true
 }
 
 // serveVariantBySendfile 使用 sendfile 传输格式变体

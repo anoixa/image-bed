@@ -8,7 +8,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// Repository 图片仓库 - 封装所有图片相关的数据库操作
+// Repository 图片仓库
 type Repository struct {
 	db *gorm.DB
 }

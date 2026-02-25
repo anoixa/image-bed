@@ -9,7 +9,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// Repository 相册仓库 - 封装所有相册相关的数据库操作
+// Repository 相册仓库
 type Repository struct {
 	db *gorm.DB
 }

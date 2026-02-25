@@ -150,6 +150,6 @@ func (s *LoginService) Logout(deviceID string) error {
 
 // GetDeviceExpiry 获取设备令牌的过期时间
 func (s *LoginService) GetDeviceExpiry(deviceID string) (time.Time, error) {
-	config := s.jwtService.tokenManager.GetConfig()
+	config := s.jwtService.GetConfig()
 	return time.Now().Add(config.RefreshExpiresIn), nil
 }

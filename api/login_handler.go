@@ -7,6 +7,7 @@ import (
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/internal/auth"
+	"github.com/anoixa/image-bed/utils"
 
 	"github.com/gin-gonic/gin"
 )
@@ -168,7 +169,7 @@ func (h *LoginHandler) clearAuthCookies(c *gin.Context) {
 	path := "/api/auth/"
 	domain := ""
 	if h.cfg != nil {
-		domain = h.cfg.ServerDomain
+		domain = utils.ExtractCookieDomain(h.cfg.ServerDomain)
 	}
 
 	// 将 MaxAge 设置为 -1 来让浏览器删除 Cookie

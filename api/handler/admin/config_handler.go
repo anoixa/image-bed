@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/anoixa/image-bed/api/common"
-	"github.com/anoixa/image-bed/cache"
 	configSvc "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/storage"
@@ -287,8 +286,11 @@ func (h *ConfigHandler) testConfig(req *models.TestConfigRequest) *models.TestCo
 	switch req.Category {
 	case models.ConfigCategoryStorage:
 		return h.testStorageConfig(req.Config)
-	case models.ConfigCategoryCache:
-		return h.testCacheConfig(req.Config)
+	case models.ConfigCategoryImageProcessing:
+		return &models.TestConfigResponse{
+			Success: true,
+			Message: "Image processing configuration cannot be tested directly",
+		}
 	default:
 		return &models.TestConfigResponse{
 			Success: false,
@@ -410,73 +412,20 @@ func (h *ConfigHandler) testStorageConfig(config map[string]interface{}) *models
 	}
 }
 
-// testCacheConfig 测试缓存配置
-func (h *ConfigHandler) testCacheConfig(config map[string]interface{}) *models.TestConfigResponse {
-	providerType, _ := config["provider_type"].(string)
-	if providerType == "" {
-		providerType = "memory"
-	}
-
-	switch providerType {
-	case "memory":
-		return &models.TestConfigResponse{
-			Success: true,
-			Message: "Memory cache configuration is valid",
-		}
-
-	case "redis":
-		redisCfg := &cache.RedisConfig{
-			Address:      getString(config, "address"),
-			Password:     getString(config, "password"),
-			DB:           getInt(config, "db"),
-			PoolSize:     getInt(config, "pool_size"),
-			MinIdleConns: getInt(config, "min_idle_conns"),
-		}
-		if redisCfg.Address == "" {
-			redisCfg.Address = "localhost:6379"
-		}
-
-		provider, err := cache.NewRedisCache(*redisCfg)
-		if err != nil {
-			return &models.TestConfigResponse{
-				Success: false,
-				Message: fmt.Sprintf("Failed to connect to Redis: %v", err),
-			}
-		}
-		defer func() { _ = provider.Close() }()
-
-		ctx := context.Background()
-		if err := provider.Health(ctx); err != nil {
-			return &models.TestConfigResponse{
-				Success: false,
-				Message: fmt.Sprintf("Redis health check failed: %v", err),
-			}
-		}
-
-		return &models.TestConfigResponse{
-			Success: true,
-			Message: "Redis connection successful",
-		}
-
-	default:
-		return &models.TestConfigResponse{
-			Success: false,
-			Message: fmt.Sprintf("Unsupported cache provider: %s", providerType),
-		}
-	}
-}
-
 // ListStorageProviders 列出所有存储提供者
 // GET /api/v1/admin/storage/providers
 func (h *ConfigHandler) ListStorageProviders(c *gin.Context) {
-	common.RespondSuccess(c, []map[string]interface{}{
-		{
-			"id":         0,
-			"name":       "default",
-			"type":       "local",
-			"is_default": true,
-		},
-	})
+	providers := storage.ListProviders()
+	result := make([]map[string]interface{}, 0, len(providers))
+	for _, p := range providers {
+		result = append(result, map[string]interface{}{
+			"id":         p.ID,
+			"name":       p.Name,
+			"type":       p.Type,
+			"is_default": p.IsDefault,
+		})
+	}
+	common.RespondSuccess(c, result)
 }
 
 // ReloadStorageConfig 热重载存储配置
@@ -541,17 +490,4 @@ func getBool(m map[string]interface{}, key string) bool {
 		return v
 	}
 	return false
-}
-
-func getInt(m map[string]interface{}, key string) int {
-	switch v := m[key].(type) {
-	case int:
-		return v
-	case int64:
-		return int(v)
-	case float64:
-		return int(v)
-	default:
-		return 0
-	}
 }

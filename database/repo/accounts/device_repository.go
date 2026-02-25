@@ -11,7 +11,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// DeviceRepository 设备仓库 - 封装所有设备相关的数据库操作
+// DeviceRepository 设备仓库
 type DeviceRepository struct {
 	db *gorm.DB
 }

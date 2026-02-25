@@ -36,14 +36,14 @@ func (h *Handler) GetThumbnail(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	settings, err := h.configManager.GetThumbnailSettings(ctx)
+	settings, err := h.configManager.GetImageProcessingSettings(ctx)
 	if err != nil {
 		// return 原图
 		h.serveOriginalImage(c, image)
 		return
 	}
 
-	if !settings.Enabled {
+	if !settings.ThumbnailEnabled {
 		h.serveOriginalImage(c, image)
 		return
 	}

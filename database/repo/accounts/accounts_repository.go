@@ -11,7 +11,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// Repository 账户仓库 - 封装所有账户相关的数据库操作
+// Repository 账户仓库
 type Repository struct {
 	db *gorm.DB
 }

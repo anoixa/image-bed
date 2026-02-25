@@ -11,7 +11,6 @@ import (
 var (
 	// jwtService JWT 服务实例
 	jwtService   *auth.JWTService
-	tokenManager *auth.TokenManager
 	authKeysRepo *keys.Repository
 )
 
@@ -20,39 +19,30 @@ func SetJWTService(service *auth.JWTService) {
 	jwtService = service
 }
 
-// SetTokenManager 设置 Token 管理器
-func SetTokenManager(manager *auth.TokenManager) {
-	tokenManager = manager
+// SetAuthKeysRepo 设置 Keys 仓库
+func SetAuthKeysRepo(repo *keys.Repository) {
+	authKeysRepo = repo
 }
 
 // TokenInitFromManager 从配置管理器初始化 JWT
 func TokenInitFromManager(manager *configSvc.Manager) error {
 	var err error
-	tokenManager, err = auth.NewTokenManager(manager)
-	if err != nil {
-		return err
-	}
-	jwtService = auth.NewJWTService(tokenManager, authKeysRepo)
-	return nil
+	jwtService, err = auth.NewJWTService(manager, authKeysRepo)
+	return err
 }
 
 // GetJWTConfig 获取当前 JWT 配置
 func GetJWTConfig() (secret []byte, expiresIn, refreshExpiresIn time.Duration) {
-	if tokenManager == nil {
+	if jwtService == nil {
 		return nil, 0, 0
 	}
-	config := tokenManager.GetConfig()
+	config := jwtService.GetConfig()
 	return config.Secret, config.ExpiresIn, config.RefreshExpiresIn
 }
 
 // GetJWTService 获取 JWT 服务实例
 func GetJWTService() *auth.JWTService {
 	return jwtService
-}
-
-// GetTokenManager 获取 Token 管理器实例
-func GetTokenManager() *auth.TokenManager {
-	return tokenManager
 }
 
 // InitTestJWT 初始化测试用的 JWT 配置
@@ -66,12 +56,11 @@ func InitTestJWT(secret, expiresInStr, refreshExpiresInStr string) error {
 		return err
 	}
 
-	tokenManager = &auth.TokenManager{}
-	tokenManager.SetConfig(auth.TokenConfig{
+	jwtService = &auth.JWTService{}
+	jwtService.SetConfig(auth.TokenConfig{
 		Secret:           []byte(secret),
 		ExpiresIn:        expiresIn,
 		RefreshExpiresIn: refreshExpiresIn,
 	})
-	jwtService = auth.NewJWTService(tokenManager, authKeysRepo)
 	return nil
 }

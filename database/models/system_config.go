@@ -12,24 +12,14 @@ type ConfigCategory string
 const (
 	// ConfigCategoryStorage 存储配置
 	ConfigCategoryStorage ConfigCategory = "storage"
-	// ConfigCategoryCache 缓存配置
-	ConfigCategoryCache ConfigCategory = "cache"
 	// ConfigCategoryJWT JWT配置
 	ConfigCategoryJWT ConfigCategory = "jwt"
-	// ConfigCategoryUpload 上传配置
-	ConfigCategoryUpload ConfigCategory = "upload"
-	// ConfigCategoryServer 服务器配置
-	ConfigCategoryServer ConfigCategory = "server"
-	// ConfigCategoryRateLimit 限流配置
-	ConfigCategoryRateLimit ConfigCategory = "rate_limit"
 	// ConfigCategorySystem 系统内部配置
 	ConfigCategorySystem ConfigCategory = "system"
-	// ConfigCategoryConversion 格式转换配置
-	ConfigCategoryConversion ConfigCategory = "conversion"
-	// ConfigCategoryThumbnail 缩略图配置
-	ConfigCategoryThumbnail ConfigCategory = "thumbnail"
-	// ConfigCategoryThumbnailScanner 缩略图扫描器配置
-	ConfigCategoryThumbnailScanner ConfigCategory = "thumbnail_scanner"
+	// ConfigCategoryImageProcessing 图片处理配置（合并缩略图、格式转换、扫描器）
+	ConfigCategoryImageProcessing ConfigCategory = "image_processing"
+	// ConfigCategorySecurity 安全配置
+	ConfigCategorySecurity ConfigCategory = "security"
 )
 
 // SystemConfig 通用系统配置表

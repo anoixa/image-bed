@@ -127,8 +127,10 @@ func NewService(
 // submitBackgroundTask 提交后台任务到 worker pool，避免 goroutine 风暴
 func (s *Service) submitBackgroundTask(task func()) {
 	if pool := worker.GetGlobalPool(); pool != nil {
+		utils.LogIfDevf("[Service] Submitting task to worker pool")
 		pool.Submit(task)
 	} else {
+		utils.LogIfDevf("[Service] Worker pool not initialized, running task in new goroutine")
 		go task()
 	}
 }
@@ -342,9 +344,7 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 		return nil, false, errors.New("database error during hash check")
 	}
 
-	// 如果找到记录，检查是否软删除
 	if err == nil && img.DeletedAt.Valid {
-		// 软删除的文件，恢复它
 		updates := map[string]interface{}{
 			"deleted_at":        nil,
 			"original_name":     fileHeader.Filename,
@@ -359,11 +359,10 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 
 		s.submitBackgroundTask(func() { s.warmCache(restored) })
 		s.submitBackgroundTask(func() { s.converter.TriggerConversion(restored) })
-		
+
 		return restored, true, nil
 	}
 
-	// 如果找到未删除的记录，直接返回
 	if err == nil {
 		s.submitBackgroundTask(func() { s.warmCache(img) })
 		s.submitBackgroundTask(func() { s.converter.TriggerConversion(img) })

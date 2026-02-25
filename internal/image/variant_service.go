@@ -6,7 +6,6 @@ import (
 	config "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
-	"github.com/anoixa/image-bed/internal/worker"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/anoixa/image-bed/utils/format"
 )
@@ -38,13 +37,6 @@ func NewVariantService(repo *images.VariantRepository, cm *config.Manager, conve
 	}
 }
 
-// submitBackgroundTask 提交后台任务到 worker pool，避免 goroutine 风暴
-func (s *VariantService) submitBackgroundTask(task func()) {
-	if pool := worker.GetGlobalPool(); pool != nil {
-		pool.Submit(task)
-	}
-}
-
 // SelectBestVariant 选择最优格式变体
 func (s *VariantService) SelectBestVariant(ctx context.Context, image *models.Image, acceptHeader string) (*VariantResult, error) {
 	// GIF 和 WebP 格式直接返回原图，不进行格式协商
@@ -59,13 +51,13 @@ func (s *VariantService) SelectBestVariant(ctx context.Context, image *models.Im
 		}, nil
 	}
 
-	settings, err := s.configManager.GetConversionSettings(ctx)
+	settings, err := s.configManager.GetImageProcessingSettings(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	// utils.LogIfDevf("[VariantNegotiation] image=%s, variantStatus=%d, acceptHeader=%s", image.Identifier, uint(image.VariantStatus), acceptHeader)
-	// utils.LogIfDevf("[VariantNegotiation] enabledFormats=%v", settings.EnabledFormats)
+	// utils.LogIfDevf("[VariantNegotiation] enabledFormats=%v", settings.ConversionEnabledFormats)
 
 	switch image.VariantStatus {
 	case models.ImageVariantStatusNone:
@@ -86,7 +78,7 @@ func (s *VariantService) SelectBestVariant(ctx context.Context, image *models.Im
 }
 
 // handleOriginalWithConversion 返回原图，根据条件触发转换
-func (s *VariantService) handleOriginalWithConversion(image *models.Image, acceptHeader string, settings *config.ConversionSettings, allowTrigger bool) (*VariantResult, error) {
+func (s *VariantService) handleOriginalWithConversion(image *models.Image, acceptHeader string, settings *config.ImageProcessingSettings, allowTrigger bool) (*VariantResult, error) {
 	result := &VariantResult{
 		Format:      format.FormatOriginal,
 		IsOriginal:  true,
@@ -103,7 +95,7 @@ func (s *VariantService) handleOriginalWithConversion(image *models.Image, accep
 }
 
 // handleCompletedVariants 处理已完成变体的情况
-func (s *VariantService) handleCompletedVariants(ctx context.Context, image *models.Image, acceptHeader string, settings *config.ConversionSettings) (*VariantResult, error) {
+func (s *VariantService) handleCompletedVariants(ctx context.Context, image *models.Image, acceptHeader string, settings *config.ImageProcessingSettings) (*VariantResult, error) {
 	variants, err := s.variantRepo.GetVariantsByImageID(image.ID)
 	if err != nil {
 		return nil, err
@@ -122,9 +114,9 @@ func (s *VariantService) handleCompletedVariants(ctx context.Context, image *mod
 
 	// 调试日志（仅在 dev 环境显示）
 	utils.LogIfDevf("[VariantNegotiation] image=%s, variantStatus=%d, acceptHeader=%s", image.Identifier, uint(image.VariantStatus), acceptHeader)
-	utils.LogIfDevf("[VariantNegotiation] availableVariants=%v, enabledFormats=%v", available, settings.EnabledFormats)
+	utils.LogIfDevf("[VariantNegotiation] availableVariants=%v, enabledFormats=%v", available, settings.ConversionEnabledFormats)
 
-	negotiator := format.NewNegotiator(settings.EnabledFormats)
+	negotiator := format.NewNegotiator(settings.ConversionEnabledFormats)
 	selectedFormat := negotiator.Negotiate(acceptHeader, available)
 
 	utils.LogIfDevf("[VariantNegotiation] selectedFormat=%s", selectedFormat)
@@ -147,12 +139,6 @@ func (s *VariantService) handleCompletedVariants(ctx context.Context, image *mod
 		if variant != nil {
 			result.Identifier = variant.Identifier
 			result.StoragePath = variant.StoragePath
-		} else {
-
-			result.Identifier = image.Identifier
-			result.StoragePath = image.StoragePath
-			result.IsOriginal = true
-			result.MIMEType = image.MimeType
 		}
 	}
 
