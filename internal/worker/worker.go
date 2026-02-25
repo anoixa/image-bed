@@ -8,11 +8,50 @@ import (
 	"sync/atomic"
 )
 
+var (
+	globalSemaphore     *ImageProcessingSemaphore
+	globalSemaphoreOnce sync.Once
+)
+
+var (
+	globalPool     *Pool
+	globalPoolOnce sync.Once
+)
+
 // ImageProcessingConfig 图片处理配置
 type ImageProcessingConfig struct {
 	MaxConcurrentImages int   // 同时处理的最大图片数
 	MaxImageSizeMB      int   // 最大图片大小(MB)
 	GCTriggerThreshold  int64 // 触发GC的内存阈值(字节)
+}
+
+// ImageProcessingSemaphore 图片处理信号量
+type ImageProcessingSemaphore struct {
+	semaphore chan struct{}
+	config    *ImageProcessingConfig
+}
+
+// PoolStats 任务池统计信息
+type PoolStats struct {
+	Submitted   uint64 // 已提交任务数
+	Executed    uint64 // 已执行任务数
+	Failed      uint64 // 失败任务数（panic）
+	QueueSize   int    // 当前队列长度
+	QueueCap    int    // 队列容量
+	WorkerCount int    // Worker 数量
+}
+
+// Pool 独立的异步任务池
+type Pool struct {
+	taskCh   chan func()
+	wg       sync.WaitGroup
+	isClosed atomic.Bool
+
+	submittedCount atomic.Uint64
+	executedCount  atomic.Uint64
+	failedCount    atomic.Uint64
+	workerCount    int
+	queueCap       int
 }
 
 // DefaultImageProcessingConfig 默认配置
@@ -23,17 +62,6 @@ func DefaultImageProcessingConfig() *ImageProcessingConfig {
 		GCTriggerThreshold:  200 * 1024 * 1024, // 200MB
 	}
 }
-
-// ImageProcessingSemaphore 图片处理信号量
-type ImageProcessingSemaphore struct {
-	semaphore chan struct{}
-	config    *ImageProcessingConfig
-}
-
-var (
-	globalSemaphore     *ImageProcessingSemaphore
-	globalSemaphoreOnce sync.Once
-)
 
 // InitGlobalSemaphore 初始化全局信号量
 func InitGlobalSemaphore(config *ImageProcessingConfig) {
@@ -80,34 +108,6 @@ func min(a, b int) int {
 	}
 	return b
 }
-
-// PoolStats 任务池统计信息
-type PoolStats struct {
-	Submitted   uint64 // 已提交任务数
-	Executed    uint64 // 已执行任务数
-	Failed      uint64 // 失败任务数（panic）
-	QueueSize   int    // 当前队列长度
-	QueueCap    int    // 队列容量
-	WorkerCount int    // Worker 数量
-}
-
-// Pool 独立的异步任务池
-type Pool struct {
-	taskCh   chan func()
-	wg       sync.WaitGroup
-	isClosed atomic.Bool
-
-	submittedCount atomic.Uint64
-	executedCount  atomic.Uint64
-	failedCount    atomic.Uint64
-	workerCount    int
-	queueCap       int
-}
-
-var (
-	globalPool     *Pool
-	globalPoolOnce sync.Once
-)
 
 // InitGlobalPool 初始化全局任务池
 func InitGlobalPool(workers, queueSize int) {

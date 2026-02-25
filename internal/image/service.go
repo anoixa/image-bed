@@ -541,7 +541,7 @@ func (s *Service) CacheImageData(ctx context.Context, identifier string, data []
 }
 
 // ListImages 获取图片列表
-func (s *Service) ListImages(storageType string, identifier string, search string, albumID *uint, startTime, endTime int64, page int, limit int, userID int) (*ListImagesResult, error) {
+func (s *Service) ListImages(storageType string, identifier string, search string, albumID *uint, startTime, endTime int64, sort string, page int, limit int, userID int) (*ListImagesResult, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -555,7 +555,7 @@ func (s *Service) ListImages(storageType string, identifier string, search strin
 		limit = maxLimit
 	}
 
-	list, total, err := s.repo.GetImageList(storageType, identifier, search, albumID, startTime, endTime, page, limit, userID)
+	list, total, err := s.repo.GetImageList(storageType, identifier, search, albumID, startTime, endTime, sort, page, limit, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get image list: %w", err)
 	}

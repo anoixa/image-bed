@@ -32,6 +32,7 @@ type ImageRequestBody struct {
 	AlbumID     *uint  `json:"album_id"`
 	StartTime   int64  `json:"start_time"` // Unix时间戳（毫秒）
 	EndTime     int64  `json:"end_time"`   // Unix时间戳（毫秒）
+	Sort        string `json:"sort"`       // asc 或 desc，默认 desc
 
 	Page  int `json:"page" binding:"required"`
 	Limit int `json:"limit" binding:"required"`
@@ -70,7 +71,7 @@ func (h *Handler) ListImages(c *gin.Context) {
 		limit = maxLimit
 	}
 
-	result, err := h.imageService.ListImages(body.StorageType, body.Identifier, body.Search, body.AlbumID, body.StartTime, body.EndTime, page, limit, int(userID))
+	result, err := h.imageService.ListImages(body.StorageType, body.Identifier, body.Search, body.AlbumID, body.StartTime, body.EndTime, body.Sort, page, limit, int(userID))
 	if err != nil {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to get image list")
 		return

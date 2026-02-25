@@ -184,8 +184,8 @@ func (r *Repository) UpdateImageByIdentifier(identifier string, updates map[stri
 	return &image, err
 }
 
-// GetImageList 获取图片列表（支持搜索和过滤）
-func (r *Repository) GetImageList(storageType, identifier, search string, albumID *uint, startTime, endTime int64, page, pageSize, userID int) ([]*models.Image, int64, error) {
+// GetImageList 获取图片列表
+func (r *Repository) GetImageList(storageType, identifier, search string, albumID *uint, startTime, endTime int64, sort string, page, pageSize, userID int) ([]*models.Image, int64, error) {
 	var imageList []*models.Image
 	var total int64
 
@@ -217,7 +217,14 @@ func (r *Repository) GetImageList(storageType, identifier, search string, albumI
 	}
 
 	offset := (page - 1) * pageSize
-	err := db.Order("created_at desc").Offset(offset).Limit(pageSize).Find(&imageList).Error
+
+	// 根据 sort 参数设置排序方向
+	orderBy := "created_at desc"
+	if sort == "asc" {
+		orderBy = "created_at asc"
+	}
+
+	err := db.Order(orderBy).Offset(offset).Limit(pageSize).Find(&imageList).Error
 	return imageList, total, err
 }
 

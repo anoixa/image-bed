@@ -62,28 +62,46 @@ type ImageTimeStats struct {
 func (r *Repository) GetImageTimeStats() (*ImageTimeStats, error) {
 	var stats ImageTimeStats
 	now := time.Now()
-	today := now.Format("2006-01-02")
-	yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
+
+	// 计算今日时间范围
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	todayEnd := todayStart.Add(24 * time.Hour)
+
+	// 计算昨日时间范围
+	yesterdayStart := todayStart.Add(-24 * time.Hour)
+	yesterdayEnd := todayStart
+
+	// 计算本周时间范围 (周一到周日)
+	weekday := int(now.Weekday())
+	if weekday == 0 {
+		weekday = 7
+	}
+	weekStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).
+		Add(-time.Duration(weekday-1) * 24 * time.Hour)
+	weekEnd := weekStart.Add(7 * 24 * time.Hour)
+
+	// 计算本月时间范围
+	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	monthEnd := monthStart.AddDate(0, 1, 0)
 
 	// 今日
 	r.db.Model(&models.Image{}).
-		Where("DATE(created_at) = ? AND deleted_at IS NULL", today).
+		Where("created_at >= ? AND created_at < ? AND deleted_at IS NULL", todayStart, todayEnd).
 		Count(&stats.Today)
 
 	// 昨日
 	r.db.Model(&models.Image{}).
-		Where("DATE(created_at) = ? AND deleted_at IS NULL", yesterday).
+		Where("created_at >= ? AND created_at < ? AND deleted_at IS NULL", yesterdayStart, yesterdayEnd).
 		Count(&stats.Yesterday)
 
-	// 本周 (MySQL YEARWEEK)
+	// 本周
 	r.db.Model(&models.Image{}).
-		Where("YEARWEEK(created_at) = YEARWEEK(?) AND deleted_at IS NULL", now).
+		Where("created_at >= ? AND created_at < ? AND deleted_at IS NULL", weekStart, weekEnd).
 		Count(&stats.ThisWeek)
 
 	// 本月
 	r.db.Model(&models.Image{}).
-		Where("YEAR(created_at) = ? AND MONTH(created_at) = ? AND deleted_at IS NULL",
-			now.Year(), int(now.Month())).
+		Where("created_at >= ? AND created_at < ? AND deleted_at IS NULL", monthStart, monthEnd).
 		Count(&stats.ThisMonth)
 
 	return &stats, nil
@@ -122,9 +140,14 @@ type DailyStat struct {
 func (r *Repository) GetDailyStats(days int) ([]DailyStat, error) {
 	var stats []DailyStat
 
+	// 计算起始时间（N天前的零点）
+	now := time.Now()
+	startDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).
+		AddDate(0, 0, -days)
+
 	err := r.db.Table("images").
 		Select("DATE(created_at) as date, COUNT(*) as count").
-		Where("created_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY) AND deleted_at IS NULL", days).
+		Where("created_at >= ? AND deleted_at IS NULL", startDate).
 		Group("DATE(created_at)").
 		Order("date").
 		Scan(&stats).Error
