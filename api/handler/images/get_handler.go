@@ -23,7 +23,7 @@ import (
 
 var fileDownloadGroup singleflight.Group
 
-// GetImage 获取图片（支持格式协商和重定向）
+// GetImage 获取图片
 func (h *Handler) GetImage(c *gin.Context) {
 	identifier := c.Param("identifier")
 	if identifier == "" {

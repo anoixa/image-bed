@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"context"
+	"log"
 	"math"
 	"time"
 
@@ -122,7 +123,7 @@ func (s *Service) GetStats(ctx context.Context) (*StatsResponse, error) {
 
 	// 组装响应
 	response := s.buildResponse(overview, timeStats, storageStats, dailyStats)
-	
+
 	_ = s.cache.Set(ctx, cacheKey, response, s.cacheTTL)
 
 	return response, nil
@@ -206,16 +207,20 @@ func (s *Service) buildTrendData(stats []dashboard.DailyStat, days int) TrendSta
 
 	// 构建日期到数量的映射
 	statMap := make(map[string]int64)
+	log.Printf("[DEBUG][buildTrendData] Received %d stats from DB", len(stats))
 	for _, stat := range stats {
 		statMap[stat.Date] = stat.Count
+		log.Printf("[DEBUG][buildTrendData] DB stat: date=%s, count=%d", stat.Date, stat.Count)
 	}
 
 	// 填充数据，没有数据的天数补0
 	for i, date := range dates {
 		if count, ok := statMap[date]; ok {
 			data[i] = count
+			log.Printf("[DEBUG][buildTrendData] Match: date=%s, count=%d", date, count)
 		} else {
 			data[i] = 0
+			log.Printf("[DEBUG][buildTrendData] No match: date=%s, set to 0", date)
 		}
 	}
 
