@@ -267,3 +267,49 @@ func (r *Repository) GetImagesByVariantStatus(statuses []models.ImageVariantStat
 	err := r.db.Where("variant_status IN ?", statuses).Limit(limit).Find(&images).Error
 	return images, err
 }
+
+// RandomImageFilter 随机图片筛选条件
+type RandomImageFilter struct {
+	AlbumID   *uint
+	MinWidth  int
+	MinHeight int
+	MaxWidth  int
+	MaxHeight int
+}
+
+// GetRandomPublicImage 随机获取一张公开图片
+func (r *Repository) GetRandomPublicImage(filter *RandomImageFilter) (*models.Image, error) {
+	var image models.Image
+
+	db := r.db.Where("is_public = ?", true)
+
+	// 相册筛选
+	if filter != nil && filter.AlbumID != nil {
+		db = db.Joins("JOIN album_images ON album_images.image_id = images.id").
+			Where("album_images.album_id = ?", *filter.AlbumID)
+	}
+
+	// 尺寸筛选
+	if filter != nil {
+		if filter.MinWidth > 0 {
+			db = db.Where("width >= ?", filter.MinWidth)
+		}
+		if filter.MinHeight > 0 {
+			db = db.Where("height >= ?", filter.MinHeight)
+		}
+		if filter.MaxWidth > 0 {
+			db = db.Where("width <= ?", filter.MaxWidth)
+		}
+		if filter.MaxHeight > 0 {
+			db = db.Where("height <= ?", filter.MaxHeight)
+		}
+	}
+
+	// 使用数据库随机排序
+	err := db.Order("RANDOM()").First(&image).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return &image, nil
+}

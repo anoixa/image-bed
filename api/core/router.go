@@ -94,6 +94,13 @@ func registerPublicRoutes(router *gin.Engine, deps *RouterDependencies) {
 	{
 		thumbnailGroup.GET("/:identifier", imageHandler.GetThumbnail)
 	}
+
+	// 随机图片API
+	randomGroup := router.Group("/random")
+	randomGroup.Use(deps.ImageRateLimiter.Middleware())
+	{
+		randomGroup.GET("", imageHandler.RandomImage)
+	}
 }
 
 // registerAPIRoutes 注册 API 路由
@@ -188,6 +195,14 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
 
 // registerAdminRoutes 注册管理员路由
 func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies) {
+	cfg := deps.Config
+	baseURL := getBaseURL(cfg)
+	uploadMaxBatchTotalMB := 500
+	if cfg != nil {
+		uploadMaxBatchTotalMB = cfg.UploadMaxBatchTotalMB
+	}
+	imageHandler := handlerImages.NewHandler(deps.CacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager, cfg, baseURL, uploadMaxBatchTotalMB)
+
 	configHandler := admin.NewConfigHandler(deps.ConfigManager)
 	adminGroup := v1.Group("/admin")
 	adminGroup.Use(middleware.Authorize("jwt"))
@@ -213,5 +228,9 @@ func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies) {
 		conversionHandler := admin.NewConversionHandler(deps.ConfigManager)
 		adminGroup.GET("/conversion", conversionHandler.GetConfig)
 		adminGroup.PUT("/conversion", conversionHandler.UpdateConfig)
+
+		// 随机图片源相册配置
+		adminGroup.GET("/random-source-album", imageHandler.GetRandomSourceAlbum)
+		adminGroup.POST("/random-source-album", imageHandler.SetRandomSourceAlbum)
 	}
 }

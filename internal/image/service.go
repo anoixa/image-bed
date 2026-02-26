@@ -824,3 +824,56 @@ func (s *Service) GetImageWithVariant(ctx context.Context, identifier string, ac
 
 	return result, nil
 }
+
+// GetRandomImage 获取随机图片（支持筛选条件）
+func (s *Service) GetRandomImage(filter *images.RandomImageFilter) (*models.Image, error) {
+	return s.repo.GetRandomPublicImage(filter)
+}
+
+// GetRandomImageWithVariant 获取随机图片（包含格式变体协商）
+func (s *Service) GetRandomImageWithVariant(ctx context.Context, filter *images.RandomImageFilter, acceptHeader string) (*ImageResultDTO, error) {
+	// 获取随机图片
+	image, err := s.repo.GetRandomPublicImage(filter)
+	if err != nil {
+		return nil, err
+	}
+
+	// 选择最优变体
+	variantResult, err := s.variantService.SelectBestVariant(ctx, image, acceptHeader)
+	if err != nil {
+		return &ImageResultDTO{
+			Image:      image,
+			IsOriginal: true,
+			URL:        utils.BuildImageURL(s.baseURL, image.Identifier),
+			MIMEType:   image.MimeType,
+		}, nil
+	}
+
+	if !variantResult.IsOriginal && variantResult.Variant == nil {
+		s.submitBackgroundTask(func() {
+			s.converter.TriggerConversion(image)
+		})
+	}
+
+	result := &ImageResultDTO{
+		Image:      image,
+		IsOriginal: variantResult.IsOriginal,
+		MIMEType:   variantResult.MIMEType,
+	}
+
+	if variantResult.IsOriginal {
+		result.URL = utils.BuildImageURL(s.baseURL, image.Identifier)
+		result.MIMEType = image.MimeType
+	} else {
+		result.Variant = variantResult.Variant
+		if variantResult.Variant != nil {
+			result.URL = utils.BuildImageURL(s.baseURL, variantResult.Variant.Identifier)
+		} else {
+			result.IsOriginal = true
+			result.URL = utils.BuildImageURL(s.baseURL, image.Identifier)
+			result.MIMEType = image.MimeType
+		}
+	}
+
+	return result, nil
+}
