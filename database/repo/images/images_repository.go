@@ -270,11 +270,12 @@ func (r *Repository) GetImagesByVariantStatus(statuses []models.ImageVariantStat
 
 // RandomImageFilter 随机图片筛选条件
 type RandomImageFilter struct {
-	AlbumID   *uint
-	MinWidth  int
-	MinHeight int
-	MaxWidth  int
-	MaxHeight int
+	AlbumID          *uint
+	IncludeAllPublic bool
+	MinWidth         int
+	MinHeight        int
+	MaxWidth         int
+	MaxHeight        int
 }
 
 // GetRandomPublicImage 随机获取一张公开图片
@@ -283,8 +284,8 @@ func (r *Repository) GetRandomPublicImage(filter *RandomImageFilter) (*models.Im
 
 	db := r.db.Where("is_public = ?", true)
 
-	// 相册筛选
-	if filter != nil && filter.AlbumID != nil {
+	// 相册筛选（仅当未配置包含所有公开图片时）
+	if filter != nil && filter.AlbumID != nil && !filter.IncludeAllPublic {
 		db = db.Joins("JOIN album_images ON album_images.image_id = images.id").
 			Where("album_images.album_id = ?", *filter.AlbumID)
 	}

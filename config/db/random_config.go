@@ -12,47 +12,77 @@ const RandomSourceAlbumConfigKey = "random_source_album"
 
 // RandomAlbumConfig 随机图源相册配置
 type RandomAlbumConfig struct {
-	AlbumID uint `json:"album_id"`
+	AlbumID          uint `json:"album_id"`
+	IncludeAllPublic bool `json:"include_all_public"`
 }
 
 // GetRandomSourceAlbum 获取随机图源相册ID
 func (m *Manager) GetRandomSourceAlbum() uint {
+	config := m.getRandomAlbumConfig()
+	if config == nil {
+		return 0
+	}
+	return config.AlbumID
+}
+
+// GetRandomIncludeAllPublic 获取是否包含所有公开图片的配置
+func (m *Manager) GetRandomIncludeAllPublic() bool {
+	config := m.getRandomAlbumConfig()
+	if config == nil {
+		return false
+	}
+	return config.IncludeAllPublic
+}
+
+// getRandomAlbumConfig 获取随机图源相册完整配置
+func (m *Manager) getRandomAlbumConfig() *RandomAlbumConfig {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	config, err := m.repo.GetByKey(ctx, RandomSourceAlbumConfigKey)
 	if err != nil || config == nil {
-		return 0
+		return nil
 	}
 
 	// 解密配置
 	configMap, err := m.crypto.Decrypt(config.ConfigJSON)
 	if err != nil {
-		return 0
+		return nil
 	}
+
+	result := &RandomAlbumConfig{}
 
 	// 解析相册ID
 	if albumID, ok := configMap["album_id"]; ok {
 		switch v := albumID.(type) {
 		case float64:
-			return uint(v)
+			result.AlbumID = uint(v)
 		case int:
-			return uint(v)
+			result.AlbumID = uint(v)
 		case uint:
-			return v
+			result.AlbumID = v
 		}
 	}
 
-	return 0
+	// 解析是否包含所有公开图片
+	if includeAllPublic, ok := configMap["include_all_public"]; ok {
+		switch v := includeAllPublic.(type) {
+		case bool:
+			result.IncludeAllPublic = v
+		}
+	}
+
+	return result
 }
 
-// SetRandomSourceAlbum 设置随机图源相册ID
-func (m *Manager) SetRandomSourceAlbum(albumID uint) error {
+// SetRandomSourceAlbum 设置随机图源相册配置
+func (m *Manager) SetRandomSourceAlbum(albumID uint, includeAllPublic bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	config := map[string]interface{}{
-		"album_id": albumID,
+		"album_id":           albumID,
+		"include_all_public": includeAllPublic,
 	}
 
 	// 检查是否已存在

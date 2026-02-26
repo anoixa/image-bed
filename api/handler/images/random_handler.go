@@ -21,13 +21,13 @@ func (h *Handler) InitRandomService() {
 	}
 }
 
-// getRandomSourceAlbum 获取配置的随机图源相册ID
-func (h *Handler) getRandomSourceAlbum() uint {
+// getRandomSourceAlbum 获取配置的随机图源相册ID和是否包含所有公开图片的配置
+func (h *Handler) getRandomSourceAlbum() (uint, bool) {
 	h.InitRandomService()
 	if randomService != nil {
 		return randomService.GetSourceAlbum()
 	}
-	return 0
+	return 0, false
 }
 
 // RandomImageQuery 随机图片查询参数
@@ -60,8 +60,12 @@ func (h *Handler) RandomImage(c *gin.Context) {
 	if query.AlbumID > 0 {
 		filter.AlbumID = &query.AlbumID
 	} else {
-		sourceAlbumID := h.getRandomSourceAlbum()
-		if sourceAlbumID > 0 {
+		sourceAlbumID, includeAllPublic := h.getRandomSourceAlbum()
+		if includeAllPublic {
+			// 如果配置了包含所有公开图片，则设置标志位且不指定相册
+			filter.IncludeAllPublic = true
+		} else if sourceAlbumID > 0 {
+			// 否则使用配置中的特定相册
 			filter.AlbumID = &sourceAlbumID
 		}
 	}
@@ -125,15 +129,17 @@ func (h *Handler) respondRandomJSON(c *gin.Context, result *image.ImageResultDTO
 
 // GetRandomSourceAlbum 获取随机图片源相册配置
 func (h *Handler) GetRandomSourceAlbum(c *gin.Context) {
-	albumID := h.getRandomSourceAlbum()
+	albumID, includeAllPublic := h.getRandomSourceAlbum()
 	common.RespondSuccess(c, gin.H{
-		"album_id": albumID,
+		"album_id":           albumID,
+		"include_all_public": includeAllPublic,
 	})
 }
 
 // SetRandomSourceAlbumRequest 设置随机图源相册请求
 type SetRandomSourceAlbumRequest struct {
-	AlbumID uint `json:"album_id" binding:"required"`
+	AlbumID          uint `json:"album_id" binding:"required"`
+	IncludeAllPublic bool `json:"include_all_public"`
 }
 
 // SetRandomSourceAlbum 设置随机图片源相册
@@ -150,13 +156,14 @@ func (h *Handler) SetRandomSourceAlbum(c *gin.Context) {
 		return
 	}
 
-	if err := randomService.SetSourceAlbum(req.AlbumID); err != nil {
+	if err := randomService.SetSourceAlbum(req.AlbumID, req.IncludeAllPublic); err != nil {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to save configuration")
 		return
 	}
 
 	common.RespondSuccess(c, gin.H{
-		"album_id": req.AlbumID,
-		"message":  "Random source album updated successfully",
+		"album_id":           req.AlbumID,
+		"include_all_public": req.IncludeAllPublic,
+		"message":            "Random source album updated successfully",
 	})
 }
