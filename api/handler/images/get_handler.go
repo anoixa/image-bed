@@ -60,6 +60,21 @@ func (h *Handler) GetImage(c *gin.Context) {
 
 // serveOriginalImage 提供原图
 func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
+	// [DEBUG] 检查关键依赖
+	if storage.GetDefault() == nil {
+		log.Printf("[DEBUG][serveOriginalImage] storage.GetDefault() is nil!")
+		common.RespondError(c, http.StatusInternalServerError, "Storage not initialized")
+		return
+	}
+	if h.cacheHelper == nil {
+		log.Printf("[DEBUG][serveOriginalImage] h.cacheHelper is nil!")
+		common.RespondError(c, http.StatusInternalServerError, "Cache not initialized")
+		return
+	}
+	// [DEBUG] 记录图片存储配置ID
+	log.Printf("[DEBUG][serveOriginalImage] image.ID=%d, StorageConfigID=%d, Identifier=%s",
+		image.ID, image.StorageConfigID, image.Identifier)
+
 	storagePath := image.StoragePath
 
 	imageData, err := h.cacheHelper.GetCachedImageData(c.Request.Context(), image.Identifier)
@@ -68,19 +83,28 @@ func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 		return
 	}
 
-	if opener, ok := storage.GetDefault().(storage.FileOpener); ok {
+	// 使用图片指定的 StorageConfigID 获取正确的存储 provider
+	provider := h.getStorageProvider(image.StorageConfigID)
+	if provider == nil {
+		log.Printf("[serveOriginalImage] Failed to get storage provider for image %s (StorageConfigID=%d)",
+			image.Identifier, image.StorageConfigID)
+		common.RespondError(c, http.StatusInternalServerError, "Storage provider not available")
+		return
+	}
+
+	if opener, ok := provider.(storage.FileOpener); ok {
 		if h.serveBySendfile(c, image, opener) {
 			return
 		}
 	}
 
-	if streamer, ok := storage.GetDefault().(storage.StreamProvider); ok {
+	if streamer, ok := provider.(storage.StreamProvider); ok {
 		if h.serveByStreaming(c, image, streamer) {
 			return
 		}
 	}
 
-	data, err := h.fetchFromRemote(storagePath)
+	data, err := h.fetchFromRemoteWithProvider(storagePath, provider)
 	if err != nil {
 		log.Printf("[serveOriginal] Failed to get image %s (path: %s): %v", image.Identifier, storagePath, err)
 		common.RespondError(c, http.StatusNotFound, "Image file not found")
@@ -106,15 +130,15 @@ func (h *Handler) serveByStreaming(c *gin.Context, img *models.Image, streamer s
 	return true
 }
 
-// fetchFromRemote 从远程存储获取图片数据
-func (h *Handler) fetchFromRemote(storagePath string) ([]byte, error) {
+// fetchFromRemoteWithProvider 从指定存储提供者获取图片数据
+func (h *Handler) fetchFromRemoteWithProvider(storagePath string, provider storage.Provider) ([]byte, error) {
 	v, err, _ := fileDownloadGroup.Do(storagePath, func() (interface{}, error) {
 		if data, err := h.cacheHelper.GetCachedImageData(context.Background(), storagePath); err == nil {
 			return data, nil
 		}
 
-		// 从存储获取
-		stream, err := storage.GetDefault().GetWithContext(context.Background(), storagePath)
+		// 从指定的存储 provider 获取
+		stream, err := provider.GetWithContext(context.Background(), storagePath)
 		if err != nil {
 			return nil, err
 		}
@@ -158,6 +182,21 @@ func (h *Handler) fetchFromRemote(storagePath string) ([]byte, error) {
 	return v.([]byte), nil
 }
 
+// getStorageProvider 根据图片的 StorageConfigID 获取对应的存储 provider
+// 如果指定的 provider 不存在，则返回默认存储
+func (h *Handler) getStorageProvider(storageConfigID uint) storage.Provider {
+	if storageConfigID == 0 {
+		return storage.GetDefault()
+	}
+
+	provider, err := storage.GetByID(storageConfigID)
+	if err != nil {
+		log.Printf("[getStorageProvider] Storage provider ID=%d not found, falling back to default: %v", storageConfigID, err)
+		return storage.GetDefault()
+	}
+	return provider
+}
+
 // serveBySendfile 使用 sendfile 零拷贝传输
 func (h *Handler) serveBySendfile(c *gin.Context, img *models.Image, opener storage.FileOpener) bool {
 	file, err := opener.OpenFile(c.Request.Context(), img.StoragePath)
@@ -186,25 +225,39 @@ func (h *Handler) serveImageData(c *gin.Context, img *models.Image, data []byte)
 
 // serveVariantImage 提供格式变体
 func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *image.VariantResult) {
+	// [DEBUG] 记录变体信息
+	log.Printf("[DEBUG][serveVariantImage] img.ID=%d, img.StorageConfigID=%d, variant.Identifier=%s",
+		img.ID, img.StorageConfigID, result.Identifier)
+
+	// 使用原图指定的 StorageConfigID 获取正确的存储 provider
+	provider := h.getStorageProvider(img.StorageConfigID)
+	if provider == nil {
+		log.Printf("[serveVariantImage] Failed to get storage provider for image %s (StorageConfigID=%d)",
+			img.Identifier, img.StorageConfigID)
+		// 降级到原图
+		h.serveOriginalImage(c, img)
+		return
+	}
+
 	imageData, err := h.cacheHelper.GetCachedImageData(c.Request.Context(), result.StoragePath)
 	if err == nil {
 		h.serveVariantData(c, img, result, imageData)
 		return
 	}
 
-	if opener, ok := storage.GetDefault().(storage.FileOpener); ok {
+	if opener, ok := provider.(storage.FileOpener); ok {
 		if h.serveVariantBySendfile(c, img, result, opener) {
 			return
 		}
 	}
 
-	if streamer, ok := storage.GetDefault().(storage.StreamProvider); ok {
+	if streamer, ok := provider.(storage.StreamProvider); ok {
 		if h.serveVariantByStreaming(c, result, streamer) {
 			return
 		}
 	}
 
-	stream, err := storage.GetDefault().GetWithContext(c.Request.Context(), result.StoragePath)
+	stream, err := provider.GetWithContext(c.Request.Context(), result.StoragePath)
 	if err != nil {
 		log.Printf("[serveVariant] Failed to get variant %s (path: %s): %v", result.Identifier, result.StoragePath, err)
 		// 降级到原图
