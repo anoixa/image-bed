@@ -70,7 +70,7 @@ func (h *Handler) RandomImage(c *gin.Context) {
 	acceptHeader := c.GetHeader("Accept")
 	result, err := h.imageService.GetRandomImageWithVariant(c.Request.Context(), filter, acceptHeader)
 	if err != nil {
-		common.RespondError(c, http.StatusNotFound, "No images found matching criteria")
+		c.Status(http.StatusNoContent)
 		return
 	}
 
