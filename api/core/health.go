@@ -44,7 +44,7 @@ func (h *HealthHandler) Handle(context *gin.Context) {
 		"checks": gin.H{
 			"database": checkDatabaseHealth(sqlDB),
 			"cache":    checkCacheHealth(),
-			"storage":  checkStorageHealth(),
+			"storage":  checkStorageHealth(context.Request.Context()),
 		},
 	}
 	httpStatus := http.StatusOK
@@ -74,13 +74,12 @@ func checkCacheHealth() string {
 	return "not initialized"
 }
 
-func checkStorageHealth() string {
+func checkStorageHealth(ctx context.Context) string {
 	provider := storage.GetDefault()
 	if provider == nil {
 		return "error: no default storage provider"
 	}
 
-	ctx := context.Background()
 	if err := provider.Health(ctx); err != nil {
 		return "error: " + err.Error()
 	}

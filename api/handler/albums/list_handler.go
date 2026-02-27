@@ -1,7 +1,6 @@
 package albums
 
 import (
-	"context"
 	"log"
 	"math"
 	"net/http"
@@ -100,7 +99,7 @@ func (h *Handler) ListAlbumsHandler(c *gin.Context) {
 
 	// 异步写入缓存
 	utils.SafeGo(func() {
-		ctx := context.Background()
+		ctx := c.Copy().Request.Context()
 		cacheData := CachedAlbumList{
 			Albums: albumDTOs,
 			Total:  total,

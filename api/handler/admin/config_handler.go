@@ -43,7 +43,7 @@ func NewConfigHandler(manager *configSvc.Manager) *ConfigHandler {
 // @Security     ApiKeyAuth
 // @Router       /admin/configs [get]
 func (h *ConfigHandler) ListConfigs(c *gin.Context) {
-	ctx := context.Background()
+	ctx := c.Request.Context()
 
 	category := c.Query("category")
 	enabledOnly := c.Query("enabled_only") == "true"
@@ -79,7 +79,7 @@ func (h *ConfigHandler) ListConfigs(c *gin.Context) {
 // @Security     ApiKeyAuth
 // @Router       /admin/configs/{id} [get]
 func (h *ConfigHandler) GetConfig(c *gin.Context) {
-	ctx := context.Background()
+	ctx := c.Request.Context()
 
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
@@ -112,7 +112,7 @@ func (h *ConfigHandler) GetConfig(c *gin.Context) {
 // @Security     ApiKeyAuth
 // @Router       /admin/configs [post]
 func (h *ConfigHandler) CreateConfig(c *gin.Context) {
-	ctx := context.Background()
+	ctx := c.Request.Context()
 
 	var req models.SystemConfigStoreRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -142,7 +142,7 @@ func (h *ConfigHandler) CreateConfig(c *gin.Context) {
 
 	if req.Category == models.ConfigCategoryStorage {
 		if err := h.hotReloadStorageConfig(config.ID, req.Config, config.IsDefault); err != nil {
-			if rollbackErr := h.manager.DeleteConfig(ctx, config.ID); rollbackErr != nil {
+			if rollbackErr := h.manager.DeleteConfig(c.Request.Context(), config.ID); rollbackErr != nil {
 				log.Printf("Failed to rollback storage config creation: %v", rollbackErr)
 			}
 			common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to load storage configuration: %v", err))
@@ -169,7 +169,7 @@ func (h *ConfigHandler) CreateConfig(c *gin.Context) {
 // @Security     ApiKeyAuth
 // @Router       /admin/configs/{id} [put]
 func (h *ConfigHandler) UpdateConfig(c *gin.Context) {
-	ctx := context.Background()
+	ctx := c.Request.Context()
 
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
@@ -226,15 +226,13 @@ func (h *ConfigHandler) UpdateConfig(c *gin.Context) {
 // @Security     ApiKeyAuth
 // @Router       /admin/configs/{id} [delete]
 func (h *ConfigHandler) DeleteConfig(c *gin.Context) {
-	ctx := context.Background()
-
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		common.RespondError(c, http.StatusBadRequest, "Invalid config ID")
 		return
 	}
 
-	config, getErr := h.manager.GetConfig(ctx, uint(id), false)
+	config, getErr := h.manager.GetConfig(c.Request.Context(), uint(id), false)
 	if getErr == nil && config.Category == models.ConfigCategoryStorage {
 		if err := storage.RemoveProvider(uint(id)); err != nil {
 			if !strings.Contains(err.Error(), "not found") {
@@ -243,7 +241,7 @@ func (h *ConfigHandler) DeleteConfig(c *gin.Context) {
 		}
 	}
 
-	if err := h.manager.DeleteConfig(ctx, uint(id)); err != nil {
+	if err := h.manager.DeleteConfig(c.Request.Context(), uint(id)); err != nil {
 		common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to delete config: %v", err))
 		return
 	}
@@ -266,7 +264,7 @@ func (h *ConfigHandler) DeleteConfig(c *gin.Context) {
 // @Security     ApiKeyAuth
 // @Router       /admin/configs/{id}/default [post]
 func (h *ConfigHandler) SetDefaultConfig(c *gin.Context) {
-	ctx := context.Background()
+	ctx := c.Request.Context()
 
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
@@ -317,7 +315,7 @@ func (h *ConfigHandler) SetDefaultConfig(c *gin.Context) {
 // @Security     ApiKeyAuth
 // @Router       /admin/configs/{id}/enable [post]
 func (h *ConfigHandler) EnableConfig(c *gin.Context) {
-	ctx := context.Background()
+	ctx := c.Request.Context()
 
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
@@ -347,7 +345,7 @@ func (h *ConfigHandler) EnableConfig(c *gin.Context) {
 // @Security     ApiKeyAuth
 // @Router       /admin/configs/{id}/disable [post]
 func (h *ConfigHandler) DisableConfig(c *gin.Context) {
-	ctx := context.Background()
+	ctx := c.Request.Context()
 
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {

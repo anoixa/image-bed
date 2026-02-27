@@ -1,7 +1,6 @@
 package albums
 
 import (
-	"context"
 	"log"
 	"net/http"
 
@@ -60,7 +59,7 @@ func (h *Handler) CreateAlbumHandler(c *gin.Context) {
 
 	// 清除用户相册列表缓存
 	utils.SafeGo(func() {
-		ctx := context.Background()
+		ctx := c.Copy().Request.Context()
 		if err := h.cacheHelper.DeleteCachedAlbumList(ctx, userID); err != nil {
 			log.Printf("Failed to delete album list cache for user %d: %v", userID, err)
 		}

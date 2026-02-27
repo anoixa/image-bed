@@ -290,7 +290,7 @@ func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *i
 	}
 
 	task := func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(c.Copy().Request.Context(), 5*time.Second)
 		defer cancel()
 		_ = h.cacheHelper.CacheImageData(ctx, result.StoragePath, data)
 	}
