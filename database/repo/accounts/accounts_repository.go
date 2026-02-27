@@ -3,7 +3,7 @@ package accounts
 import (
 	"context"
 	"errors"
-	"log"
+	"fmt"
 
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/utils"
@@ -27,22 +27,23 @@ func (r *Repository) DB() *gorm.DB {
 }
 
 // CreateDefaultAdminUser 创建默认管理员用户
-func (r *Repository) CreateDefaultAdminUser() {
+// 返回可能的错误，让调用者决定是否终止程序
+func (r *Repository) CreateDefaultAdminUser() (string, error) {
 	var count int64
 
 	if err := r.db.Model(&models.User{}).Where("username = ?", "admin").Count(&count).Error; err != nil {
-		log.Fatalf("Failed to check admin user existence: %v", err)
+		return "", fmt.Errorf("failed to check admin user existence: %w", err)
 	}
 
 	if count == 0 {
 		randomPassword, err := utils.GenerateRandomToken(16)
 		if err != nil {
-			log.Fatalf("Failed to generate random password: %v", err)
+			return "", fmt.Errorf("failed to generate random password: %w", err)
 		}
 
 		hashedPassword, err := cryptopackage.GenerateFromPassword(randomPassword)
 		if err != nil {
-			log.Fatalf("Failed to hash default password: %v", err)
+			return "", fmt.Errorf("failed to hash default password: %w", err)
 		}
 
 		user := &models.User{
@@ -52,18 +53,13 @@ func (r *Repository) CreateDefaultAdminUser() {
 		}
 
 		if err := r.db.Create(user).Error; err != nil {
-			log.Fatalf("Failed to create default admin user: %v", err)
+			return "", fmt.Errorf("failed to create default admin user: %w", err)
 		}
 
-		log.Println("========================================")
-		log.Println("🎉 默认管理员用户创建成功")
-		log.Printf("   用户名: admin")
-		log.Printf("   密码: %s", randomPassword)
-		log.Println("========================================")
-		log.Println("⚠️  请登录后立即修改默认密码！")
-	} else {
-		log.Println("Admin user already exists, skipping creation")
+		return randomPassword, nil
 	}
+
+	return "", nil
 }
 
 // ErrUserNotFound 用户不存在错误

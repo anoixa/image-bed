@@ -75,17 +75,17 @@ func (h *Handler) GetImage(c *gin.Context) {
 func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 	// [DEBUG] 检查关键依赖
 	if storage.GetDefault() == nil {
-		log.Printf("[DEBUG][serveOriginalImage] storage.GetDefault() is nil!")
+		utils.LogIfDevf("[DEBUG][serveOriginalImage] storage.GetDefault() is nil!")
 		common.RespondError(c, http.StatusInternalServerError, "Storage not initialized")
 		return
 	}
 	if h.cacheHelper == nil {
-		log.Printf("[DEBUG][serveOriginalImage] h.cacheHelper is nil!")
+		utils.LogIfDevf("[DEBUG][serveOriginalImage] h.cacheHelper is nil!")
 		common.RespondError(c, http.StatusInternalServerError, "Cache not initialized")
 		return
 	}
 	// [DEBUG] 记录图片存储配置ID
-	log.Printf("[DEBUG][serveOriginalImage] image.ID=%d, StorageConfigID=%d, Identifier=%s",
+	utils.LogIfDevf("[DEBUG][serveOriginalImage] image.ID=%d, StorageConfigID=%d, Identifier=%s",
 		image.ID, image.StorageConfigID, image.Identifier)
 
 	storagePath := image.StoragePath
@@ -239,7 +239,7 @@ func (h *Handler) serveImageData(c *gin.Context, img *models.Image, data []byte)
 // serveVariantImage 提供格式变体
 func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *image.VariantResult) {
 	// [DEBUG] 记录变体信息
-	log.Printf("[DEBUG][serveVariantImage] img.ID=%d, img.StorageConfigID=%d, variant.Identifier=%s",
+	utils.LogIfDevf("[DEBUG][serveVariantImage] img.ID=%d, img.StorageConfigID=%d, variant.Identifier=%s",
 		img.ID, img.StorageConfigID, result.Identifier)
 
 	// 使用原图指定的 StorageConfigID 获取正确的存储 provider

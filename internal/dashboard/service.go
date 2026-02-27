@@ -2,12 +2,12 @@ package dashboard
 
 import (
 	"context"
-	"log"
 	"math"
 	"time"
 
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/database/repo/dashboard"
+	"github.com/anoixa/image-bed/utils"
 	"github.com/anoixa/image-bed/utils/format"
 )
 
@@ -207,20 +207,20 @@ func (s *Service) buildTrendData(stats []dashboard.DailyStat, days int) TrendSta
 
 	// 构建日期到数量的映射
 	statMap := make(map[string]int64)
-	log.Printf("[DEBUG][buildTrendData] Received %d stats from DB", len(stats))
+	utils.LogIfDevf("[DEBUG][buildTrendData] Received %d stats from DB", len(stats))
 	for _, stat := range stats {
 		statMap[stat.Date] = stat.Count
-		log.Printf("[DEBUG][buildTrendData] DB stat: date=%s, count=%d", stat.Date, stat.Count)
+		utils.LogIfDevf("[DEBUG][buildTrendData] DB stat: date=%s, count=%d", stat.Date, stat.Count)
 	}
 
 	// 填充数据，没有数据的天数补0
 	for i, date := range dates {
 		if count, ok := statMap[date]; ok {
 			data[i] = count
-			log.Printf("[DEBUG][buildTrendData] Match: date=%s, count=%d", date, count)
+			utils.LogIfDevf("[DEBUG][buildTrendData] Match: date=%s, count=%d", date, count)
 		} else {
 			data[i] = 0
-			log.Printf("[DEBUG][buildTrendData] No match: date=%s, set to 0", date)
+			utils.LogIfDevf("[DEBUG][buildTrendData] No match: date=%s, set to 0", date)
 		}
 	}
 

@@ -225,7 +225,20 @@ func RunServer() {
 func InitDatabase(deps *Dependencies) {
 	log.Println("Initializing database...")
 
-	deps.Repositories.AccountsRepo.CreateDefaultAdminUser()
+	password, err := deps.Repositories.AccountsRepo.CreateDefaultAdminUser()
+	if err != nil {
+		log.Fatalf("Failed to create default admin user: %v", err)
+	}
+	if password != "" {
+		log.Println("========================================")
+		log.Println("🎉 默认管理员用户创建成功")
+		log.Printf("   用户名: admin")
+		log.Printf("   密码: %s", password)
+		log.Println("========================================")
+		log.Println("⚠️  请登录后立即修改默认密码！")
+	} else {
+		log.Println("Admin user already exists, skipping creation")
+	}
 }
 
 // buildCacheConfig 从应用配置构建缓存配置

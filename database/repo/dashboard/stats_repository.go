@@ -1,10 +1,10 @@
 package dashboard
 
 import (
-	"log"
 	"time"
 
 	"github.com/anoixa/image-bed/database/models"
+	"github.com/anoixa/image-bed/utils"
 	"gorm.io/gorm"
 )
 
@@ -146,7 +146,7 @@ func (r *Repository) GetDailyStats(days int) ([]DailyStat, error) {
 	startDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).
 		AddDate(0, 0, -days)
 
-	log.Printf("[DEBUG][GetDailyStats] Querying from %s, days=%d", startDate.Format("2006-01-02"), days)
+	utils.LogIfDevf("[DEBUG][GetDailyStats] Querying from %s, days=%d", startDate.Format("2006-01-02"), days)
 
 	err := r.db.Table("images").
 		Select("DATE(created_at) as date, COUNT(*) as count").
@@ -156,11 +156,11 @@ func (r *Repository) GetDailyStats(days int) ([]DailyStat, error) {
 		Scan(&stats).Error
 
 	if err != nil {
-		log.Printf("[DEBUG][GetDailyStats] Error: %v", err)
+		utils.LogIfDevf("[DEBUG][GetDailyStats] Error: %v", err)
 	} else {
-		log.Printf("[DEBUG][GetDailyStats] Found %d records", len(stats))
+		utils.LogIfDevf("[DEBUG][GetDailyStats] Found %d records", len(stats))
 		for _, s := range stats {
-			log.Printf("[DEBUG][GetDailyStats] Result: date=%s, count=%d", s.Date, s.Count)
+			utils.LogIfDevf("[DEBUG][GetDailyStats] Result: date=%s, count=%d", s.Date, s.Count)
 		}
 	}
 
