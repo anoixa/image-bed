@@ -20,6 +20,8 @@ import (
 	svcDashboard "github.com/anoixa/image-bed/internal/dashboard"
 	imageSvc "github.com/anoixa/image-bed/internal/image"
 	"github.com/gin-gonic/gin"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 	"gorm.io/gorm"
 )
 
@@ -69,6 +71,9 @@ func registerBasicRoutes(router *gin.Engine, deps *RouterDependencies) {
 	router.GET("/metrics", func(context *gin.Context) {
 		context.JSON(http.StatusOK, middleware.GetMetrics())
 	})
+
+	// Swagger 文档路由
+	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 }
 
 // registerPublicRoutes 注册公共接口路由

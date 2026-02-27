@@ -17,6 +17,21 @@ type UpdateVisibilityRequest struct {
 }
 
 // UpdateImageVisibility 更新图片可见性
+// @Summary      Update image visibility
+// @Description  Toggle image visibility between public and private
+// @Tags         images
+// @Accept       json
+// @Produce      json
+// @Param        identifier  path      string                   true  "Image identifier"
+// @Param        request     body      UpdateVisibilityRequest  true  "Visibility settings"
+// @Success      200         {object}  common.Response  "Image visibility updated successfully"
+// @Failure      400         {object}  common.Response  "Invalid request body"
+// @Failure      401         {object}  common.Response  "Unauthorized"
+// @Failure      403         {object}  common.Response  "Permission denied"
+// @Failure      404         {object}  common.Response  "Image not found"
+// @Failure      500         {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /images/{identifier}/visibility [put]
 func (h *Handler) UpdateImageVisibility(c *gin.Context) {
 	userID := c.GetUint(middleware.ContextUserIDKey)
 	if userID == 0 {

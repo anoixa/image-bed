@@ -12,6 +12,50 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// LoginRequest 登录请求
+// swagger:model
+// @Description Login request body
+type LoginRequest struct {
+	// Username
+	// required: true
+	// example: admin
+	Username string `json:"username" binding:"required"`
+	// Password
+	// required: true
+	// example: password123
+	Password string `json:"password" binding:"required"`
+}
+
+// LoginResponse 登录响应
+// swagger:model
+// @Description Login response
+type LoginResponse struct {
+	// Access token for API calls
+	// example: Bearer eyJhbGciOiJIUzI1NiIs...
+	AccessToken string `json:"access_token"`
+	// Access token expiry timestamp (Unix)
+	// example: 1704067200
+	AccessTokenExpiry int64 `json:"access_token_expiry"`
+}
+
+// LogoutResponse 登出响应
+// swagger:model
+// @Description Logout response
+type LogoutResponse struct {
+	// Device ID that was logged out
+	// example: 550e8400-e29b-41d4-a716-446655440000
+	DeviceID string `json:"device_id"`
+}
+
+// ErrorResponse 错误响应
+// swagger:model
+// @Description Error response
+type ErrorResponse struct {
+	// Error message
+	// example: Invalid credentials
+	Message string `json:"message"`
+}
+
 // LoginHandler 登录处理器
 type LoginHandler struct {
 	loginService *auth.LoginService
@@ -46,6 +90,17 @@ type logoutResponse struct {
 }
 
 // LoginHandlerFunc user login
+// @Summary      User login
+// @Description  Authenticate user with username and password, returns access token and sets refresh token cookie
+// @Tags         auth
+// @Accept       json
+// @Produce      json
+// @Param        request  body      userAuthRequestBody  true  "Login credentials"
+// @Success      200      {object}  common.Response{data=loginResponse}  "Login successful"
+// @Failure      400      {object}  common.Response  "Invalid request body"
+// @Failure      401      {object}  common.Response  "Invalid credentials"
+// @Failure      500      {object}  common.Response  "Internal server error"
+// @Router       /api/auth/login [post]
 func (h *LoginHandler) LoginHandlerFunc(context *gin.Context) {
 	if h.loginService == nil {
 		common.RespondError(context, http.StatusInternalServerError, "Login service not initialized")
@@ -79,6 +134,15 @@ func (h *LoginHandler) LoginHandlerFunc(context *gin.Context) {
 }
 
 // RefreshTokenHandlerFunc Refresh token authentication
+// @Summary      Refresh access token
+// @Description  Refresh access token using refresh_token and device_id cookies
+// @Tags         auth
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  common.Response{data=loginResponse}  "Refresh token successful"
+// @Failure      401  {object}  common.Response  "Refresh token or device ID not found / invalid"
+// @Failure      500  {object}  common.Response  "Internal server error"
+// @Router       /api/auth/refresh [post]
 func (h *LoginHandler) RefreshTokenHandlerFunc(context *gin.Context) {
 	if h.loginService == nil {
 		common.RespondError(context, http.StatusInternalServerError, "Login service not initialized")
@@ -115,6 +179,15 @@ func (h *LoginHandler) RefreshTokenHandlerFunc(context *gin.Context) {
 }
 
 // LogoutHandlerFunc user logout
+// @Summary      User logout
+// @Description  Logout user by invalidating refresh token (requires refresh_token and device_id cookies)
+// @Tags         auth
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  common.Response  "Logout successful"
+// @Failure      401  {object}  common.Response  "Refresh token not found / invalid session"
+// @Failure      500  {object}  common.Response  "Internal server error"
+// @Router       /api/auth/logout [post]
 func (h *LoginHandler) LogoutHandlerFunc(context *gin.Context) {
 	deviceID, err := context.Cookie("device_id")
 	if err != nil {
@@ -122,8 +195,18 @@ func (h *LoginHandler) LogoutHandlerFunc(context *gin.Context) {
 		return
 	}
 
+	refreshToken, err := context.Cookie("refresh_token")
+	if err != nil {
+		common.RespondError(context, http.StatusUnauthorized, "Refresh token not found")
+		return
+	}
+
 	if h.loginService != nil {
-		_ = h.loginService.Logout(deviceID)
+		err = h.loginService.Logout(deviceID, refreshToken)
+		if err != nil {
+			common.RespondError(context, http.StatusUnauthorized, "Invalid session")
+			return
+		}
 	}
 
 	h.clearAuthCookies(context)

@@ -99,8 +99,8 @@ func (m *Manager) SetRandomSourceAlbum(albumID uint, includeAllPublic bool) erro
 // createRandomAlbumConfig 创建随机图源相册配置
 func (m *Manager) createRandomAlbumConfig(ctx context.Context, config map[string]interface{}) error {
 	req := &models.SystemConfigStoreRequest{
-		Category:    "random",
-		Name:        "source_album",
+		Category:    models.ConfigCategorySystem,
+		Name:        RandomSourceAlbumConfigKey,
 		Config:      config,
 		IsEnabled:   boolPtr(true),
 		Description: "随机图片API源相册配置",
@@ -113,8 +113,8 @@ func (m *Manager) createRandomAlbumConfig(ctx context.Context, config map[string
 // updateRandomAlbumConfig 更新随机图源相册配置
 func (m *Manager) updateRandomAlbumConfig(ctx context.Context, id uint, config map[string]interface{}) error {
 	req := &models.SystemConfigStoreRequest{
-		Category:    "random",
-		Name:        "source_album",
+		Category:    models.ConfigCategorySystem,
+		Name:        RandomSourceAlbumConfigKey,
 		Config:      config,
 		IsEnabled:   boolPtr(true),
 		Description: "随机图片API源相册配置",

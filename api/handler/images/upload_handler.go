@@ -11,6 +11,21 @@ import (
 )
 
 // UploadImage 处理单图片上传
+// @Summary      Upload single image
+// @Description  Upload a single image file with optional storage strategy and visibility settings
+// @Tags         images
+// @Accept       multipart/form-data
+// @Produce      json
+// @Param        file         formData  file    true   "Image file to upload"
+// @Param        strategy_id  formData  string  false  "Storage strategy ID"
+// @Param        is_public    formData  bool    false  "Whether the image is public (default: true)"
+// @Success      200  {object}  common.Response  "Upload successful"
+// @Failure      400  {object}  common.Response  "Invalid form data or too many files"
+// @Failure      401  {object}  common.Response  "Unauthorized"
+// @Failure      413  {object}  common.Response  "File too large"
+// @Failure      500  {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /images/upload [post]
 func (h *Handler) UploadImage(c *gin.Context) {
 	form, err := c.MultipartForm()
 	if err != nil {
@@ -61,6 +76,21 @@ func (h *Handler) UploadImage(c *gin.Context) {
 }
 
 // UploadImages 处理多图片上传
+// @Summary      Upload multiple images
+// @Description  Upload up to 10 images in a single batch request
+// @Tags         images
+// @Accept       multipart/form-data
+// @Produce      json
+// @Param        files        formData  []file  true   "Image files to upload (max 10)"
+// @Param        strategy_id  formData  string  false  "Storage strategy ID"
+// @Param        is_public    formData  bool    false  "Whether images are public (default: true)"
+// @Success      200  {object}  common.Response  "Batch upload completed"
+// @Failure      400  {object}  common.Response  "Invalid form data or too many files"
+// @Failure      401  {object}  common.Response  "Unauthorized"
+// @Failure      413  {object}  common.Response  "Total file size too large"
+// @Failure      500  {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /images/upload/batch [post]
 func (h *Handler) UploadImages(c *gin.Context) {
 	form, err := c.MultipartForm()
 	if err != nil {

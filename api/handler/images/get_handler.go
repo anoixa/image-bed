@@ -24,6 +24,19 @@ import (
 var fileDownloadGroup singleflight.Group
 
 // GetImage 获取图片
+// @Summary      Get image by identifier
+// @Description  Retrieve an image by its unique identifier. Returns original or converted format based on Accept header
+// @Tags         images
+// @Accept       json
+// @Produce      image/*
+// @Param        identifier  path      string  true   "Image identifier"
+// @Success      200         {file}    binary   "Image data"
+// @Failure      400         {object}  common.Response  "Invalid identifier"
+// @Failure      403         {object}  common.Response  "Private image, access denied"
+// @Failure      404         {object}  common.Response  "Image not found"
+// @Failure      500         {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /images/{identifier} [get]
 func (h *Handler) GetImage(c *gin.Context) {
 	identifier := c.Param("identifier")
 	if identifier == "" {

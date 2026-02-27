@@ -41,6 +41,23 @@ type RandomImageQuery struct {
 }
 
 // RandomImage 随机图片API
+// @Summary      Get random image
+// @Description  Get a random image, optionally filtered by album and dimensions
+// @Tags         images
+// @Accept       json
+// @Produce      image/*,application/json
+// @Param        format     query     string  false  "Response format: json or image (default: image)"
+// @Param        album_id   query     int     false  "Filter by album ID"
+// @Param        min_width  query     int     false  "Minimum image width"
+// @Param        min_height query     int     false  "Minimum image height"
+// @Param        max_width  query     int     false  "Maximum image width"
+// @Param        max_height query     int     false  "Maximum image height"
+// @Success      200  {file}    binary           "Image data (when format=image)"
+// @Success      200  {object}  common.Response  "Image metadata (when format=json)"
+// @Failure      400  {object}  common.Response  "Invalid query parameters"
+// @Failure      204  {string}  string           "No content - no matching images found"
+// @Failure      500  {object}  common.Response  "Internal server error"
+// @Router       /images/random [get]
 func (h *Handler) RandomImage(c *gin.Context) {
 	var query RandomImageQuery
 	if err := c.ShouldBindQuery(&query); err != nil {

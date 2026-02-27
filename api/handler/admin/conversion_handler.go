@@ -20,6 +20,16 @@ func NewConversionHandler(cm *config.Manager) *ConversionHandler {
 }
 
 // GetConfig 获取转换配置
+// @Summary      Get image processing configuration
+// @Description  Get current image processing settings (thumbnail, WebP conversion, etc.)
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  common.Response  "Image processing settings"
+// @Failure      401  {object}  common.Response  "Unauthorized"
+// @Failure      500  {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /admin/conversion/config [get]
 func (h *ConversionHandler) GetConfig(c *gin.Context) {
 	ctx := c.Request.Context()
 	settings, err := h.configManager.GetImageProcessingSettings(ctx)
@@ -32,6 +42,18 @@ func (h *ConversionHandler) GetConfig(c *gin.Context) {
 }
 
 // UpdateConfig 更新转换配置
+// @Summary      Update image processing configuration
+// @Description  Update image processing settings including thumbnail and WebP conversion options
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        request  body      config.ImageProcessingSettings  true  "Image processing settings"
+// @Success      200      {object}  common.Response  "Config updated"
+// @Failure      400      {object}  common.Response  "Invalid request"
+// @Failure      401      {object}  common.Response  "Unauthorized"
+// @Failure      500      {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /admin/conversion/config [put]
 func (h *ConversionHandler) UpdateConfig(c *gin.Context) {
 	var req config.ImageProcessingSettings
 	if err := c.ShouldBindJSON(&req); err != nil {

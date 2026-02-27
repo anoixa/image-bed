@@ -13,6 +13,18 @@ type DeleteRequestBody struct {
 }
 
 // DeleteImages 批量删除图片
+// @Summary      Delete multiple images
+// @Description  Delete multiple images by their identifiers in a single request
+// @Tags         images
+// @Accept       json
+// @Produce      json
+// @Param        request  body      DeleteRequestBody  true  "List of image identifiers to delete"
+// @Success      200      {object}  common.Response  "Delete request processed successfully"
+// @Failure      400      {object}  common.Response  "Invalid request body"
+// @Failure      401      {object}  common.Response  "Unauthorized"
+// @Failure      500      {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /images/delete [post]
 func (h *Handler) DeleteImages(c *gin.Context) {
 	userID := c.GetUint(middleware.ContextUserIDKey)
 	if userID == 0 {
@@ -42,6 +54,19 @@ func (h *Handler) DeleteImages(c *gin.Context) {
 }
 
 // DeleteSingleImage 删除单张图片
+// @Summary      Delete single image
+// @Description  Delete a single image by its identifier
+// @Tags         images
+// @Accept       json
+// @Produce      json
+// @Param        identifier  path      string  true   "Image identifier"
+// @Success      200         {object}  common.Response  "Image deleted successfully"
+// @Failure      400         {object}  common.Response  "Invalid identifier"
+// @Failure      401         {object}  common.Response  "Unauthorized"
+// @Failure      404         {object}  common.Response  "Image not found"
+// @Failure      500         {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /images/{identifier} [delete]
 func (h *Handler) DeleteSingleImage(c *gin.Context) {
 	userID := c.GetUint(middleware.ContextUserIDKey)
 	if userID == 0 {

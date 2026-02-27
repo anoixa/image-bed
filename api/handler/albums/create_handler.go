@@ -26,6 +26,19 @@ type CreateAlbumResponse struct {
 	UpdatedAt   int64  `json:"updated_at"`
 }
 
+// CreateAlbumHandler 创建相册
+// @Summary      Create album
+// @Description  Create a new album with name and optional description
+// @Tags         albums
+// @Accept       json
+// @Produce      json
+// @Param        request  body      createAlbumRequest  true  "Album creation request"
+// @Success      200      {object}  common.Response{data=CreateAlbumResponse}  "Album created successfully"
+// @Failure      400      {object}  common.Response  "Invalid request body"
+// @Failure      401      {object}  common.Response  "Unauthorized"
+// @Failure      500      {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /albums [post]
 func (h *Handler) CreateAlbumHandler(c *gin.Context) {
 	userID := c.GetUint(middleware.ContextUserIDKey)
 	var req createAlbumRequest

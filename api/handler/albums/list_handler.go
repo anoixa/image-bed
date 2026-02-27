@@ -45,6 +45,19 @@ type ListAlbumsRequest struct {
 }
 
 // ListAlbumsHandler 获取相册列表
+// @Summary      List albums
+// @Description  Get paginated list of user's albums with image counts and cover URLs
+// @Tags         albums
+// @Accept       json
+// @Produce      json
+// @Param        page   query     int  false  "Page number (default: 1)"  minimum(1)
+// @Param        limit  query     int  false  "Items per page (default: 10, max: 100)"  minimum(1)  maximum(100)
+// @Success      200    {object}  common.Response{data=ListAlbumsResponse}  "Album list"
+// @Failure      400    {object}  common.Response  "Invalid request parameters"
+// @Failure      401    {object}  common.Response  "Unauthorized"
+// @Failure      500    {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /albums [get]
 func (h *Handler) ListAlbumsHandler(c *gin.Context) {
 	var req ListAlbumsRequest
 	if err := c.ShouldBindQuery(&req); err != nil {

@@ -47,20 +47,15 @@ func BuildLinkFormats(baseURL, identifier string) LinkFormats {
 }
 
 // ExtractCookieDomain 从 URL 中提取有效的 Cookie Domain
-// Cookie Domain 只能是主机名（如 "example.com" 或 "localhost"）
-// 不能包含协议（如 "http://"）或端口（如 ":8081"）
 func ExtractCookieDomain(rawURL string) string {
 	if rawURL == "" {
 		return ""
 	}
 
-	// 如果已经是纯域名（不包含协议），尝试直接返回
-	// 但也需要移除端口
 	if !strings.Contains(rawURL, "://") {
 		host := rawURL
 		// 移除端口号
 		if idx := strings.LastIndex(host, ":"); idx != -1 {
-			// 确保这是端口（只有数字）
 			port := host[idx+1:]
 			isPort := true
 			for _, c := range port {

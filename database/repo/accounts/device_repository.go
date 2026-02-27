@@ -99,6 +99,22 @@ func (r *DeviceRepository) DeleteDeviceByDeviceID(deviceID string) error {
 	return r.db.Where("device_id = ?", deviceID).Delete(&models.Device{}).Error
 }
 
+// DeleteDeviceByDeviceIDAndRefreshToken 通过设备ID和刷新令牌删除设备（双重验证）
+func (r *DeviceRepository) DeleteDeviceByDeviceIDAndRefreshToken(deviceID string, refreshToken string) error {
+	hasher := sha256.New()
+	hasher.Write([]byte(refreshToken))
+	hashedToken := hex.EncodeToString(hasher.Sum(nil))
+
+	result := r.db.Where("device_id = ? AND refresh_token = ?", deviceID, hashedToken).Delete(&models.Device{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("invalid device ID or refresh token")
+	}
+	return nil
+}
+
 // GetDevicesByUser 获取用户的所有设备
 func (r *DeviceRepository) GetDevicesByUser(userID uint) ([]*models.Device, error) {
 	var devices []*models.Device

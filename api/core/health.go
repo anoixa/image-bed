@@ -26,6 +26,14 @@ func NewHealthHandler(db *gorm.DB) *HealthHandler {
 }
 
 // Handle 处理健康检查请求
+// @Summary      Health check
+// @Description  Check the health status of the application and its dependencies (database, cache, storage)
+// @Tags         health
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}  "Service is healthy"
+// @Success      503  {object}  map[string]interface{}  "Service is unhealthy"
+// @Router       /health [get]
 func (h *HealthHandler) Handle(context *gin.Context) {
 	sqlDB, _ := h.db.DB()
 	health := gin.H{

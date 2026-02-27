@@ -29,7 +29,19 @@ func NewConfigHandler(manager *configSvc.Manager) *ConfigHandler {
 }
 
 // ListConfigs 列出配置列表
-// GET /api/v1/admin/configs
+// @Summary      List system configurations
+// @Description  Get list of system configurations including storage and image processing settings
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        category        query     string  false  "Filter by category: storage, image_processing"
+// @Param        enabled_only    query     bool    false  "Only show enabled configs"
+// @Param        mask_sensitive  query     bool    false  "Mask sensitive information (default: true)"
+// @Success      200  {object}  common.Response  "Configuration list"
+// @Failure      401  {object}  common.Response  "Unauthorized"
+// @Failure      500  {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /admin/configs [get]
 func (h *ConfigHandler) ListConfigs(c *gin.Context) {
 	ctx := context.Background()
 
@@ -52,7 +64,20 @@ func (h *ConfigHandler) ListConfigs(c *gin.Context) {
 }
 
 // GetConfig 获取单个配置详情
-// GET /api/v1/admin/configs/:id
+// @Summary      Get configuration details
+// @Description  Get detailed information about a specific configuration
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        id              path      int   true   "Config ID"
+// @Param        mask_sensitive  query     bool  false  "Mask sensitive information (default: true)"
+// @Success      200  {object}  common.Response  "Configuration details"
+// @Failure      400  {object}  common.Response  "Invalid config ID"
+// @Failure      401  {object}  common.Response  "Unauthorized"
+// @Failure      404  {object}  common.Response  "Config not found"
+// @Failure      500  {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /admin/configs/{id} [get]
 func (h *ConfigHandler) GetConfig(c *gin.Context) {
 	ctx := context.Background()
 
@@ -74,7 +99,18 @@ func (h *ConfigHandler) GetConfig(c *gin.Context) {
 }
 
 // CreateConfig 创建新配置
-// POST /api/v1/admin/configs
+// @Summary      Create configuration
+// @Description  Create a new system configuration (storage or image processing)
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        request  body      models.SystemConfigStoreRequest  true  "Configuration data"
+// @Success      200      {object}  common.Response  "Configuration created successfully"
+// @Failure      400      {object}  common.Response  "Invalid request or configuration test failed"
+// @Failure      401      {object}  common.Response  "Unauthorized"
+// @Failure      500      {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /admin/configs [post]
 func (h *ConfigHandler) CreateConfig(c *gin.Context) {
 	ctx := context.Background()
 
@@ -118,7 +154,20 @@ func (h *ConfigHandler) CreateConfig(c *gin.Context) {
 }
 
 // UpdateConfig 更新配置
-// PUT /api/v1/admin/configs/:id
+// @Summary      Update configuration
+// @Description  Update an existing system configuration
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        id       path      int                              true  "Config ID"
+// @Param        request  body      models.SystemConfigStoreRequest  true  "Configuration data"
+// @Success      200      {object}  common.Response  "Configuration updated successfully"
+// @Failure      400      {object}  common.Response  "Invalid request or configuration test failed"
+// @Failure      401      {object}  common.Response  "Unauthorized"
+// @Failure      404      {object}  common.Response  "Config not found"
+// @Failure      500      {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /admin/configs/{id} [put]
 func (h *ConfigHandler) UpdateConfig(c *gin.Context) {
 	ctx := context.Background()
 
@@ -163,7 +212,19 @@ func (h *ConfigHandler) UpdateConfig(c *gin.Context) {
 }
 
 // DeleteConfig 删除配置
-// DELETE /api/v1/admin/configs/:id
+// @Summary      Delete configuration
+// @Description  Delete a system configuration by ID
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        id   path      int  true  "Config ID"
+// @Success      200  {object}  common.Response  "Configuration deleted successfully"
+// @Failure      400  {object}  common.Response  "Invalid config ID"
+// @Failure      401  {object}  common.Response  "Unauthorized"
+// @Failure      404  {object}  common.Response  "Config not found"
+// @Failure      500  {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /admin/configs/{id} [delete]
 func (h *ConfigHandler) DeleteConfig(c *gin.Context) {
 	ctx := context.Background()
 
@@ -191,7 +252,19 @@ func (h *ConfigHandler) DeleteConfig(c *gin.Context) {
 }
 
 // SetDefaultConfig 设置默认配置
-// POST /api/v1/admin/configs/:id/default
+// @Summary      Set default configuration
+// @Description  Set a configuration as the default for its category
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        id   path      int  true  "Config ID"
+// @Success      200  {object}  common.Response  "Default config set successfully"
+// @Failure      400  {object}  common.Response  "Invalid config ID or storage provider not loaded"
+// @Failure      401  {object}  common.Response  "Unauthorized"
+// @Failure      404  {object}  common.Response  "Config not found"
+// @Failure      500  {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /admin/configs/{id}/default [post]
 func (h *ConfigHandler) SetDefaultConfig(c *gin.Context) {
 	ctx := context.Background()
 
@@ -231,7 +304,18 @@ func (h *ConfigHandler) SetDefaultConfig(c *gin.Context) {
 }
 
 // EnableConfig 启用配置
-// POST /api/v1/admin/configs/:id/enable
+// @Summary      Enable configuration
+// @Description  Enable a previously disabled configuration
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        id   path      int  true  "Config ID"
+// @Success      200  {object}  common.Response  "Config enabled successfully"
+// @Failure      400  {object}  common.Response  "Invalid config ID"
+// @Failure      401  {object}  common.Response  "Unauthorized"
+// @Failure      500  {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /admin/configs/{id}/enable [post]
 func (h *ConfigHandler) EnableConfig(c *gin.Context) {
 	ctx := context.Background()
 
@@ -250,7 +334,18 @@ func (h *ConfigHandler) EnableConfig(c *gin.Context) {
 }
 
 // DisableConfig 禁用配置
-// POST /api/v1/admin/configs/:id/disable
+// @Summary      Disable configuration
+// @Description  Disable a configuration without deleting it
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        id   path      int  true  "Config ID"
+// @Success      200  {object}  common.Response  "Config disabled successfully"
+// @Failure      400  {object}  common.Response  "Invalid config ID"
+// @Failure      401  {object}  common.Response  "Unauthorized"
+// @Failure      500  {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /admin/configs/{id}/disable [post]
 func (h *ConfigHandler) DisableConfig(c *gin.Context) {
 	ctx := context.Background()
 
@@ -269,7 +364,17 @@ func (h *ConfigHandler) DisableConfig(c *gin.Context) {
 }
 
 // TestConfig 测试配置连接
-// POST /api/v1/admin/configs/test
+// @Summary      Test configuration
+// @Description  Test a configuration without saving it (storage connection test)
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        request  body      models.TestConfigRequest  true  "Configuration to test"
+// @Success      200      {object}  models.TestConfigResponse  "Test result"
+// @Failure      400      {object}  common.Response  "Invalid request"
+// @Failure      401      {object}  common.Response  "Unauthorized"
+// @Security     ApiKeyAuth
+// @Router       /admin/configs/test [post]
 func (h *ConfigHandler) TestConfig(c *gin.Context) {
 	var req models.TestConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -413,7 +518,15 @@ func (h *ConfigHandler) testStorageConfig(config map[string]interface{}) *models
 }
 
 // ListStorageProviders 列出所有存储提供者
-// GET /api/v1/admin/storage/providers
+// @Summary      List storage providers
+// @Description  Get list of all loaded storage providers
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  common.Response  "Storage provider list"
+// @Failure      401  {object}  common.Response  "Unauthorized"
+// @Security     ApiKeyAuth
+// @Router       /admin/storage/providers [get]
 func (h *ConfigHandler) ListStorageProviders(c *gin.Context) {
 	providers := storage.ListProviders()
 	result := make([]map[string]interface{}, 0, len(providers))
@@ -429,7 +542,16 @@ func (h *ConfigHandler) ListStorageProviders(c *gin.Context) {
 }
 
 // ReloadStorageConfig 热重载存储配置
-// POST /api/v1/admin/storage/reload/:id
+// @Summary      Reload storage configuration
+// @Description  Hot reload a storage configuration (not supported in simplified mode)
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        id   path      int  true  "Storage config ID"
+// @Success      200  {object}  common.Response  "Reload status"
+// @Failure      401  {object}  common.Response  "Unauthorized"
+// @Security     ApiKeyAuth
+// @Router       /admin/storage/reload/{id} [post]
 func (h *ConfigHandler) ReloadStorageConfig(c *gin.Context) {
 	common.RespondSuccess(c, gin.H{"message": "Storage reload not supported in simplified mode"})
 }

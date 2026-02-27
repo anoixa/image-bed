@@ -144,8 +144,8 @@ func (s *LoginService) RefreshToken(refreshToken, deviceID string) (*RefreshResu
 }
 
 // Logout 执行登出操作
-func (s *LoginService) Logout(deviceID string) error {
-	return s.devicesRepo.DeleteDeviceByDeviceID(deviceID)
+func (s *LoginService) Logout(deviceID string, refreshToken string) error {
+	return s.devicesRepo.DeleteDeviceByDeviceIDAndRefreshToken(deviceID, refreshToken)
 }
 
 // GetDeviceExpiry 获取设备令牌的过期时间

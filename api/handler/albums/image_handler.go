@@ -58,6 +58,21 @@ func NewAlbumImageHandler(albumsSvc *svcAlbums.Service, imagesRepo *images.Repos
 }
 
 // AddImagesToAlbumHandler 添加图片到相册
+// @Summary      Add images to album
+// @Description  Add multiple images to an existing album
+// @Tags         albums
+// @Accept       json
+// @Produce      json
+// @Param        id       path      int                       true  "Album ID"
+// @Param        request  body      AddImagesToAlbumRequest   true  "Image IDs to add"
+// @Success      200      {object}  common.Response           "Images added to album successfully"
+// @Failure      400      {object}  common.Response           "Invalid request"
+// @Failure      401      {object}  common.Response           "Unauthorized"
+// @Failure      403      {object}  common.Response           "Permission denied"
+// @Failure      404      {object}  common.Response           "Album or images not found"
+// @Failure      500      {object}  common.Response           "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /albums/{id}/images [post]
 func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 	// 获取相册 ID
 	albumIDStr := c.Param("id")
@@ -136,6 +151,21 @@ func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 }
 
 // RemoveImageFromAlbumHandler 从相册移除图片
+// @Summary      Remove image from album
+// @Description  Remove a single image from an album (image itself is not deleted)
+// @Tags         albums
+// @Accept       json
+// @Produce      json
+// @Param        id       path      int  true  "Album ID"
+// @Param        imageId  path      int  true  "Image ID"
+// @Success      200      {object}  common.Response  "Image removed from album successfully"
+// @Failure      400      {object}  common.Response  "Invalid ID format"
+// @Failure      401      {object}  common.Response  "Unauthorized"
+// @Failure      403      {object}  common.Response  "Permission denied"
+// @Failure      404      {object}  common.Response  "Album or image not found"
+// @Failure      500      {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /albums/{id}/images/{imageId} [delete]
 func (h *AlbumImageHandler) RemoveImageFromAlbumHandler(c *gin.Context) {
 	// 获取相册 ID
 	albumIDStr := c.Param("id")

@@ -46,6 +46,18 @@ type ImageListResponse struct {
 }
 
 // ListImages 获取图片列表
+// @Summary      List images
+// @Description  Get paginated list of images with optional filters
+// @Tags         images
+// @Accept       json
+// @Produce      json
+// @Param        request  body      ImageRequestBody  true  "Filter and pagination parameters"
+// @Success      200      {object}  common.Response{data=ImageListResponse}  "Image list"
+// @Failure      400      {object}  common.Response  "Invalid request body"
+// @Failure      401      {object}  common.Response  "Unauthorized"
+// @Failure      500      {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /images/list [post]
 func (h *Handler) ListImages(c *gin.Context) {
 	var body ImageRequestBody
 

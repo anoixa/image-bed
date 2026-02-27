@@ -13,6 +13,20 @@ import (
 )
 
 // GetThumbnail 获取缩略图
+// @Summary      Get image thumbnail
+// @Description  Retrieve a thumbnail version of an image with specified width
+// @Tags         images
+// @Accept       json
+// @Produce      image/webp
+// @Param        identifier  path      string  true   "Image identifier"
+// @Param        width       query     int     false  "Thumbnail width (default: 300)"
+// @Success      200         {file}    binary   "Thumbnail image data"
+// @Failure      400         {object}  common.Response  "Invalid identifier"
+// @Failure      403         {object}  common.Response  "Private image, access denied"
+// @Failure      404         {object}  common.Response  "Image not found"
+// @Failure      500         {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /images/{identifier}/thumbnail [get]
 func (h *Handler) GetThumbnail(c *gin.Context) {
 	identifier := c.Param("identifier")
 	if identifier == "" {
