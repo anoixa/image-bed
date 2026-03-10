@@ -1,7 +1,6 @@
 package albums
 
 import (
-	"context"
 	"errors"
 	"log"
 	"net/http"
@@ -29,6 +28,21 @@ type UpdateAlbumResponse struct {
 }
 
 // UpdateAlbumHandler 更新相册
+// @Summary      Update album
+// @Description  Update album name and description
+// @Tags         albums
+// @Accept       json
+// @Produce      json
+// @Param        id       path      int                 true  "Album ID"
+// @Param        request  body      UpdateAlbumRequest  true  "Album update request"
+// @Success      200      {object}  common.Response{data=UpdateAlbumResponse}  "Album updated successfully"
+// @Failure      400      {object}  common.Response  "Invalid request"
+// @Failure      401      {object}  common.Response  "Unauthorized"
+// @Failure      403      {object}  common.Response  "Permission denied"
+// @Failure      404      {object}  common.Response  "Album not found"
+// @Failure      500      {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /albums/{id} [put]
 func (h *Handler) UpdateAlbumHandler(c *gin.Context) {
 	// 获取相册 ID
 	albumIDStr := c.Param("id")
@@ -66,7 +80,7 @@ func (h *Handler) UpdateAlbumHandler(c *gin.Context) {
 
 	// 清除相册缓存和用户的相册列表缓存
 	utils.SafeGo(func() {
-		ctx := context.Background()
+		ctx := c.Copy().Request.Context()
 		if err := h.cacheHelper.DeleteCachedAlbum(ctx, uint(albumID)); err != nil {
 			log.Printf("Failed to delete album cache for %d: %v", albumID, err)
 		}

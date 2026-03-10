@@ -42,7 +42,7 @@ type ServerDependencies struct {
 	Repositories  *Repositories
 	ConfigManager *configSvc.Manager
 	Converter     *imageSvc.Converter
-	TokenManager  *auth.TokenManager
+	JWTService    *auth.JWTService
 	Config        *config.Config
 	CacheProvider cache.Provider
 	ServerVersion ServerVersion
@@ -95,24 +95,21 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 		imageRateLimiter.StopCleanup()
 	}
 
-	var tokenManager *auth.TokenManager
 	var jwtService *auth.JWTService
 	var loginService *auth.LoginService
 
-	if deps.TokenManager != nil {
-		tokenManager = deps.TokenManager
+	if deps.JWTService != nil {
+		jwtService = deps.JWTService
 	} else if deps.ConfigManager != nil {
 		var err error
-		tokenManager, err = auth.NewTokenManager(deps.ConfigManager)
+		jwtService, err = auth.NewJWTService(deps.ConfigManager, deps.Repositories.KeysRepo)
 		if err != nil {
-			log.Printf("[Server] Failed to initialize token manager from config: %v, using defaults", err)
+			log.Printf("[Server] Failed to initialize JWT service from config: %v, using defaults", err)
 		}
 	}
 
-	if tokenManager != nil {
-		jwtService = auth.NewJWTService(tokenManager, deps.Repositories.KeysRepo)
+	if jwtService != nil {
 		loginService = auth.NewLoginService(deps.Repositories.AccountsRepo, deps.Repositories.DevicesRepo, jwtService)
-		api.SetTokenManager(tokenManager)
 		api.SetJWTService(jwtService)
 	}
 
@@ -121,7 +118,7 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 		Repositories:     deps.Repositories,
 		ConfigManager:    deps.ConfigManager,
 		Converter:        deps.Converter,
-		TokenManager:     tokenManager,
+		JWTService:       jwtService,
 		LoginService:     loginService,
 		AuthRateLimiter:  authRateLimiter,
 		APIRateLimiter:   apiRateLimiter,

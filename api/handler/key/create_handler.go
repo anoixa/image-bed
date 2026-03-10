@@ -18,6 +18,18 @@ type req struct {
 }
 
 // CreateStaticToken 创建新的static token
+// @Summary      Create API key
+// @Description  Create a new API key for programmatic access
+// @Tags         keys
+// @Accept       json
+// @Produce      json
+// @Param        request  body      req  true  "API key creation request (description is optional)"
+// @Success      200      {object}  common.Response  "API key created successfully"
+// @Failure      400      {object}  common.Response  "Invalid request body"
+// @Failure      401      {object}  common.Response  "Unauthorized"
+// @Failure      500      {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /keys [post]
 func (h *Handler) CreateStaticToken(context *gin.Context) {
 	var requestBody req
 	if err := context.ShouldBindJSON(&requestBody); err != nil {

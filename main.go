@@ -4,6 +4,8 @@ import (
 	"log"
 	"time"
 
+	_ "github.com/anoixa/image-bed/docs"
+
 	"github.com/anoixa/image-bed/config"
 
 	"github.com/anoixa/image-bed/cmd"

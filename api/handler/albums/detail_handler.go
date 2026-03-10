@@ -1,6 +1,7 @@
 package albums
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -36,6 +37,19 @@ type AlbumDetailResponse struct {
 }
 
 // GetAlbumDetailHandler 获取相册详情
+// @Summary      Get album detail
+// @Description  Get detailed information about an album including all images
+// @Tags         albums
+// @Accept       json
+// @Produce      json
+// @Param        id   path      int  true  "Album ID"
+// @Success      200  {object}  common.Response{data=AlbumDetailResponse}  "Album details"
+// @Failure      400  {object}  common.Response  "Invalid album ID format"
+// @Failure      401  {object}  common.Response  "Unauthorized"
+// @Failure      404  {object}  common.Response  "Album not found"
+// @Failure      500  {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /albums/{id} [get]
 func (h *Handler) GetAlbumDetailHandler(c *gin.Context) {
 	// 获取相册 ID
 	albumIDStr := c.Param("id")
@@ -49,7 +63,7 @@ func (h *Handler) GetAlbumDetailHandler(c *gin.Context) {
 
 	album, err := h.svc.GetAlbumWithImagesByID(uint(albumID), userID)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			common.RespondError(c, http.StatusNotFound, "Album not found")
 			return
 		}

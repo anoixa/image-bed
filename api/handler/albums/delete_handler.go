@@ -1,7 +1,6 @@
 package albums
 
 import (
-	"context"
 	"log"
 	"net/http"
 	"strconv"
@@ -13,6 +12,21 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// DeleteAlbumHandler 删除相册
+// @Summary      Delete album
+// @Description  Delete an album by ID (images in the album will not be deleted)
+// @Tags         albums
+// @Accept       json
+// @Produce      json
+// @Param        id   path      int  true  "Album ID"
+// @Success      200  {object}  common.Response  "Album deleted successfully"
+// @Failure      400  {object}  common.Response  "Invalid album ID format"
+// @Failure      401  {object}  common.Response  "Unauthorized"
+// @Failure      403  {object}  common.Response  "Permission denied"
+// @Failure      404  {object}  common.Response  "Album not found"
+// @Failure      500  {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /albums/{id} [delete]
 func (h *Handler) DeleteAlbumHandler(c *gin.Context) {
 	// 获取相册 ID
 	albumIDStr := c.Param("id")
@@ -37,7 +51,7 @@ func (h *Handler) DeleteAlbumHandler(c *gin.Context) {
 
 	// 清除相册缓存和用户的相册列表缓存
 	utils.SafeGo(func() {
-		ctx := context.Background()
+		ctx := c.Copy().Request.Context()
 		if err := h.cacheHelper.DeleteCachedAlbum(ctx, uint(albumID)); err != nil {
 			log.Printf("Failed to delete album cache for %d: %v", albumID, err)
 		}

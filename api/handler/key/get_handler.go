@@ -21,6 +21,17 @@ type apiTokenResponse struct {
 	LastUsedAt  *time.Time `json:"last_used_at,omitempty"`
 }
 
+// GetToken 获取 API Key 列表
+// @Summary      List API keys
+// @Description  Get all API keys for the authenticated user with their status and metadata
+// @Tags         keys
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  common.Response  "API key list"
+// @Failure      401  {object}  common.Response  "Unauthorized"
+// @Failure      500  {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /keys [get]
 func (h *Handler) GetToken(context *gin.Context) {
 	userID := context.GetUint(middleware.ContextUserIDKey)
 	if userID == 0 {

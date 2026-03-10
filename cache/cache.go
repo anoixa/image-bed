@@ -26,7 +26,7 @@ func IsCacheMiss(err error) bool {
 
 var defaultProvider Provider
 
-// Config 缓存配置 - 简化版本，移除 ID/Name/IsDefault 等多实例管理字段
+// Config 缓存配置
 type Config struct {
 	Type        string // "memory" or "redis"
 	NumCounters int64  // memory only

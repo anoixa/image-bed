@@ -8,7 +8,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// Repository 图片仓库 - 封装所有图片相关的数据库操作
+// Repository 图片仓库
 type Repository struct {
 	db *gorm.DB
 }
@@ -184,8 +184,8 @@ func (r *Repository) UpdateImageByIdentifier(identifier string, updates map[stri
 	return &image, err
 }
 
-// GetImageList 获取图片列表（支持搜索和过滤）
-func (r *Repository) GetImageList(storageType, identifier, search string, albumID *uint, startTime, endTime int64, page, pageSize, userID int) ([]*models.Image, int64, error) {
+// GetImageList 获取图片列表
+func (r *Repository) GetImageList(storageType, identifier, search string, albumID *uint, startTime, endTime int64, sort string, page, pageSize, userID int) ([]*models.Image, int64, error) {
 	var imageList []*models.Image
 	var total int64
 
@@ -217,7 +217,14 @@ func (r *Repository) GetImageList(storageType, identifier, search string, albumI
 	}
 
 	offset := (page - 1) * pageSize
-	err := db.Order("created_at desc").Offset(offset).Limit(pageSize).Find(&imageList).Error
+
+	// 根据 sort 参数设置排序方向
+	orderBy := "created_at desc"
+	if sort == "asc" {
+		orderBy = "created_at asc"
+	}
+
+	err := db.Order(orderBy).Offset(offset).Limit(pageSize).Find(&imageList).Error
 	return imageList, total, err
 }
 
@@ -259,4 +266,51 @@ func (r *Repository) GetImagesByVariantStatus(statuses []models.ImageVariantStat
 	var images []*models.Image
 	err := r.db.Where("variant_status IN ?", statuses).Limit(limit).Find(&images).Error
 	return images, err
+}
+
+// RandomImageFilter 随机图片筛选条件
+type RandomImageFilter struct {
+	AlbumID          *uint
+	IncludeAllPublic bool
+	MinWidth         int
+	MinHeight        int
+	MaxWidth         int
+	MaxHeight        int
+}
+
+// GetRandomPublicImage 随机获取一张公开图片
+func (r *Repository) GetRandomPublicImage(filter *RandomImageFilter) (*models.Image, error) {
+	var image models.Image
+
+	db := r.db.Where("is_public = ?", true)
+
+	// 相册筛选（仅当未配置包含所有公开图片时）
+	if filter != nil && filter.AlbumID != nil && !filter.IncludeAllPublic {
+		db = db.Joins("JOIN album_images ON album_images.image_id = images.id").
+			Where("album_images.album_id = ?", *filter.AlbumID)
+	}
+
+	// 尺寸筛选
+	if filter != nil {
+		if filter.MinWidth > 0 {
+			db = db.Where("width >= ?", filter.MinWidth)
+		}
+		if filter.MinHeight > 0 {
+			db = db.Where("height >= ?", filter.MinHeight)
+		}
+		if filter.MaxWidth > 0 {
+			db = db.Where("width <= ?", filter.MaxWidth)
+		}
+		if filter.MaxHeight > 0 {
+			db = db.Where("height <= ?", filter.MaxHeight)
+		}
+	}
+
+	// 使用数据库随机排序
+	err := db.Order("RANDOM()").First(&image).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return &image, nil
 }

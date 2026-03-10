@@ -52,11 +52,9 @@ type ThumbnailSize struct {
 	Height int // 0 表示保持比例
 }
 
-// DefaultThumbnailSizes 默认缩略图尺寸
+// DefaultThumbnailSizes 默认缩略图尺寸（单尺寸 600px）
 var DefaultThumbnailSizes = []ThumbnailSize{
-	{Name: "small", Width: 150, Height: 0},
-	{Name: "medium", Width: 300, Height: 0},
-	{Name: "large", Width: 600, Height: 0},
+	{Name: "default", Width: 600, Height: 0},
 }
 
 // FormatThumbnailSize 生成缩略图格式标识

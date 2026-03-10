@@ -21,7 +21,16 @@ func NewHandler(svc *dashboard.Service) *Handler {
 }
 
 // GetStats 获取 Dashboard 统计数据
-// GET /api/v1/dashboard/stats
+// @Summary      Get dashboard statistics
+// @Description  Get dashboard statistics including image count, storage usage, and recent activity
+// @Tags         dashboard
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  common.Response  "Dashboard statistics"
+// @Failure      401  {object}  common.Response  "Unauthorized"
+// @Failure      500  {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /dashboard/stats [get]
 func (h *Handler) GetStats(c *gin.Context) {
 	stats, err := h.svc.GetStats(c.Request.Context())
 	if err != nil {
@@ -33,7 +42,16 @@ func (h *Handler) GetStats(c *gin.Context) {
 }
 
 // RefreshStats 刷新 Dashboard 统计缓存
-// POST /api/v1/dashboard/stats/refresh
+// @Summary      Refresh dashboard statistics
+// @Description  Force refresh the dashboard statistics cache
+// @Tags         dashboard
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  common.Response  "Stats refreshed successfully"
+// @Failure      401  {object}  common.Response  "Unauthorized"
+// @Failure      500  {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /dashboard/stats/refresh [post]
 func (h *Handler) RefreshStats(c *gin.Context) {
 	if err := h.svc.RefreshCache(c.Request.Context()); err != nil {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to refresh stats")

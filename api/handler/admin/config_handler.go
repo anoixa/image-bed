@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/anoixa/image-bed/api/common"
-	"github.com/anoixa/image-bed/cache"
 	configSvc "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/storage"
@@ -30,9 +29,21 @@ func NewConfigHandler(manager *configSvc.Manager) *ConfigHandler {
 }
 
 // ListConfigs 列出配置列表
-// GET /api/v1/admin/configs
+// @Summary      List system configurations
+// @Description  Get list of system configurations including storage and image processing settings
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        category        query     string  false  "Filter by category: storage, image_processing"
+// @Param        enabled_only    query     bool    false  "Only show enabled configs"
+// @Param        mask_sensitive  query     bool    false  "Mask sensitive information (default: true)"
+// @Success      200  {object}  common.Response  "Configuration list"
+// @Failure      401  {object}  common.Response  "Unauthorized"
+// @Failure      500  {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /admin/configs [get]
 func (h *ConfigHandler) ListConfigs(c *gin.Context) {
-	ctx := context.Background()
+	ctx := c.Request.Context()
 
 	category := c.Query("category")
 	enabledOnly := c.Query("enabled_only") == "true"
@@ -53,9 +64,22 @@ func (h *ConfigHandler) ListConfigs(c *gin.Context) {
 }
 
 // GetConfig 获取单个配置详情
-// GET /api/v1/admin/configs/:id
+// @Summary      Get configuration details
+// @Description  Get detailed information about a specific configuration
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        id              path      int   true   "Config ID"
+// @Param        mask_sensitive  query     bool  false  "Mask sensitive information (default: true)"
+// @Success      200  {object}  common.Response  "Configuration details"
+// @Failure      400  {object}  common.Response  "Invalid config ID"
+// @Failure      401  {object}  common.Response  "Unauthorized"
+// @Failure      404  {object}  common.Response  "Config not found"
+// @Failure      500  {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /admin/configs/{id} [get]
 func (h *ConfigHandler) GetConfig(c *gin.Context) {
-	ctx := context.Background()
+	ctx := c.Request.Context()
 
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
@@ -75,9 +99,20 @@ func (h *ConfigHandler) GetConfig(c *gin.Context) {
 }
 
 // CreateConfig 创建新配置
-// POST /api/v1/admin/configs
+// @Summary      Create configuration
+// @Description  Create a new system configuration (storage or image processing)
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        request  body      models.SystemConfigStoreRequest  true  "Configuration data"
+// @Success      200      {object}  common.Response  "Configuration created successfully"
+// @Failure      400      {object}  common.Response  "Invalid request or configuration test failed"
+// @Failure      401      {object}  common.Response  "Unauthorized"
+// @Failure      500      {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /admin/configs [post]
 func (h *ConfigHandler) CreateConfig(c *gin.Context) {
-	ctx := context.Background()
+	ctx := c.Request.Context()
 
 	var req models.SystemConfigStoreRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -107,7 +142,7 @@ func (h *ConfigHandler) CreateConfig(c *gin.Context) {
 
 	if req.Category == models.ConfigCategoryStorage {
 		if err := h.hotReloadStorageConfig(config.ID, req.Config, config.IsDefault); err != nil {
-			if rollbackErr := h.manager.DeleteConfig(ctx, config.ID); rollbackErr != nil {
+			if rollbackErr := h.manager.DeleteConfig(c.Request.Context(), config.ID); rollbackErr != nil {
 				log.Printf("Failed to rollback storage config creation: %v", rollbackErr)
 			}
 			common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to load storage configuration: %v", err))
@@ -119,9 +154,22 @@ func (h *ConfigHandler) CreateConfig(c *gin.Context) {
 }
 
 // UpdateConfig 更新配置
-// PUT /api/v1/admin/configs/:id
+// @Summary      Update configuration
+// @Description  Update an existing system configuration
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        id       path      int                              true  "Config ID"
+// @Param        request  body      models.SystemConfigStoreRequest  true  "Configuration data"
+// @Success      200      {object}  common.Response  "Configuration updated successfully"
+// @Failure      400      {object}  common.Response  "Invalid request or configuration test failed"
+// @Failure      401      {object}  common.Response  "Unauthorized"
+// @Failure      404      {object}  common.Response  "Config not found"
+// @Failure      500      {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /admin/configs/{id} [put]
 func (h *ConfigHandler) UpdateConfig(c *gin.Context) {
-	ctx := context.Background()
+	ctx := c.Request.Context()
 
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
@@ -164,17 +212,27 @@ func (h *ConfigHandler) UpdateConfig(c *gin.Context) {
 }
 
 // DeleteConfig 删除配置
-// DELETE /api/v1/admin/configs/:id
+// @Summary      Delete configuration
+// @Description  Delete a system configuration by ID
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        id   path      int  true  "Config ID"
+// @Success      200  {object}  common.Response  "Configuration deleted successfully"
+// @Failure      400  {object}  common.Response  "Invalid config ID"
+// @Failure      401  {object}  common.Response  "Unauthorized"
+// @Failure      404  {object}  common.Response  "Config not found"
+// @Failure      500  {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /admin/configs/{id} [delete]
 func (h *ConfigHandler) DeleteConfig(c *gin.Context) {
-	ctx := context.Background()
-
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		common.RespondError(c, http.StatusBadRequest, "Invalid config ID")
 		return
 	}
 
-	config, getErr := h.manager.GetConfig(ctx, uint(id), false)
+	config, getErr := h.manager.GetConfig(c.Request.Context(), uint(id), false)
 	if getErr == nil && config.Category == models.ConfigCategoryStorage {
 		if err := storage.RemoveProvider(uint(id)); err != nil {
 			if !strings.Contains(err.Error(), "not found") {
@@ -183,7 +241,7 @@ func (h *ConfigHandler) DeleteConfig(c *gin.Context) {
 		}
 	}
 
-	if err := h.manager.DeleteConfig(ctx, uint(id)); err != nil {
+	if err := h.manager.DeleteConfig(c.Request.Context(), uint(id)); err != nil {
 		common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to delete config: %v", err))
 		return
 	}
@@ -192,9 +250,21 @@ func (h *ConfigHandler) DeleteConfig(c *gin.Context) {
 }
 
 // SetDefaultConfig 设置默认配置
-// POST /api/v1/admin/configs/:id/default
+// @Summary      Set default configuration
+// @Description  Set a configuration as the default for its category
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        id   path      int  true  "Config ID"
+// @Success      200  {object}  common.Response  "Default config set successfully"
+// @Failure      400  {object}  common.Response  "Invalid config ID or storage provider not loaded"
+// @Failure      401  {object}  common.Response  "Unauthorized"
+// @Failure      404  {object}  common.Response  "Config not found"
+// @Failure      500  {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /admin/configs/{id}/default [post]
 func (h *ConfigHandler) SetDefaultConfig(c *gin.Context) {
-	ctx := context.Background()
+	ctx := c.Request.Context()
 
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
@@ -232,9 +302,20 @@ func (h *ConfigHandler) SetDefaultConfig(c *gin.Context) {
 }
 
 // EnableConfig 启用配置
-// POST /api/v1/admin/configs/:id/enable
+// @Summary      Enable configuration
+// @Description  Enable a previously disabled configuration
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        id   path      int  true  "Config ID"
+// @Success      200  {object}  common.Response  "Config enabled successfully"
+// @Failure      400  {object}  common.Response  "Invalid config ID"
+// @Failure      401  {object}  common.Response  "Unauthorized"
+// @Failure      500  {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /admin/configs/{id}/enable [post]
 func (h *ConfigHandler) EnableConfig(c *gin.Context) {
-	ctx := context.Background()
+	ctx := c.Request.Context()
 
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
@@ -251,9 +332,20 @@ func (h *ConfigHandler) EnableConfig(c *gin.Context) {
 }
 
 // DisableConfig 禁用配置
-// POST /api/v1/admin/configs/:id/disable
+// @Summary      Disable configuration
+// @Description  Disable a configuration without deleting it
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        id   path      int  true  "Config ID"
+// @Success      200  {object}  common.Response  "Config disabled successfully"
+// @Failure      400  {object}  common.Response  "Invalid config ID"
+// @Failure      401  {object}  common.Response  "Unauthorized"
+// @Failure      500  {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /admin/configs/{id}/disable [post]
 func (h *ConfigHandler) DisableConfig(c *gin.Context) {
-	ctx := context.Background()
+	ctx := c.Request.Context()
 
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
@@ -270,7 +362,17 @@ func (h *ConfigHandler) DisableConfig(c *gin.Context) {
 }
 
 // TestConfig 测试配置连接
-// POST /api/v1/admin/configs/test
+// @Summary      Test configuration
+// @Description  Test a configuration without saving it (storage connection test)
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        request  body      models.TestConfigRequest  true  "Configuration to test"
+// @Success      200      {object}  models.TestConfigResponse  "Test result"
+// @Failure      400      {object}  common.Response  "Invalid request"
+// @Failure      401      {object}  common.Response  "Unauthorized"
+// @Security     ApiKeyAuth
+// @Router       /admin/configs/test [post]
 func (h *ConfigHandler) TestConfig(c *gin.Context) {
 	var req models.TestConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -287,8 +389,11 @@ func (h *ConfigHandler) testConfig(req *models.TestConfigRequest) *models.TestCo
 	switch req.Category {
 	case models.ConfigCategoryStorage:
 		return h.testStorageConfig(req.Config)
-	case models.ConfigCategoryCache:
-		return h.testCacheConfig(req.Config)
+	case models.ConfigCategoryImageProcessing:
+		return &models.TestConfigResponse{
+			Success: true,
+			Message: "Image processing configuration cannot be tested directly",
+		}
 	default:
 		return &models.TestConfigResponse{
 			Success: false,
@@ -410,77 +515,41 @@ func (h *ConfigHandler) testStorageConfig(config map[string]interface{}) *models
 	}
 }
 
-// testCacheConfig 测试缓存配置
-func (h *ConfigHandler) testCacheConfig(config map[string]interface{}) *models.TestConfigResponse {
-	providerType, _ := config["provider_type"].(string)
-	if providerType == "" {
-		providerType = "memory"
-	}
-
-	switch providerType {
-	case "memory":
-		return &models.TestConfigResponse{
-			Success: true,
-			Message: "Memory cache configuration is valid",
-		}
-
-	case "redis":
-		redisCfg := &cache.RedisConfig{
-			Address:      getString(config, "address"),
-			Password:     getString(config, "password"),
-			DB:           getInt(config, "db"),
-			PoolSize:     getInt(config, "pool_size"),
-			MinIdleConns: getInt(config, "min_idle_conns"),
-		}
-		if redisCfg.Address == "" {
-			redisCfg.Address = "localhost:6379"
-		}
-
-		provider, err := cache.NewRedisCache(*redisCfg)
-		if err != nil {
-			return &models.TestConfigResponse{
-				Success: false,
-				Message: fmt.Sprintf("Failed to connect to Redis: %v", err),
-			}
-		}
-		defer func() { _ = provider.Close() }()
-
-		ctx := context.Background()
-		if err := provider.Health(ctx); err != nil {
-			return &models.TestConfigResponse{
-				Success: false,
-				Message: fmt.Sprintf("Redis health check failed: %v", err),
-			}
-		}
-
-		return &models.TestConfigResponse{
-			Success: true,
-			Message: "Redis connection successful",
-		}
-
-	default:
-		return &models.TestConfigResponse{
-			Success: false,
-			Message: fmt.Sprintf("Unsupported cache provider: %s", providerType),
-		}
-	}
-}
-
 // ListStorageProviders 列出所有存储提供者
-// GET /api/v1/admin/storage/providers
+// @Summary      List storage providers
+// @Description  Get list of all loaded storage providers
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  common.Response  "Storage provider list"
+// @Failure      401  {object}  common.Response  "Unauthorized"
+// @Security     ApiKeyAuth
+// @Router       /admin/storage/providers [get]
 func (h *ConfigHandler) ListStorageProviders(c *gin.Context) {
-	common.RespondSuccess(c, []map[string]interface{}{
-		{
-			"id":         0,
-			"name":       "default",
-			"type":       "local",
-			"is_default": true,
-		},
-	})
+	providers := storage.ListProviders()
+	result := make([]map[string]interface{}, 0, len(providers))
+	for _, p := range providers {
+		result = append(result, map[string]interface{}{
+			"id":         p.ID,
+			"name":       p.Name,
+			"type":       p.Type,
+			"is_default": p.IsDefault,
+		})
+	}
+	common.RespondSuccess(c, result)
 }
 
 // ReloadStorageConfig 热重载存储配置
-// POST /api/v1/admin/storage/reload/:id
+// @Summary      Reload storage configuration
+// @Description  Hot reload a storage configuration (not supported in simplified mode)
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        id   path      int  true  "Storage config ID"
+// @Success      200  {object}  common.Response  "Reload status"
+// @Failure      401  {object}  common.Response  "Unauthorized"
+// @Security     ApiKeyAuth
+// @Router       /admin/storage/reload/{id} [post]
 func (h *ConfigHandler) ReloadStorageConfig(c *gin.Context) {
 	common.RespondSuccess(c, gin.H{"message": "Storage reload not supported in simplified mode"})
 }
@@ -541,17 +610,4 @@ func getBool(m map[string]interface{}, key string) bool {
 		return v
 	}
 	return false
-}
-
-func getInt(m map[string]interface{}, key string) int {
-	switch v := m[key].(type) {
-	case int:
-		return v
-	case int64:
-		return int(v)
-	case float64:
-		return int(v)
-	default:
-		return 0
-	}
 }

@@ -3,7 +3,6 @@ package images
 import (
 	"math"
 	"net/http"
-	"sort"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
@@ -32,6 +31,7 @@ type ImageRequestBody struct {
 	AlbumID     *uint  `json:"album_id"`
 	StartTime   int64  `json:"start_time"` // Unix时间戳（毫秒）
 	EndTime     int64  `json:"end_time"`   // Unix时间戳（毫秒）
+	Sort        string `json:"sort"`       // asc 或 desc，默认 desc
 
 	Page  int `json:"page" binding:"required"`
 	Limit int `json:"limit" binding:"required"`
@@ -46,6 +46,18 @@ type ImageListResponse struct {
 }
 
 // ListImages 获取图片列表
+// @Summary      List images
+// @Description  Get paginated list of images with optional filters
+// @Tags         images
+// @Accept       json
+// @Produce      json
+// @Param        request  body      ImageRequestBody  true  "Filter and pagination parameters"
+// @Success      200      {object}  common.Response{data=ImageListResponse}  "Image list"
+// @Failure      400      {object}  common.Response  "Invalid request body"
+// @Failure      401      {object}  common.Response  "Unauthorized"
+// @Failure      500      {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /images/list [post]
 func (h *Handler) ListImages(c *gin.Context) {
 	var body ImageRequestBody
 
@@ -70,16 +82,13 @@ func (h *Handler) ListImages(c *gin.Context) {
 		limit = maxLimit
 	}
 
-	result, err := h.imageService.ListImages(body.StorageType, body.Identifier, body.Search, body.AlbumID, body.StartTime, body.EndTime, page, limit, int(userID))
+	result, err := h.imageService.ListImages(body.StorageType, body.Identifier, body.Search, body.AlbumID, body.StartTime, body.EndTime, body.Sort, page, limit, int(userID))
 	if err != nil {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to get image list")
 		return
 	}
 
 	imageListDTO := h.toImageDTOs(result.Images)
-	sort.Slice(imageListDTO, func(i, j int) bool {
-		return imageListDTO[i].ID < imageListDTO[j].ID
-	})
 
 	common.RespondSuccess(c, ImageListResponse{
 		Images:     imageListDTO,

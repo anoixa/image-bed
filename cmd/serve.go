@@ -10,7 +10,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
-	"time"
 
 	"github.com/anoixa/image-bed/api"
 	"github.com/anoixa/image-bed/api/core"
@@ -88,11 +87,8 @@ func InitDependencies(cfg *config.Config) (*Dependencies, error) {
 		return nil, err
 	}
 
-	cacheProvider := cache.GetDefault()
-	if cacheProvider != nil {
-		configManager.SetCache(cacheProvider, 0)
-		log.Println("[Dependencies] Config cache enabled")
-	}
+	// 缓存层已在 Manager 初始化时自动启用
+	log.Println("[Dependencies] Config cache enabled")
 
 	storageConfigs, err := configManager.GetStorageConfigs(context.Background())
 	if err == nil && len(storageConfigs) > 0 {
@@ -101,8 +97,15 @@ func InitDependencies(cfg *config.Config) (*Dependencies, error) {
 		} else {
 			log.Println("[Dependencies] Storage initialized from database configs")
 		}
-	} else if err != nil {
-		log.Printf("[Dependencies] Warning: Failed to get storage configs: %v", err)
+	} else {
+		if err != nil {
+			log.Printf("[Dependencies] Warning: Failed to get storage configs: %v", err)
+		}
+		if err := storage.InitStorage([]storage.StorageConfig{}); err != nil {
+			log.Printf("[Dependencies] Warning: Failed to init default storage: %v", err)
+		} else {
+			log.Println("[Dependencies] Default storage initialized")
+		}
 	}
 
 	variantRepo := images.NewVariantRepository(db)
@@ -140,9 +143,10 @@ func RunServer() {
 	}
 
 	vips.Startup(&vips.Config{
-		MaxCacheMem:   0,
-		MaxCacheSize:  0,
-		MaxCacheFiles: 0,
+		MaxCacheMem:      0,
+		MaxCacheSize:     0,
+		MaxCacheFiles:    0,
+		ConcurrencyLevel: 2,
 	})
 	defer vips.Shutdown()
 
@@ -161,30 +165,8 @@ func RunServer() {
 
 	worker.InitGlobalPool(cfg.WorkerCount, 1000)
 
-	variantRepo := images.NewVariantRepository(deps.DB)
-	imageRepo := images.NewRepository(deps.DB)
-
-	retryScanner := imageSvc.NewRetryScanner(variantRepo, imageRepo, deps.Converter, 5*time.Minute)
-	retryScanner.Start()
-	defer retryScanner.Stop()
-
-	thumbnailSvc := imageSvc.NewThumbnailService(variantRepo, imageRepo, deps.ConfigManager, storage.GetDefault(), deps.Converter)
-
-	thumbnailScanner := imageSvc.NewThumbnailScanner(deps.DB, deps.ConfigManager, thumbnailSvc)
-	if err := thumbnailScanner.Start(); err != nil {
-		log.Fatalf("Failed to start thumbnail scanner: %v", err)
-	}
-	defer thumbnailScanner.Stop()
-
-	orphanScanner := imageSvc.NewOrphanScanner(
-		variantRepo, deps.Converter, thumbnailSvc,
-		10*time.Minute, // 10分钟视为孤儿任务
-		5*time.Minute,  // 每5分钟扫描一次
-	)
-	orphanScanner.Start()
-	defer orphanScanner.Stop()
-
 	// 初始化 JWT
+	api.SetAuthKeysRepo(deps.Repositories.KeysRepo)
 	if err := api.TokenInitFromManager(deps.ConfigManager); err != nil {
 		log.Fatalf("Failed to initialize JWT: %s", err)
 	}
@@ -194,7 +176,7 @@ func RunServer() {
 		Repositories:  deps.Repositories,
 		ConfigManager: deps.ConfigManager,
 		Converter:     deps.Converter,
-		TokenManager:  api.GetTokenManager(),
+		JWTService:    api.GetJWTService(),
 		Config:        cfg,
 		CacheProvider: cache.GetDefault(),
 		ServerVersion: core.ServerVersion{
@@ -243,7 +225,20 @@ func RunServer() {
 func InitDatabase(deps *Dependencies) {
 	log.Println("Initializing database...")
 
-	deps.Repositories.AccountsRepo.CreateDefaultAdminUser()
+	password, err := deps.Repositories.AccountsRepo.CreateDefaultAdminUser()
+	if err != nil {
+		log.Fatalf("Failed to create default admin user: %v", err)
+	}
+	if password != "" {
+		log.Println("========================================")
+		log.Println("🎉 默认管理员用户创建成功")
+		log.Printf("   用户名: admin")
+		log.Printf("   密码: %s", password)
+		log.Println("========================================")
+		log.Println("⚠️  请登录后立即修改默认密码！")
+	} else {
+		log.Println("Admin user already exists, skipping creation")
+	}
 }
 
 // buildCacheConfig 从应用配置构建缓存配置

@@ -26,6 +26,14 @@ func NewHealthHandler(db *gorm.DB) *HealthHandler {
 }
 
 // Handle 处理健康检查请求
+// @Summary      Health check
+// @Description  Check the health status of the application and its dependencies (database, cache, storage)
+// @Tags         health
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}  "Service is healthy"
+// @Success      503  {object}  map[string]interface{}  "Service is unhealthy"
+// @Router       /health [get]
 func (h *HealthHandler) Handle(context *gin.Context) {
 	sqlDB, _ := h.db.DB()
 	health := gin.H{
@@ -36,7 +44,7 @@ func (h *HealthHandler) Handle(context *gin.Context) {
 		"checks": gin.H{
 			"database": checkDatabaseHealth(sqlDB),
 			"cache":    checkCacheHealth(),
-			"storage":  checkStorageHealth(),
+			"storage":  checkStorageHealth(context.Request.Context()),
 		},
 	}
 	httpStatus := http.StatusOK
@@ -66,13 +74,12 @@ func checkCacheHealth() string {
 	return "not initialized"
 }
 
-func checkStorageHealth() string {
+func checkStorageHealth(ctx context.Context) string {
 	provider := storage.GetDefault()
 	if provider == nil {
 		return "error: no default storage provider"
 	}
 
-	ctx := context.Background()
 	if err := provider.Health(ctx); err != nil {
 		return "error: " + err.Error()
 	}

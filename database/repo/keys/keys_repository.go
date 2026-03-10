@@ -9,11 +9,10 @@ import (
 	"time"
 
 	"github.com/anoixa/image-bed/database/models"
-	"github.com/anoixa/image-bed/utils"
 	"gorm.io/gorm"
 )
 
-// Repository API Token 仓库 - 封装所有 Token 相关的数据库操作
+// Repository API Token 仓库
 type Repository struct {
 	db *gorm.DB
 }
@@ -46,9 +45,12 @@ func (r *Repository) GetUserByApiToken(token string) (*models.User, error) {
 		return nil, errors.New("invalid or non-existent API token")
 	}
 
-	utils.SafeGo(func() {
+	go func() {
+		defer func() {
+			_ = recover()
+		}()
 		r.updateTokenLastUsed(apiToken.ID)
-	})
+	}()
 	return &apiToken.User, nil
 }
 

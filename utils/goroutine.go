@@ -2,7 +2,7 @@ package utils
 
 import "log"
 
-// SafeGo 拦截 panic
+// SafeGo 拦截 panic 的 goroutine
 func SafeGo(fn func()) {
 	go func() {
 		defer func() {

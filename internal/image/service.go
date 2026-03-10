@@ -127,8 +127,10 @@ func NewService(
 // submitBackgroundTask 提交后台任务到 worker pool，避免 goroutine 风暴
 func (s *Service) submitBackgroundTask(task func()) {
 	if pool := worker.GetGlobalPool(); pool != nil {
+		utils.LogIfDevf("[Service] Submitting task to worker pool")
 		pool.Submit(task)
 	} else {
+		utils.LogIfDevf("[Service] Worker pool not initialized, running task in new goroutine")
 		go task()
 	}
 }
@@ -342,9 +344,7 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 		return nil, false, errors.New("database error during hash check")
 	}
 
-	// 如果找到记录，检查是否软删除
 	if err == nil && img.DeletedAt.Valid {
-		// 软删除的文件，恢复它
 		updates := map[string]interface{}{
 			"deleted_at":        nil,
 			"original_name":     fileHeader.Filename,
@@ -358,16 +358,14 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 		}
 
 		s.submitBackgroundTask(func() { s.warmCache(restored) })
-		s.submitBackgroundTask(func() { s.converter.TriggerWebPConversion(restored) })
-		s.submitBackgroundTask(func() { s.thumbnailSvc.TriggerGenerationForAllSizes(restored) })
+		s.submitBackgroundTask(func() { s.converter.TriggerConversion(restored) })
+
 		return restored, true, nil
 	}
 
-	// 如果找到未删除的记录，直接返回
 	if err == nil {
 		s.submitBackgroundTask(func() { s.warmCache(img) })
-		s.submitBackgroundTask(func() { s.converter.TriggerWebPConversion(img) })
-		s.submitBackgroundTask(func() { s.thumbnailSvc.TriggerGenerationForAllSizes(img) })
+		s.submitBackgroundTask(func() { s.converter.TriggerConversion(img) })
 		return img, true, nil
 	}
 
@@ -411,8 +409,7 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 	}
 
 	s.submitBackgroundTask(func() { s.warmCache(newImg) })
-	s.submitBackgroundTask(func() { s.converter.TriggerWebPConversion(newImg) })
-	s.submitBackgroundTask(func() { s.thumbnailSvc.TriggerGenerationForAllSizes(newImg) })
+	s.submitBackgroundTask(func() { s.converter.TriggerConversion(newImg) })
 
 	return newImg, false, nil
 }
@@ -544,7 +541,7 @@ func (s *Service) CacheImageData(ctx context.Context, identifier string, data []
 }
 
 // ListImages 获取图片列表
-func (s *Service) ListImages(storageType string, identifier string, search string, albumID *uint, startTime, endTime int64, page int, limit int, userID int) (*ListImagesResult, error) {
+func (s *Service) ListImages(storageType string, identifier string, search string, albumID *uint, startTime, endTime int64, sort string, page int, limit int, userID int) (*ListImagesResult, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -558,7 +555,7 @@ func (s *Service) ListImages(storageType string, identifier string, search strin
 		limit = maxLimit
 	}
 
-	list, total, err := s.repo.GetImageList(storageType, identifier, search, albumID, startTime, endTime, page, limit, userID)
+	list, total, err := s.repo.GetImageList(storageType, identifier, search, albumID, startTime, endTime, sort, page, limit, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get image list: %w", err)
 	}
@@ -800,7 +797,7 @@ func (s *Service) GetImageWithVariant(ctx context.Context, identifier string, ac
 
 	if !variantResult.IsOriginal && variantResult.Variant == nil {
 		s.submitBackgroundTask(func() {
-			s.converter.TriggerWebPConversion(image)
+			s.converter.TriggerConversion(image)
 		})
 	}
 
@@ -819,6 +816,59 @@ func (s *Service) GetImageWithVariant(ctx context.Context, identifier string, ac
 			result.URL = utils.BuildImageURL(s.baseURL, variantResult.Variant.Identifier)
 		} else {
 
+			result.IsOriginal = true
+			result.URL = utils.BuildImageURL(s.baseURL, image.Identifier)
+			result.MIMEType = image.MimeType
+		}
+	}
+
+	return result, nil
+}
+
+// GetRandomImage 获取随机图片（支持筛选条件）
+func (s *Service) GetRandomImage(filter *images.RandomImageFilter) (*models.Image, error) {
+	return s.repo.GetRandomPublicImage(filter)
+}
+
+// GetRandomImageWithVariant 获取随机图片（包含格式变体协商）
+func (s *Service) GetRandomImageWithVariant(ctx context.Context, filter *images.RandomImageFilter, acceptHeader string) (*ImageResultDTO, error) {
+	// 获取随机图片
+	image, err := s.repo.GetRandomPublicImage(filter)
+	if err != nil {
+		return nil, err
+	}
+
+	// 选择最优变体
+	variantResult, err := s.variantService.SelectBestVariant(ctx, image, acceptHeader)
+	if err != nil {
+		return &ImageResultDTO{
+			Image:      image,
+			IsOriginal: true,
+			URL:        utils.BuildImageURL(s.baseURL, image.Identifier),
+			MIMEType:   image.MimeType,
+		}, nil
+	}
+
+	if !variantResult.IsOriginal && variantResult.Variant == nil {
+		s.submitBackgroundTask(func() {
+			s.converter.TriggerConversion(image)
+		})
+	}
+
+	result := &ImageResultDTO{
+		Image:      image,
+		IsOriginal: variantResult.IsOriginal,
+		MIMEType:   variantResult.MIMEType,
+	}
+
+	if variantResult.IsOriginal {
+		result.URL = utils.BuildImageURL(s.baseURL, image.Identifier)
+		result.MIMEType = image.MimeType
+	} else {
+		result.Variant = variantResult.Variant
+		if variantResult.Variant != nil {
+			result.URL = utils.BuildImageURL(s.baseURL, variantResult.Variant.Identifier)
+		} else {
 			result.IsOriginal = true
 			result.URL = utils.BuildImageURL(s.baseURL, image.Identifier)
 			result.MIMEType = image.MimeType

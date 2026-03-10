@@ -8,8 +8,6 @@ import (
 	"github.com/anoixa/image-bed/utils"
 )
 
-// ==================== RetryScanner 重试扫描器 ====================
-
 // RetryScanner 重试扫描器
 type RetryScanner struct {
 	variantRepo *images.VariantRepository
@@ -68,7 +66,7 @@ func (s *RetryScanner) scanAndRetry() {
 		} else if len(failedImages) > 0 {
 			utils.LogIfDevf("[RetryScanner] Found %d images with failed variant status", len(failedImages))
 			for _, img := range failedImages {
-				s.converter.TriggerWebPConversion(img)
+				s.converter.TriggerConversion(img)
 			}
 		}
 	}
@@ -105,7 +103,7 @@ func (s *RetryScanner) scanAndRetry() {
 		// 触发转换
 		utils.LogIfDevf("[RetryScanner] Triggering conversion for variant %d (image: %s)",
 			variant.ID, img.Identifier)
-		s.converter.TriggerWebPConversion(img)
+		s.converter.TriggerConversion(img)
 	}
 }
 
@@ -207,15 +205,13 @@ func (s *OrphanScanner) processOrphanVariant(variant models.ImageVariant) {
 		return
 	}
 
-	if width, ok := models.ParseThumbnailSize(variant.Format); ok {
+	if _, ok := models.ParseThumbnailSize(variant.Format); ok {
 		utils.LogIfDevf("[OrphanScanner] Triggering thumbnail generation for variant %d", variant.ID)
-		if width > 0 && s.thumbnailService != nil {
-			s.thumbnailService.TriggerGeneration(img, width)
-		}
+
 	} else {
 		// WebP 转换任务
 		utils.LogIfDevf("[OrphanScanner] Triggering WebP conversion for variant %d", variant.ID)
-		s.converter.TriggerWebPConversion(img)
+		s.converter.TriggerConversion(img)
 	}
 }
 

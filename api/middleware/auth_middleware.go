@@ -2,17 +2,17 @@ package middleware
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/anoixa/image-bed/api"
 	"github.com/anoixa/image-bed/api/common"
-	"github.com/anoixa/image-bed/internal/auth"
 	"github.com/gin-gonic/gin"
 )
 
 // jwtServiceAccessor 获取 JWT 服务
-var jwtServiceAccessor func() *auth.JWTService = api.GetJWTService
+var jwtServiceAccessor = api.GetJWTService
 
 const (
 	ContextUserIDKey   = "user_id"
@@ -115,7 +115,7 @@ func handleStaticTokenAuth(c *gin.Context, token string) error {
 	}
 	user, err := jwtService.ValidateStaticToken(token)
 	if err != nil {
-		return errors.New("invalid token")
+		return fmt.Errorf("invalid token: %w", err)
 	}
 
 	role := user.Role

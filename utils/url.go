@@ -2,6 +2,8 @@ package utils
 
 import (
 	"fmt"
+	"net/url"
+	"strings"
 )
 
 // BuildImageURL 构建图片URL
@@ -42,4 +44,40 @@ func BuildLinkFormats(baseURL, identifier string) LinkFormats {
 		Markdown:         fmt.Sprintf(`![%s](%s)`, identifier, url),
 		MarkdownWithLink: fmt.Sprintf(`[![%s](%s)](%s)`, identifier, thumbnailURL, url),
 	}
+}
+
+// ExtractCookieDomain 从 URL 中提取有效的 Cookie Domain
+func ExtractCookieDomain(rawURL string) string {
+	if rawURL == "" {
+		return ""
+	}
+
+	if !strings.Contains(rawURL, "://") {
+		host := rawURL
+		// 移除端口号
+		if idx := strings.LastIndex(host, ":"); idx != -1 {
+			port := host[idx+1:]
+			isPort := true
+			for _, c := range port {
+				if c < '0' || c > '9' {
+					isPort = false
+					break
+				}
+			}
+			if isPort {
+				host = host[:idx]
+			}
+		}
+		return host
+	}
+
+	// 解析 URL
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+
+	// 获取主机名（移除端口号）
+	host := parsed.Hostname()
+	return host
 }

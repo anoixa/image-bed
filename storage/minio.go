@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/anoixa/image-bed/utils"
 	"github.com/anoixa/image-bed/utils/pool"
 	minio "github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -165,14 +166,16 @@ func (s *MinioStorage) StreamTo(ctx context.Context, storagePath string, w http.
 		if errResponse.Code == "NoSuchKey" {
 			return 0, fmt.Errorf("file not found in minio: %s", storagePath)
 		}
-		// Stat 失败（如超时）但不中断，继续流传输（无 Content-Length）
-		log.Printf("[MinIO] Stat failed for %s: %v, continuing without Content-Length", storagePath, err)
+
+		if !utils.IsClientDisconnect(err) {
+			log.Printf("[MinIO] Stat failed for %s: %v, continuing without Content-Length", storagePath, err)
+		}
 	} else {
 		if w.Header().Get("Content-Type") == "" {
 			w.Header().Set("Content-Type", stat.ContentType)
 		}
 		w.Header().Set("Content-Length", strconv.FormatInt(stat.Size, 10))
-		
+
 		// 对于大文件（>10MB），记录日志并使用更大的缓冲区
 		if stat.Size > 10*1024*1024 {
 			log.Printf("[MinIO] Large file detected: %s (%.2f MB), using optimized streaming", storagePath, float64(stat.Size)/(1024*1024))
@@ -186,6 +189,9 @@ func (s *MinioStorage) StreamTo(ctx context.Context, storagePath string, w http.
 
 	n, err := io.CopyBuffer(w, obj, *bufPtr)
 	if err != nil {
+		if utils.IsClientDisconnect(err) {
+			return n, err
+		}
 		return n, fmt.Errorf("failed to stream object '%s': %w", storagePath, err)
 	}
 
@@ -232,6 +238,9 @@ func (s *MinioStorage) StreamToWithSize(ctx context.Context, storagePath string,
 
 	n, err := io.CopyBuffer(w, obj, *bufPtr)
 	if err != nil {
+		if utils.IsClientDisconnect(err) {
+			return n, err
+		}
 		return n, fmt.Errorf("failed to stream object '%s': %w", storagePath, err)
 	}
 
