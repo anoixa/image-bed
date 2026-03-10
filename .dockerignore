@@ -22,7 +22,6 @@ data/
 *.sqlite3
 
 README.md
-docs/
 plans/
 
 .env
