@@ -29,7 +29,7 @@ type req struct {
 // @Failure      401      {object}  common.Response  "Unauthorized"
 // @Failure      500      {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /keys [post]
+// @Router       /api/v1/token [post]
 func (h *Handler) CreateStaticToken(context *gin.Context) {
 	var requestBody req
 	if err := context.ShouldBindJSON(&requestBody); err != nil {

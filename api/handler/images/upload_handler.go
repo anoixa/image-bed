@@ -25,7 +25,7 @@ import (
 // @Failure      413  {object}  common.Response  "File too large"
 // @Failure      500  {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /images/upload [post]
+// @Router       /api/v1/images/upload [post]
 func (h *Handler) UploadImage(c *gin.Context) {
 	form, err := c.MultipartForm()
 	if err != nil {
@@ -90,7 +90,7 @@ func (h *Handler) UploadImage(c *gin.Context) {
 // @Failure      413  {object}  common.Response  "Total file size too large"
 // @Failure      500  {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /images/upload/batch [post]
+// @Router       /api/v1/images/uploads [post]
 func (h *Handler) UploadImages(c *gin.Context) {
 	form, err := c.MultipartForm()
 	if err != nil {

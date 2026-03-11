@@ -41,7 +41,7 @@ func NewConfigHandler(manager *configSvc.Manager) *ConfigHandler {
 // @Failure      401  {object}  common.Response  "Unauthorized"
 // @Failure      500  {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /admin/configs [get]
+// @Router       /api/v1/admin/configs [get]
 func (h *ConfigHandler) ListConfigs(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -77,7 +77,7 @@ func (h *ConfigHandler) ListConfigs(c *gin.Context) {
 // @Failure      404  {object}  common.Response  "Config not found"
 // @Failure      500  {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /admin/configs/{id} [get]
+// @Router       /api/v1/admin/configs/{id} [get]
 func (h *ConfigHandler) GetConfig(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -110,7 +110,7 @@ func (h *ConfigHandler) GetConfig(c *gin.Context) {
 // @Failure      401      {object}  common.Response  "Unauthorized"
 // @Failure      500      {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /admin/configs [post]
+// @Router       /api/v1/admin/configs [post]
 func (h *ConfigHandler) CreateConfig(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -167,7 +167,7 @@ func (h *ConfigHandler) CreateConfig(c *gin.Context) {
 // @Failure      404      {object}  common.Response  "Config not found"
 // @Failure      500      {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /admin/configs/{id} [put]
+// @Router       /api/v1/admin/configs/{id} [put]
 func (h *ConfigHandler) UpdateConfig(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -224,7 +224,7 @@ func (h *ConfigHandler) UpdateConfig(c *gin.Context) {
 // @Failure      404  {object}  common.Response  "Config not found"
 // @Failure      500  {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /admin/configs/{id} [delete]
+// @Router       /api/v1/admin/configs/{id} [delete]
 func (h *ConfigHandler) DeleteConfig(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
@@ -262,7 +262,7 @@ func (h *ConfigHandler) DeleteConfig(c *gin.Context) {
 // @Failure      404  {object}  common.Response  "Config not found"
 // @Failure      500  {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /admin/configs/{id}/default [post]
+// @Router       /api/v1/admin/configs/{id}/default [post]
 func (h *ConfigHandler) SetDefaultConfig(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -313,7 +313,7 @@ func (h *ConfigHandler) SetDefaultConfig(c *gin.Context) {
 // @Failure      401  {object}  common.Response  "Unauthorized"
 // @Failure      500  {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /admin/configs/{id}/enable [post]
+// @Router       /api/v1/admin/configs/{id}/enable [post]
 func (h *ConfigHandler) EnableConfig(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -343,7 +343,7 @@ func (h *ConfigHandler) EnableConfig(c *gin.Context) {
 // @Failure      401  {object}  common.Response  "Unauthorized"
 // @Failure      500  {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /admin/configs/{id}/disable [post]
+// @Router       /api/v1/admin/configs/{id}/disable [post]
 func (h *ConfigHandler) DisableConfig(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -372,7 +372,7 @@ func (h *ConfigHandler) DisableConfig(c *gin.Context) {
 // @Failure      400      {object}  common.Response  "Invalid request"
 // @Failure      401      {object}  common.Response  "Unauthorized"
 // @Security     ApiKeyAuth
-// @Router       /admin/configs/test [post]
+// @Router       /api/v1/admin/configs/{id}/test [post]
 func (h *ConfigHandler) TestConfig(c *gin.Context) {
 	var req models.TestConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -524,7 +524,7 @@ func (h *ConfigHandler) testStorageConfig(config map[string]interface{}) *models
 // @Success      200  {object}  common.Response  "Storage provider list"
 // @Failure      401  {object}  common.Response  "Unauthorized"
 // @Security     ApiKeyAuth
-// @Router       /admin/storage/providers [get]
+// @Router       /api/v1/admin/storage/providers [get]
 func (h *ConfigHandler) ListStorageProviders(c *gin.Context) {
 	providers := storage.ListProviders()
 	result := make([]map[string]interface{}, 0, len(providers))
@@ -549,7 +549,7 @@ func (h *ConfigHandler) ListStorageProviders(c *gin.Context) {
 // @Success      200  {object}  common.Response  "Reload status"
 // @Failure      401  {object}  common.Response  "Unauthorized"
 // @Security     ApiKeyAuth
-// @Router       /admin/storage/reload/{id} [post]
+// @Router       /api/v1/admin/storage/reload/{id} [post]
 func (h *ConfigHandler) ReloadStorageConfig(c *gin.Context) {
 	common.RespondSuccess(c, gin.H{"message": "Storage reload not supported in simplified mode"})
 }

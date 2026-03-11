@@ -24,7 +24,7 @@ type DeleteRequestBody struct {
 // @Failure      401      {object}  common.Response  "Unauthorized"
 // @Failure      500      {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /images/delete [post]
+// @Router       /api/v1/images/delete [post]
 func (h *Handler) DeleteImages(c *gin.Context) {
 	userID := c.GetUint(middleware.ContextUserIDKey)
 	if userID == 0 {
@@ -66,7 +66,7 @@ func (h *Handler) DeleteImages(c *gin.Context) {
 // @Failure      404         {object}  common.Response  "Image not found"
 // @Failure      500         {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /images/{identifier} [delete]
+// @Router       /api/v1/images/{identifier} [delete]
 func (h *Handler) DeleteSingleImage(c *gin.Context) {
 	userID := c.GetUint(middleware.ContextUserIDKey)
 	if userID == 0 {

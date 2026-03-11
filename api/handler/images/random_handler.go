@@ -154,7 +154,7 @@ func (h *Handler) respondRandomJSON(c *gin.Context, result *image.ImageResultDTO
 // @Failure      401  {object}  common.Response  "Unauthorized"
 // @Failure      500  {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /admin/random-source-album [get]
+// @Router       /api/v1/admin/random-source-album [get]
 func (h *Handler) GetRandomSourceAlbum(c *gin.Context) {
 	albumID, includeAllPublic := h.getRandomSourceAlbum()
 	common.RespondSuccess(c, gin.H{
@@ -182,7 +182,7 @@ type SetRandomSourceAlbumRequest struct {
 // @Failure      401      {object}  common.Response                "Unauthorized"
 // @Failure      500      {object}  common.Response                "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /admin/random-source-album [post]
+// @Router       /api/v1/admin/random-source-album [post]
 func (h *Handler) SetRandomSourceAlbum(c *gin.Context) {
 	var req SetRandomSourceAlbumRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

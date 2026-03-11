@@ -71,7 +71,7 @@ func NewAlbumImageHandler(albumsSvc *svcAlbums.Service, imagesRepo *images.Repos
 // @Failure      404      {object}  common.Response           "Album or images not found"
 // @Failure      500      {object}  common.Response           "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /albums/{id}/images [post]
+// @Router       /api/v1/albums/{id}/images [post]
 func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 	// 获取相册 ID
 	albumIDStr := c.Param("id")
@@ -168,7 +168,7 @@ func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 // @Failure      404      {object}  common.Response  "Album or image not found"
 // @Failure      500      {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /albums/{id}/images/{imageId} [delete]
+// @Router       /api/v1/albums/{id}/images/{imageId} [delete]
 func (h *AlbumImageHandler) RemoveImageFromAlbumHandler(c *gin.Context) {
 	// 获取相册 ID
 	albumIDStr := c.Param("id")

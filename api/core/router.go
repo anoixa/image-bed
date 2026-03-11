@@ -61,6 +61,14 @@ func registerBasicRoutes(router *gin.Engine, deps *RouterDependencies) {
 	healthHandler := NewHealthHandler(deps.DB)
 	router.Any("/health", healthHandler.Handle)
 
+	// Version 获取版本信息
+	// @Summary      Get version
+	// @Description  Get application version and commit hash
+	// @Tags         system
+	// @Accept       json
+	// @Produce      json
+	// @Success      200  {object}  common.Response  "Version info"
+	// @Router       /version [get]
 	router.GET("/version", func(context *gin.Context) {
 		common.RespondSuccess(context, gin.H{
 			"version": deps.ServerVersion.Version,
@@ -68,6 +76,14 @@ func registerBasicRoutes(router *gin.Engine, deps *RouterDependencies) {
 		})
 	})
 
+	// Metrics 获取指标
+	// @Summary      Get metrics
+	// @Description  Get application metrics and statistics
+	// @Tags         system
+	// @Accept       json
+	// @Produce      json
+	// @Success      200  {object}  common.Response  "Metrics data"
+	// @Router       /metrics [get]
 	router.GET("/metrics", func(context *gin.Context) {
 		context.JSON(http.StatusOK, middleware.GetMetrics())
 	})

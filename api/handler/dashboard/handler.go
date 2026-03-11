@@ -30,7 +30,7 @@ func NewHandler(svc *dashboard.Service) *Handler {
 // @Failure      401  {object}  common.Response  "Unauthorized"
 // @Failure      500  {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /dashboard/stats [get]
+// @Router       /api/v1/dashboard/stats [get]
 func (h *Handler) GetStats(c *gin.Context) {
 	stats, err := h.svc.GetStats(c.Request.Context())
 	if err != nil {
@@ -51,7 +51,7 @@ func (h *Handler) GetStats(c *gin.Context) {
 // @Failure      401  {object}  common.Response  "Unauthorized"
 // @Failure      500  {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /dashboard/stats/refresh [post]
+// @Router       /api/v1/dashboard/stats/refresh [post]
 func (h *Handler) RefreshStats(c *gin.Context) {
 	if err := h.svc.RefreshCache(c.Request.Context()); err != nil {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to refresh stats")

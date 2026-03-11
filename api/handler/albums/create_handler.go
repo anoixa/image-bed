@@ -37,7 +37,7 @@ type CreateAlbumResponse struct {
 // @Failure      401      {object}  common.Response  "Unauthorized"
 // @Failure      500      {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /albums [post]
+// @Router       /api/v1/albums [post]
 func (h *Handler) CreateAlbumHandler(c *gin.Context) {
 	userID := c.GetUint(middleware.ContextUserIDKey)
 	var req createAlbumRequest
