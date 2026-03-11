@@ -1644,7 +1644,7 @@ const docTemplate = `{
                 "summary": "Delete multiple images",
                 "parameters": [
                     {
-                        "description": "List of image identifiers to delete",
+                        "description": "List of image identifiers to delete (field name: identifiers)",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -2722,10 +2722,10 @@ const docTemplate = `{
         "images.DeleteRequestBody": {
             "type": "object",
             "required": [
-                "identifier"
+                "identifiers"
             ],
             "properties": {
-                "identifier": {
+                "identifiers": {
                     "type": "array",
                     "items": {
                         "type": "string"

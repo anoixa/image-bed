@@ -154,12 +154,12 @@ definitions:
     type: object
   images.DeleteRequestBody:
     properties:
-      identifier:
+      identifiers:
         items:
           type: string
         type: array
     required:
-    - identifier
+    - identifiers
     type: object
   images.ImageDTO:
     properties:
@@ -1426,7 +1426,7 @@ paths:
       - application/json
       description: Delete multiple images by their identifiers in a single request
       parameters:
-      - description: List of image identifiers to delete
+      - description: 'List of image identifiers to delete (field name: identifiers)'
         in: body
         name: request
         required: true
