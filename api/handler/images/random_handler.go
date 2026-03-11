@@ -47,7 +47,7 @@ type RandomImageQuery struct {
 // @Accept       json
 // @Produce      image/*,application/json
 // @Param        format     query     string  false  "Response format: json or image (default: image)"
-// @Param        album_id   query     int     false  "Filter by album ID"
+// @Param        album_id   query     int     false  "Filter by album ID (0 = all public images, >0 = specific album)"
 // @Param        min_width  query     int     false  "Minimum image width"
 // @Param        min_height query     int     false  "Minimum image height"
 // @Param        max_width  query     int     false  "Maximum image width"
@@ -145,6 +145,16 @@ func (h *Handler) respondRandomJSON(c *gin.Context, result *image.ImageResultDTO
 }
 
 // GetRandomSourceAlbum 获取随机图片源相册配置
+// @Summary      Get random source album configuration
+// @Description  Get the currently configured random image source album ID and whether to include all public images
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  common.Response  "Success"
+// @Failure      401  {object}  common.Response  "Unauthorized"
+// @Failure      500  {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /admin/random-source-album [get]
 func (h *Handler) GetRandomSourceAlbum(c *gin.Context) {
 	albumID, includeAllPublic := h.getRandomSourceAlbum()
 	common.RespondSuccess(c, gin.H{
@@ -161,6 +171,18 @@ type SetRandomSourceAlbumRequest struct {
 }
 
 // SetRandomSourceAlbum 设置随机图片源相册
+// @Summary      Set random source album configuration
+// @Description  Configure the source album for random image selection. Use album_id=0 for all public images, or specify an album ID
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        request  body      SetRandomSourceAlbumRequest  true  "Random source configuration"
+// @Success      200      {object}  common.Response                "Configuration updated successfully"
+// @Failure      400      {object}  common.Response                "Invalid request"
+// @Failure      401      {object}  common.Response                "Unauthorized"
+// @Failure      500      {object}  common.Response                "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /admin/random-source-album [post]
 func (h *Handler) SetRandomSourceAlbum(c *gin.Context) {
 	var req SetRandomSourceAlbumRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

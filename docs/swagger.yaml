@@ -226,6 +226,13 @@ definitions:
     - limit
     - page
     type: object
+  images.SetRandomSourceAlbumRequest:
+    properties:
+      album_id:
+        type: integer
+      include_all_public:
+        type: boolean
+    type: object
   images.UpdateVisibilityRequest:
     properties:
       is_public:
@@ -705,6 +712,68 @@ paths:
       security:
       - ApiKeyAuth: []
       summary: Update image processing configuration
+      tags:
+      - admin
+  /admin/random-source-album:
+    get:
+      consumes:
+      - application/json
+      description: Get the currently configured random image source album ID and whether
+        to include all public images
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Get random source album configuration
+      tags:
+      - admin
+    post:
+      consumes:
+      - application/json
+      description: Configure the source album for random image selection. Use album_id=0
+        for all public images, or specify an album ID
+      parameters:
+      - description: Random source configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/images.SetRandomSourceAlbumRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Configuration updated successfully
+          schema:
+            $ref: '#/definitions/common.Response'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Set random source album configuration
       tags:
       - admin
   /admin/storage/providers:
@@ -1501,7 +1570,7 @@ paths:
         in: query
         name: format
         type: string
-      - description: Filter by album ID
+      - description: Filter by album ID (0 = all public images, >0 = specific album)
         in: query
         name: album_id
         type: integer
