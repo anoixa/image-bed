@@ -107,6 +107,7 @@ func registerPublicRoutes(router *gin.Engine, deps *RouterDependencies) {
 	publicGroup := router.Group("/images")
 	publicGroup.Use(deps.ImageRateLimiter.Middleware())
 	{
+		publicGroup.GET("/random", imageHandler.RandomImage)
 		publicGroup.GET("/:identifier", imageHandler.GetImage)
 	}
 
@@ -116,12 +117,6 @@ func registerPublicRoutes(router *gin.Engine, deps *RouterDependencies) {
 		thumbnailGroup.GET("/:identifier", imageHandler.GetThumbnail)
 	}
 
-	// 随机图片API
-	randomGroup := router.Group("/random")
-	randomGroup.Use(deps.ImageRateLimiter.Middleware())
-	{
-		randomGroup.GET("", imageHandler.RandomImage)
-	}
 }
 
 // registerAPIRoutes 注册 API 路由
@@ -234,13 +229,15 @@ func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies) {
 		{
 			configsGroup.GET("", configHandler.ListConfigs)
 			configsGroup.POST("", configHandler.CreateConfig)
-			configsGroup.GET("/:id", configHandler.GetConfig)
-			configsGroup.PUT("/:id", configHandler.UpdateConfig)
-			configsGroup.DELETE("/:id", configHandler.DeleteConfig)
+			// 子路由必须在 `/:id` 之前注册
 			configsGroup.POST("/:id/test", configHandler.TestConfig)
 			configsGroup.POST("/:id/default", configHandler.SetDefaultConfig)
 			configsGroup.POST("/:id/enable", configHandler.EnableConfig)
 			configsGroup.POST("/:id/disable", configHandler.DisableConfig)
+			// `/:id` 放在子路由之后
+			configsGroup.GET("/:id", configHandler.GetConfig)
+			configsGroup.PUT("/:id", configHandler.UpdateConfig)
+			configsGroup.DELETE("/:id", configHandler.DeleteConfig)
 		}
 
 		adminGroup.GET("/storage/providers", configHandler.ListStorageProviders)

@@ -648,7 +648,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Test a configuration without saving it (storage connection test)",
+                "description": "Test a configuration without saving it (storage connection test).\nIf no body is provided, tests the existing configuration by ID.",
                 "consumes": [
                     "application/json"
                 ],
@@ -661,10 +661,16 @@ const docTemplate = `{
                 "summary": "Test configuration",
                 "parameters": [
                     {
-                        "description": "Configuration to test",
+                        "type": "integer",
+                        "description": "Config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Configuration to test (optional)",
                         "name": "request",
                         "in": "body",
-                        "required": true,
                         "schema": {
                             "$ref": "#/definitions/models.TestConfigRequest"
                         }

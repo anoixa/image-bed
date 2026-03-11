@@ -363,21 +363,37 @@ func (h *ConfigHandler) DisableConfig(c *gin.Context) {
 
 // TestConfig 测试配置连接
 // @Summary      Test configuration
-// @Description  Test a configuration without saving it (storage connection test)
+// @Description  Test a configuration without saving it (storage connection test).
+// @Description  If no body is provided, tests the existing configuration by ID.
 // @Tags         admin
 // @Accept       json
 // @Produce      json
-// @Param        request  body      models.TestConfigRequest  true  "Configuration to test"
+// @Param        id       path      int                       true   "Config ID"
+// @Param        request  body      models.TestConfigRequest  false  "Configuration to test (optional)"
 // @Success      200      {object}  models.TestConfigResponse  "Test result"
 // @Failure      400      {object}  common.Response  "Invalid request"
 // @Failure      401      {object}  common.Response  "Unauthorized"
 // @Security     ApiKeyAuth
 // @Router       /api/v1/admin/configs/{id}/test [post]
 func (h *ConfigHandler) TestConfig(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		common.RespondError(c, http.StatusBadRequest, "Invalid config ID")
+		return
+	}
+
 	var req models.TestConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		common.RespondError(c, http.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err))
-		return
+		// 如果 body 为空或解析失败，尝试从数据库获取配置
+		config, getErr := h.manager.GetConfig(c.Request.Context(), uint(id), false)
+		if getErr != nil {
+			common.RespondError(c, http.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err))
+			return
+		}
+		req = models.TestConfigRequest{
+			Category: config.Category,
+			Config:   config.Config,
+		}
 	}
 
 	result := h.testConfig(&req)

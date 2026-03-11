@@ -716,12 +716,18 @@ paths:
     post:
       consumes:
       - application/json
-      description: Test a configuration without saving it (storage connection test)
+      description: |-
+        Test a configuration without saving it (storage connection test).
+        If no body is provided, tests the existing configuration by ID.
       parameters:
-      - description: Configuration to test
+      - description: Config ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Configuration to test (optional)
         in: body
         name: request
-        required: true
         schema:
           $ref: '#/definitions/models.TestConfigRequest'
       produces:
