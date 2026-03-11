@@ -78,7 +78,15 @@ func (r *Repository) DeleteImageByIdentifierAndUser(identifier string, userID ui
 	if result.RowsAffected == 0 {
 		return gorm.ErrRecordNotFound
 	}
-	return result.Error
+
+	return nil
+}
+
+// CountImagesByStorageConfig 统计指定存储配置下的图片数量
+func (r *Repository) CountImagesByStorageConfig(storageConfigID uint) (int64, error) {
+	var count int64
+	err := r.db.Model(&models.Image{}).Where("storage_config_id = ?", storageConfigID).Count(&count).Error
+	return count, err
 }
 
 // ListImagesByUser 获取用户图片列表

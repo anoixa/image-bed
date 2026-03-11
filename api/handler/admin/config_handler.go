@@ -12,19 +12,22 @@ import (
 	"github.com/anoixa/image-bed/api/common"
 	configSvc "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
+	imagesRepo "github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/gin-gonic/gin"
 )
 
 // ConfigHandler 配置管理处理器
 type ConfigHandler struct {
-	manager *configSvc.Manager
+	manager    *configSvc.Manager
+	imagesRepo *imagesRepo.Repository
 }
 
 // NewConfigHandler 创建配置处理器
-func NewConfigHandler(manager *configSvc.Manager) *ConfigHandler {
+func NewConfigHandler(manager *configSvc.Manager, imagesRepo *imagesRepo.Repository) *ConfigHandler {
 	return &ConfigHandler{
-		manager: manager,
+		manager:    manager,
+		imagesRepo: imagesRepo,
 	}
 }
 
@@ -234,6 +237,19 @@ func (h *ConfigHandler) DeleteConfig(c *gin.Context) {
 
 	config, getErr := h.manager.GetConfig(c.Request.Context(), uint(id), false)
 	if getErr == nil && config.Category == models.ConfigCategoryStorage {
+		// 检查是否有图片使用该存储配置
+		if h.imagesRepo != nil {
+			count, err := h.imagesRepo.CountImagesByStorageConfig(uint(id))
+			if err != nil {
+				common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to check associated images: %v", err))
+				return
+			}
+			if count > 0 {
+				common.RespondError(c, http.StatusBadRequest, fmt.Sprintf("Cannot delete storage config: %d image(s) are still using this storage. Please migrate or delete these images first.", count))
+				return
+			}
+		}
+
 		if err := storage.RemoveProvider(uint(id)); err != nil {
 			if !strings.Contains(err.Error(), "not found") {
 				log.Printf("Warning: failed to remove storage provider: %v", err)

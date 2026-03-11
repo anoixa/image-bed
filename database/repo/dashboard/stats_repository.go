@@ -133,7 +133,7 @@ func (r *Repository) GetStorageStats() ([]StorageStat, error) {
 
 // DailyStat 每日统计
 type DailyStat struct {
-	Date  string
+	Date  time.Time
 	Count int64
 }
 
@@ -160,7 +160,7 @@ func (r *Repository) GetDailyStats(days int) ([]DailyStat, error) {
 	} else {
 		utils.LogIfDevf("[DEBUG][GetDailyStats] Found %d records", len(stats))
 		for _, s := range stats {
-			utils.LogIfDevf("[DEBUG][GetDailyStats] Result: date=%s, count=%d", s.Date, s.Count)
+			utils.LogIfDevf("[DEBUG][GetDailyStats] Result: date=%s, count=%d", s.Date.Format("2006-01-02"), s.Count)
 		}
 	}
 

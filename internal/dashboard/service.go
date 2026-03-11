@@ -209,8 +209,9 @@ func (s *Service) buildTrendData(stats []dashboard.DailyStat, days int) TrendSta
 	statMap := make(map[string]int64)
 	utils.LogIfDevf("[DEBUG][buildTrendData] Received %d stats from DB", len(stats))
 	for _, stat := range stats {
-		statMap[stat.Date] = stat.Count
-		utils.LogIfDevf("[DEBUG][buildTrendData] DB stat: date=%s, count=%d", stat.Date, stat.Count)
+		dateStr := stat.Date.Format("2006-01-02")
+		statMap[dateStr] = stat.Count
+		utils.LogIfDevf("[DEBUG][buildTrendData] DB stat: date=%s, count=%d", dateStr, stat.Count)
 	}
 
 	// 填充数据，没有数据的天数补0

@@ -219,7 +219,7 @@ func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies) {
 	}
 	imageHandler := handlerImages.NewHandler(deps.CacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager, cfg, baseURL, uploadMaxBatchTotalMB)
 
-	configHandler := admin.NewConfigHandler(deps.ConfigManager)
+	configHandler := admin.NewConfigHandler(deps.ConfigManager, deps.Repositories.ImagesRepo)
 	adminGroup := v1.Group("/admin")
 	adminGroup.Use(middleware.Authorize("jwt"))
 	adminGroup.Use(middleware.RequireRole("admin"))
