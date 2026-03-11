@@ -56,7 +56,7 @@ func (s *RetryScanner) Stop() {
 func (s *RetryScanner) scanAndRetry() {
 	now := time.Now()
 
-	if s.imageRepo != nil {
+	if s.imageRepo != nil && s.converter != nil {
 		failedImages, err := s.imageRepo.GetImagesByVariantStatus(
 			[]models.ImageVariantStatus{models.ImageVariantStatusFailed},
 			s.batchSize,
@@ -101,9 +101,11 @@ func (s *RetryScanner) scanAndRetry() {
 		}
 
 		// 触发转换
-		utils.LogIfDevf("[RetryScanner] Triggering conversion for variant %d (image: %s)",
-			variant.ID, img.Identifier)
-		s.converter.TriggerConversion(img)
+		if s.converter != nil {
+			utils.LogIfDevf("[RetryScanner] Triggering conversion for variant %d (image: %s)",
+				variant.ID, img.Identifier)
+			s.converter.TriggerConversion(img)
+		}
 	}
 }
 
@@ -211,7 +213,9 @@ func (s *OrphanScanner) processOrphanVariant(variant models.ImageVariant) {
 	} else {
 		// WebP 转换任务
 		utils.LogIfDevf("[OrphanScanner] Triggering WebP conversion for variant %d", variant.ID)
-		s.converter.TriggerConversion(img)
+		if s.converter != nil {
+			s.converter.TriggerConversion(img)
+		}
 	}
 }
 

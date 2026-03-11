@@ -126,6 +126,14 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 		return
 	}
 
+	// 获取图片对应的存储提供者
+	storageProvider := c.getStorageForImage(image)
+	if storageProvider == nil {
+		utils.LogIfDevf("[Converter] No storage provider available for image %s (StorageConfigID=%d), skip conversion",
+			image.Identifier, image.StorageConfigID)
+		return
+	}
+
 	// 提交统一流水线任务
 	ok := pool.Submit(func() {
 		task := &worker.ImagePipelineTask{
@@ -134,7 +142,7 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 			ImageID:         image.ID,
 			StoragePath:     image.StoragePath,
 			ImageIdentifier: image.Identifier,
-			Storage:         c.storage,
+			Storage:         storageProvider,
 			ConfigManager:   c.configManager,
 			VariantRepo:     c.variantRepo,
 			ImageRepo:       c.imageRepo,
@@ -154,6 +162,21 @@ func getVariantID(v *models.ImageVariant) uint {
 		return 0
 	}
 	return v.ID
+}
+
+// getStorageForImage 获取图片对应的存储提供者
+func (c *Converter) getStorageForImage(image *models.Image) storage.Provider {
+	// 如果图片指定了 StorageConfigID，尝试获取对应的 provider
+	if image.StorageConfigID > 0 {
+		provider, err := storage.GetByID(image.StorageConfigID)
+		if err == nil {
+			return provider
+		}
+		utils.LogIfDevf("[Converter] Failed to get storage provider ID=%d: %v, fallback to default",
+			image.StorageConfigID, err)
+	}
+	// Fallback 到默认 storage
+	return c.storage
 }
 
 // TriggerRetry 触发指定变体的重试

@@ -124,6 +124,10 @@ func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 	addedCount := 0
 	if len(imageIDsToAdd) > 0 {
 		if err := h.svc.AddImagesToAlbum(uint(albumID), userID, imageIDsToAdd); err != nil {
+			if err.Error() == "album not found or access denied" {
+				common.RespondError(c, http.StatusNotFound, "Album not found or access denied")
+				return
+			}
 			common.RespondError(c, http.StatusInternalServerError, "Failed to add imgs to album")
 			return
 		}
@@ -195,7 +199,7 @@ func (h *AlbumImageHandler) RemoveImageFromAlbumHandler(c *gin.Context) {
 
 	// 从相册移除图片
 	if err := h.svc.RemoveImageFromAlbum(uint(albumID), userID, image); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if err.Error() == "album not found or access denied" {
 			common.RespondError(c, http.StatusNotFound, "Album not found or access denied")
 			return
 		}

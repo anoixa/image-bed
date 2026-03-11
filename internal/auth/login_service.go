@@ -53,11 +53,15 @@ func NewLoginService(
 func (s *LoginService) ValidateCredentials(username, password string) (*models.User, bool, error) {
 	user, err := s.accountsRepo.GetUserByUsername(username)
 	if err != nil {
+		if err == accounts.ErrUserNotFound {
+			// 用户不存在，返回统一的错误信息，避免泄露用户名是否存在
+			return nil, false, fmt.Errorf("invalid credentials")
+		}
 		return nil, false, fmt.Errorf("failed to get user: %w", err)
 	}
 
 	if user == nil {
-		return nil, false, nil
+		return nil, false, fmt.Errorf("invalid credentials")
 	}
 
 	ok, err := cryptopackage.ComparePasswordAndHash(password, user.Password)
@@ -65,7 +69,11 @@ func (s *LoginService) ValidateCredentials(username, password string) (*models.U
 		return nil, false, fmt.Errorf("password comparison failed: %w", err)
 	}
 
-	return user, ok, nil
+	if !ok {
+		return nil, false, fmt.Errorf("invalid credentials")
+	}
+
+	return user, true, nil
 }
 
 // Login 执行登录操作
