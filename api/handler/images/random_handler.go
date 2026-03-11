@@ -154,8 +154,9 @@ func (h *Handler) GetRandomSourceAlbum(c *gin.Context) {
 }
 
 // SetRandomSourceAlbumRequest 设置随机图源相册请求
+// AlbumID: 0 表示所有公开图片, >0 表示特定相册ID
 type SetRandomSourceAlbumRequest struct {
-	AlbumID          uint `json:"album_id" binding:"required"`
+	AlbumID          uint `json:"album_id"`
 	IncludeAllPublic bool `json:"include_all_public"`
 }
 
@@ -163,7 +164,7 @@ type SetRandomSourceAlbumRequest struct {
 func (h *Handler) SetRandomSourceAlbum(c *gin.Context) {
 	var req SetRandomSourceAlbumRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		common.RespondError(c, http.StatusBadRequest, "Invalid request: album_id is required")
+		common.RespondError(c, http.StatusBadRequest, "Invalid request: "+err.Error())
 		return
 	}
 
