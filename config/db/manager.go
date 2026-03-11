@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 
@@ -327,7 +328,7 @@ func (m *Manager) GetJWTConfig(ctx context.Context) (*JWTConfig, error) {
 
 	config, err := m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryJWT)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			if err := m.EnsureDefaultJWTConfig(ctx); err != nil {
 				return nil, fmt.Errorf("failed to create default JWT config: %w", err)
 			}
@@ -394,7 +395,7 @@ func (m *Manager) EnsureDefaultJWTConfig(ctx context.Context) error {
 func (m *Manager) UpdateJWTConfig(ctx context.Context, jwtConfig *JWTConfig) error {
 	config, err := m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryJWT)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return m.EnsureDefaultJWTConfig(ctx)
 		}
 		return fmt.Errorf("failed to get JWT config: %w", err)

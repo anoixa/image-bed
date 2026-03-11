@@ -119,7 +119,8 @@ func (h *LoginHandler) LoginHandlerFunc(context *gin.Context) {
 			common.RespondError(context, http.StatusUnauthorized, "Invalid credentials")
 			return
 		}
-		common.RespondError(context, http.StatusInternalServerError, "Internal server error")
+		// TODO: remove detailed error message in production
+		common.RespondError(context, http.StatusInternalServerError, err.Error())
 		return
 	}
 

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -53,7 +54,8 @@ func NewLoginService(
 func (s *LoginService) ValidateCredentials(username, password string) (*models.User, bool, error) {
 	user, err := s.accountsRepo.GetUserByUsername(username)
 	if err != nil {
-		if err == accounts.ErrUserNotFound {
+		// 使用 errors.Is 处理可能的错误包装
+		if errors.Is(err, accounts.ErrUserNotFound) {
 			// 用户不存在，返回统一的错误信息，避免泄露用户名是否存在
 			return nil, false, fmt.Errorf("invalid credentials")
 		}

@@ -14,6 +14,7 @@ import (
 	"github.com/anoixa/image-bed/database/models"
 	imagesRepo "github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/storage"
+	"github.com/anoixa/image-bed/utils"
 	"github.com/gin-gonic/gin"
 )
 
@@ -339,9 +340,24 @@ func (h *ConfigHandler) EnableConfig(c *gin.Context) {
 		return
 	}
 
+	// 先获取配置信息，用于后续热重载
+	config, getErr := h.manager.GetConfig(ctx, uint(id), true)
+	if getErr != nil {
+		common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to get config: %v", getErr))
+		return
+	}
+
 	if err := h.manager.Enable(ctx, uint(id)); err != nil {
 		common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to enable config: %v", err))
 		return
+	}
+
+	// 如果是存储配置，启用后热重载到内存
+	if config.Category == models.ConfigCategoryStorage {
+		if err := h.hotReloadStorageConfig(config.ID, config.Config, config.IsDefault); err != nil {
+			// 热重载失败但不回滚启用操作，只是记录日志
+			utils.LogIfDevf("Failed to hot reload storage config %d after enable: %v", config.ID, err)
+		}
 	}
 
 	common.RespondSuccess(c, gin.H{"message": "Config enabled successfully"})
