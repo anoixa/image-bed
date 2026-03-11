@@ -83,35 +83,59 @@ func InitStorage(configs []StorageConfig) error {
 	providersMu.Lock()
 	defer providersMu.Unlock()
 
+	log.Printf("[Storage] ============================================")
+	log.Printf("[Storage] Starting storage initialization...")
+	log.Printf("[Storage] Total configs to initialize: %d", len(configs))
+	log.Printf("[Storage] --------------------------------------------")
+
 	var initErrors []error
+	successCount := 0
+	var defaultCfg *StorageConfig
 
 	for i := range configs {
 		cfg := &configs[i]
 
+		// 记录默认配置信息
+		if cfg.IsDefault {
+			defaultCfg = cfg
+			log.Printf("[Storage] [DEFAULT] ID=%d, Name=%s, Type=%s", cfg.ID, cfg.Name, cfg.Type)
+		}
+
+		log.Printf("[Storage] Initializing: ID=%d, Name=%s, Type=%s, IsDefault=%v",
+			cfg.ID, cfg.Name, cfg.Type, cfg.IsDefault)
+
 		provider, err := createProvider(*cfg)
 		if err != nil {
-			// 记录错误但继续处理其他配置，不中断整个初始化
-			log.Printf("[Storage] Failed to create storage %s (ID=%d): %v", cfg.Name, cfg.ID, err)
-			initErrors = append(initErrors, fmt.Errorf("%s: %w", cfg.Name, err))
+			log.Printf("[Storage] [FAILED] ID=%d, Name=%s, Error: %v", cfg.ID, cfg.Name, err)
+			initErrors = append(initErrors, fmt.Errorf("ID=%d, Name=%s: %w", cfg.ID, cfg.Name, err))
 			continue
 		}
+
 		providers[cfg.ID] = provider
+		successCount++
+		log.Printf("[Storage] [SUCCESS] ID=%d, Name=%s, Type=%s", cfg.ID, cfg.Name, cfg.Type)
+
 		if cfg.IsDefault {
 			defaultProvider = provider
 			defaultID = cfg.ID
+			log.Printf("[Storage] [SET DEFAULT] ID=%d (%s)", cfg.ID, cfg.Name)
 		}
 	}
 
+	log.Printf("[Storage] --------------------------------------------")
+	log.Printf("[Storage] Initialization Summary:")
+	log.Printf("[Storage]   Total: %d, Success: %d, Failed: %d", len(configs), successCount, len(initErrors))
+
 	if defaultProvider == nil {
-		return fmt.Errorf("no default storage available, please check database storage configs")
+		if defaultCfg != nil {
+			log.Printf("[Storage] [ERROR] Default config (ID=%d, Name=%s) failed to initialize", defaultCfg.ID, defaultCfg.Name)
+		}
+		log.Printf("[Storage] ============================================")
+		return fmt.Errorf("no default storage available (checked %d configs, %d failed)", len(configs), len(initErrors))
 	}
 
-	log.Printf("[Storage] Default storage: ID=%d (%s)", defaultID, defaultProvider.Name())
-
-	// 如果有部分配置失败，记录警告但不返回错误
-	if len(initErrors) > 0 {
-		log.Printf("[Storage] Warning: %d of %d storage configs failed to initialize", len(initErrors), len(configs))
-	}
+	log.Printf("[Storage] [DEFAULT STORAGE] ID=%d, Name=%s", defaultID, defaultProvider.Name())
+	log.Printf("[Storage] ============================================")
 
 	return nil
 }

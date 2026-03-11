@@ -298,8 +298,11 @@ func (h *ConfigHandler) SetDefaultConfig(c *gin.Context) {
 	if config.Category == models.ConfigCategoryStorage {
 		_, err := storage.GetByID(uint(id))
 		if err != nil {
-			common.RespondError(c, http.StatusBadRequest, fmt.Sprintf("Storage provider not loaded: %v", err))
-			return
+			// Provider 未加载，尝试热重载
+			if loadErr := h.hotReloadStorageConfig(config.ID, config.Config, false); loadErr != nil {
+				common.RespondError(c, http.StatusBadRequest, fmt.Sprintf("Storage provider not loaded and failed to reload: %v", loadErr))
+				return
+			}
 		}
 	}
 
