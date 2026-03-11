@@ -178,24 +178,3 @@ func (c *Converter) getStorageForImage(image *models.Image) storage.Provider {
 	// Fallback 到默认 storage
 	return c.storage
 }
-
-// TriggerRetry 触发指定变体的重试
-func (c *Converter) TriggerRetry(variant *models.ImageVariant, image *models.Image) {
-	ctx := context.Background()
-	settings, err := c.configManager.GetImageProcessingSettings(ctx)
-	if err != nil {
-		return
-	}
-
-	if variant.RetryCount >= settings.MaxRetries {
-		return
-	}
-
-	if err := c.variantRepo.ResetForRetry(variant.ID, 0); err != nil {
-		utils.LogIfDevf("[Converter] Failed to reset variant %d: %v", variant.ID, err)
-		return
-	}
-
-	// 重新触发统一转换
-	c.TriggerConversion(image)
-}

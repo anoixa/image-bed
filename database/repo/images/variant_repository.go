@@ -127,47 +127,6 @@ func (r *VariantRepository) UpdateFailed(id uint, errMsg string, allowRetry bool
 	return r.db.Model(&models.ImageVariant{}).Where("id = ?", id).Updates(updates).Error
 }
 
-// calculateBackoff 计算指数退避时间
-func calculateBackoff(base time.Duration, retryCount int) time.Duration {
-	if retryCount >= 5 {
-		return 60 * time.Minute
-	}
-	return base * time.Duration(1<<retryCount)
-}
-
-// ResetForRetry CAS：只有 failed 才能转为 pending
-func (r *VariantRepository) ResetForRetry(id uint, baseBackoff time.Duration) error {
-	var variant models.ImageVariant
-	if err := r.db.First(&variant, id).Error; err != nil {
-		return err
-	}
-
-	nextRetry := time.Now().Add(calculateBackoff(baseBackoff, variant.RetryCount))
-
-	result := r.db.Model(&models.ImageVariant{}).Where("id = ? AND status = ?", id, models.VariantStatusFailed).Updates(map[string]interface{}{
-		"retry_count":   gorm.Expr("retry_count + 1"),
-		"next_retry_at": nextRetry,
-		"status":        models.VariantStatusPending,
-		"updated_at":    time.Now(),
-	})
-
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return errors.New("variant is not in failed state")
-	}
-	return nil
-}
-
-// GetRetryableVariants 查询可重试的变体
-func (r *VariantRepository) GetRetryableVariants(now time.Time, limit int) ([]models.ImageVariant, error) {
-	var variants []models.ImageVariant
-	err := r.db.Where("status = ? AND retry_count < ? AND (next_retry_at IS NULL OR next_retry_at <= ?)",
-		models.VariantStatusFailed, 3, now).Limit(limit).Find(&variants).Error
-	return variants, err
-}
-
 // GetImageByID 获取图片信息
 func (r *VariantRepository) GetImageByID(imageID uint) (*models.Image, error) {
 	var image models.Image
@@ -209,20 +168,4 @@ func (r *VariantRepository) GetMissingThumbnailVariants(imageIDs []uint, formats
 	}
 
 	return result, nil
-}
-
-// GetOrphanVariants 获取长时间处于 processing 状态的孤儿任务
-func (r *VariantRepository) GetOrphanVariants(threshold time.Duration, limit int) ([]models.ImageVariant, error) {
-	cutoff := time.Now().Add(-threshold)
-	var variants []models.ImageVariant
-	err := r.db.Where("status = ? AND updated_at < ?", models.VariantStatusProcessing, cutoff).Limit(limit).Find(&variants).Error
-	return variants, err
-}
-
-// ResetProcessingToPending 将 processing 状态重置为 pending
-func (r *VariantRepository) ResetProcessingToPending(id uint) error {
-	return r.db.Model(&models.ImageVariant{}).Where("id = ? AND status = ?", id, models.VariantStatusProcessing).Updates(map[string]interface{}{
-		"status":     models.VariantStatusPending,
-		"updated_at": time.Now(),
-	}).Error
 }
