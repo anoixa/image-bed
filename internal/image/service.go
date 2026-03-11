@@ -480,7 +480,7 @@ func (s *Service) GetImageMetadata(ctx context.Context, identifier string) (*mod
 			cacheCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			if cacheErr := s.cacheHelper.CacheImage(cacheCtx, img); cacheErr != nil {
-				log.Printf("Failed to cache image metadata for '%s': %v", img.Identifier, cacheErr)
+				utils.LogIfDevf("Failed to cache image metadata for '%s': %v", img.Identifier, cacheErr)
 			}
 		}(imagePtr)
 

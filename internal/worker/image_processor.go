@@ -11,6 +11,7 @@ import (
 
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/storage"
+	"github.com/anoixa/image-bed/utils"
 	"gorm.io/gorm"
 )
 
@@ -25,7 +26,7 @@ type ImageDimensionsTask struct {
 // Execute 执行任务
 func (t *ImageDimensionsTask) Execute() {
 	if t.DB == nil {
-		log.Printf("Database not provided for image dimensions task")
+		utils.LogIfDevf("Database not provided for image dimensions task")
 		return
 	}
 
@@ -56,7 +57,7 @@ func (t *ImageDimensionsTask) Execute() {
 	}
 
 	if result.RowsAffected > 0 {
-		log.Printf("Image dimensions updated: %s = %dx%d", t.Identifier, width, height)
+		utils.LogIfDevf("Image dimensions updated: %s = %dx%d", t.Identifier, width, height)
 	}
 }
 
@@ -100,6 +101,6 @@ func ExtractImageDimensionsAsync(identifier string, storageConfigID uint, db *go
 	})
 
 	if !ok {
-		log.Printf("Failed to submit image dimensions task for %s", identifier)
+		utils.LogIfDevf("Failed to submit image dimensions task for %s", identifier)
 	}
 }

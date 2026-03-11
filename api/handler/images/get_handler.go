@@ -170,7 +170,7 @@ func (h *Handler) fetchFromRemoteWithProvider(storagePath string, provider stora
 
 		// 记录大图片日志
 		if len(data) > 10*1024*1024 {
-			log.Printf("[fetchFromRemote] Large image loaded: %d bytes, path: %s", len(data), storagePath)
+			utils.LogIfDevf("[fetchFromRemote] Large image loaded: %d bytes, path: %s", len(data), storagePath)
 		}
 
 		if len(data) < 5*1024*1024 { // 只缓存小于 5MB 的图片
@@ -204,7 +204,7 @@ func (h *Handler) getStorageProvider(storageConfigID uint) storage.Provider {
 
 	provider, err := storage.GetByID(storageConfigID)
 	if err != nil {
-		log.Printf("[getStorageProvider] Storage provider ID=%d not found, falling back to default: %v", storageConfigID, err)
+		utils.LogIfDevf("[getStorageProvider] Storage provider ID=%d not found, falling back to default: %v", storageConfigID, err)
 		return storage.GetDefault()
 	}
 	return provider

@@ -178,7 +178,7 @@ func (s *MinioStorage) StreamTo(ctx context.Context, storagePath string, w http.
 
 		// 对于大文件（>10MB），记录日志并使用更大的缓冲区
 		if stat.Size > 10*1024*1024 {
-			log.Printf("[MinIO] Large file detected: %s (%.2f MB), using optimized streaming", storagePath, float64(stat.Size)/(1024*1024))
+			utils.LogIfDevf("[MinIO] Large file detected: %s (%.2f MB), using optimized streaming", storagePath, float64(stat.Size)/(1024*1024))
 		}
 	}
 	w.WriteHeader(http.StatusOK)
