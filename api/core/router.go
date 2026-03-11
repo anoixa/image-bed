@@ -167,7 +167,7 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
 				imagesGroup.POST("", imageHandler.ListImages)
 				imagesGroup.POST("/delete", imageHandler.DeleteImages)
 				imagesGroup.DELETE("/:identifier", imageHandler.DeleteSingleImage)
-				imagesGroup.PATCH("/:identifier/visibility", imageHandler.UpdateImageVisibility)
+				imagesGroup.PUT("/:identifier/visibility", imageHandler.UpdateImageVisibility)
 			}
 
 			// Static Token
