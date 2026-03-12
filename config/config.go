@@ -64,6 +64,9 @@ type Config struct {
 	// Worker 配置
 	WorkerCount         int `mapstructure:"worker_count"`
 	WorkerMemoryLimitMB int `mapstructure:"worker_memory_limit_mb"`
+
+	// 前端配置
+	ServeFrontend bool `mapstructure:"serve_frontend"` // 是否提供前端静态文件服务，默认 true
 }
 
 // InitConfig Initialize configuration
@@ -157,6 +160,9 @@ func setDefaults() {
 	// Worker 配置默认值
 	viper.SetDefault("worker_count", 0)             // 0 表示使用默认值
 	viper.SetDefault("worker_memory_limit_mb", 512) // Worker 内存限制，默认 512MB
+
+	// 前端配置默认值
+	viper.SetDefault("serve_frontend", true) // 默认启用前端服务
 }
 
 // Addr 返回监听地址，格式为 "host:port"

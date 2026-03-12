@@ -2,6 +2,7 @@ package core
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/anoixa/image-bed/api"
 	"github.com/anoixa/image-bed/api/common"
@@ -19,6 +20,7 @@ import (
 	"github.com/anoixa/image-bed/internal/auth"
 	svcDashboard "github.com/anoixa/image-bed/internal/dashboard"
 	imageSvc "github.com/anoixa/image-bed/internal/image"
+	"github.com/anoixa/image-bed/public"
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
@@ -54,6 +56,10 @@ func RegisterRoutes(router *gin.Engine, deps *RouterDependencies) {
 	registerBasicRoutes(router, deps)
 	registerPublicRoutes(router, deps)
 	registerAPIRoutes(router, deps)
+
+	if deps.Config != nil && deps.Config.ServeFrontend {
+		registerStaticRoutes(router)
+	}
 }
 
 // registerBasicRoutes 注册基础路由
@@ -229,12 +235,10 @@ func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies) {
 		{
 			configsGroup.GET("", configHandler.ListConfigs)
 			configsGroup.POST("", configHandler.CreateConfig)
-			// 子路由必须在 `/:id` 之前注册
 			configsGroup.POST("/:id/test", configHandler.TestConfig)
 			configsGroup.POST("/:id/default", configHandler.SetDefaultConfig)
 			configsGroup.POST("/:id/enable", configHandler.EnableConfig)
 			configsGroup.POST("/:id/disable", configHandler.DisableConfig)
-			// `/:id` 放在子路由之后
 			configsGroup.GET("/:id", configHandler.GetConfig)
 			configsGroup.PUT("/:id", configHandler.UpdateConfig)
 			configsGroup.DELETE("/:id", configHandler.DeleteConfig)
@@ -251,4 +255,55 @@ func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies) {
 		adminGroup.GET("/random-source-album", imageHandler.GetRandomSourceAlbum)
 		adminGroup.POST("/random-source-album", imageHandler.SetRandomSourceAlbum)
 	}
+}
+
+// registerStaticRoutes 注册静态文件路由
+func registerStaticRoutes(router *gin.Engine) {
+	router.NoRoute(func(c *gin.Context) {
+		path := c.Request.URL.Path
+
+		// 跳过 API 路径
+		if isStaticAPIPath(path) {
+			c.JSON(404, gin.H{"error": "Not found"})
+			return
+		}
+
+		// 尝试打开请求的文件
+		filePath := strings.TrimPrefix(path, "/")
+		if filePath == "" {
+			filePath = "index.html"
+		}
+
+		// 检查文件是否存在且不是目录（避免重定向问题）
+		if filePath != "index.html" && public.Exists(filePath) && !public.Exists(filePath+"/index.html") {
+			c.FileFromFS(filePath, public.DistFS)
+			return
+		}
+
+		content, err := public.ReadFile("index.html")
+		if err != nil {
+			c.String(500, "Failed to load index.html")
+			return
+		}
+		c.Data(200, "text/html; charset=utf-8", content)
+	})
+}
+
+// isStaticAPIPath 检查路径是否为 API 路径
+func isStaticAPIPath(p string) bool {
+	apiPaths := []string{
+		"/api/",
+		"/images/",
+		"/thumbnails/",
+		"/health",
+		"/version",
+		"/metrics",
+		"/swagger/",
+	}
+	for _, prefix := range apiPaths {
+		if strings.HasPrefix(p, prefix) {
+			return true
+		}
+	}
+	return false
 }
