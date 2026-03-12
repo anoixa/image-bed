@@ -94,8 +94,10 @@ func registerBasicRoutes(router *gin.Engine, deps *RouterDependencies) {
 		context.JSON(http.StatusOK, middleware.GetMetrics())
 	})
 
-	// Swagger 文档路由
-	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	// Swagger 文档路由（开发环境可用）
+	if !config.IsProduction() {
+		router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	}
 }
 
 // registerPublicRoutes 注册公共接口路由

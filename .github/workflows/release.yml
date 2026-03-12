@@ -132,7 +132,7 @@ jobs:
           GOOS: linux
           GOARCH: amd64
           CGO_ENABLED: 1
-          VERSION: ${{ inputs.version }}
+          VERSION: "release"
         run: |
           go build -trimpath \
             -ldflags="-s -w \
@@ -176,7 +176,7 @@ jobs:
           GOOS: linux
           GOARCH: arm64
           CGO_ENABLED: 1
-          VERSION: ${{ inputs.version }}
+          VERSION: "release"
         run: |
           go build -trimpath \
             -ldflags="-s -w \
@@ -215,15 +215,16 @@ jobs:
 
       - name: Build & Push
         env:
-          VERSION: ${{ inputs.version }}
+          RELEASE_TAG: ${{ inputs.version }}
         run: |
           IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
 
           docker buildx build \
             --platform linux/amd64 \
-            --build-arg VERSION=${VERSION} \
+            --build-arg VERSION=release \
             --build-arg COMMIT_HASH=${GITHUB_SHA} \
-            -t ${IMAGE}:${VERSION}-amd64 \
+            -t ${IMAGE}:${RELEASE_TAG}-amd64 \
+            -t ${IMAGE}:latest-amd64 \
             --push .
 
   ########################################
@@ -252,15 +253,16 @@ jobs:
 
       - name: Build & Push
         env:
-          VERSION: ${{ inputs.version }}
+          RELEASE_TAG: ${{ inputs.version }}
         run: |
           IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
 
           docker buildx build \
             --platform linux/arm64 \
-            --build-arg VERSION=${VERSION} \
+            --build-arg VERSION=release \
             --build-arg COMMIT_HASH=${GITHUB_SHA} \
-            -t ${IMAGE}:${VERSION}-arm64 \
+            -t ${IMAGE}:${RELEASE_TAG}-arm64 \
+            -t ${IMAGE}:latest-arm64 \
             --push .
 
   ########################################

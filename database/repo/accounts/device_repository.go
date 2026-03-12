@@ -53,6 +53,23 @@ func (r *DeviceRepository) GetDeviceByRefreshTokenAndDeviceID(refreshToken strin
 	return &device, nil
 }
 
+// GetDeviceByRefreshToken 通过刷新令牌获取设备
+func (r *DeviceRepository) GetDeviceByRefreshToken(refreshToken string) (*models.Device, error) {
+	hasher := sha256.New()
+	hasher.Write([]byte(refreshToken))
+	hashedToken := hex.EncodeToString(hasher.Sum(nil))
+
+	var device models.Device
+	err := r.db.Where("refresh_token = ? AND expiry > ?", hashedToken, time.Now()).First(&device).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &device, nil
+}
+
 // DeleteRefreshToken 删除刷新令牌
 func (r *DeviceRepository) DeleteRefreshToken(device *models.Device) error {
 	return r.db.Where("device_id", device.DeviceID).Delete(device).Error

@@ -8,7 +8,7 @@ import (
 )
 
 // RandomSourceAlbumConfigKey 随机图源相册配置键
-const RandomSourceAlbumConfigKey = "random_source_album"
+const RandomSourceAlbumConfigKey = "system:random_source_album"
 
 // RandomAlbumConfig 随机图源相册配置
 type RandomAlbumConfig struct {

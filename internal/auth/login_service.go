@@ -155,7 +155,29 @@ func (s *LoginService) RefreshToken(refreshToken, deviceID string) (*RefreshResu
 
 // Logout 执行登出操作
 func (s *LoginService) Logout(deviceID string, refreshToken string) error {
-	return s.devicesRepo.DeleteDeviceByDeviceIDAndRefreshToken(deviceID, refreshToken)
+	// 如果只有 refresh_token，先查找到 device
+	if deviceID == "" && refreshToken != "" {
+		device, err := s.devicesRepo.GetDeviceByRefreshToken(refreshToken)
+		if err != nil {
+			return err
+		}
+		if device == nil {
+			return errors.New("invalid refresh token")
+		}
+		deviceID = device.DeviceID
+	}
+
+	// 如果只有 device_id，直接删除设备
+	if deviceID != "" && refreshToken == "" {
+		return s.devicesRepo.DeleteDeviceByDeviceID(deviceID)
+	}
+
+	// 两者都有，双重验证删除
+	if deviceID != "" && refreshToken != "" {
+		return s.devicesRepo.DeleteDeviceByDeviceIDAndRefreshToken(deviceID, refreshToken)
+	}
+
+	return errors.New("device_id or refresh_token is required")
 }
 
 // GetDeviceExpiry 获取设备令牌的过期时间
