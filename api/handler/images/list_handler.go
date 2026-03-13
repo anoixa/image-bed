@@ -13,6 +13,7 @@ import (
 
 type ImageDTO struct {
 	ID           uint   `json:"id"`
+	Identifier   string `json:"identifier"`
 	URL          string `json:"url"`
 	ThumbnailURL string `json:"thumbnail_url"`
 	OriginalName string `json:"original_name"`
@@ -109,6 +110,7 @@ func (h *Handler) toImageDTO(image *models.Image) *ImageDTO {
 
 	return &ImageDTO{
 		ID:           image.ID,
+		Identifier:   image.Identifier,
 		URL:          imageUrl,
 		ThumbnailURL: thumbnailUrl,
 		OriginalName: image.OriginalName,
