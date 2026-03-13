@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -456,14 +457,7 @@ func (m *Manager) GetStorageConfigs(ctx context.Context) ([]storage.StorageConfi
 			storageCfg.SecretAccessKey = getStringFromMap(configMap, "secret_access_key", "")
 			storageCfg.BucketName = getStringFromMap(configMap, "bucket_name", "")
 			if val, ok := configMap["use_ssl"]; ok {
-				switch v := val.(type) {
-				case bool:
-					storageCfg.UseSSL = v
-				case string:
-					storageCfg.UseSSL = v == "true" || v == "1" || v == "yes"
-				}
-			} else {
-				storageCfg.UseSSL = true
+				storageCfg.UseSSL = parseBool(val, false)
 			}
 		case "webdav":
 			storageCfg.WebDAVURL = getStringFromMap(configMap, "webdav_url", "")
@@ -542,4 +536,26 @@ func (m *Manager) ensureDefaultLocalStorageConfig(ctx context.Context) error {
 
 	log.Println("[ConfigManager] Default local storage config created successfully")
 	return nil
+}
+
+// parseBool 解析任意类型的值为 bool
+// 支持 bool、string、int/float 类型
+func parseBool(val interface{}, defaultValue bool) bool {
+	switch v := val.(type) {
+	case bool:
+		return v
+	case string:
+		return v == "true" || v == "1" || v == "yes" || v == "on"
+	case int:
+		return v != 0
+	case int64:
+		return v != 0
+	case float64:
+		return v != 0
+	case json.Number:
+		n, err := v.Int64()
+		return err == nil && n != 0
+	default:
+		return defaultValue
+	}
 }
