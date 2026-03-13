@@ -55,10 +55,10 @@ func (m *mockCache) Name() string {
 
 // mockRepository 模拟仓库
 type mockRepository struct {
-	overviewStats  *dashboardRepo.OverviewStats
-	timeStats      *dashboardRepo.ImageTimeStats
-	storageStats   []dashboardRepo.StorageStat
-	dailyStats     []dashboardRepo.DailyStat
+	overviewStats *dashboardRepo.OverviewStats
+	timeStats     *dashboardRepo.ImageTimeStats
+	storageStats  []dashboardRepo.StorageStat
+	dailyStats    []dashboardRepo.DailyStat
 }
 
 func (m *mockRepository) GetOverviewStats() (*dashboardRepo.OverviewStats, error) {
@@ -96,8 +96,8 @@ func TestService_GetStats(t *testing.T) {
 			{StorageID: 2, StorageName: "MinIO", Count: 40, Size: 40 * 1024 * 1024},
 		},
 		dailyStats: []dashboardRepo.DailyStat{
-			{Date: "2024-01-01", Count: 5},
-			{Date: "2024-01-02", Count: 3},
+			{Date: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), Count: 5},
+			{Date: time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC), Count: 3},
 		},
 	}
 
@@ -182,8 +182,8 @@ func Test_buildTrendData(t *testing.T) {
 
 	// 使用相对于当前时间的日期
 	now := time.Now()
-	yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
-	today := now.Format("2006-01-02")
+	yesterday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).AddDate(0, 0, -1)
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 
 	dailyStats := []dashboardRepo.DailyStat{
 		{Date: yesterday, Count: 5},

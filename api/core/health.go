@@ -36,23 +36,28 @@ func NewHealthHandler(db *gorm.DB) *HealthHandler {
 // @Router       /health [get]
 func (h *HealthHandler) Handle(context *gin.Context) {
 	sqlDB, _ := h.db.DB()
+	checks := gin.H{
+		"database": checkDatabaseHealth(sqlDB),
+		"cache":    checkCacheHealth(),
+		"storage":  checkStorageHealth(context.Request.Context()),
+	}
+
+	httpStatus := http.StatusOK
+	status := "ok"
+	for _, checkResult := range checks {
+		if result, ok := checkResult.(string); ok && result != "ok" {
+			httpStatus = http.StatusServiceUnavailable
+			status = "error"
+			break
+		}
+	}
+
 	health := gin.H{
-		"status":  "ok",
+		"status":  status,
 		"uptime":  time.Since(startTime).Round(time.Second).String(),
 		"version": config.Version,
 		"commit":  config.CommitHash,
-		"checks": gin.H{
-			"database": checkDatabaseHealth(sqlDB),
-			"cache":    checkCacheHealth(),
-			"storage":  checkStorageHealth(context.Request.Context()),
-		},
-	}
-	httpStatus := http.StatusOK
-	for _, checkResult := range health["checks"].(gin.H) {
-		if result, ok := checkResult.(string); ok && result != "ok" {
-			httpStatus = http.StatusServiceUnavailable
-			break
-		}
+		"checks":  checks,
 	}
 	context.JSON(httpStatus, health)
 }

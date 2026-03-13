@@ -26,7 +26,7 @@ import (
 // @Failure      404         {object}  common.Response  "Image not found"
 // @Failure      500         {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /images/{identifier}/thumbnail [get]
+// @Router       /thumbnails/{identifier} [get]
 func (h *Handler) GetThumbnail(c *gin.Context) {
 	identifier := c.Param("identifier")
 	if identifier == "" {

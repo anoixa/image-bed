@@ -73,16 +73,49 @@ jobs:
       - run: go mod download
       - run: go test -v -race -shuffle=on ./...
 
-########################################
-# Build Binary AMD64
-########################################
+  ########################################
+  # Build Frontend
+  ########################################
+  build-frontend:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: anoixa/image-bed-web
+          ref: main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install and build
+        run: |
+          npm install
+          npm run build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: dist/
+          retention-days: 1
+
+  ########################################
+  # Build Binary AMD64
+  ########################################
   build-binary-amd64:
     name: Binary (amd64)
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, build-frontend]
 
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: public/dist/
 
       - uses: actions/setup-go@v5
         with:
@@ -99,7 +132,7 @@ jobs:
           GOOS: linux
           GOARCH: amd64
           CGO_ENABLED: 1
-          VERSION: ${{ inputs.version }}
+          VERSION: "release"
         run: |
           go build -trimpath \
             -ldflags="-s -w \
@@ -112,16 +145,21 @@ jobs:
           name: image-bed-linux-amd64
           path: image-bed-linux-amd64
 
-########################################
-# Build Binary ARM64
-########################################
+  ########################################
+  # Build Binary ARM64
+  ########################################
   build-binary-arm64:
     name: Binary (arm64)
     runs-on: ubuntu-24.04-arm
-    needs: test
+    needs: [test, build-frontend]
 
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: public/dist/
 
       - uses: actions/setup-go@v5
         with:
@@ -138,7 +176,7 @@ jobs:
           GOOS: linux
           GOARCH: arm64
           CGO_ENABLED: 1
-          VERSION: ${{ inputs.version }}
+          VERSION: "release"
         run: |
           go build -trimpath \
             -ldflags="-s -w \
@@ -151,16 +189,22 @@ jobs:
           name: image-bed-linux-arm64
           path: image-bed-linux-arm64
 
-########################################
-# Docker AMD64
-########################################
+  ########################################
+  # Docker AMD64
+  ########################################
   docker-amd64:
     name: Docker (amd64)
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, build-frontend]
 
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: public/dist/
+
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
@@ -171,27 +215,34 @@ jobs:
 
       - name: Build & Push
         env:
-          VERSION: ${{ inputs.version }}
+          RELEASE_TAG: ${{ inputs.version }}
         run: |
           IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
 
           docker buildx build \
             --platform linux/amd64 \
-            --build-arg VERSION=${VERSION} \
+            --build-arg VERSION=release \
             --build-arg COMMIT_HASH=${GITHUB_SHA} \
-            -t ${IMAGE}:${VERSION}-amd64 \
+            -t ${IMAGE}:${RELEASE_TAG}-amd64 \
+            -t ${IMAGE}:latest-amd64 \
             --push .
 
-########################################
-# Docker ARM64
-########################################
+  ########################################
+  # Docker ARM64
+  ########################################
   docker-arm64:
     name: Docker (arm64)
     runs-on: ubuntu-24.04-arm
-    needs: test
+    needs: [test, build-frontend]
 
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: public/dist/
+
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
@@ -202,20 +253,21 @@ jobs:
 
       - name: Build & Push
         env:
-          VERSION: ${{ inputs.version }}
+          RELEASE_TAG: ${{ inputs.version }}
         run: |
           IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
 
           docker buildx build \
             --platform linux/arm64 \
-            --build-arg VERSION=${VERSION} \
+            --build-arg VERSION=release \
             --build-arg COMMIT_HASH=${GITHUB_SHA} \
-            -t ${IMAGE}:${VERSION}-arm64 \
+            -t ${IMAGE}:${RELEASE_TAG}-arm64 \
+            -t ${IMAGE}:latest-arm64 \
             --push .
 
-########################################
-# Multi Arch
-########################################
+  ########################################
+  # Multi Arch
+  ########################################
   docker-multi:
     name: Multi-Arch Manifest
     runs-on: ubuntu-latest
@@ -240,9 +292,9 @@ jobs:
             ${IMAGE}:${VERSION}-amd64 \
             ${IMAGE}:${VERSION}-arm64
 
-########################################
-# GitHub Release
-########################################
+  ########################################
+  # GitHub Release
+  ########################################
   release:
     name: GitHub Release
     runs-on: ubuntu-latest

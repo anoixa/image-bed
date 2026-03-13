@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/anoixa/image-bed/api/common"
@@ -115,11 +116,12 @@ func (h *LoginHandler) LoginHandlerFunc(context *gin.Context) {
 
 	result, err := h.loginService.Login(req.Username, req.Password)
 	if err != nil {
-		if err.Error() == "invalid credentials" {
+		if strings.Contains(err.Error(), "invalid credentials") {
 			common.RespondError(context, http.StatusUnauthorized, "Invalid credentials")
 			return
 		}
-		common.RespondError(context, http.StatusInternalServerError, "Internal server error")
+		// TODO: remove detailed error message in production
+		common.RespondError(context, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -180,36 +182,30 @@ func (h *LoginHandler) RefreshTokenHandlerFunc(context *gin.Context) {
 
 // LogoutHandlerFunc user logout
 // @Summary      User logout
-// @Description  Logout user by invalidating refresh token (requires refresh_token and device_id cookies)
+// @Description  Logout user by invalidating session. Works with any combination of cookies (refresh_token, device_id, or both). Always clears cookies and returns 200 for idempotency.
 // @Tags         auth
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  common.Response  "Logout successful"
-// @Failure      401  {object}  common.Response  "Refresh token not found / invalid session"
-// @Failure      500  {object}  common.Response  "Internal server error"
+// @Success      200  {object}  common.Response  "Logout successful or already logged out"
 // @Router       /api/auth/logout [post]
 func (h *LoginHandler) LogoutHandlerFunc(context *gin.Context) {
-	deviceID, err := context.Cookie("device_id")
-	if err != nil {
-		common.RespondSuccessMessage(context, "Already logged out or session invalid", nil)
-		return
-	}
+	deviceID, _ := context.Cookie("device_id")
+	refreshToken, _ := context.Cookie("refresh_token")
 
-	refreshToken, err := context.Cookie("refresh_token")
-	if err != nil {
-		common.RespondError(context, http.StatusUnauthorized, "Refresh token not found")
-		return
-	}
-
-	if h.loginService != nil {
-		err = h.loginService.Logout(deviceID, refreshToken)
-		if err != nil {
-			common.RespondError(context, http.StatusUnauthorized, "Invalid session")
-			return
-		}
-	}
-
+	// 始终清理客户端 Cookie
 	h.clearAuthCookies(context)
+
+	// 两者都缺失：已登出状态
+	if deviceID == "" && refreshToken == "" {
+		common.RespondSuccessMessage(context, "Already logged out", nil)
+		return
+	}
+
+	// 至少有一个凭证：执行服务端清理
+	if h.loginService != nil {
+		// 忽略错误，确保幂等性
+		_ = h.loginService.Logout(deviceID, refreshToken)
+	}
 
 	common.RespondSuccessMessage(context, "Logout successful", nil)
 }

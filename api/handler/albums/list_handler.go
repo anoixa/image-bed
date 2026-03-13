@@ -1,6 +1,7 @@
 package albums
 
 import (
+	"context"
 	"log"
 	"math"
 	"net/http"
@@ -56,7 +57,7 @@ type ListAlbumsRequest struct {
 // @Failure      401    {object}  common.Response  "Unauthorized"
 // @Failure      500    {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /albums [get]
+// @Router       /api/v1/albums [get]
 func (h *Handler) ListAlbumsHandler(c *gin.Context) {
 	var req ListAlbumsRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
@@ -99,7 +100,7 @@ func (h *Handler) ListAlbumsHandler(c *gin.Context) {
 
 	// 异步写入缓存
 	utils.SafeGo(func() {
-		ctx := c.Copy().Request.Context()
+		ctx := context.Background()
 		cacheData := CachedAlbumList{
 			Albums: albumDTOs,
 			Total:  total,

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/anoixa/image-bed/utils"
@@ -35,6 +36,14 @@ type MinioStorage struct {
 
 // NewMinioStorage 创建 MinIO 存储提供者
 func NewMinioStorage(cfg MinioConfig) (*MinioStorage, error) {
+	// 清理 endpoint，去除 scheme 前缀（http:// 或 https://）
+	endpoint := cfg.Endpoint
+	if strings.HasPrefix(strings.ToLower(endpoint), "http://") {
+		endpoint = endpoint[7:]
+	} else if strings.HasPrefix(strings.ToLower(endpoint), "https://") {
+		endpoint = endpoint[8:]
+	}
+
 	opts := &minio.Options{
 		Creds:  credentials.NewStaticV4(cfg.AccessKeyID, cfg.SecretAccessKey, ""),
 		Secure: cfg.UseSSL,
@@ -54,7 +63,7 @@ func NewMinioStorage(cfg MinioConfig) (*MinioStorage, error) {
 		}
 	}
 
-	client, err := minio.New(cfg.Endpoint, opts)
+	client, err := minio.New(endpoint, opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize MinIO client: %w", err)
 	}
@@ -178,7 +187,7 @@ func (s *MinioStorage) StreamTo(ctx context.Context, storagePath string, w http.
 
 		// 对于大文件（>10MB），记录日志并使用更大的缓冲区
 		if stat.Size > 10*1024*1024 {
-			log.Printf("[MinIO] Large file detected: %s (%.2f MB), using optimized streaming", storagePath, float64(stat.Size)/(1024*1024))
+			utils.LogIfDevf("[MinIO] Large file detected: %s (%.2f MB), using optimized streaming", storagePath, float64(stat.Size)/(1024*1024))
 		}
 	}
 	w.WriteHeader(http.StatusOK)

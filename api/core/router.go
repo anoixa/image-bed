@@ -2,6 +2,7 @@ package core
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/anoixa/image-bed/api"
 	"github.com/anoixa/image-bed/api/common"
@@ -19,6 +20,7 @@ import (
 	"github.com/anoixa/image-bed/internal/auth"
 	svcDashboard "github.com/anoixa/image-bed/internal/dashboard"
 	imageSvc "github.com/anoixa/image-bed/internal/image"
+	"github.com/anoixa/image-bed/public"
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
@@ -54,6 +56,10 @@ func RegisterRoutes(router *gin.Engine, deps *RouterDependencies) {
 	registerBasicRoutes(router, deps)
 	registerPublicRoutes(router, deps)
 	registerAPIRoutes(router, deps)
+
+	if deps.Config != nil && deps.Config.ServeFrontend {
+		registerStaticRoutes(router)
+	}
 }
 
 // registerBasicRoutes 注册基础路由
@@ -61,6 +67,14 @@ func registerBasicRoutes(router *gin.Engine, deps *RouterDependencies) {
 	healthHandler := NewHealthHandler(deps.DB)
 	router.Any("/health", healthHandler.Handle)
 
+	// Version 获取版本信息
+	// @Summary      Get version
+	// @Description  Get application version and commit hash
+	// @Tags         system
+	// @Accept       json
+	// @Produce      json
+	// @Success      200  {object}  common.Response  "Version info"
+	// @Router       /version [get]
 	router.GET("/version", func(context *gin.Context) {
 		common.RespondSuccess(context, gin.H{
 			"version": deps.ServerVersion.Version,
@@ -68,12 +82,22 @@ func registerBasicRoutes(router *gin.Engine, deps *RouterDependencies) {
 		})
 	})
 
+	// Metrics 获取指标
+	// @Summary      Get metrics
+	// @Description  Get application metrics and statistics
+	// @Tags         system
+	// @Accept       json
+	// @Produce      json
+	// @Success      200  {object}  common.Response  "Metrics data"
+	// @Router       /metrics [get]
 	router.GET("/metrics", func(context *gin.Context) {
 		context.JSON(http.StatusOK, middleware.GetMetrics())
 	})
 
-	// Swagger 文档路由
-	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	// Swagger 文档路由（开发环境可用）
+	if !config.IsProduction() {
+		router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	}
 }
 
 // registerPublicRoutes 注册公共接口路由
@@ -91,6 +115,7 @@ func registerPublicRoutes(router *gin.Engine, deps *RouterDependencies) {
 	publicGroup := router.Group("/images")
 	publicGroup.Use(deps.ImageRateLimiter.Middleware())
 	{
+		publicGroup.GET("/random", imageHandler.RandomImage)
 		publicGroup.GET("/:identifier", imageHandler.GetImage)
 	}
 
@@ -100,12 +125,6 @@ func registerPublicRoutes(router *gin.Engine, deps *RouterDependencies) {
 		thumbnailGroup.GET("/:identifier", imageHandler.GetThumbnail)
 	}
 
-	// 随机图片API
-	randomGroup := router.Group("/random")
-	randomGroup.Use(deps.ImageRateLimiter.Middleware())
-	{
-		randomGroup.GET("", imageHandler.RandomImage)
-	}
 }
 
 // registerAPIRoutes 注册 API 路由
@@ -156,7 +175,7 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
 				imagesGroup.POST("", imageHandler.ListImages)
 				imagesGroup.POST("/delete", imageHandler.DeleteImages)
 				imagesGroup.DELETE("/:identifier", imageHandler.DeleteSingleImage)
-				imagesGroup.PATCH("/:identifier/visibility", imageHandler.UpdateImageVisibility)
+				imagesGroup.PUT("/:identifier/visibility", imageHandler.UpdateImageVisibility)
 			}
 
 			// Static Token
@@ -208,7 +227,7 @@ func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies) {
 	}
 	imageHandler := handlerImages.NewHandler(deps.CacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager, cfg, baseURL, uploadMaxBatchTotalMB)
 
-	configHandler := admin.NewConfigHandler(deps.ConfigManager)
+	configHandler := admin.NewConfigHandler(deps.ConfigManager, deps.Repositories.ImagesRepo)
 	adminGroup := v1.Group("/admin")
 	adminGroup.Use(middleware.Authorize("jwt"))
 	adminGroup.Use(middleware.RequireRole("admin"))
@@ -218,13 +237,13 @@ func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies) {
 		{
 			configsGroup.GET("", configHandler.ListConfigs)
 			configsGroup.POST("", configHandler.CreateConfig)
-			configsGroup.GET("/:id", configHandler.GetConfig)
-			configsGroup.PUT("/:id", configHandler.UpdateConfig)
-			configsGroup.DELETE("/:id", configHandler.DeleteConfig)
 			configsGroup.POST("/:id/test", configHandler.TestConfig)
 			configsGroup.POST("/:id/default", configHandler.SetDefaultConfig)
 			configsGroup.POST("/:id/enable", configHandler.EnableConfig)
 			configsGroup.POST("/:id/disable", configHandler.DisableConfig)
+			configsGroup.GET("/:id", configHandler.GetConfig)
+			configsGroup.PUT("/:id", configHandler.UpdateConfig)
+			configsGroup.DELETE("/:id", configHandler.DeleteConfig)
 		}
 
 		adminGroup.GET("/storage/providers", configHandler.ListStorageProviders)
@@ -238,4 +257,55 @@ func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies) {
 		adminGroup.GET("/random-source-album", imageHandler.GetRandomSourceAlbum)
 		adminGroup.POST("/random-source-album", imageHandler.SetRandomSourceAlbum)
 	}
+}
+
+// registerStaticRoutes 注册静态文件路由
+func registerStaticRoutes(router *gin.Engine) {
+	router.NoRoute(func(c *gin.Context) {
+		path := c.Request.URL.Path
+
+		// 跳过 API 路径
+		if isStaticAPIPath(path) {
+			c.JSON(404, gin.H{"error": "Not found"})
+			return
+		}
+
+		// 尝试打开请求的文件
+		filePath := strings.TrimPrefix(path, "/")
+		if filePath == "" {
+			filePath = "index.html"
+		}
+
+		// 检查文件是否存在且不是目录（避免重定向问题）
+		if filePath != "index.html" && public.Exists(filePath) && !public.Exists(filePath+"/index.html") {
+			c.FileFromFS(filePath, public.DistFS)
+			return
+		}
+
+		content, err := public.ReadFile("index.html")
+		if err != nil {
+			c.String(500, "Failed to load index.html")
+			return
+		}
+		c.Data(200, "text/html; charset=utf-8", content)
+	})
+}
+
+// isStaticAPIPath 检查路径是否为 API 路径
+func isStaticAPIPath(p string) bool {
+	apiPaths := []string{
+		"/api/",
+		"/images/",
+		"/thumbnails/",
+		"/health",
+		"/version",
+		"/metrics",
+		"/swagger/",
+	}
+	for _, prefix := range apiPaths {
+		if strings.HasPrefix(p, prefix) {
+			return true
+		}
+	}
+	return false
 }

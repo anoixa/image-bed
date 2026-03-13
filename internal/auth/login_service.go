@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -53,11 +54,16 @@ func NewLoginService(
 func (s *LoginService) ValidateCredentials(username, password string) (*models.User, bool, error) {
 	user, err := s.accountsRepo.GetUserByUsername(username)
 	if err != nil {
+		// 使用 errors.Is 处理可能的错误包装
+		if errors.Is(err, accounts.ErrUserNotFound) {
+			// 用户不存在，返回统一的错误信息，避免泄露用户名是否存在
+			return nil, false, fmt.Errorf("invalid credentials")
+		}
 		return nil, false, fmt.Errorf("failed to get user: %w", err)
 	}
 
 	if user == nil {
-		return nil, false, nil
+		return nil, false, fmt.Errorf("invalid credentials")
 	}
 
 	ok, err := cryptopackage.ComparePasswordAndHash(password, user.Password)
@@ -65,7 +71,11 @@ func (s *LoginService) ValidateCredentials(username, password string) (*models.U
 		return nil, false, fmt.Errorf("password comparison failed: %w", err)
 	}
 
-	return user, ok, nil
+	if !ok {
+		return nil, false, fmt.Errorf("invalid credentials")
+	}
+
+	return user, true, nil
 }
 
 // Login 执行登录操作
@@ -145,7 +155,29 @@ func (s *LoginService) RefreshToken(refreshToken, deviceID string) (*RefreshResu
 
 // Logout 执行登出操作
 func (s *LoginService) Logout(deviceID string, refreshToken string) error {
-	return s.devicesRepo.DeleteDeviceByDeviceIDAndRefreshToken(deviceID, refreshToken)
+	// 如果只有 refresh_token，先查找到 device
+	if deviceID == "" && refreshToken != "" {
+		device, err := s.devicesRepo.GetDeviceByRefreshToken(refreshToken)
+		if err != nil {
+			return err
+		}
+		if device == nil {
+			return errors.New("invalid refresh token")
+		}
+		deviceID = device.DeviceID
+	}
+
+	// 如果只有 device_id，直接删除设备
+	if deviceID != "" && refreshToken == "" {
+		return s.devicesRepo.DeleteDeviceByDeviceID(deviceID)
+	}
+
+	// 两者都有，双重验证删除
+	if deviceID != "" && refreshToken != "" {
+		return s.devicesRepo.DeleteDeviceByDeviceIDAndRefreshToken(deviceID, refreshToken)
+	}
+
+	return errors.New("device_id or refresh_token is required")
 }
 
 // GetDeviceExpiry 获取设备令牌的过期时间

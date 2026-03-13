@@ -75,7 +75,7 @@ func (h *Handler) executeTokenAction(c *gin.Context, action TokenAction, actionV
 // @Failure      404  {object}  common.Response  "API key not found"
 // @Failure      500  {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /keys/{id}/disable [post]
+// @Router       /api/v1/token/{id}/disable [post]
 func (h *Handler) DisableToken(c *gin.Context) {
 	h.executeTokenAction(c, h.svc.DisableApiToken, "disable", "disabled")
 }
@@ -93,7 +93,7 @@ func (h *Handler) DisableToken(c *gin.Context) {
 // @Failure      404  {object}  common.Response  "API key not found"
 // @Failure      500  {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /keys/{id}/revoke [post]
+// @Router       /api/v1/token/{id} [delete]
 func (h *Handler) RevokeToken(c *gin.Context) {
 	h.executeTokenAction(c, h.svc.RevokeApiToken, "revoke", "revoked")
 }
@@ -111,7 +111,7 @@ func (h *Handler) RevokeToken(c *gin.Context) {
 // @Failure      404  {object}  common.Response  "API key not found"
 // @Failure      500  {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /keys/{id}/enable [post]
+// @Router       /api/v1/token/{id}/enable [post]
 func (h *Handler) EnableToken(c *gin.Context) {
 	h.executeTokenAction(c, h.svc.EnableApiToken, "enable", "enabled")
 }

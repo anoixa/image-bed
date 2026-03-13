@@ -49,7 +49,7 @@ type AlbumDetailResponse struct {
 // @Failure      404  {object}  common.Response  "Album not found"
 // @Failure      500  {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /albums/{id} [get]
+// @Router       /api/v1/albums/{id} [get]
 func (h *Handler) GetAlbumDetailHandler(c *gin.Context) {
 	// 获取相册 ID
 	albumIDStr := c.Param("id")

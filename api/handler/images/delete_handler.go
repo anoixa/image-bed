@@ -9,7 +9,7 @@ import (
 )
 
 type DeleteRequestBody struct {
-	ImageID []string `json:"identifier" binding:"required"`
+	Identifiers []string `json:"identifiers" binding:"required"`
 }
 
 // DeleteImages 批量删除图片
@@ -18,13 +18,13 @@ type DeleteRequestBody struct {
 // @Tags         images
 // @Accept       json
 // @Produce      json
-// @Param        request  body      DeleteRequestBody  true  "List of image identifiers to delete"
+// @Param        request  body      DeleteRequestBody  true  "List of image identifiers to delete (field name: identifiers)"
 // @Success      200      {object}  common.Response  "Delete request processed successfully"
 // @Failure      400      {object}  common.Response  "Invalid request body"
 // @Failure      401      {object}  common.Response  "Unauthorized"
 // @Failure      500      {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /images/delete [post]
+// @Router       /api/v1/images/delete [post]
 func (h *Handler) DeleteImages(c *gin.Context) {
 	userID := c.GetUint(middleware.ContextUserIDKey)
 	if userID == 0 {
@@ -34,17 +34,17 @@ func (h *Handler) DeleteImages(c *gin.Context) {
 
 	var requestBody DeleteRequestBody
 	if err := c.ShouldBindJSON(&requestBody); err != nil {
-		common.RespondError(c, http.StatusBadRequest, "Invalid request body. 'identifier' field with a list of strings is required.")
+		common.RespondError(c, http.StatusBadRequest, "Invalid request body. 'identifiers' field with a list of strings is required.")
 		return
 	}
 
-	if len(requestBody.ImageID) == 0 {
+	if len(requestBody.Identifiers) == 0 {
 		common.RespondError(c, http.StatusBadRequest, "No image identifiers provided for deletion.")
 		return
 	}
 
 	ctx := c.Request.Context()
-	result, err := h.imageService.DeleteBatch(ctx, requestBody.ImageID, userID)
+	result, err := h.imageService.DeleteBatch(ctx, requestBody.Identifiers, userID)
 	if err != nil {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to delete images")
 		return
@@ -66,7 +66,7 @@ func (h *Handler) DeleteImages(c *gin.Context) {
 // @Failure      404         {object}  common.Response  "Image not found"
 // @Failure      500         {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /images/{identifier} [delete]
+// @Router       /api/v1/images/{identifier} [delete]
 func (h *Handler) DeleteSingleImage(c *gin.Context) {
 	userID := c.GetUint(middleware.ContextUserIDKey)
 	if userID == 0 {

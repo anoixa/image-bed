@@ -358,14 +358,18 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 		}
 
 		s.submitBackgroundTask(func() { s.warmCache(restored) })
-		s.submitBackgroundTask(func() { s.converter.TriggerConversion(restored) })
+		if s.converter != nil {
+			s.submitBackgroundTask(func() { s.converter.TriggerConversion(restored) })
+		}
 
 		return restored, true, nil
 	}
 
 	if err == nil {
 		s.submitBackgroundTask(func() { s.warmCache(img) })
-		s.submitBackgroundTask(func() { s.converter.TriggerConversion(img) })
+		if s.converter != nil {
+			s.submitBackgroundTask(func() { s.converter.TriggerConversion(img) })
+		}
 		return img, true, nil
 	}
 
@@ -409,7 +413,9 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 	}
 
 	s.submitBackgroundTask(func() { s.warmCache(newImg) })
-	s.submitBackgroundTask(func() { s.converter.TriggerConversion(newImg) })
+	if s.converter != nil {
+		s.submitBackgroundTask(func() { s.converter.TriggerConversion(newImg) })
+	}
 
 	return newImg, false, nil
 }
@@ -474,7 +480,7 @@ func (s *Service) GetImageMetadata(ctx context.Context, identifier string) (*mod
 			cacheCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			if cacheErr := s.cacheHelper.CacheImage(cacheCtx, img); cacheErr != nil {
-				log.Printf("Failed to cache image metadata for '%s': %v", img.Identifier, cacheErr)
+				utils.LogIfDevf("Failed to cache image metadata for '%s': %v", img.Identifier, cacheErr)
 			}
 		}(imagePtr)
 
@@ -795,7 +801,7 @@ func (s *Service) GetImageWithVariant(ctx context.Context, identifier string, ac
 		}, nil
 	}
 
-	if !variantResult.IsOriginal && variantResult.Variant == nil {
+	if !variantResult.IsOriginal && variantResult.Variant == nil && s.converter != nil {
 		s.submitBackgroundTask(func() {
 			s.converter.TriggerConversion(image)
 		})
@@ -849,7 +855,7 @@ func (s *Service) GetRandomImageWithVariant(ctx context.Context, filter *images.
 		}, nil
 	}
 
-	if !variantResult.IsOriginal && variantResult.Variant == nil {
+	if !variantResult.IsOriginal && variantResult.Variant == nil && s.converter != nil {
 		s.submitBackgroundTask(func() {
 			s.converter.TriggerConversion(image)
 		})

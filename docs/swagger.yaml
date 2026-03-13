@@ -154,12 +154,12 @@ definitions:
     type: object
   images.DeleteRequestBody:
     properties:
-      identifier:
+      identifiers:
         items:
           type: string
         type: array
     required:
-    - identifier
+    - identifiers
     type: object
   images.ImageDTO:
     properties:
@@ -225,6 +225,13 @@ definitions:
     required:
     - limit
     - page
+    type: object
+  images.SetRandomSourceAlbumRequest:
+    properties:
+      album_id:
+        type: integer
+      include_all_public:
+        type: boolean
     type: object
   images.UpdateVisibilityRequest:
     properties:
@@ -305,7 +312,99 @@ definitions:
 info:
   contact: {}
 paths:
-  /admin/configs:
+  /api/auth/login:
+    post:
+      consumes:
+      - application/json
+      description: Authenticate user with username and password, returns access token
+        and sets refresh token cookie
+      parameters:
+      - description: Login credentials
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.userAuthRequestBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Login successful
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/api.loginResponse'
+              type: object
+        "400":
+          description: Invalid request body
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Invalid credentials
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      summary: User login
+      tags:
+      - auth
+  /api/auth/logout:
+    post:
+      consumes:
+      - application/json
+      description: Logout user by invalidating refresh token (requires refresh_token
+        and device_id cookies)
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Logout successful
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Refresh token not found / invalid session
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      summary: User logout
+      tags:
+      - auth
+  /api/auth/refresh:
+    post:
+      consumes:
+      - application/json
+      description: Refresh access token using refresh_token and device_id cookies
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Refresh token successful
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/api.loginResponse'
+              type: object
+        "401":
+          description: Refresh token or device ID not found / invalid
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      summary: Refresh access token
+      tags:
+      - auth
+  /api/v1/admin/configs:
     get:
       consumes:
       - application/json
@@ -379,7 +478,7 @@ paths:
       summary: Create configuration
       tags:
       - admin
-  /admin/configs/{id}:
+  /api/v1/admin/configs/{id}:
     delete:
       consumes:
       - application/json
@@ -504,7 +603,7 @@ paths:
       summary: Update configuration
       tags:
       - admin
-  /admin/configs/{id}/default:
+  /api/v1/admin/configs/{id}/default:
     post:
       consumes:
       - application/json
@@ -543,7 +642,7 @@ paths:
       summary: Set default configuration
       tags:
       - admin
-  /admin/configs/{id}/disable:
+  /api/v1/admin/configs/{id}/disable:
     post:
       consumes:
       - application/json
@@ -578,7 +677,7 @@ paths:
       summary: Disable configuration
       tags:
       - admin
-  /admin/configs/{id}/enable:
+  /api/v1/admin/configs/{id}/enable:
     post:
       consumes:
       - application/json
@@ -613,16 +712,22 @@ paths:
       summary: Enable configuration
       tags:
       - admin
-  /admin/configs/test:
+  /api/v1/admin/configs/{id}/test:
     post:
       consumes:
       - application/json
-      description: Test a configuration without saving it (storage connection test)
+      description: |-
+        Test a configuration without saving it (storage connection test).
+        If no body is provided, tests the existing configuration by ID.
       parameters:
-      - description: Configuration to test
+      - description: Config ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Configuration to test (optional)
         in: body
         name: request
-        required: true
         schema:
           $ref: '#/definitions/models.TestConfigRequest'
       produces:
@@ -645,7 +750,7 @@ paths:
       summary: Test configuration
       tags:
       - admin
-  /admin/conversion/config:
+  /api/v1/admin/conversion:
     get:
       consumes:
       - application/json
@@ -707,7 +812,69 @@ paths:
       summary: Update image processing configuration
       tags:
       - admin
-  /admin/storage/providers:
+  /api/v1/admin/random-source-album:
+    get:
+      consumes:
+      - application/json
+      description: Get the currently configured random image source album ID and whether
+        to include all public images
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Get random source album configuration
+      tags:
+      - admin
+    post:
+      consumes:
+      - application/json
+      description: Configure the source album for random image selection. Use album_id=0
+        for all public images, or specify an album ID
+      parameters:
+      - description: Random source configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/images.SetRandomSourceAlbumRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Configuration updated successfully
+          schema:
+            $ref: '#/definitions/common.Response'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Set random source album configuration
+      tags:
+      - admin
+  /api/v1/admin/storage/providers:
     get:
       consumes:
       - application/json
@@ -728,7 +895,7 @@ paths:
       summary: List storage providers
       tags:
       - admin
-  /admin/storage/reload/{id}:
+  /api/v1/admin/storage/reload/{id}:
     post:
       consumes:
       - application/json
@@ -756,7 +923,7 @@ paths:
       summary: Reload storage configuration
       tags:
       - admin
-  /albums:
+  /api/v1/albums:
     get:
       consumes:
       - application/json
@@ -843,7 +1010,7 @@ paths:
       summary: Create album
       tags:
       - albums
-  /albums/{id}:
+  /api/v1/albums/{id}:
     delete:
       consumes:
       - application/json
@@ -982,7 +1149,7 @@ paths:
       summary: Update album
       tags:
       - albums
-  /albums/{id}/images:
+  /api/v1/albums/{id}/images:
     post:
       consumes:
       - application/json
@@ -1031,7 +1198,7 @@ paths:
       summary: Add images to album
       tags:
       - albums
-  /albums/{id}/images/{imageId}:
+  /api/v1/albums/{id}/images/{imageId}:
     delete:
       consumes:
       - application/json
@@ -1079,99 +1246,7 @@ paths:
       summary: Remove image from album
       tags:
       - albums
-  /api/auth/login:
-    post:
-      consumes:
-      - application/json
-      description: Authenticate user with username and password, returns access token
-        and sets refresh token cookie
-      parameters:
-      - description: Login credentials
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/api.userAuthRequestBody'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Login successful
-          schema:
-            allOf:
-            - $ref: '#/definitions/common.Response'
-            - properties:
-                data:
-                  $ref: '#/definitions/api.loginResponse'
-              type: object
-        "400":
-          description: Invalid request body
-          schema:
-            $ref: '#/definitions/common.Response'
-        "401":
-          description: Invalid credentials
-          schema:
-            $ref: '#/definitions/common.Response'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/common.Response'
-      summary: User login
-      tags:
-      - auth
-  /api/auth/logout:
-    post:
-      consumes:
-      - application/json
-      description: Logout user by invalidating refresh token (requires refresh_token
-        and device_id cookies)
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Logout successful
-          schema:
-            $ref: '#/definitions/common.Response'
-        "401":
-          description: Refresh token not found / invalid session
-          schema:
-            $ref: '#/definitions/common.Response'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/common.Response'
-      summary: User logout
-      tags:
-      - auth
-  /api/auth/refresh:
-    post:
-      consumes:
-      - application/json
-      description: Refresh access token using refresh_token and device_id cookies
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Refresh token successful
-          schema:
-            allOf:
-            - $ref: '#/definitions/common.Response'
-            - properties:
-                data:
-                  $ref: '#/definitions/api.loginResponse'
-              type: object
-        "401":
-          description: Refresh token or device ID not found / invalid
-          schema:
-            $ref: '#/definitions/common.Response'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/common.Response'
-      summary: Refresh access token
-      tags:
-      - auth
-  /dashboard/stats:
+  /api/v1/dashboard/stats:
     get:
       consumes:
       - application/json
@@ -1197,7 +1272,7 @@ paths:
       summary: Get dashboard statistics
       tags:
       - dashboard
-  /dashboard/stats/refresh:
+  /api/v1/dashboard/stats/refresh:
     post:
       consumes:
       - application/json
@@ -1222,29 +1297,48 @@ paths:
       summary: Refresh dashboard statistics
       tags:
       - dashboard
-  /health:
-    get:
+  /api/v1/images:
+    post:
       consumes:
       - application/json
-      description: Check the health status of the application and its dependencies
-        (database, cache, storage)
+      description: Get paginated list of images with optional filters
+      parameters:
+      - description: Filter and pagination parameters
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/images.ImageRequestBody'
       produces:
       - application/json
       responses:
         "200":
-          description: Service is healthy
+          description: Image list
           schema:
-            additionalProperties: true
-            type: object
-        "503":
-          description: Service is unhealthy
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/images.ImageListResponse'
+              type: object
+        "400":
+          description: Invalid request body
           schema:
-            additionalProperties: true
-            type: object
-      summary: Health check
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: List images
       tags:
-      - health
-  /images/{identifier}:
+      - images
+  /api/v1/images/{identifier}:
     delete:
       consumes:
       - application/json
@@ -1283,89 +1377,7 @@ paths:
       summary: Delete single image
       tags:
       - images
-    get:
-      consumes:
-      - application/json
-      description: Retrieve an image by its unique identifier. Returns original or
-        converted format based on Accept header
-      parameters:
-      - description: Image identifier
-        in: path
-        name: identifier
-        required: true
-        type: string
-      produces:
-      - image/*
-      responses:
-        "200":
-          description: Image data
-          schema:
-            type: file
-        "400":
-          description: Invalid identifier
-          schema:
-            $ref: '#/definitions/common.Response'
-        "403":
-          description: Private image, access denied
-          schema:
-            $ref: '#/definitions/common.Response'
-        "404":
-          description: Image not found
-          schema:
-            $ref: '#/definitions/common.Response'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/common.Response'
-      security:
-      - ApiKeyAuth: []
-      summary: Get image by identifier
-      tags:
-      - images
-  /images/{identifier}/thumbnail:
-    get:
-      consumes:
-      - application/json
-      description: Retrieve a thumbnail version of an image with specified width
-      parameters:
-      - description: Image identifier
-        in: path
-        name: identifier
-        required: true
-        type: string
-      - description: 'Thumbnail width (default: 300)'
-        in: query
-        name: width
-        type: integer
-      produces:
-      - image/webp
-      responses:
-        "200":
-          description: Thumbnail image data
-          schema:
-            type: file
-        "400":
-          description: Invalid identifier
-          schema:
-            $ref: '#/definitions/common.Response'
-        "403":
-          description: Private image, access denied
-          schema:
-            $ref: '#/definitions/common.Response'
-        "404":
-          description: Image not found
-          schema:
-            $ref: '#/definitions/common.Response'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/common.Response'
-      security:
-      - ApiKeyAuth: []
-      summary: Get image thumbnail
-      tags:
-      - images
-  /images/{identifier}/visibility:
+  /api/v1/images/{identifier}/visibility:
     put:
       consumes:
       - application/json
@@ -1414,13 +1426,13 @@ paths:
       summary: Update image visibility
       tags:
       - images
-  /images/delete:
+  /api/v1/images/delete:
     post:
       consumes:
       - application/json
       description: Delete multiple images by their identifiers in a single request
       parameters:
-      - description: List of image identifiers to delete
+      - description: 'List of image identifiers to delete (field name: identifiers)'
         in: body
         name: request
         required: true
@@ -1450,101 +1462,7 @@ paths:
       summary: Delete multiple images
       tags:
       - images
-  /images/list:
-    post:
-      consumes:
-      - application/json
-      description: Get paginated list of images with optional filters
-      parameters:
-      - description: Filter and pagination parameters
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/images.ImageRequestBody'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Image list
-          schema:
-            allOf:
-            - $ref: '#/definitions/common.Response'
-            - properties:
-                data:
-                  $ref: '#/definitions/images.ImageListResponse'
-              type: object
-        "400":
-          description: Invalid request body
-          schema:
-            $ref: '#/definitions/common.Response'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/common.Response'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/common.Response'
-      security:
-      - ApiKeyAuth: []
-      summary: List images
-      tags:
-      - images
-  /images/random:
-    get:
-      consumes:
-      - application/json
-      description: Get a random image, optionally filtered by album and dimensions
-      parameters:
-      - description: 'Response format: json or image (default: image)'
-        in: query
-        name: format
-        type: string
-      - description: Filter by album ID
-        in: query
-        name: album_id
-        type: integer
-      - description: Minimum image width
-        in: query
-        name: min_width
-        type: integer
-      - description: Minimum image height
-        in: query
-        name: min_height
-        type: integer
-      - description: Maximum image width
-        in: query
-        name: max_width
-        type: integer
-      - description: Maximum image height
-        in: query
-        name: max_height
-        type: integer
-      produces:
-      - image/*
-      - application/json
-      responses:
-        "200":
-          description: Image metadata (when format=json)
-          schema:
-            $ref: '#/definitions/common.Response'
-        "204":
-          description: No content - no matching images found
-          schema:
-            type: string
-        "400":
-          description: Invalid query parameters
-          schema:
-            $ref: '#/definitions/common.Response'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/common.Response'
-      summary: Get random image
-      tags:
-      - images
-  /images/upload:
+  /api/v1/images/upload:
     post:
       consumes:
       - multipart/form-data
@@ -1592,7 +1510,7 @@ paths:
       summary: Upload single image
       tags:
       - images
-  /images/upload/batch:
+  /api/v1/images/uploads:
     post:
       consumes:
       - multipart/form-data
@@ -1642,7 +1560,7 @@ paths:
       summary: Upload multiple images
       tags:
       - images
-  /keys:
+  /api/v1/token:
     get:
       consumes:
       - application/json
@@ -1703,7 +1621,46 @@ paths:
       summary: Create API key
       tags:
       - keys
-  /keys/{id}/disable:
+  /api/v1/token/{id}:
+    delete:
+      consumes:
+      - application/json
+      description: Permanently revoke an API key (cannot be re-enabled)
+      parameters:
+      - description: API Key ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: API key revoked successfully
+          schema:
+            $ref: '#/definitions/common.Response'
+        "400":
+          description: Invalid API key ID
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "404":
+          description: API key not found
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Revoke API key
+      tags:
+      - keys
+  /api/v1/token/{id}/disable:
     post:
       consumes:
       - application/json
@@ -1742,7 +1699,7 @@ paths:
       summary: Disable API key
       tags:
       - keys
-  /keys/{id}/enable:
+  /api/v1/token/{id}/enable:
     post:
       consumes:
       - application/json
@@ -1781,34 +1738,57 @@ paths:
       summary: Enable API key
       tags:
       - keys
-  /keys/{id}/revoke:
-    post:
+  /health:
+    get:
       consumes:
       - application/json
-      description: Permanently revoke an API key (cannot be re-enabled)
-      parameters:
-      - description: API Key ID
-        in: path
-        name: id
-        required: true
-        type: integer
+      description: Check the health status of the application and its dependencies
+        (database, cache, storage)
       produces:
       - application/json
       responses:
         "200":
-          description: API key revoked successfully
+          description: Service is healthy
           schema:
-            $ref: '#/definitions/common.Response'
+            additionalProperties: true
+            type: object
+        "503":
+          description: Service is unhealthy
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Health check
+      tags:
+      - health
+  /images/{identifier}:
+    get:
+      consumes:
+      - application/json
+      description: Retrieve an image by its unique identifier. Returns original or
+        converted format based on Accept header
+      parameters:
+      - description: Image identifier
+        in: path
+        name: identifier
+        required: true
+        type: string
+      produces:
+      - image/*
+      responses:
+        "200":
+          description: Image data
+          schema:
+            type: file
         "400":
-          description: Invalid API key ID
+          description: Invalid identifier
           schema:
             $ref: '#/definitions/common.Response'
-        "401":
-          description: Unauthorized
+        "403":
+          description: Private image, access denied
           schema:
             $ref: '#/definitions/common.Response'
         "404":
-          description: API key not found
+          description: Image not found
           schema:
             $ref: '#/definitions/common.Response'
         "500":
@@ -1817,7 +1797,103 @@ paths:
             $ref: '#/definitions/common.Response'
       security:
       - ApiKeyAuth: []
-      summary: Revoke API key
+      summary: Get image by identifier
       tags:
-      - keys
+      - images
+  /images/random:
+    get:
+      consumes:
+      - application/json
+      description: Get a random image, optionally filtered by album and dimensions
+      parameters:
+      - description: 'Response format: json or image (default: image)'
+        in: query
+        name: format
+        type: string
+      - description: Filter by album ID (0 = all public images, >0 = specific album)
+        in: query
+        name: album_id
+        type: integer
+      - description: Minimum image width
+        in: query
+        name: min_width
+        type: integer
+      - description: Minimum image height
+        in: query
+        name: min_height
+        type: integer
+      - description: Maximum image width
+        in: query
+        name: max_width
+        type: integer
+      - description: Maximum image height
+        in: query
+        name: max_height
+        type: integer
+      produces:
+      - image/*
+      - application/json
+      responses:
+        "200":
+          description: Image metadata (when format=json)
+          schema:
+            $ref: '#/definitions/common.Response'
+        "204":
+          description: No content - no matching images found
+          schema:
+            type: string
+        "400":
+          description: Invalid query parameters
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      summary: Get random image
+      tags:
+      - images
+  /thumbnails/{identifier}:
+    get:
+      consumes:
+      - application/json
+      description: Retrieve a thumbnail version of an image with specified width
+      parameters:
+      - description: Image identifier
+        in: path
+        name: identifier
+        required: true
+        type: string
+      - description: 'Thumbnail width (default: 300)'
+        in: query
+        name: width
+        type: integer
+      produces:
+      - image/webp
+      responses:
+        "200":
+          description: Thumbnail image data
+          schema:
+            type: file
+        "400":
+          description: Invalid identifier
+          schema:
+            $ref: '#/definitions/common.Response'
+        "403":
+          description: Private image, access denied
+          schema:
+            $ref: '#/definitions/common.Response'
+        "404":
+          description: Image not found
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Get image thumbnail
+      tags:
+      - images
 swagger: "2.0"

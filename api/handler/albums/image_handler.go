@@ -1,8 +1,8 @@
 package albums
 
 import (
+	"context"
 	"errors"
-	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -71,7 +71,7 @@ func NewAlbumImageHandler(albumsSvc *svcAlbums.Service, imagesRepo *images.Repos
 // @Failure      404      {object}  common.Response           "Album or images not found"
 // @Failure      500      {object}  common.Response           "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /albums/{id}/images [post]
+// @Router       /api/v1/albums/{id}/images [post]
 func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 	// 获取相册 ID
 	albumIDStr := c.Param("id")
@@ -91,7 +91,7 @@ func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 
 	_, err = h.svc.GetAlbumWithImagesByID(uint(albumID), userID)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			common.RespondError(c, http.StatusNotFound, "Album not found or access denied")
 			return
 		}
@@ -124,6 +124,10 @@ func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 	addedCount := 0
 	if len(imageIDsToAdd) > 0 {
 		if err := h.svc.AddImagesToAlbum(uint(albumID), userID, imageIDsToAdd); err != nil {
+			if err.Error() == "album not found or access denied" {
+				common.RespondError(c, http.StatusNotFound, "Album not found or access denied")
+				return
+			}
 			common.RespondError(c, http.StatusInternalServerError, "Failed to add imgs to album")
 			return
 		}
@@ -138,12 +142,12 @@ func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 
 	if addedCount > 0 {
 		utils.SafeGo(func() {
-			ctx := c.Copy().Request.Context()
+			ctx := context.Background()
 			if err := h.cacheHelper.DeleteCachedAlbum(ctx, uint(albumID)); err != nil {
-				log.Printf("Failed to delete album cache for %d: %v", albumID, err)
+				utils.LogIfDevf("Failed to delete album cache for %d: %v", albumID, err)
 			}
 			if err := h.cacheHelper.DeleteCachedAlbumList(ctx, userID); err != nil {
-				log.Printf("Failed to delete album list cache for user %d: %v", userID, err)
+				utils.LogIfDevf("Failed to delete album list cache for user %d: %v", userID, err)
 			}
 		})
 	}
@@ -164,7 +168,7 @@ func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 // @Failure      404      {object}  common.Response  "Album or image not found"
 // @Failure      500      {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /albums/{id}/images/{imageId} [delete]
+// @Router       /api/v1/albums/{id}/images/{imageId} [delete]
 func (h *AlbumImageHandler) RemoveImageFromAlbumHandler(c *gin.Context) {
 	// 获取相册 ID
 	albumIDStr := c.Param("id")
@@ -195,7 +199,7 @@ func (h *AlbumImageHandler) RemoveImageFromAlbumHandler(c *gin.Context) {
 
 	// 从相册移除图片
 	if err := h.svc.RemoveImageFromAlbum(uint(albumID), userID, image); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if err.Error() == "album not found or access denied" {
 			common.RespondError(c, http.StatusNotFound, "Album not found or access denied")
 			return
 		}
@@ -207,12 +211,12 @@ func (h *AlbumImageHandler) RemoveImageFromAlbumHandler(c *gin.Context) {
 
 	// 清除相关缓存
 	utils.SafeGo(func() {
-		ctx := c.Copy().Request.Context()
+		ctx := context.Background()
 		if err := h.cacheHelper.DeleteCachedAlbum(ctx, uint(albumID)); err != nil {
-			log.Printf("Failed to delete album cache for %d: %v", albumID, err)
+			utils.LogIfDevf("Failed to delete album cache for %d: %v", albumID, err)
 		}
 		if err := h.cacheHelper.DeleteCachedAlbumList(ctx, userID); err != nil {
-			log.Printf("Failed to delete album list cache for user %d: %v", userID, err)
+			utils.LogIfDevf("Failed to delete album list cache for user %d: %v", userID, err)
 		}
 	})
 }

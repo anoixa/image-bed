@@ -31,7 +31,7 @@ type UpdateVisibilityRequest struct {
 // @Failure      404         {object}  common.Response  "Image not found"
 // @Failure      500         {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /images/{identifier}/visibility [put]
+// @Router       /api/v1/images/{identifier}/visibility [put]
 func (h *Handler) UpdateImageVisibility(c *gin.Context) {
 	userID := c.GetUint(middleware.ContextUserIDKey)
 	if userID == 0 {

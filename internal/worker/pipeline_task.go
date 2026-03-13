@@ -197,7 +197,7 @@ func (t *ImagePipelineTask) generateThumbnail(ctx context.Context, fileBytes []b
 	thumbImg, err := vips.NewThumbnailFromBuffer(
 		fileBytes,
 		size.Width,
-		0,
+		-1,
 		vips.InterestingNone,
 	)
 	if err != nil {

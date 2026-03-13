@@ -15,7 +15,153 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
-        "/admin/configs": {
+        "/api/auth/login": {
+            "post": {
+                "description": "Authenticate user with username and password, returns access token and sets refresh token cookie",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "User login",
+                "parameters": [
+                    {
+                        "description": "Login credentials",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.userAuthRequestBody"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Login successful",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/api.loginResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid credentials",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/logout": {
+            "post": {
+                "description": "Logout user by invalidating refresh token (requires refresh_token and device_id cookies)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "User logout",
+                "responses": {
+                    "200": {
+                        "description": "Logout successful",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Refresh token not found / invalid session",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/refresh": {
+            "post": {
+                "description": "Refresh access token using refresh_token and device_id cookies",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Refresh access token",
+                "responses": {
+                    "200": {
+                        "description": "Refresh token successful",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/api.loginResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Refresh token or device ID not found / invalid",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/configs": {
             "get": {
                 "security": [
                     {
@@ -130,58 +276,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/admin/configs/test": {
-            "post": {
-                "security": [
-                    {
-                        "ApiKeyAuth": []
-                    }
-                ],
-                "description": "Test a configuration without saving it (storage connection test)",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "Test configuration",
-                "parameters": [
-                    {
-                        "description": "Configuration to test",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/models.TestConfigRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Test result",
-                        "schema": {
-                            "$ref": "#/definitions/models.TestConfigResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Invalid request",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    }
-                }
-            }
-        },
-        "/admin/configs/{id}": {
+        "/api/v1/admin/configs/{id}": {
             "get": {
                 "security": [
                     {
@@ -375,7 +470,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/admin/configs/{id}/default": {
+        "/api/v1/admin/configs/{id}/default": {
             "post": {
                 "security": [
                     {
@@ -436,7 +531,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/admin/configs/{id}/disable": {
+        "/api/v1/admin/configs/{id}/disable": {
             "post": {
                 "security": [
                     {
@@ -491,7 +586,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/admin/configs/{id}/enable": {
+        "/api/v1/admin/configs/{id}/enable": {
             "post": {
                 "security": [
                     {
@@ -546,7 +641,64 @@ const docTemplate = `{
                 }
             }
         },
-        "/admin/conversion/config": {
+        "/api/v1/admin/configs/{id}/test": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Test a configuration without saving it (storage connection test).\nIf no body is provided, tests the existing configuration by ID.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Test configuration",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Configuration to test (optional)",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/models.TestConfigRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Test result",
+                        "schema": {
+                            "$ref": "#/definitions/models.TestConfigResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/conversion": {
             "get": {
                 "security": [
                     {
@@ -641,7 +793,102 @@ const docTemplate = `{
                 }
             }
         },
-        "/admin/storage/providers": {
+        "/api/v1/admin/random-source-album": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Get the currently configured random image source album ID and whether to include all public images",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get random source album configuration",
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Configure the source album for random image selection. Use album_id=0 for all public images, or specify an album ID",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Set random source album configuration",
+                "parameters": [
+                    {
+                        "description": "Random source configuration",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/images.SetRandomSourceAlbumRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Configuration updated successfully",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/storage/providers": {
             "get": {
                 "security": [
                     {
@@ -675,7 +922,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/admin/storage/reload/{id}": {
+        "/api/v1/admin/storage/reload/{id}": {
             "post": {
                 "security": [
                     {
@@ -718,7 +965,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/albums": {
+        "/api/v1/albums": {
             "get": {
                 "security": [
                     {
@@ -860,7 +1107,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/albums/{id}": {
+        "/api/v1/albums/{id}": {
             "get": {
                 "security": [
                     {
@@ -1084,7 +1331,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/albums/{id}/images": {
+        "/api/v1/albums/{id}/images": {
             "post": {
                 "security": [
                     {
@@ -1160,7 +1407,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/albums/{id}/images/{imageId}": {
+        "/api/v1/albums/{id}/images/{imageId}": {
             "delete": {
                 "security": [
                     {
@@ -1234,153 +1481,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/auth/login": {
-            "post": {
-                "description": "Authenticate user with username and password, returns access token and sets refresh token cookie",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "auth"
-                ],
-                "summary": "User login",
-                "parameters": [
-                    {
-                        "description": "Login credentials",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/api.userAuthRequestBody"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Login successful",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/common.Response"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "data": {
-                                            "$ref": "#/definitions/api.loginResponse"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "400": {
-                        "description": "Invalid request body",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "401": {
-                        "description": "Invalid credentials",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/auth/logout": {
-            "post": {
-                "description": "Logout user by invalidating refresh token (requires refresh_token and device_id cookies)",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "auth"
-                ],
-                "summary": "User logout",
-                "responses": {
-                    "200": {
-                        "description": "Logout successful",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "401": {
-                        "description": "Refresh token not found / invalid session",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/auth/refresh": {
-            "post": {
-                "description": "Refresh access token using refresh_token and device_id cookies",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "auth"
-                ],
-                "summary": "Refresh access token",
-                "responses": {
-                    "200": {
-                        "description": "Refresh token successful",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/common.Response"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "data": {
-                                            "$ref": "#/definitions/api.loginResponse"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "401": {
-                        "description": "Refresh token or device ID not found / invalid",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    }
-                }
-            }
-        },
-        "/dashboard/stats": {
+        "/api/v1/dashboard/stats": {
             "get": {
                 "security": [
                     {
@@ -1420,7 +1521,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/dashboard/stats/refresh": {
+        "/api/v1/dashboard/stats/refresh": {
             "post": {
                 "security": [
                     {
@@ -1460,95 +1561,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/health": {
-            "get": {
-                "description": "Check the health status of the application and its dependencies (database, cache, storage)",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "health"
-                ],
-                "summary": "Health check",
-                "responses": {
-                    "200": {
-                        "description": "Service is healthy",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "503": {
-                        "description": "Service is unhealthy",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            }
-        },
-        "/images/delete": {
-            "post": {
-                "security": [
-                    {
-                        "ApiKeyAuth": []
-                    }
-                ],
-                "description": "Delete multiple images by their identifiers in a single request",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "images"
-                ],
-                "summary": "Delete multiple images",
-                "parameters": [
-                    {
-                        "description": "List of image identifiers to delete",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/images.DeleteRequestBody"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Delete request processed successfully",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "400": {
-                        "description": "Invalid request body",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    }
-                }
-            }
-        },
-        "/images/list": {
+        "/api/v1/images": {
             "post": {
                 "security": [
                     {
@@ -1617,73 +1630,50 @@ const docTemplate = `{
                 }
             }
         },
-        "/images/random": {
-            "get": {
-                "description": "Get a random image, optionally filtered by album and dimensions",
+        "/api/v1/images/delete": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Delete multiple images by their identifiers in a single request",
                 "consumes": [
                     "application/json"
                 ],
                 "produces": [
-                    "image/*",
                     "application/json"
                 ],
                 "tags": [
                     "images"
                 ],
-                "summary": "Get random image",
+                "summary": "Delete multiple images",
                 "parameters": [
                     {
-                        "type": "string",
-                        "description": "Response format: json or image (default: image)",
-                        "name": "format",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "Filter by album ID",
-                        "name": "album_id",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "Minimum image width",
-                        "name": "min_width",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "Minimum image height",
-                        "name": "min_height",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "Maximum image width",
-                        "name": "max_width",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "Maximum image height",
-                        "name": "max_height",
-                        "in": "query"
+                        "description": "List of image identifiers to delete (field name: identifiers)",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/images.DeleteRequestBody"
+                        }
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "Image metadata (when format=json)",
+                        "description": "Delete request processed successfully",
                         "schema": {
                             "$ref": "#/definitions/common.Response"
                         }
                     },
-                    "204": {
-                        "description": "No content - no matching images found",
+                    "400": {
+                        "description": "Invalid request body",
                         "schema": {
-                            "type": "string"
+                            "$ref": "#/definitions/common.Response"
                         }
                     },
-                    "400": {
-                        "description": "Invalid query parameters",
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "$ref": "#/definitions/common.Response"
                         }
@@ -1697,7 +1687,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/images/upload": {
+        "/api/v1/images/upload": {
             "post": {
                 "security": [
                     {
@@ -1770,7 +1760,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/images/upload/batch": {
+        "/api/v1/images/uploads": {
             "post": {
                 "security": [
                     {
@@ -1847,66 +1837,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/images/{identifier}": {
-            "get": {
-                "security": [
-                    {
-                        "ApiKeyAuth": []
-                    }
-                ],
-                "description": "Retrieve an image by its unique identifier. Returns original or converted format based on Accept header",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "image/*"
-                ],
-                "tags": [
-                    "images"
-                ],
-                "summary": "Get image by identifier",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Image identifier",
-                        "name": "identifier",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Image data",
-                        "schema": {
-                            "type": "file"
-                        }
-                    },
-                    "400": {
-                        "description": "Invalid identifier",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "403": {
-                        "description": "Private image, access denied",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "404": {
-                        "description": "Image not found",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    }
-                }
-            },
+        "/api/v1/images/{identifier}": {
             "delete": {
                 "security": [
                     {
@@ -1967,74 +1898,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/images/{identifier}/thumbnail": {
-            "get": {
-                "security": [
-                    {
-                        "ApiKeyAuth": []
-                    }
-                ],
-                "description": "Retrieve a thumbnail version of an image with specified width",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "image/webp"
-                ],
-                "tags": [
-                    "images"
-                ],
-                "summary": "Get image thumbnail",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Image identifier",
-                        "name": "identifier",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "integer",
-                        "description": "Thumbnail width (default: 300)",
-                        "name": "width",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Thumbnail image data",
-                        "schema": {
-                            "type": "file"
-                        }
-                    },
-                    "400": {
-                        "description": "Invalid identifier",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "403": {
-                        "description": "Private image, access denied",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "404": {
-                        "description": "Image not found",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    }
-                }
-            }
-        },
-        "/images/{identifier}/visibility": {
+        "/api/v1/images/{identifier}/visibility": {
             "put": {
                 "security": [
                     {
@@ -2110,7 +1974,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/keys": {
+        "/api/v1/token": {
             "get": {
                 "security": [
                     {
@@ -2205,7 +2069,68 @@ const docTemplate = `{
                 }
             }
         },
-        "/keys/{id}/disable": {
+        "/api/v1/token/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Permanently revoke an API key (cannot be re-enabled)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "keys"
+                ],
+                "summary": "Revoke API key",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "API Key ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "API key revoked successfully",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid API key ID",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "API key not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/token/{id}/disable": {
             "post": {
                 "security": [
                     {
@@ -2266,7 +2191,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/keys/{id}/enable": {
+        "/api/v1/token/{id}/enable": {
             "post": {
                 "security": [
                     {
@@ -2327,14 +2252,9 @@ const docTemplate = `{
                 }
             }
         },
-        "/keys/{id}/revoke": {
-            "post": {
-                "security": [
-                    {
-                        "ApiKeyAuth": []
-                    }
-                ],
-                "description": "Permanently revoke an API key (cannot be re-enabled)",
+        "/health": {
+            "get": {
+                "description": "Check the health status of the application and its dependencies (database, cache, storage)",
                 "consumes": [
                     "application/json"
                 ],
@@ -2342,39 +2262,222 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "keys"
+                    "health"
                 ],
-                "summary": "Revoke API key",
+                "summary": "Health check",
+                "responses": {
+                    "200": {
+                        "description": "Service is healthy",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "503": {
+                        "description": "Service is unhealthy",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/images/random": {
+            "get": {
+                "description": "Get a random image, optionally filtered by album and dimensions",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "image/*",
+                    "application/json"
+                ],
+                "tags": [
+                    "images"
+                ],
+                "summary": "Get random image",
                 "parameters": [
                     {
+                        "type": "string",
+                        "description": "Response format: json or image (default: image)",
+                        "name": "format",
+                        "in": "query"
+                    },
+                    {
                         "type": "integer",
-                        "description": "API Key ID",
-                        "name": "id",
+                        "description": "Filter by album ID (0 = all public images, \u003e0 = specific album)",
+                        "name": "album_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Minimum image width",
+                        "name": "min_width",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Minimum image height",
+                        "name": "min_height",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum image width",
+                        "name": "max_width",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum image height",
+                        "name": "max_height",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Image metadata (when format=json)",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "204": {
+                        "description": "No content - no matching images found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid query parameters",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/images/{identifier}": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Retrieve an image by its unique identifier. Returns original or converted format based on Accept header",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "image/*"
+                ],
+                "tags": [
+                    "images"
+                ],
+                "summary": "Get image by identifier",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Image identifier",
+                        "name": "identifier",
                         "in": "path",
                         "required": true
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "API key revoked successfully",
+                        "description": "Image data",
                         "schema": {
-                            "$ref": "#/definitions/common.Response"
+                            "type": "file"
                         }
                     },
                     "400": {
-                        "description": "Invalid API key ID",
+                        "description": "Invalid identifier",
                         "schema": {
                             "$ref": "#/definitions/common.Response"
                         }
                     },
-                    "401": {
-                        "description": "Unauthorized",
+                    "403": {
+                        "description": "Private image, access denied",
                         "schema": {
                             "$ref": "#/definitions/common.Response"
                         }
                     },
                     "404": {
-                        "description": "API key not found",
+                        "description": "Image not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/thumbnails/{identifier}": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Retrieve a thumbnail version of an image with specified width",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "image/webp"
+                ],
+                "tags": [
+                    "images"
+                ],
+                "summary": "Get image thumbnail",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Image identifier",
+                        "name": "identifier",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Thumbnail width (default: 300)",
+                        "name": "width",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Thumbnail image data",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid identifier",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Private image, access denied",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Image not found",
                         "schema": {
                             "$ref": "#/definitions/common.Response"
                         }
@@ -2625,10 +2728,10 @@ const docTemplate = `{
         "images.DeleteRequestBody": {
             "type": "object",
             "required": [
-                "identifier"
+                "identifiers"
             ],
             "properties": {
-                "identifier": {
+                "identifiers": {
                     "type": "array",
                     "items": {
                         "type": "string"
@@ -2730,6 +2833,17 @@ const docTemplate = `{
                 },
                 "storage_type": {
                     "type": "string"
+                }
+            }
+        },
+        "images.SetRandomSourceAlbumRequest": {
+            "type": "object",
+            "properties": {
+                "album_id": {
+                    "type": "integer"
+                },
+                "include_all_public": {
+                    "type": "boolean"
                 }
             }
         },

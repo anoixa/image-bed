@@ -29,7 +29,7 @@ func NewConversionHandler(cm *config.Manager) *ConversionHandler {
 // @Failure      401  {object}  common.Response  "Unauthorized"
 // @Failure      500  {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /admin/conversion/config [get]
+// @Router       /api/v1/admin/conversion [get]
 func (h *ConversionHandler) GetConfig(c *gin.Context) {
 	ctx := c.Request.Context()
 	settings, err := h.configManager.GetImageProcessingSettings(ctx)
@@ -53,7 +53,7 @@ func (h *ConversionHandler) GetConfig(c *gin.Context) {
 // @Failure      401      {object}  common.Response  "Unauthorized"
 // @Failure      500      {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /admin/conversion/config [put]
+// @Router       /api/v1/admin/conversion [put]
 func (h *ConversionHandler) UpdateConfig(c *gin.Context) {
 	var req config.ImageProcessingSettings
 	if err := c.ShouldBindJSON(&req); err != nil {

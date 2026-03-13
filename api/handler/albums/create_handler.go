@@ -1,7 +1,7 @@
 package albums
 
 import (
-	"log"
+	"context"
 	"net/http"
 
 	"github.com/anoixa/image-bed/api/common"
@@ -37,7 +37,7 @@ type CreateAlbumResponse struct {
 // @Failure      401      {object}  common.Response  "Unauthorized"
 // @Failure      500      {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /albums [post]
+// @Router       /api/v1/albums [post]
 func (h *Handler) CreateAlbumHandler(c *gin.Context) {
 	userID := c.GetUint(middleware.ContextUserIDKey)
 	var req createAlbumRequest
@@ -59,9 +59,9 @@ func (h *Handler) CreateAlbumHandler(c *gin.Context) {
 
 	// 清除用户相册列表缓存
 	utils.SafeGo(func() {
-		ctx := c.Copy().Request.Context()
+		ctx := context.Background()
 		if err := h.cacheHelper.DeleteCachedAlbumList(ctx, userID); err != nil {
-			log.Printf("Failed to delete album list cache for user %d: %v", userID, err)
+			utils.LogIfDevf("Failed to delete album list cache for user %d: %v", userID, err)
 		}
 	})
 

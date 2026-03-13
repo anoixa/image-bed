@@ -57,7 +57,7 @@ type ImageListResponse struct {
 // @Failure      401      {object}  common.Response  "Unauthorized"
 // @Failure      500      {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
-// @Router       /images/list [post]
+// @Router       /api/v1/images [post]
 func (h *Handler) ListImages(c *gin.Context) {
 	var body ImageRequestBody
 
