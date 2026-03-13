@@ -8,7 +8,6 @@ import (
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/internal/image"
-	"github.com/anoixa/image-bed/storage"
 	"github.com/gin-gonic/gin"
 )
 
@@ -96,7 +95,15 @@ func (h *Handler) serveThumbnailImage(c *gin.Context, image *models.Image, resul
 	c.Header("Content-Type", "image/webp")
 
 	ctx := c.Request.Context()
-	reader, err := storage.GetDefault().GetWithContext(ctx, result.StoragePath)
+
+	// 使用图片指定的 StorageConfigID 获取正确的存储 provider
+	provider := h.getStorageProvider(image.StorageConfigID)
+	if provider == nil {
+		h.serveOriginalImage(c, image)
+		return
+	}
+
+	reader, err := provider.GetWithContext(ctx, result.StoragePath)
 	if err != nil {
 		h.serveOriginalImage(c, image)
 		return
