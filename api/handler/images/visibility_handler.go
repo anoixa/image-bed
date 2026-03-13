@@ -13,7 +13,7 @@ import (
 
 // UpdateVisibilityRequest 更新图片可见性请求
 type UpdateVisibilityRequest struct {
-	IsPublic bool `json:"is_public" binding:"required"`
+	IsPublic bool `json:"is_public"`
 }
 
 // UpdateImageVisibility 更新图片可见性

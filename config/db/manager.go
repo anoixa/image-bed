@@ -424,7 +424,8 @@ func (m *Manager) GetStorageConfigs(ctx context.Context) ([]storage.StorageConfi
 		return cached, nil
 	}
 
-	configs, err := m.repo.List(ctx, models.ConfigCategoryStorage, true)
+	// 加载所有存储配置
+	configs, err := m.repo.List(ctx, models.ConfigCategoryStorage, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list storage configs: %w", err)
 	}
@@ -478,24 +479,25 @@ func (m *Manager) GetStorageConfigs(ctx context.Context) ([]storage.StorageConfi
 	return result, nil
 }
 
-// GetDefaultStorageConfigID 获取默认存储配置 ID
+// GetDefaultStorageConfigID 获取默认存储配置 ID（只考虑启用的）
 func (m *Manager) GetDefaultStorageConfigID(ctx context.Context) (uint, error) {
-	configs, err := m.GetStorageConfigs(ctx)
-	if err != nil {
-		return 0, err
+	// 优先获取启用的默认配置
+	config, err := m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryStorage)
+	if err == nil && config != nil {
+		return config.ID, nil
 	}
 
-	for _, cfg := range configs {
-		if cfg.IsDefault {
-			return cfg.ID, nil
-		}
+	// 如果没有默认配置，获取第一个启用的配置
+	configs, err := m.repo.List(ctx, models.ConfigCategoryStorage, true)
+	if err != nil {
+		return 0, err
 	}
 
 	if len(configs) > 0 {
 		return configs[0].ID, nil
 	}
 
-	return 0, fmt.Errorf("no storage config available")
+	return 0, fmt.Errorf("no enabled storage config available")
 }
 
 // ensureDefaultLocalStorageConfig 确保存在默认本地存储配置
