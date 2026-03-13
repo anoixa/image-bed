@@ -81,7 +81,7 @@ const docTemplate = `{
         },
         "/api/auth/logout": {
             "post": {
-                "description": "Logout user by invalidating refresh token (requires refresh_token and device_id cookies)",
+                "description": "Logout user by invalidating session. Works with any combination of cookies (refresh_token, device_id, or both). Always clears cookies and returns 200 for idempotency.",
                 "consumes": [
                     "application/json"
                 ],
@@ -94,19 +94,7 @@ const docTemplate = `{
                 "summary": "User logout",
                 "responses": {
                     "200": {
-                        "description": "Logout successful",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "401": {
-                        "description": "Refresh token not found / invalid session",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
+                        "description": "Logout successful or already logged out",
                         "schema": {
                             "$ref": "#/definitions/common.Response"
                         }
@@ -2252,37 +2240,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/health": {
-            "get": {
-                "description": "Check the health status of the application and its dependencies (database, cache, storage)",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "health"
-                ],
-                "summary": "Health check",
-                "responses": {
-                    "200": {
-                        "description": "Service is healthy",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "503": {
-                        "description": "Service is unhealthy",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            }
-        },
         "/images/random": {
             "get": {
                 "description": "Get a random image, optionally filtered by album and dimensions",
@@ -2419,6 +2376,130 @@ const docTemplate = `{
                         "description": "Internal server error",
                         "schema": {
                             "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/system/health": {
+            "get": {
+                "description": "Check the health status of the application and its dependencies (database, cache, storage)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Health check",
+                "responses": {
+                    "200": {
+                        "description": "Service is healthy",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "503": {
+                        "description": "Service is unhealthy",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/system/metrics": {
+            "get": {
+                "description": "Get application metrics and statistics",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Get metrics",
+                "responses": {
+                    "200": {
+                        "description": "Metrics data",
+                        "schema": {
+                            "$ref": "#/definitions/system.MetricsResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/system/status": {
+            "get": {
+                "description": "Get detailed system runtime information including version, memory stats, goroutines, GC count, and cache info",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Get system status",
+                "responses": {
+                    "200": {
+                        "description": "System status",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/system.StatusResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/system/version": {
+            "get": {
+                "description": "Get application version and commit hash",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Get version",
+                "responses": {
+                    "200": {
+                        "description": "Version info",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/system.VersionResponse"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     }
                 }
@@ -2723,7 +2804,72 @@ const docTemplate = `{
             }
         },
         "config.ImageProcessingSettings": {
-            "type": "object"
+            "type": "object",
+            "properties": {
+                "avif_experimental": {
+                    "type": "boolean"
+                },
+                "avif_quality": {
+                    "type": "integer"
+                },
+                "avif_speed": {
+                    "type": "integer"
+                },
+                "conversion_enabled_formats": {
+                    "description": "格式转换配置",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "max_dimension": {
+                    "type": "integer"
+                },
+                "max_retries": {
+                    "type": "integer"
+                },
+                "scanner_batch_size": {
+                    "type": "integer"
+                },
+                "scanner_enabled": {
+                    "description": "扫描器配置",
+                    "type": "boolean"
+                },
+                "scanner_interval": {
+                    "$ref": "#/definitions/time.Duration"
+                },
+                "scanner_max_age_days": {
+                    "type": "integer"
+                },
+                "scanner_max_file_size_mb": {
+                    "type": "integer"
+                },
+                "scanner_only_public": {
+                    "type": "boolean"
+                },
+                "skip_smaller_than": {
+                    "type": "integer"
+                },
+                "thumbnail_enabled": {
+                    "description": "缩略图配置",
+                    "type": "boolean"
+                },
+                "thumbnail_quality": {
+                    "type": "integer"
+                },
+                "thumbnail_sizes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.ThumbnailSize"
+                    }
+                },
+                "webp_effort": {
+                    "type": "integer"
+                },
+                "webp_quality": {
+                    "type": "integer"
+                }
+            }
         },
         "images.DeleteRequestBody": {
             "type": "object",
@@ -2753,6 +2899,9 @@ const docTemplate = `{
                 },
                 "id": {
                     "type": "integer"
+                },
+                "identifier": {
+                    "type": "string"
                 },
                 "is_public": {
                     "type": "boolean"
@@ -2849,9 +2998,6 @@ const docTemplate = `{
         },
         "images.UpdateVisibilityRequest": {
             "type": "object",
-            "required": [
-                "is_public"
-            ],
             "properties": {
                 "is_public": {
                     "type": "boolean"
@@ -2956,6 +3102,192 @@ const docTemplate = `{
                     "type": "integer"
                 }
             }
+        },
+        "system.CacheStatus": {
+            "type": "object",
+            "properties": {
+                "provider": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "system.DirStatus": {
+            "type": "object",
+            "properties": {
+                "file_count": {
+                    "type": "integer"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "size_str": {
+                    "type": "string"
+                },
+                "total_size": {
+                    "type": "integer"
+                }
+            }
+        },
+        "system.MemoryStatus": {
+            "type": "object",
+            "properties": {
+                "gc_sys_mb": {
+                    "type": "number"
+                },
+                "gc_sys_str": {
+                    "type": "string"
+                },
+                "goroutines": {
+                    "type": "integer"
+                },
+                "heap_alloc_mb": {
+                    "type": "number"
+                },
+                "heap_alloc_str": {
+                    "type": "string"
+                },
+                "heap_in_use_mb": {
+                    "type": "number"
+                },
+                "heap_in_use_str": {
+                    "type": "string"
+                },
+                "heap_sys_mb": {
+                    "type": "number"
+                },
+                "heap_sys_str": {
+                    "type": "string"
+                },
+                "last_gc_time": {
+                    "type": "integer"
+                },
+                "num_gc": {
+                    "type": "integer"
+                },
+                "stack_sys_mb": {
+                    "type": "number"
+                },
+                "stack_sys_str": {
+                    "type": "string"
+                },
+                "total_alloc_mb": {
+                    "type": "number"
+                },
+                "total_alloc_str": {
+                    "type": "string"
+                }
+            }
+        },
+        "system.MetricsResponse": {
+            "type": "object",
+            "properties": {
+                "avg_duration_ms": {
+                    "type": "number"
+                },
+                "request_count": {
+                    "type": "integer"
+                },
+                "request_duration_ms": {
+                    "type": "integer"
+                }
+            }
+        },
+        "system.RuntimeStatus": {
+            "type": "object",
+            "properties": {
+                "num_cpu": {
+                    "type": "integer"
+                }
+            }
+        },
+        "system.StatusResponse": {
+            "type": "object",
+            "properties": {
+                "cache": {
+                    "description": "缓存信息",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/system.CacheStatus"
+                        }
+                    ]
+                },
+                "commit_hash": {
+                    "type": "string"
+                },
+                "data_dir": {
+                    "description": "数据目录信息",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/system.DirStatus"
+                        }
+                    ]
+                },
+                "environment": {
+                    "description": "运行环境",
+                    "type": "string"
+                },
+                "go_version": {
+                    "type": "string"
+                },
+                "memory": {
+                    "description": "内存统计",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/system.MemoryStatus"
+                        }
+                    ]
+                },
+                "runtime": {
+                    "description": "运行时信息",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/system.RuntimeStatus"
+                        }
+                    ]
+                },
+                "version": {
+                    "description": "版本信息",
+                    "type": "string"
+                }
+            }
+        },
+        "system.VersionResponse": {
+            "type": "object",
+            "properties": {
+                "commit_hash": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "time.Duration": {
+            "type": "integer",
+            "format": "int64",
+            "enum": [
+                -9223372036854775808,
+                9223372036854775807,
+                1,
+                1000,
+                1000000,
+                1000000000,
+                60000000000,
+                3600000000000
+            ],
+            "x-enum-varnames": [
+                "minDuration",
+                "maxDuration",
+                "Nanosecond",
+                "Microsecond",
+                "Millisecond",
+                "Second",
+                "Minute",
+                "Hour"
+            ]
         }
     }
 }`

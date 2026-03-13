@@ -1,16 +1,15 @@
 package core
 
 import (
-	"net/http"
 	"strings"
 
 	"github.com/anoixa/image-bed/api"
-	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/handler/admin"
 	handlerAlbums "github.com/anoixa/image-bed/api/handler/albums"
 	handlerDashboard "github.com/anoixa/image-bed/api/handler/dashboard"
 	handlerImages "github.com/anoixa/image-bed/api/handler/images"
 	"github.com/anoixa/image-bed/api/handler/key"
+	handlerSystem "github.com/anoixa/image-bed/api/handler/system"
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
@@ -64,35 +63,17 @@ func RegisterRoutes(router *gin.Engine, deps *RouterDependencies) {
 
 // registerBasicRoutes 注册基础路由
 func registerBasicRoutes(router *gin.Engine, deps *RouterDependencies) {
-	healthHandler := NewHealthHandler(deps.DB)
-	router.Any("/health", healthHandler.Handle)
+	// System Routes
+	systemGroup := router.Group("/system")
+	{
+		systemHandler := handlerSystem.NewHandler()
+		healthHandler := handlerSystem.NewHealthHandler(deps.DB)
 
-	// Version 获取版本信息
-	// @Summary      Get version
-	// @Description  Get application version and commit hash
-	// @Tags         system
-	// @Accept       json
-	// @Produce      json
-	// @Success      200  {object}  common.Response  "Version info"
-	// @Router       /version [get]
-	router.GET("/version", func(context *gin.Context) {
-		common.RespondSuccess(context, gin.H{
-			"version": deps.ServerVersion.Version,
-			"commit":  deps.ServerVersion.CommitHash,
-		})
-	})
-
-	// Metrics 获取指标
-	// @Summary      Get metrics
-	// @Description  Get application metrics and statistics
-	// @Tags         system
-	// @Accept       json
-	// @Produce      json
-	// @Success      200  {object}  common.Response  "Metrics data"
-	// @Router       /metrics [get]
-	router.GET("/metrics", func(context *gin.Context) {
-		context.JSON(http.StatusOK, middleware.GetMetrics())
-	})
+		systemGroup.Any("/health", healthHandler.Handle)
+		systemGroup.GET("/version", systemHandler.GetVersion)
+		systemGroup.GET("/metrics", systemHandler.GetMetrics)
+		systemGroup.GET("/status", middleware.Authorize("jwt"), systemHandler.GetStatus)
+	}
 
 	// Swagger 文档路由（开发环境可用）
 	if !config.IsProduction() {
@@ -297,9 +278,7 @@ func isStaticAPIPath(p string) bool {
 		"/api/",
 		"/images/",
 		"/thumbnails/",
-		"/health",
-		"/version",
-		"/metrics",
+		"/system/",
 		"/swagger/",
 	}
 	for _, prefix := range apiPaths {

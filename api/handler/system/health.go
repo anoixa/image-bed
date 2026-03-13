@@ -1,4 +1,4 @@
-package core
+package system
 
 import (
 	"context"
@@ -28,12 +28,12 @@ func NewHealthHandler(db *gorm.DB) *HealthHandler {
 // Handle 处理健康检查请求
 // @Summary      Health check
 // @Description  Check the health status of the application and its dependencies (database, cache, storage)
-// @Tags         health
+// @Tags         system
 // @Accept       json
 // @Produce      json
 // @Success      200  {object}  map[string]interface{}  "Service is healthy"
 // @Success      503  {object}  map[string]interface{}  "Service is unhealthy"
-// @Router       /health [get]
+// @Router       /system/health [get]
 func (h *HealthHandler) Handle(context *gin.Context) {
 	sqlDB, _ := h.db.DB()
 	checks := gin.H{

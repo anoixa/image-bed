@@ -151,6 +151,50 @@ definitions:
         type: string
     type: object
   config.ImageProcessingSettings:
+    properties:
+      avif_experimental:
+        type: boolean
+      avif_quality:
+        type: integer
+      avif_speed:
+        type: integer
+      conversion_enabled_formats:
+        description: 格式转换配置
+        items:
+          type: string
+        type: array
+      max_dimension:
+        type: integer
+      max_retries:
+        type: integer
+      scanner_batch_size:
+        type: integer
+      scanner_enabled:
+        description: 扫描器配置
+        type: boolean
+      scanner_interval:
+        $ref: '#/definitions/time.Duration'
+      scanner_max_age_days:
+        type: integer
+      scanner_max_file_size_mb:
+        type: integer
+      scanner_only_public:
+        type: boolean
+      skip_smaller_than:
+        type: integer
+      thumbnail_enabled:
+        description: 缩略图配置
+        type: boolean
+      thumbnail_quality:
+        type: integer
+      thumbnail_sizes:
+        items:
+          $ref: '#/definitions/models.ThumbnailSize'
+        type: array
+      webp_effort:
+        type: integer
+      webp_quality:
+        type: integer
     type: object
   images.DeleteRequestBody:
     properties:
@@ -171,6 +215,8 @@ definitions:
         type: integer
       id:
         type: integer
+      identifier:
+        type: string
       is_public:
         type: boolean
       mime_type:
@@ -237,8 +283,6 @@ definitions:
     properties:
       is_public:
         type: boolean
-    required:
-    - is_public
     type: object
   key.req:
     properties:
@@ -309,6 +353,128 @@ definitions:
       width:
         type: integer
     type: object
+  system.CacheStatus:
+    properties:
+      provider:
+        type: string
+      type:
+        type: string
+    type: object
+  system.DirStatus:
+    properties:
+      file_count:
+        type: integer
+      path:
+        type: string
+      size_str:
+        type: string
+      total_size:
+        type: integer
+    type: object
+  system.MemoryStatus:
+    properties:
+      gc_sys_mb:
+        type: number
+      gc_sys_str:
+        type: string
+      goroutines:
+        type: integer
+      heap_alloc_mb:
+        type: number
+      heap_alloc_str:
+        type: string
+      heap_in_use_mb:
+        type: number
+      heap_in_use_str:
+        type: string
+      heap_sys_mb:
+        type: number
+      heap_sys_str:
+        type: string
+      last_gc_time:
+        type: integer
+      num_gc:
+        type: integer
+      stack_sys_mb:
+        type: number
+      stack_sys_str:
+        type: string
+      total_alloc_mb:
+        type: number
+      total_alloc_str:
+        type: string
+    type: object
+  system.MetricsResponse:
+    properties:
+      avg_duration_ms:
+        type: number
+      request_count:
+        type: integer
+      request_duration_ms:
+        type: integer
+    type: object
+  system.RuntimeStatus:
+    properties:
+      num_cpu:
+        type: integer
+    type: object
+  system.StatusResponse:
+    properties:
+      cache:
+        allOf:
+        - $ref: '#/definitions/system.CacheStatus'
+        description: 缓存信息
+      commit_hash:
+        type: string
+      data_dir:
+        allOf:
+        - $ref: '#/definitions/system.DirStatus'
+        description: 数据目录信息
+      environment:
+        description: 运行环境
+        type: string
+      go_version:
+        type: string
+      memory:
+        allOf:
+        - $ref: '#/definitions/system.MemoryStatus'
+        description: 内存统计
+      runtime:
+        allOf:
+        - $ref: '#/definitions/system.RuntimeStatus'
+        description: 运行时信息
+      version:
+        description: 版本信息
+        type: string
+    type: object
+  system.VersionResponse:
+    properties:
+      commit_hash:
+        type: string
+      version:
+        type: string
+    type: object
+  time.Duration:
+    enum:
+    - -9223372036854775808
+    - 9223372036854775807
+    - 1
+    - 1000
+    - 1000000
+    - 1000000000
+    - 60000000000
+    - 3600000000000
+    format: int64
+    type: integer
+    x-enum-varnames:
+    - minDuration
+    - maxDuration
+    - Nanosecond
+    - Microsecond
+    - Millisecond
+    - Second
+    - Minute
+    - Hour
 info:
   contact: {}
 paths:
@@ -356,21 +522,14 @@ paths:
     post:
       consumes:
       - application/json
-      description: Logout user by invalidating refresh token (requires refresh_token
-        and device_id cookies)
+      description: Logout user by invalidating session. Works with any combination
+        of cookies (refresh_token, device_id, or both). Always clears cookies and
+        returns 200 for idempotency.
       produces:
       - application/json
       responses:
         "200":
-          description: Logout successful
-          schema:
-            $ref: '#/definitions/common.Response'
-        "401":
-          description: Refresh token not found / invalid session
-          schema:
-            $ref: '#/definitions/common.Response'
-        "500":
-          description: Internal server error
+          description: Logout successful or already logged out
           schema:
             $ref: '#/definitions/common.Response'
       summary: User logout
@@ -1738,28 +1897,6 @@ paths:
       summary: Enable API key
       tags:
       - keys
-  /health:
-    get:
-      consumes:
-      - application/json
-      description: Check the health status of the application and its dependencies
-        (database, cache, storage)
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Service is healthy
-          schema:
-            additionalProperties: true
-            type: object
-        "503":
-          description: Service is unhealthy
-          schema:
-            additionalProperties: true
-            type: object
-      summary: Health check
-      tags:
-      - health
   /images/{identifier}:
     get:
       consumes:
@@ -1853,6 +1990,84 @@ paths:
       summary: Get random image
       tags:
       - images
+  /system/health:
+    get:
+      consumes:
+      - application/json
+      description: Check the health status of the application and its dependencies
+        (database, cache, storage)
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Service is healthy
+          schema:
+            additionalProperties: true
+            type: object
+        "503":
+          description: Service is unhealthy
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Health check
+      tags:
+      - system
+  /system/metrics:
+    get:
+      consumes:
+      - application/json
+      description: Get application metrics and statistics
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Metrics data
+          schema:
+            $ref: '#/definitions/system.MetricsResponse'
+      summary: Get metrics
+      tags:
+      - system
+  /system/status:
+    get:
+      consumes:
+      - application/json
+      description: Get detailed system runtime information including version, memory
+        stats, goroutines, GC count, and cache info
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: System status
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/system.StatusResponse'
+              type: object
+      summary: Get system status
+      tags:
+      - system
+  /system/version:
+    get:
+      consumes:
+      - application/json
+      description: Get application version and commit hash
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Version info
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/system.VersionResponse'
+              type: object
+      summary: Get version
+      tags:
+      - system
   /thumbnails/{identifier}:
     get:
       consumes:
