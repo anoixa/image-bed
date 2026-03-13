@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/anoixa/image-bed/config"
@@ -133,7 +134,7 @@ func configurePool(db *gorm.DB, cfg *config.Config) {
 
 // AutoMigrate 自动迁移数据库结构
 func AutoMigrate(db *gorm.DB) error {
-	return db.AutoMigrate(
+	if err := db.AutoMigrate(
 		&models.User{},
 		&models.Device{},
 		&models.Image{},
@@ -141,7 +142,64 @@ func AutoMigrate(db *gorm.DB) error {
 		&models.Album{},
 		&models.SystemConfig{},
 		&models.ImageVariant{},
-	)
+	); err != nil {
+		return err
+	}
+
+	// 执行额外的索引修复
+	return fixSystemConfigIndexes(db)
+}
+
+// fixSystemConfigIndexes 修复 system_configs 表的索引
+// 将旧的唯一索引改为条件唯一索引（只针对未删除的记录）
+func fixSystemConfigIndexes(db *gorm.DB) error {
+	// 获取数据库类型
+	var dbType string
+	if db.Name() == "sqlite" {
+		dbType = "sqlite"
+	} else {
+		dbType = "postgres"
+	}
+
+	// 删除旧索引（如果存在）
+	dropOldIndexSQL := `DROP INDEX IF EXISTS idx_system_configs_key`
+	if err := db.Exec(dropOldIndexSQL).Error; err != nil {
+		log.Printf("[DB Migration] Warning: failed to drop old index: %v", err)
+		// 继续执行，不要返回错误
+	} else {
+		log.Printf("[DB Migration] Dropped old index idx_system_configs_key")
+	}
+
+	// 创建新条件索引
+	var createIndexSQL string
+	if dbType == "sqlite" {
+		createIndexSQL = `CREATE UNIQUE INDEX IF NOT EXISTS idx_key_unique ON system_configs(key) WHERE deleted_at IS NULL`
+	} else {
+		// PostgreSQL
+		createIndexSQL = `CREATE UNIQUE INDEX IF NOT EXISTS idx_key_unique ON system_configs(key) WHERE deleted_at IS NULL`
+	}
+
+	if err := db.Exec(createIndexSQL).Error; err != nil {
+		// 如果索引已存在，会报错，忽略
+		if !isIndexExistsError(err) {
+			return fmt.Errorf("failed to create new index: %w", err)
+		}
+	} else {
+		log.Printf("[DB Migration] Created new partial index idx_key_unique")
+	}
+
+	return nil
+}
+
+// isIndexExistsError 检查是否为索引已存在的错误
+func isIndexExistsError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	// SQLite: "index idx_key_unique already exists"
+	// PostgreSQL: "relation \"idx_key_unique\" already exists"
+	return strings.Contains(errStr, "already exists")
 }
 
 // Transaction 执行事务

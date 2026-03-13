@@ -31,7 +31,7 @@ type SystemConfig struct {
 
 	Category ConfigCategory `gorm:"index:idx_category_enabled;not null" json:"category"`
 	Name     string         `gorm:"not null" json:"name"`
-	Key      string         `gorm:"uniqueIndex;not null" json:"key"` // 唯一标识，如 "storage:minio:1"
+	Key      string         `gorm:"uniqueIndex:idx_key_unique,where:deleted_at IS NULL;not null" json:"key"` // 唯一标识，如 "storage:minio:1"
 
 	IsEnabled bool `gorm:"default:true;index:idx_category_enabled" json:"is_enabled"`
 	IsDefault bool `gorm:"default:false" json:"is_default"`
