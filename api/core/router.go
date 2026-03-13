@@ -263,6 +263,12 @@ func registerStaticRoutes(router *gin.Engine) {
 			return
 		}
 
+		// 对于明确的静态文件请求（如 favicon.ico, robots.txt 等），如果不存在则返回 404
+		if isStaticAssetFile(filePath) {
+			c.JSON(404, gin.H{"error": "Not found"})
+			return
+		}
+
 		content, err := public.ReadFile("index.html")
 		if err != nil {
 			c.String(500, "Failed to load index.html")
@@ -283,6 +289,23 @@ func isStaticAPIPath(p string) bool {
 	}
 	for _, prefix := range apiPaths {
 		if strings.HasPrefix(p, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// isStaticAssetFile 检查是否为明确的静态文件请求
+// 这些文件如果不存在应该返回 404，而不是返回 index.html
+func isStaticAssetFile(filePath string) bool {
+	staticExtensions := []string{
+		".ico", ".png", ".jpg", ".jpeg", ".gif", ".svg",
+		".css", ".js", ".map",
+		".woff", ".woff2", ".ttf", ".eot",
+		".txt", ".xml",
+	}
+	for _, ext := range staticExtensions {
+		if strings.HasSuffix(strings.ToLower(filePath), ext) {
 			return true
 		}
 	}
