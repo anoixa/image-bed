@@ -3,6 +3,7 @@ package worker
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -20,7 +21,7 @@ import (
 // VariantRepository 变体仓库接口
 type VariantRepository interface {
 	UpdateStatusCAS(id uint, expected, newStatus, errMsg string) (bool, error)
-	UpdateCompleted(id uint, identifier, storagePath string, fileSize int64, width, height int) error
+	UpdateCompleted(id uint, identifier, storagePath string, fileSize int64, fileHash string, width, height int) error
 	UpdateFailed(id uint, errMsg string, allowRetry bool) error
 	GetByID(id uint) (*models.ImageVariant, error)
 }
@@ -37,6 +38,7 @@ type pipelineResult struct {
 	Width       int
 	Height      int
 	FileSize    int64
+	FileHash    string
 }
 
 // readWithLimit 读取流并检查大小限制
@@ -229,11 +231,15 @@ func (t *ImagePipelineTask) generateThumbnail(ctx context.Context, fileBytes []b
 
 	utils.LogIfDevf("[Pipeline] Thumbnail saved: %s (%d bytes)", thumbPath, len(thumbWebp))
 
+	// 计算文件哈希
+	fileHash := fmt.Sprintf("%x", sha256.Sum256(thumbWebp))
+
 	return &pipelineResult{
 		StoragePath: thumbPath,
 		Width:       width,
 		Height:      height,
 		FileSize:    int64(len(thumbWebp)),
+		FileHash:    fileHash,
 	}, nil
 }
 
@@ -292,11 +298,15 @@ func (t *ImagePipelineTask) generateWebPWithSettings(ctx context.Context, fileBy
 
 	utils.LogIfDevf("[Pipeline] WebP saved: %s (%d bytes)", originPath, len(originWebp))
 
+	// 计算文件哈希
+	fileHash := fmt.Sprintf("%x", sha256.Sum256(originWebp))
+
 	return &pipelineResult{
 		StoragePath: originPath,
 		Width:       width,
 		Height:      height,
 		FileSize:    int64(len(originWebp)),
+		FileHash:    fileHash,
 	}, nil
 }
 
@@ -320,6 +330,7 @@ func (t *ImagePipelineTask) handleSuccess(thumbResult, webpResult *pipelineResul
 			filepath.Base(thumbResult.StoragePath),
 			thumbResult.StoragePath,
 			thumbResult.FileSize,
+			thumbResult.FileHash,
 			thumbResult.Width,
 			thumbResult.Height,
 		)
@@ -332,6 +343,7 @@ func (t *ImagePipelineTask) handleSuccess(thumbResult, webpResult *pipelineResul
 			filepath.Base(webpResult.StoragePath),
 			webpResult.StoragePath,
 			webpResult.FileSize,
+			webpResult.FileHash,
 			webpResult.Width,
 			webpResult.Height,
 		)

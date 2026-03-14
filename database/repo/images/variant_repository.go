@@ -92,12 +92,13 @@ func (r *VariantRepository) UpdateStatusCAS(id uint, expected, newStatus, errMsg
 }
 
 // UpdateCompleted 更新完成状态
-func (r *VariantRepository) UpdateCompleted(id uint, identifier, storagePath string, fileSize int64, width, height int) error {
+func (r *VariantRepository) UpdateCompleted(id uint, identifier, storagePath string, fileSize int64, fileHash string, width, height int) error {
 	result := r.db.Model(&models.ImageVariant{}).Where("id = ? AND status = ?", id, models.VariantStatusProcessing).Updates(map[string]any{
 		"status":        models.VariantStatusCompleted,
 		"identifier":    identifier,
 		"storage_path":  storagePath,
 		"file_size":     fileSize,
+		"file_hash":     fileHash,
 		"width":         width,
 		"height":        height,
 		"error_message": "",
