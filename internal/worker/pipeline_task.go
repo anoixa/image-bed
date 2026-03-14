@@ -41,6 +41,80 @@ type pipelineResult struct {
 	FileHash    string
 }
 
+// ImageComplexity 图片复杂度级别
+type ImageComplexity int
+
+const (
+	ComplexityLow    ImageComplexity = 0 // 低复杂度（截图、纯色）
+	ComplexityMedium ImageComplexity = 1 // 中复杂度（普通图）
+	ComplexityHigh   ImageComplexity = 2 // 高复杂度（照片）
+)
+
+// detectImageComplexity 检测图片复杂度
+// 通过分析文件头、透明通道和压缩率快速判断
+// 截图/纯色图特征：大文件、有透明通道、低压缩率
+// 照片特征：小文件、无透明通道、高压缩率
+func detectImageComplexity(img *vips.ImageRef, fileBytes []byte) ImageComplexity {
+	// 1. 检测 PNG 透明通道（通常是 UI/截图）
+	hasAlpha := img.HasAlpha()
+	if hasAlpha {
+		// 有透明度的 PNG 通常是截图或 UI
+		return ComplexityLow
+	}
+
+	// 2. 根据图片尺寸和文件大小判断
+	width := img.Width()
+	height := img.Height()
+	fileSize := len(fileBytes)
+	pixelCount := width * height
+
+	if pixelCount == 0 {
+		return ComplexityMedium
+	}
+
+	// 计算每像素的字节数（压缩率指标）
+	// 截图通常压缩率很低（大文件，简单内容）
+	// 照片压缩率高（小文件，复杂内容）
+	bytesPerPixel := float64(fileSize) / float64(pixelCount)
+
+	// JPEG 图片分析
+	// < 1.5 bytes/pixel: 压缩率高，可能是照片
+	// > 2.5 bytes/pixel: 压缩率低，可能是截图
+	switch {
+	case bytesPerPixel > 3.0:
+		// 非常大的文件，通常是未压缩或简单内容的截图
+		return ComplexityLow
+	case bytesPerPixel > 2.0:
+		// 可能是截图或简单图表
+		return ComplexityLow
+	case bytesPerPixel < 0.8:
+		// 高度压缩，通常是照片
+		return ComplexityHigh
+	case bytesPerPixel < 1.2:
+		// 中等压缩，可能是照片或复杂图像
+		return ComplexityMedium
+	default:
+		return ComplexityMedium
+	}
+}
+
+// adaptiveWebPQuality 根据图片复杂度返回自适应质量
+func adaptiveWebPQuality(complexity ImageComplexity, baseQuality int) int {
+	switch complexity {
+	case ComplexityLow:
+		// 简单图片：使用较低质量（文件更小，视觉无损）
+		return min(baseQuality-10, 75)
+	case ComplexityMedium:
+		// 中等复杂度：使用基准质量
+		return baseQuality
+	case ComplexityHigh:
+		// 高复杂度：使用较高质量
+		return min(baseQuality+5, 90)
+	default:
+		return baseQuality
+	}
+}
+
 // readWithLimit 读取流并检查大小限制
 func readWithLimit(r io.Reader, limit int64) ([]byte, error) {
 	lr := io.LimitReader(r, limit+1)
@@ -277,8 +351,15 @@ func (t *ImagePipelineTask) generateWebPWithSettings(ctx context.Context, fileBy
 		}
 	}
 
+	// 检测图片复杂度，自适应调整质量
+	complexity := detectImageComplexity(originImg, fileBytes)
+	adaptiveQuality := adaptiveWebPQuality(complexity, settings.WebPQuality)
+
+	utils.LogIfDevf("[Pipeline] Image complexity=%d, adaptive quality=%d (base=%d)",
+		complexity, adaptiveQuality, settings.WebPQuality)
+
 	originWebp, _, err := originImg.ExportWebp(&vips.WebpExportParams{
-		Quality:         settings.WebPQuality,
+		Quality:         adaptiveQuality,
 		Lossless:        false,
 		ReductionEffort: settings.WebPEffort,
 		StripMetadata:   true,
@@ -296,7 +377,7 @@ func (t *ImagePipelineTask) generateWebPWithSettings(ctx context.Context, fileBy
 		return nil, fmt.Errorf("save webp: %w", err)
 	}
 
-	utils.LogIfDevf("[Pipeline] WebP saved: %s (%d bytes)", originPath, len(originWebp))
+	utils.LogIfDevf("[Pipeline] WebP saved: %s (%d bytes, quality=%d)", originPath, len(originWebp), adaptiveQuality)
 
 	// 计算文件哈希
 	fileHash := fmt.Sprintf("%x", sha256.Sum256(originWebp))
