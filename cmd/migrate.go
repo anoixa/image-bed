@@ -257,8 +257,8 @@ func autoMigrate(db *gorm.DB) error {
 
 // handleConflict 处理冲突
 // 返回值: shouldCreate (是否创建), shouldOverwrite (是否覆盖), error
-func handleConflict(targetDB *gorm.DB, model interface{}, where string, args []interface{}, onConflict string) (bool, bool, error) {
-	var existing interface{}
+func handleConflict(targetDB *gorm.DB, _ any, where string, args []any, onConflict string) (bool, bool, error) {
+	var existing any
 	result := targetDB.Where(where, args...).First(&existing)
 
 	if result.Error == gorm.ErrRecordNotFound {
@@ -294,7 +294,7 @@ func migrateUsers(ctx context.Context, sourceDB, targetDB *gorm.DB, stats *migra
 			targetDB.WithContext(ctx),
 			&models.User{},
 			"id = ?",
-			[]interface{}{user.ID},
+			[]any{user.ID},
 			onConflict,
 		)
 		if err != nil {
@@ -344,7 +344,7 @@ func migrateDevices(ctx context.Context, sourceDB, targetDB *gorm.DB, stats *mig
 			targetDB.WithContext(ctx),
 			&models.Device{},
 			"id = ?",
-			[]interface{}{device.ID},
+			[]any{device.ID},
 			onConflict,
 		)
 		if err != nil {
@@ -398,7 +398,7 @@ func migrateImages(ctx context.Context, sourceDB, targetDB *gorm.DB, stats *migr
 				targetDB.WithContext(ctx),
 				&models.Image{},
 				"id = ? OR identifier = ?",
-				[]interface{}{image.ID, image.Identifier},
+				[]any{image.ID, image.Identifier},
 				onConflict,
 			)
 			if err != nil {
@@ -450,7 +450,7 @@ func migrateAlbums(ctx context.Context, sourceDB, targetDB *gorm.DB, stats *migr
 			targetDB.WithContext(ctx),
 			&models.Album{},
 			"id = ?",
-			[]interface{}{album.ID},
+			[]any{album.ID},
 			onConflict,
 		)
 		if err != nil {
@@ -549,7 +549,7 @@ func migrateTokens(ctx context.Context, sourceDB, targetDB *gorm.DB, stats *migr
 			targetDB.WithContext(ctx),
 			&models.ApiToken{},
 			"id = ?",
-			[]interface{}{token.ID},
+			[]any{token.ID},
 			onConflict,
 		)
 		if err != nil {

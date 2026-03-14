@@ -276,10 +276,10 @@ func restoreTable(db *gorm.DB, tableName, jsonlPath string, stats *restoreStats,
 	switch tableName {
 	case "users":
 		restoreBatch(db, scanner, &lineNum, batchSize, dryRun, stats, tableName,
-			func() interface{} { return &models.User{} })
+			func() any { return &models.User{} })
 	case "devices":
 		restoreBatch(db, scanner, &lineNum, batchSize, dryRun, stats, tableName,
-			func() interface{} { return &models.Device{} })
+			func() any { return &models.Device{} })
 	case "images":
 		restoreBatchWithCleanup(db, scanner, &lineNum, batchSize, dryRun, stats, tableName,
 			func() *models.Image { return &models.Image{} },
@@ -292,7 +292,7 @@ func restoreTable(db *gorm.DB, tableName, jsonlPath string, stats *restoreStats,
 		restoreAlbumImagesBatch(db, scanner, &lineNum, batchSize, dryRun, stats)
 	case "api_tokens":
 		restoreBatch(db, scanner, &lineNum, batchSize, dryRun, stats, tableName,
-			func() interface{} { return &models.ApiToken{} })
+			func() any { return &models.ApiToken{} })
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -304,8 +304,8 @@ func restoreTable(db *gorm.DB, tableName, jsonlPath string, stats *restoreStats,
 }
 
 // restoreBatch 通用批量还原
-func restoreBatch(db *gorm.DB, scanner *bufio.Scanner, lineNum *int, batchSize int, dryRun bool, stats *restoreStats, tableName string, newRecord func() interface{}) {
-	batch := make([]interface{}, 0, batchSize)
+func restoreBatch(db *gorm.DB, scanner *bufio.Scanner, lineNum *int, batchSize int, dryRun bool, stats *restoreStats, tableName string, newRecord func() any) {
+	batch := make([]any, 0, batchSize)
 
 	for scanner.Scan() {
 		*lineNum++
@@ -411,7 +411,7 @@ func restoreAlbumImagesBatch(db *gorm.DB, scanner *bufio.Scanner, lineNum *int, 
 }
 
 // insertBatch 插入批量记录
-func insertBatch(db *gorm.DB, batch []interface{}, dryRun bool, stats *restoreStats, tableName string) {
+func insertBatch(db *gorm.DB, batch []any, dryRun bool, stats *restoreStats, tableName string) {
 	if dryRun {
 		stats.Restored[tableName] += int64(len(batch))
 		return
@@ -482,7 +482,7 @@ func truncateTables(db *gorm.DB, tablesToClear []string) error {
 func updateAutoIncrementSequences(db *gorm.DB, dbType string, stats *restoreStats) error {
 	type tableInfo struct {
 		TableName string
-		Model     interface{}
+		Model     any
 	}
 
 	tables := []tableInfo{

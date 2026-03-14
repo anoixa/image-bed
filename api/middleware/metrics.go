@@ -29,8 +29,8 @@ func Metrics() gin.HandlerFunc {
 }
 
 // GetMetrics 获取当前指标
-func GetMetrics() map[string]interface{} {
-	return map[string]interface{}{
+func GetMetrics() map[string]any {
+	return map[string]any{
 		"request_count":       requestCount,
 		"request_duration_ms": requestDuration,
 		"avg_duration_ms": func() float64 {

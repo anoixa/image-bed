@@ -46,7 +46,7 @@ func (t *ImageDimensionsTask) Execute() {
 
 	result := t.DB.Model(&models.Image{}).
 		Where("identifier = ?", t.Identifier).
-		UpdateColumns(map[string]interface{}{
+		UpdateColumns(map[string]any{
 			"width":  width,
 			"height": height,
 		})

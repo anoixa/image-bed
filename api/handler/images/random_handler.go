@@ -32,26 +32,30 @@ func (h *Handler) getRandomSourceAlbum() (uint, bool) {
 
 // RandomImageQuery 随机图片查询参数
 type RandomImageQuery struct {
-	Format    string `form:"format"`     // 返回格式: json 或直接图片
-	AlbumID   uint   `form:"album_id"`   // 指定相册
-	MinWidth  int    `form:"min_width"`  // 最小宽度
-	MinHeight int    `form:"min_height"` // 最小高度
-	MaxWidth  int    `form:"max_width"`  // 最大宽度
-	MaxHeight int    `form:"max_height"` // 最大高度
+	Format       string `form:"format"`        // 返回格式: json 或直接图片
+	AlbumID      uint   `form:"album_id"`      // 指定相册
+	MinWidth     int    `form:"min_width"`     // 最小宽度
+	MinHeight    int    `form:"min_height"`    // 最小高度
+	MaxWidth     int    `form:"max_width"`     // 最大宽度
+	MaxHeight    int    `form:"max_height"`    // 最大高度
+	RequireWebP  bool   `form:"require_webp"`  // 是否只返回有WebP变体的图片
+	MaxFileSize  int64  `form:"max_file_size"` // 最大文件大小（字节），例如10485760表示10MB
 }
 
 // RandomImage 随机图片API
 // @Summary      Get random image
-// @Description  Get a random image, optionally filtered by album and dimensions
+// @Description  Get a random image, optionally filtered by album, dimensions, WebP availability and file size
 // @Tags         images
 // @Accept       json
 // @Produce      image/*,application/json
-// @Param        format     query     string  false  "Response format: json or image (default: image)"
-// @Param        album_id   query     int     false  "Filter by album ID (0 = all public images, >0 = specific album)"
-// @Param        min_width  query     int     false  "Minimum image width"
-// @Param        min_height query     int     false  "Minimum image height"
-// @Param        max_width  query     int     false  "Maximum image width"
-// @Param        max_height query     int     false  "Maximum image height"
+// @Param        format         query     string  false  "Response format: json or image (default: image)"
+// @Param        album_id       query     int     false  "Filter by album ID (0 = all public images, >0 = specific album)"
+// @Param        min_width      query     int     false  "Minimum image width"
+// @Param        min_height     query     int     false  "Minimum image height"
+// @Param        max_width      query     int     false  "Maximum image width"
+// @Param        max_height     query     int     false  "Maximum image height"
+// @Param        require_webp   query     bool    false  "Only return images with WebP variant (default: false)"
+// @Param        max_file_size  query     int     false  "Maximum file size in bytes (e.g., 10485760 for 10MB)"
 // @Success      200  {file}    binary           "Image data (when format=image)"
 // @Success      200  {object}  common.Response  "Image metadata (when format=json)"
 // @Failure      400  {object}  common.Response  "Invalid query parameters"
@@ -67,10 +71,12 @@ func (h *Handler) RandomImage(c *gin.Context) {
 
 	// 构建筛选条件
 	filter := &images.RandomImageFilter{
-		MinWidth:  query.MinWidth,
-		MinHeight: query.MinHeight,
-		MaxWidth:  query.MaxWidth,
-		MaxHeight: query.MaxHeight,
+		MinWidth:    query.MinWidth,
+		MinHeight:   query.MinHeight,
+		MaxWidth:    query.MaxWidth,
+		MaxHeight:   query.MaxHeight,
+		RequireWebP: query.RequireWebP,
+		MaxFileSize: query.MaxFileSize,
 	}
 
 	// 优先使用请求参数中的相册ID，否则使用配置的推荐相册

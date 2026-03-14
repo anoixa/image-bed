@@ -109,7 +109,7 @@ func (s *ThumbnailService) GenerateThumbnailIdentifiers(originalStoragePath stri
 }
 
 // getMIMETypeFromFormat 根据格式获取 MIME 类型
-func (s *ThumbnailService) getMIMETypeFromFormat(format string) string {
+func (s *ThumbnailService) getMIMETypeFromFormat(_ string) string {
 	return "image/webp"
 }
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
+	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/internal/image"
 	"github.com/anoixa/image-bed/internal/worker"
@@ -74,11 +75,6 @@ func (h *Handler) GetImage(c *gin.Context) {
 // serveOriginalImage 提供原图
 func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 	// [DEBUG] 检查关键依赖
-	if storage.GetDefault() == nil {
-		utils.LogIfDevf("[DEBUG][serveOriginalImage] storage.GetDefault() is nil!")
-		common.RespondError(c, http.StatusInternalServerError, "Storage not initialized")
-		return
-	}
 	if h.cacheHelper == nil {
 		utils.LogIfDevf("[DEBUG][serveOriginalImage] h.cacheHelper is nil!")
 		common.RespondError(c, http.StatusInternalServerError, "Cache not initialized")
@@ -128,7 +124,7 @@ func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 }
 
 func (h *Handler) serveByStreaming(c *gin.Context, img *models.Image, streamer storage.StreamProvider) bool {
-	c.Header("Cache-Control", "public, max-age=86400")
+	c.Header("Cache-Control", config.CacheControlPublic)
 	c.Header("Content-Type", img.MimeType)
 	c.Header("ETag", "\""+img.FileHash+"\"")
 
@@ -145,7 +141,7 @@ func (h *Handler) serveByStreaming(c *gin.Context, img *models.Image, streamer s
 
 // fetchFromRemoteWithProvider 从指定存储提供者获取图片数据
 func (h *Handler) fetchFromRemoteWithProvider(storagePath string, provider storage.Provider) ([]byte, error) {
-	v, err, _ := fileDownloadGroup.Do(storagePath, func() (interface{}, error) {
+	v, err, _ := fileDownloadGroup.Do(storagePath, func() (any, error) {
 		if data, err := h.cacheHelper.GetCachedImageData(context.Background(), storagePath); err == nil {
 			return data, nil
 		}
@@ -161,19 +157,18 @@ func (h *Handler) fetchFromRemoteWithProvider(storagePath string, provider stora
 			}
 		}()
 
-		const maxImageSize = 50 * 1024 * 1024
-		limitedReader := io.LimitReader(stream, maxImageSize)
+		limitedReader := io.LimitReader(stream, config.DefaultMaxUploadSize)
 		data, err := io.ReadAll(limitedReader)
 		if err != nil {
 			return nil, err
 		}
 
 		// 记录大图片日志
-		if len(data) > 10*1024*1024 {
+		if len(data) > config.DefaultMaxImageSize {
 			utils.LogIfDevf("[fetchFromRemote] Large image loaded: %d bytes, path: %s", len(data), storagePath)
 		}
 
-		if len(data) < 5*1024*1024 { // 只缓存小于 5MB 的图片
+		if len(data) < config.DefaultMaxThumbnailSize { // 只缓存小于 5MB 的图片
 			task := func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
@@ -218,7 +213,7 @@ func (h *Handler) serveBySendfile(c *gin.Context, img *models.Image, opener stor
 	}
 	defer func() { _ = file.Close() }()
 
-	c.Header("Cache-Control", "public, max-age=86400")
+	c.Header("Cache-Control", config.CacheControlPublic)
 	c.Header("Content-Type", img.MimeType)
 	c.Header("ETag", "\""+img.FileHash+"\"")
 
@@ -228,7 +223,7 @@ func (h *Handler) serveBySendfile(c *gin.Context, img *models.Image, opener stor
 
 // serveImageData 从内存提供图片数据
 func (h *Handler) serveImageData(c *gin.Context, img *models.Image, data []byte) {
-	c.Header("Cache-Control", "public, max-age=86400")
+	c.Header("Cache-Control", config.CacheControlPublic)
 	c.Header("Content-Type", img.MimeType)
 	c.Header("Content-Length", strconv.Itoa(len(data)))
 	c.Header("ETag", "\""+img.FileHash+"\"")
@@ -305,7 +300,7 @@ func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *i
 
 // serveVariantByStreaming 使用流式传输格式变体
 func (h *Handler) serveVariantByStreaming(c *gin.Context, result *image.VariantResult, streamer storage.StreamProvider) bool {
-	c.Header("Cache-Control", "public, max-age=86400")
+	c.Header("Cache-Control", config.CacheControlPublic)
 	c.Header("Content-Type", result.MIMEType)
 	c.Header("X-Content-Type-Options", "nosniff")
 
@@ -330,7 +325,7 @@ func (h *Handler) serveVariantBySendfile(c *gin.Context, img *models.Image, resu
 		return false
 	}
 
-	c.Header("Cache-Control", "public, max-age=86400")
+	c.Header("Cache-Control", config.CacheControlPublic)
 	c.Header("Content-Type", result.MIMEType)
 	c.Header("Content-Length", strconv.FormatInt(stat.Size(), 10))
 	c.Header("X-Content-Type-Options", "nosniff")
@@ -341,7 +336,7 @@ func (h *Handler) serveVariantBySendfile(c *gin.Context, img *models.Image, resu
 
 // serveVariantData 从内存提供格式变体数据
 func (h *Handler) serveVariantData(c *gin.Context, img *models.Image, result *image.VariantResult, data []byte) {
-	c.Header("Cache-Control", "public, max-age=86400")
+	c.Header("Cache-Control", config.CacheControlPublic)
 	c.Header("Content-Type", result.MIMEType)
 	c.Header("Content-Length", strconv.Itoa(len(data)))
 	c.Header("X-Content-Type-Options", "nosniff")

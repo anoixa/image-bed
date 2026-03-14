@@ -373,7 +373,7 @@ func (h *Helper) incrementAlbumListVersion(ctx context.Context, userID uint) err
 }
 
 // CacheAlbumList 缓存用户相册列表（包含版本号）
-func (h *Helper) CacheAlbumList(ctx context.Context, userID uint, page, limit int, data interface{}) error {
+func (h *Helper) CacheAlbumList(ctx context.Context, userID uint, page, limit int, data any) error {
 	if h.provider == nil {
 		return fmt.Errorf("cache provider not initialized")
 	}
@@ -384,7 +384,7 @@ func (h *Helper) CacheAlbumList(ctx context.Context, userID uint, page, limit in
 }
 
 // GetCachedAlbumList 获取缓存的用户相册列表（检查版本号）
-func (h *Helper) GetCachedAlbumList(ctx context.Context, userID uint, page, limit int, dest interface{}) error {
+func (h *Helper) GetCachedAlbumList(ctx context.Context, userID uint, page, limit int, dest any) error {
 	if h.provider == nil {
 		return ErrCacheMiss
 	}

@@ -50,8 +50,8 @@ func (SystemConfig) TableName() string {
 }
 
 // ToResponse 转换为响应结构
-func (sc *SystemConfig) ToResponse(config map[string]interface{}) map[string]interface{} {
-	return map[string]interface{}{
+func (sc *SystemConfig) ToResponse(config map[string]any) map[string]any {
+	return map[string]any{
 		"id":          sc.ID,
 		"category":    sc.Category,
 		"name":        sc.Name,
@@ -76,7 +76,7 @@ type ConfigResponse struct {
 	IsEnabled   bool                   `json:"is_enabled"`
 	IsDefault   bool                   `json:"is_default"`
 	Priority    int                    `json:"priority"`
-	Config      map[string]interface{} `json:"config"`
+	Config      map[string]any `json:"config"`
 	Description string                 `json:"description"`
 	CreatedBy   uint                   `json:"created_by"`
 	CreatedAt   time.Time              `json:"created_at"`
@@ -87,7 +87,7 @@ type ConfigResponse struct {
 type SystemConfigStoreRequest struct {
 	Category    ConfigCategory         `json:"category" binding:"required"`
 	Name        string                 `json:"name" binding:"required"`
-	Config      map[string]interface{} `json:"config" binding:"required"`
+	Config      map[string]any `json:"config" binding:"required"`
 	IsEnabled   *bool                  `json:"is_enabled,omitempty"`
 	IsDefault   *bool                  `json:"is_default,omitempty"`
 	Priority    *int                   `json:"priority,omitempty"`
@@ -97,7 +97,7 @@ type SystemConfigStoreRequest struct {
 // TestConfigRequest 测试配置请求
 type TestConfigRequest struct {
 	Category ConfigCategory         `json:"category" binding:"required"`
-	Config   map[string]interface{} `json:"config" binding:"required"`
+	Config   map[string]any `json:"config" binding:"required"`
 }
 
 // TestConfigResponse 测试配置响应

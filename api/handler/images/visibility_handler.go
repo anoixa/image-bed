@@ -66,7 +66,7 @@ func (h *Handler) UpdateImageVisibility(c *gin.Context) {
 		return
 	}
 
-	updates := map[string]interface{}{
+	updates := map[string]any{
 		"is_public": req.IsPublic,
 	}
 	updatedImage, err := h.imageService.UpdateImageByIdentifier(identifier, updates)

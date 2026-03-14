@@ -9,14 +9,14 @@ import (
 
 // CacheLayer 配置缓存层
 type CacheLayer struct {
-	localCache map[string]interface{}
+	localCache map[string]any
 	mutex      sync.RWMutex
 }
 
 // NewCacheLayer 创建缓存层
 func NewCacheLayer() *CacheLayer {
 	return &CacheLayer{
-		localCache: make(map[string]interface{}),
+		localCache: make(map[string]any),
 	}
 }
 

@@ -20,6 +20,7 @@ import (
 	svcDashboard "github.com/anoixa/image-bed/internal/dashboard"
 	imageSvc "github.com/anoixa/image-bed/internal/image"
 	"github.com/anoixa/image-bed/public"
+	"github.com/anoixa/image-bed/storage"
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
@@ -67,12 +68,17 @@ func registerBasicRoutes(router *gin.Engine, deps *RouterDependencies) {
 	systemGroup := router.Group("/system")
 	{
 		systemHandler := handlerSystem.NewHandler()
-		healthHandler := handlerSystem.NewHealthHandler(deps.DB)
+		healthHandler := handlerSystem.NewHealthHandler(deps.DB, storage.GetDefault())
 
 		systemGroup.Any("/health", healthHandler.Handle)
 		systemGroup.GET("/version", systemHandler.GetVersion)
 		systemGroup.GET("/metrics", systemHandler.GetMetrics)
-		systemGroup.GET("/status", middleware.Authorize("jwt"), systemHandler.GetStatus)
+
+		// 需要 JWT 认证的路由
+		authSystemGroup := systemGroup.Group("")
+		authSystemGroup.Use(middleware.CombinedAuth())
+		authSystemGroup.Use(middleware.Authorize(middleware.AllowJWTOnly...))
+		authSystemGroup.GET("/status", systemHandler.GetStatus)
 	}
 
 	// Swagger 文档路由（开发环境可用）
@@ -90,7 +96,7 @@ func registerPublicRoutes(router *gin.Engine, deps *RouterDependencies) {
 		uploadMaxBatchTotalMB = cfg.UploadMaxBatchTotalMB
 	}
 
-	imageHandler := handlerImages.NewHandler(deps.CacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager, cfg, baseURL, uploadMaxBatchTotalMB)
+	imageHandler := handlerImages.NewHandler(deps.CacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager, cfg, baseURL, uploadMaxBatchTotalMB, storage.GetDefault())
 
 	// 公共图片访问
 	publicGroup := router.Group("/images")
@@ -117,7 +123,7 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
 		uploadMaxBatchTotalMB = cfg.UploadMaxBatchTotalMB
 	}
 
-	imageHandler := handlerImages.NewHandler(deps.CacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager, cfg, baseURL, uploadMaxBatchTotalMB)
+	imageHandler := handlerImages.NewHandler(deps.CacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager, cfg, baseURL, uploadMaxBatchTotalMB, storage.GetDefault())
 	albumService := svcAlbums.NewService(deps.Repositories.AlbumsRepo)
 	albumHandler := handlerAlbums.NewHandler(albumService, deps.CacheProvider, baseURL)
 	albumImageHandler := handlerAlbums.NewAlbumImageHandler(albumService, deps.Repositories.ImagesRepo, deps.CacheProvider, cfg)
@@ -131,7 +137,7 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
 
 	apiGroup := router.Group("/api")
 	apiGroup.Use(func(context *gin.Context) {
-		context.Header("Cache-Control", "no-store")
+		context.Header("Cache-Control", config.CacheControlNoStore)
 		context.Next()
 	})
 	{
@@ -149,7 +155,7 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
 		{
 			// Images
 			imagesGroup := v1.Group("/images")
-			imagesGroup.Use(middleware.Authorize("jwt", "static_token"))
+			imagesGroup.Use(middleware.Authorize(middleware.AllowAllAuth...))
 			{
 				imagesGroup.POST("/upload", imageHandler.UploadImage)
 				imagesGroup.POST("/uploads", imageHandler.UploadImages)
@@ -161,7 +167,7 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
 
 			// Static Token
 			apiTokenGroup := v1.Group("/token")
-			apiTokenGroup.Use(middleware.Authorize("jwt"))
+			apiTokenGroup.Use(middleware.Authorize(middleware.AllowJWTOnly...))
 			{
 				apiTokenGroup.POST("", keyHandler.CreateStaticToken)
 				apiTokenGroup.GET("", keyHandler.GetToken)
@@ -172,7 +178,7 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
 
 			// Albums
 			albumsGroup := v1.Group("/albums")
-			albumsGroup.Use(middleware.Authorize("jwt"))
+			albumsGroup.Use(middleware.Authorize(middleware.AllowJWTOnly...))
 			{
 				albumsGroup.GET("", albumHandler.ListAlbumsHandler)
 				albumsGroup.POST("", albumHandler.CreateAlbumHandler)
@@ -184,7 +190,7 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
 			}
 
 			dashboardGroup := v1.Group("/dashboard")
-			dashboardGroup.Use(middleware.Authorize("jwt"))
+			dashboardGroup.Use(middleware.Authorize(middleware.AllowJWTOnly...))
 			{
 				dashboardGroup.GET("/stats", dashboardHandler.GetStats)
 				dashboardGroup.POST("/stats/refresh", dashboardHandler.RefreshStats)
@@ -206,12 +212,12 @@ func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies) {
 	if cfg != nil {
 		uploadMaxBatchTotalMB = cfg.UploadMaxBatchTotalMB
 	}
-	imageHandler := handlerImages.NewHandler(deps.CacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager, cfg, baseURL, uploadMaxBatchTotalMB)
+	imageHandler := handlerImages.NewHandler(deps.CacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager, cfg, baseURL, uploadMaxBatchTotalMB, storage.GetDefault())
 
 	configHandler := admin.NewConfigHandler(deps.ConfigManager, deps.Repositories.ImagesRepo)
 	adminGroup := v1.Group("/admin")
-	adminGroup.Use(middleware.Authorize("jwt"))
-	adminGroup.Use(middleware.RequireRole("admin"))
+	adminGroup.Use(middleware.Authorize(middleware.AllowJWTOnly...))
+	adminGroup.Use(middleware.RequireRole(middleware.RoleAdmin))
 	{
 		// Configs
 		configsGroup := adminGroup.Group("/configs")

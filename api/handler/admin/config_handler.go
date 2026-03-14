@@ -454,7 +454,7 @@ func (h *ConfigHandler) testConfig(req *models.TestConfigRequest) *models.TestCo
 }
 
 // testStorageConfig 测试存储配置
-func (h *ConfigHandler) testStorageConfig(config map[string]interface{}) *models.TestConfigResponse {
+func (h *ConfigHandler) testStorageConfig(config map[string]any) *models.TestConfigResponse {
 	storageType, _ := config["type"].(string)
 	if storageType == "" {
 		return &models.TestConfigResponse{
@@ -578,9 +578,9 @@ func (h *ConfigHandler) testStorageConfig(config map[string]interface{}) *models
 // @Router       /api/v1/admin/storage/providers [get]
 func (h *ConfigHandler) ListStorageProviders(c *gin.Context) {
 	providers := storage.ListProviders()
-	result := make([]map[string]interface{}, 0, len(providers))
+	result := make([]map[string]any, 0, len(providers))
 	for _, p := range providers {
-		result = append(result, map[string]interface{}{
+		result = append(result, map[string]any{
 			"id":         p.ID,
 			"name":       p.Name,
 			"type":       p.Type,
@@ -606,7 +606,7 @@ func (h *ConfigHandler) ReloadStorageConfig(c *gin.Context) {
 }
 
 // hotReloadStorageConfig 热重载存储配置
-func (h *ConfigHandler) hotReloadStorageConfig(id uint, config map[string]interface{}, isDefault bool) error {
+func (h *ConfigHandler) hotReloadStorageConfig(id uint, config map[string]any, isDefault bool) error {
 	storageType := getString(config, "type")
 	if storageType == "" {
 		return fmt.Errorf("storage type is required")
@@ -649,14 +649,14 @@ func (h *ConfigHandler) hotReloadStorageConfig(id uint, config map[string]interf
 	return storage.AddOrUpdateProvider(cfg)
 }
 
-func getString(m map[string]interface{}, key string) string {
+func getString(m map[string]any, key string) string {
 	if v, ok := m[key].(string); ok {
 		return v
 	}
 	return ""
 }
 
-func getBool(m map[string]interface{}, key string) bool {
+func getBool(m map[string]any, key string) bool {
 	if v, ok := m[key].(bool); ok {
 		return v
 	}

@@ -5,17 +5,23 @@ import (
 	"time"
 
 	"github.com/anoixa/image-bed/database/models"
+	"github.com/anoixa/image-bed/database/repo"
 	"gorm.io/gorm"
 )
 
 // Repository 图片仓库
 type Repository struct {
 	db *gorm.DB
+	// 嵌入泛型仓库，提供基础 CRUD 能力
+	*repo.GenericRepository[models.Image]
 }
 
 // NewRepository 创建新的图片仓库
 func NewRepository(db *gorm.DB) *Repository {
-	return &Repository{db: db}
+	return &Repository{
+		db:                db,
+		GenericRepository: repo.NewGenericRepository[models.Image](db),
+	}
 }
 
 // SaveImage 保存图片
@@ -178,7 +184,7 @@ func (r *Repository) GetSoftDeletedImageByHash(hash string) (*models.Image, erro
 }
 
 // UpdateImageByIdentifier 通过标识符更新图片
-func (r *Repository) UpdateImageByIdentifier(identifier string, updates map[string]interface{}) (*models.Image, error) {
+func (r *Repository) UpdateImageByIdentifier(identifier string, updates map[string]any) (*models.Image, error) {
 	result := r.db.Model(&models.Image{}).Where("identifier = ?", identifier).Updates(updates)
 	if result.Error != nil {
 		return nil, result.Error
@@ -284,6 +290,8 @@ type RandomImageFilter struct {
 	MinHeight        int
 	MaxWidth         int
 	MaxHeight        int
+	RequireWebP      bool  // 是否要求必须有WebP变体
+	MaxFileSize      int64 // 最大文件大小（字节）
 }
 
 // GetRandomPublicImage 随机获取一张公开图片
@@ -311,6 +319,14 @@ func (r *Repository) GetRandomPublicImage(filter *RandomImageFilter) (*models.Im
 		}
 		if filter.MaxHeight > 0 {
 			db = db.Where("height <= ?", filter.MaxHeight)
+		}
+		// 文件大小限制
+		if filter.MaxFileSize > 0 {
+			db = db.Where("file_size <= ?", filter.MaxFileSize)
+		}
+		// WebP变体要求：只返回变体状态为Completed的图片
+		if filter.RequireWebP {
+			db = db.Where("variant_status = ?", models.ImageVariantStatusCompleted)
 		}
 	}
 

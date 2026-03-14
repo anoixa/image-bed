@@ -47,7 +47,7 @@ func (s *Service) DecryptString(ciphertext string) (string, error) {
 }
 
 // EncryptJSON 加密 JSON 数据
-func (s *Service) EncryptJSON(data map[string]interface{}) (string, error) {
+func (s *Service) EncryptJSON(data map[string]any) (string, error) {
 	if s.encryptor == nil {
 		return "", fmt.Errorf("encryptor not initialized")
 	}
@@ -61,7 +61,7 @@ func (s *Service) EncryptJSON(data map[string]interface{}) (string, error) {
 }
 
 // DecryptJSON 解密 JSON 数据
-func (s *Service) DecryptJSON(ciphertext string) (map[string]interface{}, error) {
+func (s *Service) DecryptJSON(ciphertext string) (map[string]any, error) {
 	if s.encryptor == nil {
 		return nil, fmt.Errorf("encryptor not initialized")
 	}
@@ -71,7 +71,7 @@ func (s *Service) DecryptJSON(ciphertext string) (map[string]interface{}, error)
 		return nil, fmt.Errorf("failed to decrypt: %w", err)
 	}
 
-	var data map[string]interface{}
+	var data map[string]any
 	if err := json.Unmarshal([]byte(decrypted), &data); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal: %w", err)
 	}

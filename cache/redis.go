@@ -77,7 +77,7 @@ func (r *RedisCache) Health(ctx context.Context) error {
 }
 
 // Set 设置缓存项
-func (r *RedisCache) Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error {
+func (r *RedisCache) Set(ctx context.Context, key string, value any, expiration time.Duration) error {
 	var data []byte
 	var err error
 
@@ -94,7 +94,7 @@ func (r *RedisCache) Set(ctx context.Context, key string, value interface{}, exp
 }
 
 // Get 获取缓存项
-func (r *RedisCache) Get(ctx context.Context, key string, dest interface{}) error {
+func (r *RedisCache) Get(ctx context.Context, key string, dest any) error {
 	data, err := r.client.Get(ctx, key).Result()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {

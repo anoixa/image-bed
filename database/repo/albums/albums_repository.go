@@ -154,9 +154,9 @@ func (r *Repository) AddImagesToAlbum(albumID, userID uint, imageIDs []uint) err
 		}
 
 		// 批量插入关联记录
-		associations := make([]map[string]interface{}, len(imageIDs))
+		associations := make([]map[string]any, len(imageIDs))
 		for i, id := range imageIDs {
-			associations[i] = map[string]interface{}{
+			associations[i] = map[string]any{
 				"album_id": albumID,
 				"image_id": id,
 			}

@@ -78,7 +78,7 @@ func (s *VariantService) SelectBestVariant(ctx context.Context, image *models.Im
 }
 
 // handleOriginalWithConversion 返回原图，根据条件触发转换
-func (s *VariantService) handleOriginalWithConversion(image *models.Image, acceptHeader string, settings *config.ImageProcessingSettings, allowTrigger bool) (*VariantResult, error) {
+func (s *VariantService) handleOriginalWithConversion(image *models.Image, acceptHeader string, _ *config.ImageProcessingSettings, allowTrigger bool) (*VariantResult, error) {
 	result := &VariantResult{
 		Format:      format.FormatOriginal,
 		IsOriginal:  true,
@@ -95,7 +95,7 @@ func (s *VariantService) handleOriginalWithConversion(image *models.Image, accep
 }
 
 // handleCompletedVariants 处理已完成变体的情况
-func (s *VariantService) handleCompletedVariants(ctx context.Context, image *models.Image, acceptHeader string, settings *config.ImageProcessingSettings) (*VariantResult, error) {
+func (s *VariantService) handleCompletedVariants(_ context.Context, image *models.Image, acceptHeader string, settings *config.ImageProcessingSettings) (*VariantResult, error) {
 	variants, err := s.variantRepo.GetVariantsByImageID(image.ID)
 	if err != nil {
 		return nil, err

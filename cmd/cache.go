@@ -79,7 +79,7 @@ func runCacheClear(imageOnly, all bool, pattern string) error {
 		log.Printf("Cache matching pattern '%s' cleared successfully", pattern)
 	} else if imageOnly {
 		log.Println("Clearing image cache...")
-		if err := clearImageCache(ctx, provider); err != nil {
+		if err := clearImageCacheKeys(ctx, provider); err != nil {
 			return fmt.Errorf("failed to clear image cache: %w", err)
 		}
 		log.Println("Image cache cleared successfully")
@@ -89,7 +89,7 @@ func runCacheClear(imageOnly, all bool, pattern string) error {
 }
 
 // clearAllCache 清理所有缓存
-func clearAllCache(ctx context.Context, provider interface{}) error {
+func clearAllCache(ctx context.Context, provider any) error {
 	type ClearAll interface {
 		ClearAll(ctx context.Context) error
 	}
@@ -99,11 +99,11 @@ func clearAllCache(ctx context.Context, provider interface{}) error {
 	}
 
 	log.Println("Cache provider does not support bulk clear, attempting to clear known keys...")
-	return clearImageCache(ctx, provider)
+	return clearImageCacheKeys(ctx, provider)
 }
 
 // clearCacheByPattern 按模式清理缓存
-func clearCacheByPattern(ctx context.Context, provider interface{}, pattern string) error {
+func clearCacheByPattern(ctx context.Context, provider any, pattern string) error {
 	type ClearByPattern interface {
 		ClearByPattern(ctx context.Context, pattern string) error
 	}
@@ -113,11 +113,11 @@ func clearCacheByPattern(ctx context.Context, provider interface{}, pattern stri
 	}
 
 	log.Printf("Cache provider does not support pattern matching, falling back to image cache clear...")
-	return clearImageCache(ctx, provider)
+	return clearImageCacheKeys(ctx, provider)
 }
 
-// clearImageCache 清理图片缓存
-func clearImageCache(ctx context.Context, provider interface{}) error {
+// clearImageCacheKeys 清理图片缓存键
+func clearImageCacheKeys(ctx context.Context, provider any) error {
 	imageCachePrefixes := []string{
 		"image:",
 		"image_meta:",

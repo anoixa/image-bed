@@ -45,7 +45,7 @@ func (eb *EventBus) Subscribe(eventType EventType, handler EventHandler) {
 }
 
 // Publish 发布事件
-func (eb *EventBus) Publish(eventType EventType, config interface{}) {
+func (eb *EventBus) Publish(eventType EventType, config any) {
 	eb.mu.RLock()
 	handlers := eb.subscribers[eventType]
 	eb.mu.RUnlock()

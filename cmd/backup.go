@@ -237,7 +237,7 @@ func backupTable(db *gorm.DB, table string, tempDir string) (int64, error) {
 }
 
 // writeJSONFile 写入 JSON 文件
-func writeJSONFile(path string, data interface{}) error {
+func writeJSONFile(path string, data any) error {
 	file, err := os.Create(path)
 	if err != nil {
 		return err

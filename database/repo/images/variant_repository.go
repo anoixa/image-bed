@@ -79,7 +79,7 @@ func (r *VariantRepository) UpsertPending(imageID uint, format string) (*models.
 
 // UpdateStatusCAS 条件更新状态
 func (r *VariantRepository) UpdateStatusCAS(id uint, expected, newStatus, errMsg string) (bool, error) {
-	updates := map[string]interface{}{
+	updates := map[string]any{
 		"status":     newStatus,
 		"updated_at": time.Now(),
 	}
@@ -93,7 +93,7 @@ func (r *VariantRepository) UpdateStatusCAS(id uint, expected, newStatus, errMsg
 
 // UpdateCompleted 更新完成状态
 func (r *VariantRepository) UpdateCompleted(id uint, identifier, storagePath string, fileSize int64, width, height int) error {
-	result := r.db.Model(&models.ImageVariant{}).Where("id = ? AND status = ?", id, models.VariantStatusProcessing).Updates(map[string]interface{}{
+	result := r.db.Model(&models.ImageVariant{}).Where("id = ? AND status = ?", id, models.VariantStatusProcessing).Updates(map[string]any{
 		"status":        models.VariantStatusCompleted,
 		"identifier":    identifier,
 		"storage_path":  storagePath,
@@ -115,7 +115,7 @@ func (r *VariantRepository) UpdateCompleted(id uint, identifier, storagePath str
 
 // UpdateFailed 更新失败状态
 func (r *VariantRepository) UpdateFailed(id uint, errMsg string, allowRetry bool) error {
-	updates := map[string]interface{}{
+	updates := map[string]any{
 		"status":        models.VariantStatusFailed,
 		"error_message": errMsg,
 		"updated_at":    time.Now(),

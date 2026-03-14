@@ -20,7 +20,7 @@ var DistFS = func() http.FileSystem {
 }()
 
 // FileSystem 开发模式下返回 nil
-func FileSystem() interface{} {
+func FileSystem() any {
 	return nil
 }
 

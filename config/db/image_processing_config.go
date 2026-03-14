@@ -182,7 +182,7 @@ func (m *Manager) ensureDefaultImageProcessingConfig(ctx context.Context) error 
 	req := &models.SystemConfigStoreRequest{
 		Category: models.ConfigCategoryImageProcessing,
 		Name:     "Image Processing Settings",
-		Config: map[string]interface{}{
+		Config: map[string]any{
 			"thumbnail_enabled":          defaultSettings.ThumbnailEnabled,
 			"thumbnail_sizes":            defaultSettings.ThumbnailSizes,
 			"thumbnail_quality":          defaultSettings.ThumbnailQuality,
@@ -233,7 +233,7 @@ func (m *Manager) SaveImageProcessingSettings(ctx context.Context, settings *Ima
 	req := &models.SystemConfigStoreRequest{
 		Category: models.ConfigCategoryImageProcessing,
 		Name:     "Image Processing Settings",
-		Config: map[string]interface{}{
+		Config: map[string]any{
 			"thumbnail_enabled":          settings.ThumbnailEnabled,
 			"thumbnail_sizes":            settings.ThumbnailSizes,
 			"thumbnail_quality":          settings.ThumbnailQuality,
@@ -268,12 +268,12 @@ func (m *Manager) InitializeImageProcessingConfig(ctx context.Context) error {
 }
 
 // MaskSensitiveData 脱敏敏感数据
-func MaskSensitiveData(config map[string]interface{}) map[string]interface{} {
+func MaskSensitiveData(config map[string]any) map[string]any {
 	sensitiveFields := []string{
 		"secret", "secret_access_key", "access_key_id", "password",
 	}
 
-	result := make(map[string]interface{})
+	result := make(map[string]any)
 	for k, v := range config {
 		isSensitive := false
 		for _, sf := range sensitiveFields {
@@ -299,7 +299,7 @@ func BoolPtr(b bool) *bool {
 }
 
 // getStringFromMap 从 map 中获取字符串值，提供默认值
-func getStringFromMap(m map[string]interface{}, key, defaultValue string) string {
+func getStringFromMap(m map[string]any, key, defaultValue string) string {
 	if val, ok := m[key]; ok {
 		if str, ok := val.(string); ok {
 			return str

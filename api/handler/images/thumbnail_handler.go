@@ -6,6 +6,7 @@ import (
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
+	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/internal/image"
 	"github.com/gin-gonic/gin"
@@ -91,8 +92,8 @@ func (h *Handler) parseThumbnailWidth(c *gin.Context) int {
 
 // serveThumbnailImage 提供缩略图
 func (h *Handler) serveThumbnailImage(c *gin.Context, image *models.Image, result *image.ThumbnailResult) {
-	c.Header("Cache-Control", "public, max-age=86400")
-	c.Header("Content-Type", "image/webp")
+	c.Header("Cache-Control", config.CacheControlPublic)
+	c.Header("Content-Type", config.ContentTypeWebP)
 
 	ctx := c.Request.Context()
 

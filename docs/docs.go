@@ -2242,7 +2242,7 @@ const docTemplate = `{
         },
         "/images/random": {
             "get": {
-                "description": "Get a random image, optionally filtered by album and dimensions",
+                "description": "Get a random image, optionally filtered by album, dimensions, WebP availability and file size",
                 "consumes": [
                     "application/json"
                 ],
@@ -2289,6 +2289,18 @@ const docTemplate = `{
                         "type": "integer",
                         "description": "Maximum image height",
                         "name": "max_height",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Only return images with WebP variant (default: false)",
+                        "name": "require_webp",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum file size in bytes (e.g., 10485760 for 10MB)",
+                        "name": "max_file_size",
                         "in": "query"
                     }
                 ],

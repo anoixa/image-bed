@@ -171,7 +171,7 @@ func (m *Manager) UpdateConfig(ctx context.Context, id uint, req *models.SystemC
 }
 
 // mergeConfig 合并配置
-func (m *Manager) mergeConfig(config *models.SystemConfig, newConfig map[string]interface{}) error {
+func (m *Manager) mergeConfig(config *models.SystemConfig, newConfig map[string]any) error {
 	existingConfig, err := m.crypto.Decrypt(config.ConfigJSON)
 	if err != nil {
 		return fmt.Errorf("failed to decrypt existing config: %w", err)
@@ -373,7 +373,7 @@ func (m *Manager) EnsureDefaultJWTConfig(ctx context.Context) error {
 	req := &models.SystemConfigStoreRequest{
 		Category: models.ConfigCategoryJWT,
 		Name:     "JWT Settings",
-		Config: map[string]interface{}{
+		Config: map[string]any{
 			"secret":            secret,
 			"access_token_ttl":  "15m",
 			"refresh_token_ttl": "168h",
@@ -405,7 +405,7 @@ func (m *Manager) UpdateJWTConfig(ctx context.Context, jwtConfig *JWTConfig) err
 	req := &models.SystemConfigStoreRequest{
 		Category: config.Category,
 		Name:     config.Name,
-		Config: map[string]interface{}{
+		Config: map[string]any{
 			"secret":            jwtConfig.Secret,
 			"access_token_ttl":  jwtConfig.AccessTokenTTL,
 			"refresh_token_ttl": jwtConfig.RefreshTokenTTL,
@@ -520,7 +520,7 @@ func (m *Manager) ensureDefaultLocalStorageConfig(ctx context.Context) error {
 	req := &models.SystemConfigStoreRequest{
 		Category: models.ConfigCategoryStorage,
 		Name:     "Local Storage",
-		Config: map[string]interface{}{
+		Config: map[string]any{
 			"type":       "local",
 			"local_path": "./data/upload",
 		},
@@ -540,7 +540,7 @@ func (m *Manager) ensureDefaultLocalStorageConfig(ctx context.Context) error {
 
 // parseBool 解析任意类型的值为 bool
 // 支持 bool、string、int/float 类型
-func parseBool(val interface{}, defaultValue bool) bool {
+func parseBool(val any, defaultValue bool) bool {
 	switch v := val.(type) {
 	case bool:
 		return v

@@ -6,6 +6,7 @@ import (
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
+	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/gin-gonic/gin"
@@ -74,13 +75,12 @@ func (h *Handler) ListImages(c *gin.Context) {
 		page = 1
 	}
 	if body.Limit <= 0 {
-		limit = 10
+		limit = config.DefaultPerPage
 	}
 
 	// 限制最大分页数量
-	const maxLimit = 100
-	if limit > maxLimit {
-		limit = maxLimit
+	if limit > config.MaxPerPage {
+		limit = config.MaxPerPage
 	}
 
 	result, err := h.imageService.ListImages(body.StorageType, body.Identifier, body.Search, body.AlbumID, body.StartTime, body.EndTime, body.Sort, page, limit, int(userID))
