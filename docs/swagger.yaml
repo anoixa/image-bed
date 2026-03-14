@@ -1,4 +1,12 @@
 definitions:
+  admin.SetTransferModeRequest:
+    properties:
+      mode:
+        description: auto, always_proxy, always_direct
+        type: string
+    required:
+    - mode
+    type: object
   albums.AddImagesToAlbumRequest:
     properties:
       image_ids:
@@ -151,50 +159,6 @@ definitions:
         type: string
     type: object
   config.ImageProcessingSettings:
-    properties:
-      avif_experimental:
-        type: boolean
-      avif_quality:
-        type: integer
-      avif_speed:
-        type: integer
-      conversion_enabled_formats:
-        description: 格式转换配置
-        items:
-          type: string
-        type: array
-      max_dimension:
-        type: integer
-      max_retries:
-        type: integer
-      scanner_batch_size:
-        type: integer
-      scanner_enabled:
-        description: 扫描器配置
-        type: boolean
-      scanner_interval:
-        $ref: '#/definitions/time.Duration'
-      scanner_max_age_days:
-        type: integer
-      scanner_max_file_size_mb:
-        type: integer
-      scanner_only_public:
-        type: boolean
-      skip_smaller_than:
-        type: integer
-      thumbnail_enabled:
-        description: 缩略图配置
-        type: boolean
-      thumbnail_quality:
-        type: integer
-      thumbnail_sizes:
-        items:
-          $ref: '#/definitions/models.ThumbnailSize'
-        type: array
-      webp_effort:
-        type: integer
-      webp_quality:
-        type: integer
     type: object
   images.DeleteRequestBody:
     properties:
@@ -308,7 +272,7 @@ definitions:
       category:
         $ref: '#/definitions/models.ConfigCategory'
       config:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
       description:
         type: string
@@ -330,7 +294,7 @@ definitions:
       category:
         $ref: '#/definitions/models.ConfigCategory'
       config:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
     required:
     - category
@@ -454,27 +418,6 @@ definitions:
       version:
         type: string
     type: object
-  time.Duration:
-    enum:
-    - -9223372036854775808
-    - 9223372036854775807
-    - 1
-    - 1000
-    - 1000000
-    - 1000000000
-    - 60000000000
-    - 3600000000000
-    format: int64
-    type: integer
-    x-enum-varnames:
-    - minDuration
-    - maxDuration
-    - Nanosecond
-    - Microsecond
-    - Millisecond
-    - Second
-    - Minute
-    - Hour
 info:
   contact: {}
 paths:
@@ -1080,6 +1023,69 @@ paths:
       security:
       - ApiKeyAuth: []
       summary: Reload storage configuration
+      tags:
+      - admin
+  /api/v1/admin/transfer-mode:
+    get:
+      consumes:
+      - application/json
+      description: Get the global image transfer mode (auto, always_proxy, always_direct)
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Transfer mode
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  additionalProperties:
+                    type: string
+                  type: object
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Get global transfer mode
+      tags:
+      - admin
+    post:
+      consumes:
+      - application/json
+      description: Set the global image transfer mode
+      parameters:
+      - description: Transfer mode request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/admin.SetTransferModeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/common.Response'
+        "400":
+          description: Invalid mode
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Set global transfer mode
       tags:
       - admin
   /api/v1/albums:

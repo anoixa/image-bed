@@ -18,6 +18,18 @@ var (
 	defaultID       uint
 )
 
+// TransferMode 转发模式
+type TransferMode string
+
+const (
+	// TransferModeAuto 自动模式：公开图片走直链，私有图片走代理
+	TransferModeAuto TransferMode = "auto"
+	// TransferModeAlwaysProxy 总是代理：所有图片都经过 Go 转发
+	TransferModeAlwaysProxy TransferMode = "always_proxy"
+	// TransferModeAlwaysDirect 总是直链：所有图片（仅限 public bucket）走直链
+	TransferModeAlwaysDirect TransferMode = "always_direct"
+)
+
 // ImageStream 图片流结构
 type ImageStream struct {
 	Reader      io.ReadSeeker
@@ -44,6 +56,18 @@ type StorageConfig struct {
 	WebDAVUsername string
 	WebDAVPassword string
 	WebDAVRootPath string
+	// === 直链配置 ===
+	// EnableDirectLink 是否启用直链功能
+	EnableDirectLink bool `json:"enable_direct_link"`
+	// PublicEndpoint 对外访问地址（如 CDN、反向代理、公网域名）
+	// 为空时使用 Endpoint
+	PublicEndpoint string `json:"public_endpoint"`
+	// IsPublicBucket 存储桶是否为 Public-read（必须 true 才能直链）
+	IsPublicBucket bool `json:"is_public_bucket"`
+	// ForceProxy 强制走代理（即使配置了直链，用于某些内网安全场景）
+	ForceProxy bool `json:"force_proxy"`
+	// TransferMode 该存储的转发模式
+	TransferMode TransferMode `json:"transfer_mode"`
 }
 
 // Provider 存储提供者接口
@@ -76,6 +100,22 @@ type FileOpener interface {
 type StreamProvider interface {
 	Provider
 	StreamTo(ctx context.Context, storagePath string, w http.ResponseWriter) (int64, error)
+}
+
+// DirectURLProvider 直链提供者接口
+// 支持直链的存储（如 MinIO public bucket）可实现此接口
+type DirectURLProvider interface {
+	// GetDirectURL 获取直链 URL，返回空表示不支持或配置不完整
+	// 仅当图片为公开且存储配置 EnableDirectLink=true 时调用
+	GetDirectURL(storagePath string) string
+
+	// SupportsDirectLink 是否支持直链（配置正确且 IsPublicBucket=true）
+	SupportsDirectLink() bool
+
+	// ShouldProxy 根据策略判断是否走代理
+	// imageIsPublic: 图片是否公开
+	// globalMode: 全局转发模式
+	ShouldProxy(imageIsPublic bool, globalMode TransferMode) bool
 }
 
 // InitStorage 初始化存储层
@@ -268,11 +308,16 @@ func createProvider(cfg StorageConfig) (Provider, error) {
 		return NewLocalStorage(cfg.LocalPath)
 	case "minio":
 		return NewMinioStorage(MinioConfig{
-			Endpoint:        cfg.Endpoint,
-			AccessKeyID:     cfg.AccessKeyID,
-			SecretAccessKey: cfg.SecretAccessKey,
-			UseSSL:          cfg.UseSSL,
-			BucketName:      cfg.BucketName,
+			Endpoint:         cfg.Endpoint,
+			AccessKeyID:      cfg.AccessKeyID,
+			SecretAccessKey:  cfg.SecretAccessKey,
+			UseSSL:           cfg.UseSSL,
+			BucketName:       cfg.BucketName,
+			EnableDirectLink: cfg.EnableDirectLink,
+			PublicEndpoint:   cfg.PublicEndpoint,
+			IsPublicBucket:   cfg.IsPublicBucket,
+			ForceProxy:       cfg.ForceProxy,
+			TransferMode:     cfg.TransferMode,
 		})
 	case "webdav":
 		return NewWebDAVStorage(WebDAVConfig{

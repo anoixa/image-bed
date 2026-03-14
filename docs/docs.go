@@ -953,6 +953,110 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/admin/transfer-mode": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Get the global image transfer mode (auto, always_proxy, always_direct)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get global transfer mode",
+                "responses": {
+                    "200": {
+                        "description": "Transfer mode",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "object",
+                                            "additionalProperties": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Set the global image transfer mode",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Set global transfer mode",
+                "parameters": [
+                    {
+                        "description": "Transfer mode request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.SetTransferModeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid mode",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/albums": {
             "get": {
                 "security": [
@@ -2586,6 +2690,18 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "admin.SetTransferModeRequest": {
+            "type": "object",
+            "required": [
+                "mode"
+            ],
+            "properties": {
+                "mode": {
+                    "description": "auto, always_proxy, always_direct",
+                    "type": "string"
+                }
+            }
+        },
         "albums.AddImagesToAlbumRequest": {
             "type": "object",
             "required": [
@@ -2816,72 +2932,7 @@ const docTemplate = `{
             }
         },
         "config.ImageProcessingSettings": {
-            "type": "object",
-            "properties": {
-                "avif_experimental": {
-                    "type": "boolean"
-                },
-                "avif_quality": {
-                    "type": "integer"
-                },
-                "avif_speed": {
-                    "type": "integer"
-                },
-                "conversion_enabled_formats": {
-                    "description": "格式转换配置",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "max_dimension": {
-                    "type": "integer"
-                },
-                "max_retries": {
-                    "type": "integer"
-                },
-                "scanner_batch_size": {
-                    "type": "integer"
-                },
-                "scanner_enabled": {
-                    "description": "扫描器配置",
-                    "type": "boolean"
-                },
-                "scanner_interval": {
-                    "$ref": "#/definitions/time.Duration"
-                },
-                "scanner_max_age_days": {
-                    "type": "integer"
-                },
-                "scanner_max_file_size_mb": {
-                    "type": "integer"
-                },
-                "scanner_only_public": {
-                    "type": "boolean"
-                },
-                "skip_smaller_than": {
-                    "type": "integer"
-                },
-                "thumbnail_enabled": {
-                    "description": "缩略图配置",
-                    "type": "boolean"
-                },
-                "thumbnail_quality": {
-                    "type": "integer"
-                },
-                "thumbnail_sizes": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/models.ThumbnailSize"
-                    }
-                },
-                "webp_effort": {
-                    "type": "integer"
-                },
-                "webp_quality": {
-                    "type": "integer"
-                }
-            }
+            "type": "object"
         },
         "images.DeleteRequestBody": {
             "type": "object",
@@ -3054,7 +3105,7 @@ const docTemplate = `{
                 },
                 "config": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": {}
                 },
                 "description": {
                     "type": "string"
@@ -3085,7 +3136,7 @@ const docTemplate = `{
                 },
                 "config": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": {}
                 }
             }
         },
@@ -3276,30 +3327,6 @@ const docTemplate = `{
                     "type": "string"
                 }
             }
-        },
-        "time.Duration": {
-            "type": "integer",
-            "format": "int64",
-            "enum": [
-                -9223372036854775808,
-                9223372036854775807,
-                1,
-                1000,
-                1000000,
-                1000000000,
-                60000000000,
-                3600000000000
-            ],
-            "x-enum-varnames": [
-                "minDuration",
-                "maxDuration",
-                "Nanosecond",
-                "Microsecond",
-                "Millisecond",
-                "Second",
-                "Minute",
-                "Hour"
-            ]
         }
     }
 }`

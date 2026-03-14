@@ -243,6 +243,10 @@ func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies) {
 		// 随机图片源相册配置
 		adminGroup.GET("/random-source-album", imageHandler.GetRandomSourceAlbum)
 		adminGroup.POST("/random-source-album", imageHandler.SetRandomSourceAlbum)
+
+		// 全局转发模式配置
+		adminGroup.GET("/transfer-mode", configHandler.GetGlobalTransferMode)
+		adminGroup.POST("/transfer-mode", configHandler.SetGlobalTransferMode)
 	}
 }
 

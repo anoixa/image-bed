@@ -98,6 +98,11 @@ func (m *Manager) Subscribe(eventType EventType, handler EventHandler) {
 	m.eventBus.Subscribe(eventType, handler)
 }
 
+// ClearCache 清除配置缓存
+func (m *Manager) ClearCache() {
+	m.cache.Invalidate(models.ConfigCategoryStorage)
+}
+
 // CreateConfig 创建配置
 func (m *Manager) CreateConfig(ctx context.Context, req *models.SystemConfigStoreRequest, userID uint) (*models.ConfigResponse, error) {
 	baseKey := fmt.Sprintf("%s:%s", req.Category, req.Name)
@@ -459,6 +464,12 @@ func (m *Manager) GetStorageConfigs(ctx context.Context) ([]storage.StorageConfi
 			if val, ok := configMap["use_ssl"]; ok {
 				storageCfg.UseSSL = parseBool(val, false)
 			}
+			// 直链配置
+			storageCfg.EnableDirectLink = getBoolFromMap(configMap, "enable_direct_link", false)
+			storageCfg.PublicEndpoint = getStringFromMap(configMap, "public_endpoint", "")
+			storageCfg.IsPublicBucket = getBoolFromMap(configMap, "is_public_bucket", false)
+			storageCfg.ForceProxy = getBoolFromMap(configMap, "force_proxy", false)
+			storageCfg.TransferMode = storage.TransferMode(getStringFromMap(configMap, "transfer_mode", string(storage.TransferModeAuto)))
 		case "webdav":
 			storageCfg.WebDAVURL = getStringFromMap(configMap, "webdav_url", "")
 			storageCfg.WebDAVUsername = getStringFromMap(configMap, "webdav_username", "")
@@ -558,4 +569,59 @@ func parseBool(val any, defaultValue bool) bool {
 	default:
 		return defaultValue
 	}
+}
+
+// === 全局转发模式配置 ===
+
+const globalTransferModeKey = "system:transfer_mode"
+
+// GetGlobalTransferMode 获取全局转发模式
+func (m *Manager) GetGlobalTransferMode(ctx context.Context) storage.TransferMode {
+	config, err := m.repo.GetByKey(ctx, globalTransferModeKey)
+	if err != nil {
+		return storage.TransferModeAuto // 默认 auto
+	}
+
+	configMap, err := m.crypto.Decrypt(config.ConfigJSON)
+	if err != nil {
+		log.Printf("[ConfigManager] Failed to decrypt transfer mode: %v", err)
+		return storage.TransferModeAuto
+	}
+
+	mode, ok := configMap["mode"].(string)
+	if !ok {
+		return storage.TransferModeAuto
+	}
+
+	return storage.TransferMode(mode)
+}
+
+// SetGlobalTransferMode 设置全局转发模式
+func (m *Manager) SetGlobalTransferMode(ctx context.Context, mode storage.TransferMode) error {
+	configMap := map[string]any{
+		"mode": string(mode),
+	}
+
+	encryptedJSON, err := m.crypto.Encrypt(configMap)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt transfer mode: %w", err)
+	}
+
+	// 查找或创建配置
+	existing, err := m.repo.GetByKey(ctx, globalTransferModeKey)
+	if err != nil {
+		// 创建新配置
+		return m.repo.Create(ctx, &models.SystemConfig{
+			Category:    models.ConfigCategorySystem,
+			Name:        "Global Transfer Mode",
+			Key:         globalTransferModeKey,
+			ConfigJSON:  encryptedJSON,
+			IsEnabled:   true,
+			Description: "全局图片转发模式: auto(自动), always_proxy(总是代理), always_direct(总是直链)",
+		})
+	}
+
+	// 更新配置
+	existing.ConfigJSON = encryptedJSON
+	return m.repo.Update(ctx, existing)
 }

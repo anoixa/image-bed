@@ -662,3 +662,73 @@ func getBool(m map[string]any, key string) bool {
 	}
 	return false
 }
+
+// === 全局转发模式配置 ===
+
+// GetGlobalTransferMode 获取全局转发模式
+// @Summary      Get global transfer mode
+// @Description  Get the global image transfer mode (auto, always_proxy, always_direct)
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  common.Response{data=map[string]string}  "Transfer mode"
+// @Failure      401  {object}  common.Response  "Unauthorized"
+// @Security     ApiKeyAuth
+// @Router       /api/v1/admin/transfer-mode [get]
+func (h *ConfigHandler) GetGlobalTransferMode(c *gin.Context) {
+	ctx := c.Request.Context()
+	mode := h.manager.GetGlobalTransferMode(ctx)
+
+	common.RespondSuccess(c, map[string]string{
+		"mode": string(mode),
+	})
+}
+
+// SetGlobalTransferMode 设置全局转发模式
+// @Summary      Set global transfer mode
+// @Description  Set the global image transfer mode
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        request  body      SetTransferModeRequest  true  "Transfer mode request"
+// @Success      200  {object}  common.Response  "Success"
+// @Failure      400  {object}  common.Response  "Invalid mode"
+// @Failure      401  {object}  common.Response  "Unauthorized"
+// @Failure      500  {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /api/v1/admin/transfer-mode [post]
+func (h *ConfigHandler) SetGlobalTransferMode(c *gin.Context) {
+	var req SetTransferModeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.RespondError(c, http.StatusBadRequest, "Invalid request: "+err.Error())
+		return
+	}
+
+	// 验证模式值
+	mode := storage.TransferMode(req.Mode)
+	switch mode {
+	case storage.TransferModeAuto, storage.TransferModeAlwaysProxy, storage.TransferModeAlwaysDirect:
+		// valid
+	default:
+		common.RespondError(c, http.StatusBadRequest, "Invalid mode. Must be: auto, always_proxy, or always_direct")
+		return
+	}
+
+	ctx := c.Request.Context()
+	if err := h.manager.SetGlobalTransferMode(ctx, mode); err != nil {
+		common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to set transfer mode: %v", err))
+		return
+	}
+
+	// 清除配置缓存，使新配置立即生效
+	h.manager.ClearCache()
+
+	common.RespondSuccess(c, map[string]string{
+		"mode": req.Mode,
+	})
+}
+
+// SetTransferModeRequest 设置转发模式请求
+type SetTransferModeRequest struct {
+	Mode string `json:"mode" binding:"required"` // auto, always_proxy, always_direct
+}

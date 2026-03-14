@@ -8,7 +8,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -26,12 +28,23 @@ type MinioConfig struct {
 	SecretAccessKey string
 	UseSSL          bool
 	BucketName      string
+	// 直链配置
+	EnableDirectLink bool
+	PublicEndpoint   string
+	IsPublicBucket   bool
+	ForceProxy       bool
+	TransferMode     TransferMode
 }
 
 // MinioStorage MinIO 存储实现
 type MinioStorage struct {
-	client     *minio.Client
-	bucketName string
+	client           *minio.Client
+	bucketName       string
+	enableDirectLink bool
+	publicEndpoint   string
+	isPublicBucket   bool
+	forceProxy       bool
+	transferMode     TransferMode
 }
 
 // NewMinioStorage 创建 MinIO 存储提供者
@@ -84,8 +97,13 @@ func NewMinioStorage(cfg MinioConfig) (*MinioStorage, error) {
 	}
 
 	return &MinioStorage{
-		client:     client,
-		bucketName: cfg.BucketName,
+		client:           client,
+		bucketName:       cfg.BucketName,
+		enableDirectLink: cfg.EnableDirectLink,
+		publicEndpoint:   cfg.PublicEndpoint,
+		isPublicBucket:   cfg.IsPublicBucket,
+		forceProxy:       cfg.ForceProxy,
+		transferMode:     cfg.TransferMode,
 	}, nil
 }
 
@@ -264,4 +282,74 @@ func mustGetSystemCertPool() *x509.CertPool {
 		return x509.NewCertPool()
 	}
 	return pool
+}
+
+// === DirectURLProvider 接口实现 ===
+
+// GetDirectURL 获取直链 URL
+func (s *MinioStorage) GetDirectURL(storagePath string) string {
+	if !s.SupportsDirectLink() {
+		return ""
+	}
+
+	// 构建 URL
+	base := s.publicEndpoint
+	if base == "" {
+		// 使用 MinIO 端点
+		base = s.client.EndpointURL().String()
+	}
+
+	// 确保格式正确
+	base = strings.TrimRight(base, "/")
+
+	// URL 编码路径（处理中文、空格等）
+	segments := strings.Split(storagePath, "/")
+	encodedSegments := make([]string, len(segments))
+	for i, seg := range segments {
+		encodedSegments[i] = url.PathEscape(seg)
+	}
+	encodedPath := path.Join(encodedSegments...)
+
+	return fmt.Sprintf("%s/%s/%s", base, s.bucketName, encodedPath)
+}
+
+// SupportsDirectLink 是否支持直链
+func (s *MinioStorage) SupportsDirectLink() bool {
+	// 必须启用直链且是 public bucket 且不强制代理
+	return s.enableDirectLink && s.isPublicBucket && !s.forceProxy
+}
+
+// ShouldProxy 根据策略判断是否走代理
+func (s *MinioStorage) ShouldProxy(imageIsPublic bool, globalMode TransferMode) bool {
+	// 强制代理
+	if s.forceProxy {
+		return true
+	}
+
+	// 使用存储级策略，如果未设置则使用全局策略
+	mode := s.transferMode
+	if mode == "" {
+		mode = globalMode
+	}
+
+	switch mode {
+	case TransferModeAlwaysProxy:
+		// 总是代理
+		return true
+
+	case TransferModeAlwaysDirect:
+		// 总是直链（仅限 public bucket 配置正确时）
+		return !s.SupportsDirectLink()
+
+	case TransferModeAuto, "": // 默认 auto
+		// 自动：私有图片代理，公开图片直链
+		if !imageIsPublic {
+			return true
+		}
+		return !s.SupportsDirectLink()
+
+	default:
+		// 未知模式，安全起见走代理
+		return true
+	}
 }

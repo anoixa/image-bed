@@ -72,7 +72,7 @@ func (h *Handler) GetImage(c *gin.Context) {
 	}
 }
 
-// serveOriginalImage 提供原图
+// serveOriginalImage 提供原图（支持直链模式）
 func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 	// [DEBUG] 检查关键依赖
 	if h.cacheHelper == nil {
@@ -80,9 +80,17 @@ func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 		common.RespondError(c, http.StatusInternalServerError, "Cache not initialized")
 		return
 	}
+
 	// [DEBUG] 记录图片存储配置ID
 	utils.LogIfDevf("[DEBUG][serveOriginalImage] image.ID=%d, StorageConfigID=%d, Identifier=%s",
 		image.ID, image.StorageConfigID, image.Identifier)
+
+	// 检查是否可以使用直链（使用 singleflight 防止缓存击穿）
+	if directURL := h.getDirectURLIfPossible(c, image); directURL != "" {
+		c.Header("Cache-Control", config.CacheControlPublic)
+		c.Redirect(http.StatusFound, directURL)
+		return
+	}
 
 	storagePath := image.StoragePath
 
@@ -121,6 +129,49 @@ func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 	}
 
 	h.serveImageData(c, image, data)
+}
+
+// getDirectURLIfPossible 尝试获取直链 URL
+// 如果返回空字符串，表示应该使用代理模式
+func (h *Handler) getDirectURLIfPossible(c *gin.Context, img *models.Image) string {
+	// 私有图片不支持直链
+	if !img.IsPublic {
+		return ""
+	}
+
+	// 获取存储提供者
+	provider := h.getStorageProvider(img.StorageConfigID)
+	if provider == nil {
+		return ""
+	}
+
+	directProvider, ok := provider.(storage.DirectURLProvider)
+	if !ok {
+		return ""
+	}
+
+	// 使用 singleflight 获取全局模式（防止缓存击穿）
+	globalMode := h.getGlobalTransferMode(c.Request.Context())
+
+	// 判断是否应该走代理
+	if directProvider.ShouldProxy(img.IsPublic, globalMode) {
+		return ""
+	}
+
+	// 获取直链 URL
+	return directProvider.GetDirectURL(img.StoragePath)
+}
+
+// getGlobalTransferMode 获取全局转发模式（带 singleflight 保护）
+func (h *Handler) getGlobalTransferMode(ctx context.Context) storage.TransferMode {
+	v, err, _ := fileDownloadGroup.Do("global_transfer_mode", func() (any, error) {
+		mode := h.configManager.GetGlobalTransferMode(ctx)
+		return mode, nil
+	})
+	if err != nil {
+		return storage.TransferModeAuto
+	}
+	return v.(storage.TransferMode)
 }
 
 func (h *Handler) serveByStreaming(c *gin.Context, img *models.Image, streamer storage.StreamProvider) bool {
@@ -231,11 +282,18 @@ func (h *Handler) serveImageData(c *gin.Context, img *models.Image, data []byte)
 	c.Data(http.StatusOK, img.MimeType, data)
 }
 
-// serveVariantImage 提供格式变体
+// serveVariantImage 提供格式变体（支持直链模式）
 func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *image.VariantResult) {
 	// [DEBUG] 记录变体信息
 	utils.LogIfDevf("[DEBUG][serveVariantImage] img.ID=%d, img.StorageConfigID=%d, variant.Identifier=%s",
 		img.ID, img.StorageConfigID, result.Identifier)
+
+	// 检查是否可以使用直链
+	if directURL := h.getDirectURLIfPossible(c, img); directURL != "" {
+		c.Header("Cache-Control", config.CacheControlPublic)
+		c.Redirect(http.StatusFound, directURL)
+		return
+	}
 
 	// 使用原图指定的 StorageConfigID 获取正确的存储 provider
 	provider := h.getStorageProvider(img.StorageConfigID)

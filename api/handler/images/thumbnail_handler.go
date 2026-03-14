@@ -90,8 +90,15 @@ func (h *Handler) parseThumbnailWidth(c *gin.Context) int {
 	return width
 }
 
-// serveThumbnailImage 提供缩略图
+// serveThumbnailImage 提供缩略图（支持直链模式）
 func (h *Handler) serveThumbnailImage(c *gin.Context, image *models.Image, result *image.ThumbnailResult) {
+	// 检查是否可以使用直链
+	if directURL := h.getDirectURLIfPossible(c, image); directURL != "" {
+		c.Header("Cache-Control", config.CacheControlPublic)
+		c.Redirect(http.StatusFound, directURL)
+		return
+	}
+
 	c.Header("Cache-Control", config.CacheControlPublic)
 	c.Header("Content-Type", config.ContentTypeWebP)
 
