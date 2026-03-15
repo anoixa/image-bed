@@ -2344,6 +2344,75 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/user/password": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "验证旧密码并更新为新密码",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "user"
+                ],
+                "summary": "修改用户密码",
+                "parameters": [
+                    {
+                        "description": "修改密码请求",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_anoixa_image-bed_api_handler_user.ChangePasswordRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/user.ChangePasswordResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "旧密码错误",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器内部错误",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/images/random": {
             "get": {
                 "description": "Get a random image, optionally filtered by album, dimensions, WebP availability and file size",
@@ -2932,7 +3001,88 @@ const docTemplate = `{
             }
         },
         "config.ImageProcessingSettings": {
-            "type": "object"
+            "type": "object",
+            "properties": {
+                "avif_experimental": {
+                    "type": "boolean"
+                },
+                "avif_quality": {
+                    "type": "integer"
+                },
+                "avif_speed": {
+                    "type": "integer"
+                },
+                "conversion_enabled_formats": {
+                    "description": "格式转换配置",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "max_dimension": {
+                    "type": "integer"
+                },
+                "max_retries": {
+                    "type": "integer"
+                },
+                "scanner_batch_size": {
+                    "type": "integer"
+                },
+                "scanner_enabled": {
+                    "description": "扫描器配置",
+                    "type": "boolean"
+                },
+                "scanner_interval": {
+                    "$ref": "#/definitions/time.Duration"
+                },
+                "scanner_max_age_days": {
+                    "type": "integer"
+                },
+                "scanner_max_file_size_mb": {
+                    "type": "integer"
+                },
+                "scanner_only_public": {
+                    "type": "boolean"
+                },
+                "skip_smaller_than": {
+                    "type": "integer"
+                },
+                "thumbnail_enabled": {
+                    "description": "缩略图配置",
+                    "type": "boolean"
+                },
+                "thumbnail_quality": {
+                    "type": "integer"
+                },
+                "thumbnail_sizes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.ThumbnailSize"
+                    }
+                },
+                "webp_effort": {
+                    "type": "integer"
+                },
+                "webp_quality": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_anoixa_image-bed_api_handler_user.ChangePasswordRequest": {
+            "type": "object",
+            "required": [
+                "new_password",
+                "old_password"
+            ],
+            "properties": {
+                "new_password": {
+                    "type": "string",
+                    "minLength": 6
+                },
+                "old_password": {
+                    "type": "string"
+                }
+            }
         },
         "images.DeleteRequestBody": {
             "type": "object",
@@ -3324,6 +3474,38 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "time.Duration": {
+            "type": "integer",
+            "format": "int64",
+            "enum": [
+                -9223372036854775808,
+                9223372036854775807,
+                1,
+                1000,
+                1000000,
+                1000000000,
+                60000000000,
+                3600000000000
+            ],
+            "x-enum-varnames": [
+                "minDuration",
+                "maxDuration",
+                "Nanosecond",
+                "Microsecond",
+                "Millisecond",
+                "Second",
+                "Minute",
+                "Hour"
+            ]
+        },
+        "user.ChangePasswordResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
                     "type": "string"
                 }
             }

@@ -128,6 +128,11 @@ func (r *Repository) GetAllUsers(page, pageSize int) ([]*models.User, int64, err
 	return users, total, err
 }
 
+// UpdatePassword 更新用户密码
+func (r *Repository) UpdatePassword(userID uint, hashedPassword string) error {
+	return r.db.Model(&models.User{}).Where("id = ?", userID).Update("password", hashedPassword).Error
+}
+
 // WithContext 返回带上下文的仓库
 func (r *Repository) WithContext(ctx context.Context) *Repository {
 	return &Repository{db: r.db.WithContext(ctx)}

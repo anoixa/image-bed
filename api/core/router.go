@@ -10,6 +10,7 @@ import (
 	handlerImages "github.com/anoixa/image-bed/api/handler/images"
 	"github.com/anoixa/image-bed/api/handler/key"
 	handlerSystem "github.com/anoixa/image-bed/api/handler/system"
+	handlerUser "github.com/anoixa/image-bed/api/handler/user"
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
@@ -19,6 +20,7 @@ import (
 	"github.com/anoixa/image-bed/internal/auth"
 	svcDashboard "github.com/anoixa/image-bed/internal/dashboard"
 	imageSvc "github.com/anoixa/image-bed/internal/image"
+	svcUser "github.com/anoixa/image-bed/internal/user"
 	"github.com/anoixa/image-bed/public"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/gin-gonic/gin"
@@ -134,6 +136,9 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
 	dashboardService := svcDashboard.NewService(dashboardRepository, deps.CacheProvider)
 	dashboardHandler := handlerDashboard.NewHandler(dashboardService)
 
+	userService := svcUser.NewService(deps.Repositories.AccountsRepo)
+	userHandler := handlerUser.NewHandler(userService)
+
 	apiGroup := router.Group("/api")
 	apiGroup.Use(func(context *gin.Context) {
 		context.Header("Cache-Control", config.CacheControlNoStore)
@@ -162,6 +167,13 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
 				imagesGroup.POST("/delete", imageHandler.DeleteImages)
 				imagesGroup.DELETE("/:identifier", imageHandler.DeleteSingleImage)
 				imagesGroup.PUT("/:identifier/visibility", imageHandler.UpdateImageVisibility)
+			}
+
+			// User
+			userGroup := v1.Group("/user")
+			userGroup.Use(middleware.Authorize(middleware.AllowJWTOnly...))
+			{
+				userGroup.POST("/password", userHandler.ChangePassword)
 			}
 
 			// Static Token
