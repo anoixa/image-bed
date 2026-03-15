@@ -176,11 +176,18 @@ func TestGetBoolFromMap(t *testing.T) {
 			expected:     false,
 		},
 		{
-			name:         "string_true_value_returns_default",
+			name:         "string_true_value_parsed",
 			m:            map[string]any{"enabled": "true"},
 			key:          "enabled",
 			defaultValue: false,
-			expected:     false, // getBoolFromMap 不解析字符串，只接受 bool 类型
+			expected:     true, // getBoolFromMap 现在支持解析字符串 "true"
+		},
+		{
+			name:         "string_false_value_parsed",
+			m:            map[string]any{"enabled": "false"},
+			key:          "enabled",
+			defaultValue: true,
+			expected:     false, // getBoolFromMap 现在支持解析字符串 "false"
 		},
 		{
 			name:         "missing_key_returns_default",

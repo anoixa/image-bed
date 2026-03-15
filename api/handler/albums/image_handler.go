@@ -20,7 +20,7 @@ import (
 
 // AddImagesToAlbumRequest 添加图片到相册请求
 type AddImagesToAlbumRequest struct {
-	ImageIDs []uint `json:"image_ids" binding:"required,min=1"`
+	Identifiers []string `json:"identifiers" binding:"required,min=1"`
 }
 
 // AlbumImageHandler 相册图片处理器
@@ -58,12 +58,12 @@ func NewAlbumImageHandler(albumsSvc *svcAlbums.Service, imagesRepo *images.Repos
 
 // AddImagesToAlbumHandler 添加图片到相册
 // @Summary      Add images to album
-// @Description  Add multiple images to an existing album
+// @Description  Add multiple images to an existing album using image identifiers
 // @Tags         albums
 // @Accept       json
 // @Produce      json
 // @Param        id       path      int                       true  "Album ID"
-// @Param        request  body      AddImagesToAlbumRequest   true  "Image IDs to add"
+// @Param        request  body      AddImagesToAlbumRequest   true  "Image identifiers to add"
 // @Success      200      {object}  common.Response           "Images added to album successfully"
 // @Failure      400      {object}  common.Response           "Invalid request"
 // @Failure      401      {object}  common.Response           "Unauthorized"
@@ -100,23 +100,23 @@ func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 	}
 
 	// 批量查询图片
-	imgs, err := h.imageRepo.GetImagesByIDsAndUser(req.ImageIDs, userID)
+	imgs, err := h.imageRepo.GetImagesByIdentifiersAndUser(req.Identifiers, userID)
 	if err != nil {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to get imgs")
 		return
 	}
 
-	foundIDs := make(map[uint]bool)
+	foundIdentifiers := make(map[string]bool)
 	imageIDsToAdd := make([]uint, 0, len(imgs))
 	for _, img := range imgs {
-		foundIDs[img.ID] = true
+		foundIdentifiers[img.Identifier] = true
 		imageIDsToAdd = append(imageIDsToAdd, img.ID)
 	}
 
-	var failedIDs []uint
-	for _, id := range req.ImageIDs {
-		if !foundIDs[id] {
-			failedIDs = append(failedIDs, id)
+	var failedIdentifiers []string
+	for _, ident := range req.Identifiers {
+		if !foundIdentifiers[ident] {
+			failedIdentifiers = append(failedIdentifiers, ident)
 		}
 	}
 
@@ -135,9 +135,9 @@ func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 	}
 
 	common.RespondSuccess(c, gin.H{
-		"album_id":    albumID,
-		"added_count": addedCount,
-		"failed_ids":  failedIDs,
+		"album_id":             albumID,
+		"added_count":          addedCount,
+		"failed_identifiers":   failedIdentifiers,
 	})
 
 	if addedCount > 0 {

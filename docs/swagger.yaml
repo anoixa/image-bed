@@ -9,13 +9,13 @@ definitions:
     type: object
   albums.AddImagesToAlbumRequest:
     properties:
-      image_ids:
+      identifiers:
         items:
-          type: integer
+          type: string
         minItems: 1
         type: array
     required:
-    - image_ids
+    - identifiers
     type: object
   albums.AlbumDTO:
     properties:
@@ -159,50 +159,6 @@ definitions:
         type: string
     type: object
   config.ImageProcessingSettings:
-    properties:
-      avif_experimental:
-        type: boolean
-      avif_quality:
-        type: integer
-      avif_speed:
-        type: integer
-      conversion_enabled_formats:
-        description: 格式转换配置
-        items:
-          type: string
-        type: array
-      max_dimension:
-        type: integer
-      max_retries:
-        type: integer
-      scanner_batch_size:
-        type: integer
-      scanner_enabled:
-        description: 扫描器配置
-        type: boolean
-      scanner_interval:
-        $ref: '#/definitions/time.Duration'
-      scanner_max_age_days:
-        type: integer
-      scanner_max_file_size_mb:
-        type: integer
-      scanner_only_public:
-        type: boolean
-      skip_smaller_than:
-        type: integer
-      thumbnail_enabled:
-        description: 缩略图配置
-        type: boolean
-      thumbnail_quality:
-        type: integer
-      thumbnail_sizes:
-        items:
-          $ref: '#/definitions/models.ThumbnailSize'
-        type: array
-      webp_effort:
-        type: integer
-      webp_quality:
-        type: integer
     type: object
   github_com_anoixa_image-bed_api_handler_user.ChangePasswordRequest:
     properties:
@@ -473,27 +429,6 @@ definitions:
       version:
         type: string
     type: object
-  time.Duration:
-    enum:
-    - -9223372036854775808
-    - 9223372036854775807
-    - 1
-    - 1000
-    - 1000000
-    - 1000000000
-    - 60000000000
-    - 3600000000000
-    format: int64
-    type: integer
-    x-enum-varnames:
-    - minDuration
-    - maxDuration
-    - Nanosecond
-    - Microsecond
-    - Millisecond
-    - Second
-    - Minute
-    - Hour
   user.ChangePasswordResponse:
     properties:
       message:
@@ -1399,14 +1334,14 @@ paths:
     post:
       consumes:
       - application/json
-      description: Add multiple images to an existing album
+      description: Add multiple images to an existing album using image identifiers
       parameters:
       - description: Album ID
         in: path
         name: id
         required: true
         type: integer
-      - description: Image IDs to add
+      - description: Image identifiers to add
         in: body
         name: request
         required: true

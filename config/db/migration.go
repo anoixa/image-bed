@@ -191,8 +191,19 @@ func (m *Manager) createDefaultStorage(ctx context.Context) error {
 
 // 辅助函数
 func getBoolFromMap(m map[string]any, key string, defaultVal bool) bool {
-	if v, ok := m[key].(bool); ok {
-		return v
+	if v, ok := m[key]; ok {
+		switch val := v.(type) {
+		case bool:
+			return val
+		case string:
+			return val == "true" || val == "1" || val == "yes" || val == "on"
+		case int:
+			return val != 0
+		case int64:
+			return val != 0
+		case float64:
+			return val != 0
+		}
 	}
 	return defaultVal
 }
