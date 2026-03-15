@@ -6,10 +6,10 @@ import (
 
 func TestMinioStorage_GetDirectURL(t *testing.T) {
 	tests := []struct {
-		name         string
-		storage      *MinioStorage
-		storagePath  string
-		expectedURL  string
+		name        string
+		storage     *MinioStorage
+		storagePath string
+		expectedURL string
 	}{
 		{
 			name: "public endpoint with custom domain",
@@ -45,18 +45,6 @@ func TestMinioStorage_GetDirectURL(t *testing.T) {
 			expectedURL: "",
 		},
 		{
-			name: "force proxy returns empty",
-			storage: &MinioStorage{
-				bucketName:       "images",
-				publicEndpoint:   "https://img.cdn.com",
-				enableDirectLink: true,
-				isPublicBucket:   true,
-				forceProxy:       true,
-			},
-			storagePath: "2024/01/test.jpg",
-			expectedURL: "",
-		},
-		{
 			name: "path with special characters is encoded",
 			storage: &MinioStorage{
 				bucketName:       "images",
@@ -86,38 +74,34 @@ func TestMinioStorage_SupportsDirectLink(t *testing.T) {
 		expected bool
 	}{
 		{
-			name: "all conditions met",
+			name: "all conditions met - supports direct link",
 			storage: &MinioStorage{
 				enableDirectLink: true,
 				isPublicBucket:   true,
-				forceProxy:       false,
 			},
 			expected: true,
 		},
 		{
-			name: "direct link disabled",
+			name: "direct link disabled - not supported",
 			storage: &MinioStorage{
 				enableDirectLink: false,
 				isPublicBucket:   true,
-				forceProxy:       false,
 			},
 			expected: false,
 		},
 		{
-			name: "not public bucket",
+			name: "not public bucket - not supported",
 			storage: &MinioStorage{
 				enableDirectLink: true,
 				isPublicBucket:   false,
-				forceProxy:       false,
 			},
 			expected: false,
 		},
 		{
-			name: "force proxy enabled",
+			name: "both disabled - not supported",
 			storage: &MinioStorage{
-				enableDirectLink: true,
-				isPublicBucket:   true,
-				forceProxy:       true,
+				enableDirectLink: false,
+				isPublicBucket:   false,
 			},
 			expected: false,
 		},
@@ -147,7 +131,6 @@ func TestMinioStorage_ShouldProxy(t *testing.T) {
 			storage: &MinioStorage{
 				enableDirectLink: true,
 				isPublicBucket:   true,
-				transferMode:     TransferModeAuto,
 			},
 			imageIsPublic: true,
 			globalMode:    TransferModeAuto,
@@ -158,7 +141,6 @@ func TestMinioStorage_ShouldProxy(t *testing.T) {
 			storage: &MinioStorage{
 				enableDirectLink: true,
 				isPublicBucket:   true,
-				transferMode:     TransferModeAuto,
 			},
 			imageIsPublic: false,
 			globalMode:    TransferModeAuto,
@@ -169,7 +151,6 @@ func TestMinioStorage_ShouldProxy(t *testing.T) {
 			storage: &MinioStorage{
 				enableDirectLink: false,
 				isPublicBucket:   false,
-				transferMode:     TransferModeAuto,
 			},
 			imageIsPublic: true,
 			globalMode:    TransferModeAuto,
@@ -181,18 +162,16 @@ func TestMinioStorage_ShouldProxy(t *testing.T) {
 			storage: &MinioStorage{
 				enableDirectLink: true,
 				isPublicBucket:   true,
-				transferMode:     TransferModeAlwaysProxy,
 			},
 			imageIsPublic: true,
 			globalMode:    TransferModeAlwaysProxy,
 			expected:      true,
 		},
 		{
-			name: "always_proxy (global) + public image = proxy",
+			name: "always_proxy + supports direct but global says proxy",
 			storage: &MinioStorage{
 				enableDirectLink: true,
 				isPublicBucket:   true,
-				transferMode:     "", // use global
 			},
 			imageIsPublic: true,
 			globalMode:    TransferModeAlwaysProxy,
@@ -204,7 +183,6 @@ func TestMinioStorage_ShouldProxy(t *testing.T) {
 			storage: &MinioStorage{
 				enableDirectLink: true,
 				isPublicBucket:   true,
-				transferMode:     TransferModeAlwaysDirect,
 			},
 			imageIsPublic: true,
 			globalMode:    TransferModeAlwaysDirect,
@@ -215,20 +193,6 @@ func TestMinioStorage_ShouldProxy(t *testing.T) {
 			storage: &MinioStorage{
 				enableDirectLink: false,
 				isPublicBucket:   false,
-				transferMode:     TransferModeAlwaysDirect,
-			},
-			imageIsPublic: true,
-			globalMode:    TransferModeAlwaysDirect,
-			expected:      true,
-		},
-		// Force proxy override
-		{
-			name: "force_proxy overrides everything",
-			storage: &MinioStorage{
-				enableDirectLink: true,
-				isPublicBucket:   true,
-				forceProxy:       true,
-				transferMode:     TransferModeAlwaysDirect,
 			},
 			imageIsPublic: true,
 			globalMode:    TransferModeAlwaysDirect,
@@ -240,11 +204,21 @@ func TestMinioStorage_ShouldProxy(t *testing.T) {
 			storage: &MinioStorage{
 				enableDirectLink: true,
 				isPublicBucket:   true,
-				transferMode:     "unknown_mode",
 			},
 			imageIsPublic: true,
 			globalMode:    "unknown_mode",
 			expected:      true,
+		},
+		// Empty global mode (should default to auto behavior)
+		{
+			name: "empty global mode + public image = no proxy",
+			storage: &MinioStorage{
+				enableDirectLink: true,
+				isPublicBucket:   true,
+			},
+			imageIsPublic: true,
+			globalMode:    "",
+			expected:      false,
 		},
 	}
 

@@ -464,12 +464,10 @@ func (m *Manager) GetStorageConfigs(ctx context.Context) ([]storage.StorageConfi
 			if val, ok := configMap["use_ssl"]; ok {
 				storageCfg.UseSSL = parseBool(val, false)
 			}
-			// 直链配置
+			// 直链能力声明
 			storageCfg.EnableDirectLink = getBoolFromMap(configMap, "enable_direct_link", false)
 			storageCfg.PublicEndpoint = getStringFromMap(configMap, "public_endpoint", "")
 			storageCfg.IsPublicBucket = getBoolFromMap(configMap, "is_public_bucket", false)
-			storageCfg.ForceProxy = getBoolFromMap(configMap, "force_proxy", false)
-			storageCfg.TransferMode = storage.TransferMode(getStringFromMap(configMap, "transfer_mode", string(storage.TransferModeAuto)))
 		case "webdav":
 			storageCfg.WebDAVURL = getStringFromMap(configMap, "webdav_url", "")
 			storageCfg.WebDAVUsername = getStringFromMap(configMap, "webdav_username", "")

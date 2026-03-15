@@ -74,7 +74,6 @@ func registerBasicRoutes(router *gin.Engine, deps *RouterDependencies) {
 		systemGroup.GET("/version", systemHandler.GetVersion)
 		systemGroup.GET("/metrics", systemHandler.GetMetrics)
 
-		// 需要 JWT 认证的路由
 		authSystemGroup := systemGroup.Group("")
 		authSystemGroup.Use(middleware.CombinedAuth())
 		authSystemGroup.Use(middleware.Authorize(middleware.AllowJWTOnly...))

@@ -28,12 +28,10 @@ type MinioConfig struct {
 	SecretAccessKey string
 	UseSSL          bool
 	BucketName      string
-	// 直链配置
+	// 直链能力声明
 	EnableDirectLink bool
 	PublicEndpoint   string
 	IsPublicBucket   bool
-	ForceProxy       bool
-	TransferMode     TransferMode
 }
 
 // MinioStorage MinIO 存储实现
@@ -43,8 +41,6 @@ type MinioStorage struct {
 	enableDirectLink bool
 	publicEndpoint   string
 	isPublicBucket   bool
-	forceProxy       bool
-	transferMode     TransferMode
 }
 
 // NewMinioStorage 创建 MinIO 存储提供者
@@ -102,8 +98,6 @@ func NewMinioStorage(cfg MinioConfig) (*MinioStorage, error) {
 		enableDirectLink: cfg.EnableDirectLink,
 		publicEndpoint:   cfg.PublicEndpoint,
 		isPublicBucket:   cfg.IsPublicBucket,
-		forceProxy:       cfg.ForceProxy,
-		transferMode:     cfg.TransferMode,
 	}, nil
 }
 
@@ -174,8 +168,6 @@ func (s *MinioStorage) Name() string {
 }
 
 // StreamTo 将 MinIO 对象直接流式传输到 ResponseWriter
-// 避免全量加载到内存，使用 buffer pool 复用缓冲区
-// 对于大文件（>10MB），使用更大的缓冲区并进行分块传输
 func (s *MinioStorage) StreamTo(ctx context.Context, storagePath string, w http.ResponseWriter) (int64, error) {
 	obj, err := s.client.GetObject(ctx, s.bucketName, storagePath, minio.GetObjectOptions{})
 	if err != nil {
@@ -226,7 +218,6 @@ func (s *MinioStorage) StreamTo(ctx context.Context, storagePath string, w http.
 }
 
 // StreamToWithSize 将 MinIO 对象流式传输到指定 writer，支持文件大小检查
-// 对于超过 maxSize 的文件，返回错误而不传输
 func (s *MinioStorage) StreamToWithSize(ctx context.Context, storagePath string, w http.ResponseWriter, maxSize int64) (int64, error) {
 	obj, err := s.client.GetObject(ctx, s.bucketName, storagePath, minio.GetObjectOptions{})
 	if err != nil {
@@ -284,8 +275,6 @@ func mustGetSystemCertPool() *x509.CertPool {
 	return pool
 }
 
-// === DirectURLProvider 接口实现 ===
-
 // GetDirectURL 获取直链 URL
 func (s *MinioStorage) GetDirectURL(storagePath string) string {
 	if !s.SupportsDirectLink() {
@@ -315,38 +304,29 @@ func (s *MinioStorage) GetDirectURL(storagePath string) string {
 
 // SupportsDirectLink 是否支持直链
 func (s *MinioStorage) SupportsDirectLink() bool {
-	// 必须启用直链且是 public bucket 且不强制代理
-	return s.enableDirectLink && s.isPublicBucket && !s.forceProxy
+	return s.enableDirectLink && s.isPublicBucket
 }
 
-// ShouldProxy 根据策略判断是否走代理
+// ShouldProxy 根据全局策略判断是否走代理
 func (s *MinioStorage) ShouldProxy(imageIsPublic bool, globalMode TransferMode) bool {
-	// 强制代理
-	if s.forceProxy {
+	// 如果存储本身不支持直链，强制代理
+	if !s.SupportsDirectLink() {
 		return true
 	}
 
-	// 使用存储级策略，如果未设置则使用全局策略
-	mode := s.transferMode
-	if mode == "" {
-		mode = globalMode
-	}
-
-	switch mode {
+	// 使用全局策略控制行为
+	switch globalMode {
 	case TransferModeAlwaysProxy:
 		// 总是代理
 		return true
 
 	case TransferModeAlwaysDirect:
-		// 总是直链（仅限 public bucket 配置正确时）
-		return !s.SupportsDirectLink()
+		// 总是直链（存储能力已验证）
+		return false
 
 	case TransferModeAuto, "": // 默认 auto
 		// 自动：私有图片代理，公开图片直链
-		if !imageIsPublic {
-			return true
-		}
-		return !s.SupportsDirectLink()
+		return !imageIsPublic
 
 	default:
 		// 未知模式，安全起见走代理

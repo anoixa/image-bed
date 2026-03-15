@@ -56,18 +56,17 @@ type StorageConfig struct {
 	WebDAVUsername string
 	WebDAVPassword string
 	WebDAVRootPath string
-	// === 直链配置 ===
+	// === 直链能力声明 ===
 	// EnableDirectLink 是否启用直链功能
 	EnableDirectLink bool `json:"enable_direct_link"`
 	// PublicEndpoint 对外访问地址（如 CDN、反向代理、公网域名）
 	// 为空时使用 Endpoint
 	PublicEndpoint string `json:"public_endpoint"`
 	// IsPublicBucket 存储桶是否为 Public-read（必须 true 才能直链）
+	// 此字段仅声明存储能力，实际是否使用直链由全局设置控制
 	IsPublicBucket bool `json:"is_public_bucket"`
-	// ForceProxy 强制走代理（即使配置了直链，用于某些内网安全场景）
-	ForceProxy bool `json:"force_proxy"`
-	// TransferMode 该存储的转发模式
-	TransferMode TransferMode `json:"transfer_mode"`
+	// 注意：直链行为由全局设置 system:transfer_mode 统一控制
+	// 存储级别只声明是否支持直链，不控制行为
 }
 
 // Provider 存储提供者接口
@@ -316,8 +315,6 @@ func createProvider(cfg StorageConfig) (Provider, error) {
 			EnableDirectLink: cfg.EnableDirectLink,
 			PublicEndpoint:   cfg.PublicEndpoint,
 			IsPublicBucket:   cfg.IsPublicBucket,
-			ForceProxy:       cfg.ForceProxy,
-			TransferMode:     cfg.TransferMode,
 		})
 	case "webdav":
 		return NewWebDAVStorage(WebDAVConfig{
