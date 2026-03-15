@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -103,7 +104,7 @@ func NewMinioStorage(cfg MinioConfig) (*MinioStorage, error) {
 
 // SaveWithContext 保存文件到 MinIO
 func (s *MinioStorage) SaveWithContext(ctx context.Context, storagePath string, file io.Reader) error {
-	contentType := "application/octet-stream"
+	contentType := getContentTypeFromPath(storagePath)
 
 	_, err := s.client.PutObject(ctx, s.bucketName, storagePath, file, -1, minio.PutObjectOptions{
 		ContentType: contentType,
@@ -331,5 +332,30 @@ func (s *MinioStorage) ShouldProxy(imageIsPublic bool, globalMode TransferMode) 
 	default:
 		// 未知模式，安全起见走代理
 		return true
+	}
+}
+
+// getContentTypeFromPath 根据文件路径获取 Content-Type
+func getContentTypeFromPath(storagePath string) string {
+	ext := strings.ToLower(filepath.Ext(storagePath))
+	switch ext {
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	case ".avif":
+		return "image/avif"
+	case ".svg":
+		return "image/svg+xml"
+	case ".bmp":
+		return "image/bmp"
+	case ".tiff", ".tif":
+		return "image/tiff"
+	default:
+		return "application/octet-stream"
 	}
 }

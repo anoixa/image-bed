@@ -80,20 +80,10 @@ func (h *Handler) GetThumbnail(c *gin.Context) {
 	h.serveThumbnailImage(c, image, thumbnailResult)
 }
 
-// parseThumbnailWidth 解析缩略图宽度参数
-func (h *Handler) parseThumbnailWidth(c *gin.Context) int {
-	widthStr := c.DefaultQuery("width", "300")
-	width, err := strconv.Atoi(widthStr)
-	if err != nil || width <= 0 {
-		return 300
-	}
-	return width
-}
-
 // serveThumbnailImage 提供缩略图（支持直链模式）
 func (h *Handler) serveThumbnailImage(c *gin.Context, image *models.Image, result *image.ThumbnailResult) {
-	// 检查是否可以使用直链
-	if directURL := h.getDirectURLIfPossible(c, image); directURL != "" {
+	// 检查缩略图是否可以使用直链（使用缩略图自己的路径）
+	if directURL := h.getVariantDirectURLIfPossible(c, image, result.StoragePath); directURL != "" {
 		c.Header("Cache-Control", config.CacheControlPublic)
 		c.Redirect(http.StatusFound, directURL)
 		return
@@ -120,4 +110,14 @@ func (h *Handler) serveThumbnailImage(c *gin.Context, image *models.Image, resul
 	c.Header("Content-Length", strconv.FormatInt(result.FileSize, 10))
 
 	c.DataFromReader(http.StatusOK, result.FileSize, result.MIMEType, reader, nil)
+}
+
+// parseThumbnailWidth 解析缩略图宽度参数
+func (h *Handler) parseThumbnailWidth(c *gin.Context) int {
+	widthStr := c.DefaultQuery("width", "300")
+	width, err := strconv.Atoi(widthStr)
+	if err != nil || width <= 0 {
+		return 300
+	}
+	return width
 }
