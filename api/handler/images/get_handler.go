@@ -155,30 +155,45 @@ func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 
 // getDirectURLIfPossible 尝试获取直链 URL
 func (h *Handler) getDirectURLIfPossible(c *gin.Context, img *models.Image) string {
+	return h.getVariantDirectURLIfPossible(c, img, img.StoragePath)
+}
+
+// getVariantDirectURLIfPossible 尝试获取变体的直链 URL
+func (h *Handler) getVariantDirectURLIfPossible(c *gin.Context, img *models.Image, storagePath string) string {
 	// 私有图片不支持直链
 	if !img.IsPublic {
+		utils.LogIfDevf("[getVariantDirectURLIfPossible] Image %s is not public, skip direct link", img.Identifier)
 		return ""
 	}
 
 	// 获取存储提供者
 	provider := h.getStorageProvider(img.StorageConfigID)
 	if provider == nil {
+		utils.LogIfDevf("[getVariantDirectURLIfPossible] Failed to get storage provider for image %s (StorageConfigID=%d)",
+			img.Identifier, img.StorageConfigID)
 		return ""
 	}
 
 	directProvider, ok := provider.(storage.DirectURLProvider)
 	if !ok {
+		utils.LogIfDevf("[getVariantDirectURLIfPossible] Provider does not support direct URL for image %s", img.Identifier)
 		return ""
 	}
 
 	globalMode := h.getGlobalTransferMode(c.Request.Context())
 
+	utils.LogIfDevf("[getVariantDirectURLIfPossible] Image %s (path=%s): SupportsDirectLink=%v, globalMode=%s, isPublic=%v",
+		img.Identifier, storagePath, directProvider.SupportsDirectLink(), globalMode, img.IsPublic)
+
 	if directProvider.ShouldProxy(img.IsPublic, globalMode) {
+		utils.LogIfDevf("[getVariantDirectURLIfPossible] Image %s: ShouldProxy returned true, using proxy", img.Identifier)
 		return ""
 	}
 
 	// 获取直链 URL
-	return directProvider.GetDirectURL(img.StoragePath)
+	directURL := directProvider.GetDirectURL(storagePath)
+	utils.LogIfDevf("[getVariantDirectURLIfPossible] Image %s: Using direct URL %s", img.Identifier, directURL)
+	return directURL
 }
 
 // getGlobalTransferMode 获取全局转发模式
@@ -316,11 +331,11 @@ func (h *Handler) serveImageData(c *gin.Context, img *models.Image, data []byte)
 // serveVariantImage 提供格式变体（支持直链模式）
 func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *image.VariantResult) {
 	// [DEBUG] 记录变体信息
-	utils.LogIfDevf("[DEBUG][serveVariantImage] img.ID=%d, img.StorageConfigID=%d, variant.Identifier=%s",
-		img.ID, img.StorageConfigID, result.Identifier)
+	utils.LogIfDevf("[DEBUG][serveVariantImage] img.ID=%d, img.StorageConfigID=%d, variant.Identifier=%s, variant.StoragePath=%s",
+		img.ID, img.StorageConfigID, result.Identifier, result.StoragePath)
 
-	// 检查是否可以使用直链
-	if directURL := h.getDirectURLIfPossible(c, img); directURL != "" {
+	// 检查变体是否可以使用直链（使用变体自己的路径）
+	if directURL := h.getVariantDirectURLIfPossible(c, img, result.StoragePath); directURL != "" {
 		c.Header("Cache-Control", config.CacheControlPublic)
 		c.Redirect(http.StatusFound, directURL)
 		return

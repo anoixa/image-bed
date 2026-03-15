@@ -12,7 +12,6 @@ import (
 // Repository 图片仓库
 type Repository struct {
 	db *gorm.DB
-	// 嵌入泛型仓库，提供基础 CRUD 能力
 	*repo.GenericRepository[models.Image]
 }
 

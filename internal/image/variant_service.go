@@ -104,11 +104,12 @@ func (s *VariantService) handleCompletedVariants(_ context.Context, image *model
 	available := make(map[format.FormatType]bool)
 	variantMap := make(map[format.FormatType]*models.ImageVariant)
 
-	for _, v := range variants {
+	for i := range variants {
+		v := &variants[i]
 		if v.Status == models.VariantStatusCompleted {
 			ft := format.FormatType(v.Format)
 			available[ft] = true
-			variantMap[ft] = &v
+			variantMap[ft] = v
 		}
 	}
 
