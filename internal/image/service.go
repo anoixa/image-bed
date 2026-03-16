@@ -633,6 +633,11 @@ func (s *Service) DeleteSingle(ctx context.Context, identifier string, userID ui
 		return &DeleteResult{Success: false, Error: errors.New("permission denied")}, nil
 	}
 
+	// 从所有相册中移除关联
+	if err := s.repo.RemoveImageFromAllAlbums(img.ID); err != nil {
+		log.Printf("Failed to remove image %d from albums: %v", img.ID, err)
+	}
+
 	// 先删除原图文件
 	if img.StoragePath != "" {
 		provider, err := s.getStorageProviderByID(img.StorageConfigID)
@@ -669,6 +674,17 @@ func (s *Service) DeleteBatch(ctx context.Context, identifiers []string, userID 
 	imagesToDelete, err := s.repo.GetImagesByIdentifiersAndUser(identifiers, userID)
 	if err != nil {
 		log.Printf("Failed to get images for batch delete: %v", err)
+	}
+
+	// 从所有相册中移除关联
+	if len(imagesToDelete) > 0 {
+		imageIDs := make([]uint, len(imagesToDelete))
+		for i, img := range imagesToDelete {
+			imageIDs[i] = img.ID
+		}
+		if err := s.repo.RemoveImagesFromAllAlbums(imageIDs); err != nil {
+			log.Printf("Failed to remove images from albums: %v", err)
+		}
 	}
 
 	// 删除原图文件和变体

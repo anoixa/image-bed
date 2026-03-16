@@ -269,6 +269,19 @@ func (r *Repository) DB() *gorm.DB {
 	return r.db
 }
 
+// RemoveImageFromAllAlbums 从所有相册中移除图片关联
+func (r *Repository) RemoveImageFromAllAlbums(imageID uint) error {
+	return r.db.Table("album_images").Where("image_id = ?", imageID).Delete(nil).Error
+}
+
+// RemoveImagesFromAllAlbums 批量从所有相册中移除图片关联
+func (r *Repository) RemoveImagesFromAllAlbums(imageIDs []uint) error {
+	if len(imageIDs) == 0 {
+		return nil
+	}
+	return r.db.Table("album_images").Where("image_id IN ?", imageIDs).Delete(nil).Error
+}
+
 // UpdateVariantStatus 更新图片变体状态
 func (r *Repository) UpdateVariantStatus(imageID uint, status models.ImageVariantStatus) error {
 	return r.db.Model(&models.Image{}).Where("id = ?", imageID).Update("variant_status", status).Error
