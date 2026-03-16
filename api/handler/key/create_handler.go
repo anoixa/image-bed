@@ -31,6 +31,10 @@ type req struct {
 // @Security     ApiKeyAuth
 // @Router       /api/v1/token [post]
 func (h *Handler) CreateStaticToken(context *gin.Context) {
+	if context.IsAborted() {
+		return
+	}
+
 	var requestBody req
 	if err := context.ShouldBindJSON(&requestBody); err != nil {
 		if err != io.EOF {

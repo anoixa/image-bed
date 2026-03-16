@@ -33,6 +33,10 @@ type UpdateVisibilityRequest struct {
 // @Security     ApiKeyAuth
 // @Router       /api/v1/images/{identifier}/visibility [put]
 func (h *Handler) UpdateImageVisibility(c *gin.Context) {
+	if c.IsAborted() {
+		return
+	}
+
 	userID := c.GetUint(middleware.ContextUserIDKey)
 	if userID == 0 {
 		common.RespondError(c, http.StatusUnauthorized, "Invalid user session")

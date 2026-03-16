@@ -44,6 +44,10 @@ type UpdateAlbumResponse struct {
 // @Security     ApiKeyAuth
 // @Router       /api/v1/albums/{id} [put]
 func (h *Handler) UpdateAlbumHandler(c *gin.Context) {
+	if c.IsAborted() {
+		return
+	}
+
 	// 获取相册 ID
 	albumIDStr := c.Param("id")
 	albumID, err := strconv.ParseUint(albumIDStr, 10, 32)

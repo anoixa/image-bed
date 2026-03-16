@@ -73,6 +73,10 @@ func NewAlbumImageHandler(albumsSvc *svcAlbums.Service, imagesRepo *images.Repos
 // @Security     ApiKeyAuth
 // @Router       /api/v1/albums/{id}/images [post]
 func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
+	if c.IsAborted() {
+		return
+	}
+
 	// 获取相册 ID
 	albumIDStr := c.Param("id")
 	albumID, err := strconv.ParseUint(albumIDStr, 10, 32)
@@ -170,6 +174,10 @@ func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 // @Security     ApiKeyAuth
 // @Router       /api/v1/albums/{id}/images/{imageId} [delete]
 func (h *AlbumImageHandler) RemoveImageFromAlbumHandler(c *gin.Context) {
+	if c.IsAborted() {
+		return
+	}
+
 	// 获取相册 ID
 	albumIDStr := c.Param("id")
 	albumID, err := strconv.ParseUint(albumIDStr, 10, 32)

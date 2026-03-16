@@ -39,6 +39,10 @@ type CreateAlbumResponse struct {
 // @Security     ApiKeyAuth
 // @Router       /api/v1/albums [post]
 func (h *Handler) CreateAlbumHandler(c *gin.Context) {
+	if c.IsAborted() {
+		return
+	}
+
 	userID := c.GetUint(middleware.ContextUserIDKey)
 	var req createAlbumRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
