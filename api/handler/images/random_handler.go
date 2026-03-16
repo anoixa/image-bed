@@ -137,12 +137,12 @@ func (h *Handler) respondRandomJSON(c *gin.Context, result *image.ImageResultDTO
 		"created_at": img.CreatedAt,
 	}
 
-	// 如果有格式变体，添加变体信息
+	// 如果有格式变体，添加变体信息（url 使用基础 identifier，支持 Accept header 协商格式）
 	if !result.IsOriginal && result.Variant != nil {
 		response["variant"] = gin.H{
 			"identifier": result.Variant.Identifier,
 			"format":     result.Variant.Format,
-			"url":        utils.BuildImageURL(h.baseURL, result.Variant.Identifier),
+			"url":        utils.BuildImageURL(h.baseURL, img.Identifier),
 		}
 		response["mime_type"] = result.MIMEType
 	}
