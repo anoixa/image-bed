@@ -52,3 +52,8 @@ func (s *Service) AddImagesToAlbum(albumID, userID uint, imageIDs []uint) error 
 func (s *Service) RemoveImageFromAlbum(albumID, userID uint, image *models.Image) error {
 	return s.repo.RemoveImageFromAlbum(albumID, userID, image)
 }
+
+// RemoveImagesFromAlbum 批量从相册移除图片
+func (s *Service) RemoveImagesFromAlbum(albumID, userID uint, imageIDs []uint) (int64, error) {
+	return s.repo.RemoveImagesFromAlbum(albumID, userID, imageIDs)
+}

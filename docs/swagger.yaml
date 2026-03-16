@@ -100,6 +100,16 @@ definitions:
       total_pages:
         type: integer
     type: object
+  albums.RemoveImagesFromAlbumRequest:
+    properties:
+      identifiers:
+        items:
+          type: string
+        minItems: 1
+        type: array
+    required:
+    - identifiers
+    type: object
   albums.UpdateAlbumRequest:
     properties:
       description:
@@ -1425,6 +1435,56 @@ paths:
       security:
       - ApiKeyAuth: []
       summary: Remove image from album
+      tags:
+      - albums
+  /api/v1/albums/{id}/images/remove:
+    post:
+      consumes:
+      - application/json
+      description: Remove multiple images from an album at once (images themselves
+        are not deleted)
+      parameters:
+      - description: Album ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Image identifiers to remove
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/albums.RemoveImagesFromAlbumRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Images removed from album successfully
+          schema:
+            $ref: '#/definitions/common.Response'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "403":
+          description: Permission denied
+          schema:
+            $ref: '#/definitions/common.Response'
+        "404":
+          description: Album not found
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Remove multiple images from album
       tags:
       - albums
   /api/v1/dashboard/stats:

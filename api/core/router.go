@@ -198,6 +198,7 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
 				albumsGroup.DELETE("/:id", albumHandler.DeleteAlbumHandler)
 				albumsGroup.POST("/:id/images", albumImageHandler.AddImagesToAlbumHandler)
 				albumsGroup.DELETE("/:id/images/:imageId", albumImageHandler.RemoveImageFromAlbumHandler)
+				albumsGroup.POST("/:id/images/remove", albumImageHandler.RemoveImagesFromAlbumHandler)
 			}
 
 			dashboardGroup := v1.Group("/dashboard")

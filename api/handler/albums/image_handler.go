@@ -228,3 +228,110 @@ func (h *AlbumImageHandler) RemoveImageFromAlbumHandler(c *gin.Context) {
 		}
 	})
 }
+
+// RemoveImagesFromAlbumRequest 批量从相册移除图片请求
+type RemoveImagesFromAlbumRequest struct {
+	Identifiers []string `json:"identifiers" binding:"required,min=1"`
+}
+
+// RemoveImagesFromAlbumHandler 批量从相册移除图片
+// @Summary      Remove multiple images from album
+// @Description  Remove multiple images from an album at once (images themselves are not deleted)
+// @Tags         albums
+// @Accept       json
+// @Produce      json
+// @Param        id       path      int                            true  "Album ID"
+// @Param        request  body      RemoveImagesFromAlbumRequest   true  "Image identifiers to remove"
+// @Success      200      {object}  common.Response                "Images removed from album successfully"
+// @Failure      400      {object}  common.Response                "Invalid request"
+// @Failure      401      {object}  common.Response                "Unauthorized"
+// @Failure      403      {object}  common.Response                "Permission denied"
+// @Failure      404      {object}  common.Response                "Album not found"
+// @Failure      500      {object}  common.Response                "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /api/v1/albums/{id}/images/remove [post]
+func (h *AlbumImageHandler) RemoveImagesFromAlbumHandler(c *gin.Context) {
+	if c.IsAborted() {
+		return
+	}
+
+	// 获取相册 ID
+	albumIDStr := c.Param("id")
+	albumID, err := strconv.ParseUint(albumIDStr, 10, 32)
+	if err != nil {
+		common.RespondError(c, http.StatusBadRequest, "Invalid album ID format")
+		return
+	}
+
+	var req RemoveImagesFromAlbumRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.RespondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	userID := c.GetUint(middleware.ContextUserIDKey)
+
+	// 验证相册存在且用户有权限
+	_, err = h.svc.GetAlbumWithImagesByID(uint(albumID), userID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			common.RespondError(c, http.StatusNotFound, "Album not found or access denied")
+			return
+		}
+		common.RespondError(c, http.StatusInternalServerError, "Failed to get album")
+		return
+	}
+
+	// 批量查询图片
+	imgs, err := h.imageRepo.GetImagesByIdentifiersAndUser(req.Identifiers, userID)
+	if err != nil {
+		common.RespondError(c, http.StatusInternalServerError, "Failed to get images")
+		return
+	}
+
+	foundIdentifiers := make(map[string]bool)
+	imageIDsToRemove := make([]uint, 0, len(imgs))
+	for _, img := range imgs {
+		foundIdentifiers[img.Identifier] = true
+		imageIDsToRemove = append(imageIDsToRemove, img.ID)
+	}
+
+	var failedIdentifiers []string
+	for _, ident := range req.Identifiers {
+		if !foundIdentifiers[ident] {
+			failedIdentifiers = append(failedIdentifiers, ident)
+		}
+	}
+
+	// 批量从相册移除
+	removedCount := int64(0)
+	if len(imageIDsToRemove) > 0 {
+		removedCount, err = h.svc.RemoveImagesFromAlbum(uint(albumID), userID, imageIDsToRemove)
+		if err != nil {
+			if err.Error() == "album not found or access denied" {
+				common.RespondError(c, http.StatusNotFound, "Album not found or access denied")
+				return
+			}
+			common.RespondError(c, http.StatusInternalServerError, "Failed to remove images from album")
+			return
+		}
+	}
+
+	common.RespondSuccess(c, gin.H{
+		"album_id":           albumID,
+		"removed_count":      removedCount,
+		"failed_identifiers": failedIdentifiers,
+	})
+
+	if removedCount > 0 {
+		utils.SafeGo(func() {
+			ctx := context.Background()
+			if err := h.cacheHelper.DeleteCachedAlbum(ctx, uint(albumID)); err != nil {
+				utils.LogIfDevf("Failed to delete album cache for %d: %v", albumID, err)
+			}
+			if err := h.cacheHelper.DeleteCachedAlbumList(ctx, userID); err != nil {
+				utils.LogIfDevf("Failed to delete album list cache for user %d: %v", userID, err)
+			}
+		})
+	}
+}
