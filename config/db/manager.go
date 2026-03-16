@@ -456,8 +456,7 @@ func (m *Manager) GetStorageConfigs(ctx context.Context) ([]storage.StorageConfi
 		switch storageType {
 		case "local":
 			storageCfg.LocalPath = getStringFromMap(configMap, "local_path", "./data/upload")
-		case "minio", "s3":
-			// S3 兼容配置（支持 MinIO、AWS S3、Cloudflare R2 等）
+		case "s3":
 			storageCfg.Endpoint = getStringFromMap(configMap, "endpoint", "")
 			storageCfg.Region = getStringFromMap(configMap, "region", "us-east-1")
 			storageCfg.BucketName = getStringFromMap(configMap, "bucket_name", "")

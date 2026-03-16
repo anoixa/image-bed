@@ -492,7 +492,7 @@ func (h *ConfigHandler) testStorageConfig(config map[string]any) *models.TestCon
 			Message: "Local storage connection successful",
 		}
 
-	case "minio", "s3":
+	case "s3":
 		s3Cfg := storage.S3Config{
 			Type:            storageType,
 			Endpoint:        getString(config, "endpoint"),
@@ -629,7 +629,7 @@ func (h *ConfigHandler) hotReloadStorageConfig(id uint, config map[string]any, i
 		if cfg.LocalPath == "" {
 			return fmt.Errorf("local_path is required for local storage")
 		}
-	case "minio", "s3":
+	case "s3":
 		cfg.Endpoint = getString(config, "endpoint")
 		cfg.Region = getString(config, "region")
 		cfg.BucketName = getString(config, "bucket_name")

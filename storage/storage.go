@@ -284,7 +284,7 @@ func createProvider(cfg StorageConfig) (Provider, error) {
 	switch cfg.Type {
 	case "local":
 		return NewLocalStorage(cfg.LocalPath)
-	case "minio", "s3":
+	case "s3":
 		return NewS3Storage(S3Config{
 			Type:            cfg.Type,
 			Endpoint:        cfg.Endpoint,
