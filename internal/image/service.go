@@ -472,6 +472,11 @@ func (s *Service) GetImageMetadata(ctx context.Context, identifier string) (*mod
 
 		// 异步写入缓存
 		go func(img *models.Image) {
+			defer func() {
+				if r := recover(); r != nil {
+					utils.LogIfDevf("Panic in async cache goroutine for '%s': %v", img.Identifier, r)
+				}
+			}()
 			if s.cacheHelper == nil {
 				return
 			}
