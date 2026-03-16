@@ -15,6 +15,18 @@ type Repository struct {
 	*repo.GenericRepository[models.Image]
 }
 
+// RandomImageFilter 随机图片筛选条件
+type RandomImageFilter struct {
+	AlbumID          *uint
+	IncludeAllPublic bool
+	MinWidth         int
+	MinHeight        int
+	MaxWidth         int
+	MaxHeight        int
+	RequireWebP      bool  // 是否要求必须有WebP变体
+	MaxFileSize      int64 // 最大文件大小（字节）
+}
+
 // NewRepository 创建新的图片仓库
 func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{
@@ -62,7 +74,7 @@ func (r *Repository) DeleteImagesByIdentifiersAndUser(identifiers []string, user
 	return result.RowsAffected, result.Error
 }
 
-// GetImagesByIdentifiersAndUser 批量查询用户的图片（使用 IN 语句，避免 N+1 查询）
+// GetImagesByIdentifiersAndUser 批量查询用户的图片
 func (r *Repository) GetImagesByIdentifiersAndUser(identifiers []string, userID uint) ([]*models.Image, error) {
 	if len(identifiers) == 0 {
 		return []*models.Image{}, nil
@@ -292,18 +304,6 @@ func (r *Repository) GetImagesByVariantStatus(statuses []models.ImageVariantStat
 	var images []*models.Image
 	err := r.db.Where("variant_status IN ?", statuses).Limit(limit).Find(&images).Error
 	return images, err
-}
-
-// RandomImageFilter 随机图片筛选条件
-type RandomImageFilter struct {
-	AlbumID          *uint
-	IncludeAllPublic bool
-	MinWidth         int
-	MinHeight        int
-	MaxWidth         int
-	MaxHeight        int
-	RequireWebP      bool  // 是否要求必须有WebP变体
-	MaxFileSize      int64 // 最大文件大小（字节）
 }
 
 // GetRandomPublicImage 随机获取一张公开图片

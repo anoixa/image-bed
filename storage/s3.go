@@ -22,45 +22,69 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
-// MinioConfig MinIO 配置结构
-type MinioConfig struct {
-	Endpoint        string
-	AccessKeyID     string
-	SecretAccessKey string
-	UseSSL          bool
-	BucketName      string
-	// 直链能力声明
-	EnableDirectLink bool
-	PublicEndpoint   string
-	IsPublicBucket   bool
-}
-
-// MinioStorage MinIO 存储实现
-type MinioStorage struct {
-	client           *minio.Client
-	bucketName       string
-	enableDirectLink bool
-	publicEndpoint   string
-	isPublicBucket   bool
-}
-
-// NewMinioStorage 创建 MinIO 存储提供者
-func NewMinioStorage(cfg MinioConfig) (*MinioStorage, error) {
-	// 清理 endpoint，去除 scheme 前缀（http:// 或 https://）
-	endpoint := cfg.Endpoint
-	if strings.HasPrefix(strings.ToLower(endpoint), "http://") {
-		endpoint = endpoint[7:]
-	} else if strings.HasPrefix(strings.ToLower(endpoint), "https://") {
-		endpoint = endpoint[8:]
+// mustGetSystemCertPool 获取系统证书池
+func mustGetSystemCertPool() *x509.CertPool {
+	pool, err := x509.SystemCertPool()
+	if err != nil {
+		log.Printf("Failed to load system cert pool: %v", err)
+		return x509.NewCertPool()
 	}
+	return pool
+}
+
+// S3Config S3 兼容配置结构（支持 MinIO、AWS S3、Cloudflare R2 等）
+type S3Config struct {
+	Type            string `json:"type" binding:"required"`
+	Endpoint        string `json:"endpoint" binding:"required"`
+	Region          string `json:"region"`
+	BucketName      string `json:"bucket_name" binding:"required"`
+	AccessKeyID     string `json:"access_key_id" binding:"required"`
+	SecretAccessKey string `json:"secret_access_key" binding:"required"`
+	ForcePathStyle  bool   `json:"force_path_style"`
+	PublicDomain    string `json:"public_domain"`
+	IsPrivate       bool   `json:"is_private"`
+}
+
+// S3Storage S3 兼容存储实现
+type S3Storage struct {
+	client         *minio.Client
+	bucketName     string
+	endpoint       string
+	publicDomain   string
+	isPrivate      bool
+	forcePathStyle bool
+}
+
+// NewS3Storage 创建 S3 兼容存储提供者
+func NewS3Storage(cfg S3Config) (*S3Storage, error) {
+	if cfg.Region == "" {
+		cfg.Region = "us-east-1"
+	}
+
+	endpoint := cfg.Endpoint
+	secure := false
+
+	if strings.HasPrefix(strings.ToLower(endpoint), "https://") {
+		secure = true
+		endpoint = endpoint[8:]
+	} else if strings.HasPrefix(strings.ToLower(endpoint), "http://") {
+		endpoint = endpoint[7:]
+	}
+
+	endpoint = strings.TrimRight(endpoint, "/")
 
 	opts := &minio.Options{
 		Creds:  credentials.NewStaticV4(cfg.AccessKeyID, cfg.SecretAccessKey, ""),
-		Secure: cfg.UseSSL,
+		Secure: secure,
+		Region: cfg.Region,
+	}
+
+	if cfg.ForcePathStyle {
+		opts.BucketLookup = minio.BucketLookupPath
 	}
 
 	// SSL 自定义证书配置
-	if cfg.UseSSL && os.Getenv("SSL_CERT_FILE") != "" {
+	if secure && os.Getenv("SSL_CERT_FILE") != "" {
 		rootCAs := mustGetSystemCertPool()
 		if data, err := os.ReadFile(os.Getenv("SSL_CERT_FILE")); err == nil {
 			rootCAs.AppendCertsFromPEM(data)
@@ -75,7 +99,7 @@ func NewMinioStorage(cfg MinioConfig) (*MinioStorage, error) {
 
 	client, err := minio.New(endpoint, opts)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize MinIO client: %w", err)
+		return nil, fmt.Errorf("failed to initialize S3 client: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -86,63 +110,60 @@ func NewMinioStorage(cfg MinioConfig) (*MinioStorage, error) {
 		return nil, fmt.Errorf("failed to check if bucket '%s' exists: %w", cfg.BucketName, err)
 	}
 	if !exists {
-		err = client.MakeBucket(ctx, cfg.BucketName, minio.MakeBucketOptions{})
+		err = client.MakeBucket(ctx, cfg.BucketName, minio.MakeBucketOptions{Region: cfg.Region})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create bucket '%s': %w", cfg.BucketName, err)
 		}
 		log.Printf("Successfully created bucket: %s", cfg.BucketName)
 	}
 
-	return &MinioStorage{
-		client:           client,
-		bucketName:       cfg.BucketName,
-		enableDirectLink: cfg.EnableDirectLink,
-		publicEndpoint:   cfg.PublicEndpoint,
-		isPublicBucket:   cfg.IsPublicBucket,
+	return &S3Storage{
+		client:         client,
+		bucketName:     cfg.BucketName,
+		endpoint:       cfg.Endpoint,
+		publicDomain:   cfg.PublicDomain,
+		isPrivate:      cfg.IsPrivate,
+		forcePathStyle: cfg.ForcePathStyle,
 	}, nil
 }
 
-// SaveWithContext 保存文件到 MinIO
-func (s *MinioStorage) SaveWithContext(ctx context.Context, storagePath string, file io.Reader) error {
-	contentType := getContentTypeFromPath(storagePath)
+func (s *S3Storage) SaveWithContext(ctx context.Context, storagePath string, file io.Reader) error {
+	contentType := getContentTypeFromPathS3(storagePath)
 
 	_, err := s.client.PutObject(ctx, s.bucketName, storagePath, file, -1, minio.PutObjectOptions{
 		ContentType: contentType,
 	})
 
 	if err != nil {
-		return fmt.Errorf("failed to upload object '%s' to minio: %w", storagePath, err)
+		return fmt.Errorf("failed to upload object '%s' to s3: %w", storagePath, err)
 	}
 
 	return nil
 }
 
-// GetWithContext 从 MinIO 获取文件
-func (s *MinioStorage) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeeker, error) {
+func (s *S3Storage) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeeker, error) {
 	obj, err := s.client.GetObject(ctx, s.bucketName, storagePath, minio.GetObjectOptions{})
 	if err != nil {
 		errResponse := minio.ToErrorResponse(err)
 		if errResponse.Code == "NoSuchKey" {
-			return nil, fmt.Errorf("file not found in minio: %s", storagePath)
+			return nil, fmt.Errorf("file not found in s3: %s", storagePath)
 		}
-		return nil, fmt.Errorf("failed to get object from minio for '%s': %w", storagePath, err)
+		return nil, fmt.Errorf("failed to get object from s3 for '%s': %w", storagePath, err)
 	}
 
 	return obj, nil
 }
 
-// DeleteWithContext 从 MinIO 删除文件
-func (s *MinioStorage) DeleteWithContext(ctx context.Context, storagePath string) error {
+func (s *S3Storage) DeleteWithContext(ctx context.Context, storagePath string) error {
 	err := s.client.RemoveObject(ctx, s.bucketName, storagePath, minio.RemoveObjectOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to delete object '%s' from minio: %w", storagePath, err)
+		return fmt.Errorf("failed to delete object '%s' from s3: %w", storagePath, err)
 	}
 
 	return nil
 }
 
-// Exists 检查文件是否存在于 MinIO
-func (s *MinioStorage) Exists(ctx context.Context, storagePath string) (bool, error) {
+func (s *S3Storage) Exists(ctx context.Context, storagePath string) (bool, error) {
 	_, err := s.client.StatObject(ctx, s.bucketName, storagePath, minio.StatObjectOptions{})
 	if err != nil {
 		errResponse := minio.ToErrorResponse(err)
@@ -154,29 +175,26 @@ func (s *MinioStorage) Exists(ctx context.Context, storagePath string) (bool, er
 	return true, nil
 }
 
-// Health 检查 MinIO 健康状态
-func (s *MinioStorage) Health(ctx context.Context) error {
+func (s *S3Storage) Health(ctx context.Context) error {
 	_, err := s.client.ListBuckets(ctx)
 	if err != nil {
-		return fmt.Errorf("minio storage health check failed: %w", err)
+		return fmt.Errorf("s3 storage health check failed: %w", err)
 	}
 	return nil
 }
 
-// Name 返回存储名称
-func (s *MinioStorage) Name() string {
-	return "minio"
+func (s *S3Storage) Name() string {
+	return "s3"
 }
 
-// StreamTo 将 MinIO 对象直接流式传输到 ResponseWriter
-func (s *MinioStorage) StreamTo(ctx context.Context, storagePath string, w http.ResponseWriter) (int64, error) {
+func (s *S3Storage) StreamTo(ctx context.Context, storagePath string, w http.ResponseWriter) (int64, error) {
 	obj, err := s.client.GetObject(ctx, s.bucketName, storagePath, minio.GetObjectOptions{})
 	if err != nil {
 		errResponse := minio.ToErrorResponse(err)
 		if errResponse.Code == "NoSuchKey" {
-			return 0, fmt.Errorf("file not found in minio: %s", storagePath)
+			return 0, fmt.Errorf("file not found in s3: %s", storagePath)
 		}
-		return 0, fmt.Errorf("failed to get object from minio for '%s': %w", storagePath, err)
+		return 0, fmt.Errorf("failed to get object from s3 for '%s': %w", storagePath, err)
 	}
 	defer func() { _ = obj.Close() }()
 
@@ -184,11 +202,11 @@ func (s *MinioStorage) StreamTo(ctx context.Context, storagePath string, w http.
 	if err != nil {
 		errResponse := minio.ToErrorResponse(err)
 		if errResponse.Code == "NoSuchKey" {
-			return 0, fmt.Errorf("file not found in minio: %s", storagePath)
+			return 0, fmt.Errorf("file not found in s3: %s", storagePath)
 		}
 
 		if !utils.IsClientDisconnect(err) {
-			log.Printf("[MinIO] Stat failed for %s: %v, continuing without Content-Length", storagePath, err)
+			log.Printf("[S3] Stat failed for %s: %v, continuing without Content-Length", storagePath, err)
 		}
 	} else {
 		if w.Header().Get("Content-Type") == "" {
@@ -196,14 +214,12 @@ func (s *MinioStorage) StreamTo(ctx context.Context, storagePath string, w http.
 		}
 		w.Header().Set("Content-Length", strconv.FormatInt(stat.Size, 10))
 
-		// 对于大文件（>10MB），记录日志并使用更大的缓冲区
 		if stat.Size > 10*1024*1024 {
-			utils.LogIfDevf("[MinIO] Large file detected: %s (%.2f MB), using optimized streaming", storagePath, float64(stat.Size)/(1024*1024))
+			utils.LogIfDevf("[S3] Large file detected: %s (%.2f MB), using optimized streaming", storagePath, float64(stat.Size)/(1024*1024))
 		}
 	}
 	w.WriteHeader(http.StatusOK)
 
-	// 使用 buffer pool 复用缓冲区（默认 32KB）
 	bufPtr := pool.SharedBufferPool.Get().(*[]byte)
 	defer pool.SharedBufferPool.Put(bufPtr)
 
@@ -218,15 +234,14 @@ func (s *MinioStorage) StreamTo(ctx context.Context, storagePath string, w http.
 	return n, nil
 }
 
-// StreamToWithSize 将 MinIO 对象流式传输到指定 writer，支持文件大小检查
-func (s *MinioStorage) StreamToWithSize(ctx context.Context, storagePath string, w http.ResponseWriter, maxSize int64) (int64, error) {
+func (s *S3Storage) StreamToWithSize(ctx context.Context, storagePath string, w http.ResponseWriter, maxSize int64) (int64, error) {
 	obj, err := s.client.GetObject(ctx, s.bucketName, storagePath, minio.GetObjectOptions{})
 	if err != nil {
 		errResponse := minio.ToErrorResponse(err)
 		if errResponse.Code == "NoSuchKey" {
-			return 0, fmt.Errorf("file not found in minio: %s", storagePath)
+			return 0, fmt.Errorf("file not found in s3: %s", storagePath)
 		}
-		return 0, fmt.Errorf("failed to get object from minio for '%s': %w", storagePath, err)
+		return 0, fmt.Errorf("failed to get object from s3 for '%s': %w", storagePath, err)
 	}
 	defer func() { _ = obj.Close() }()
 
@@ -234,12 +249,11 @@ func (s *MinioStorage) StreamToWithSize(ctx context.Context, storagePath string,
 	if err != nil {
 		errResponse := minio.ToErrorResponse(err)
 		if errResponse.Code == "NoSuchKey" {
-			return 0, fmt.Errorf("file not found in minio: %s", storagePath)
+			return 0, fmt.Errorf("file not found in s3: %s", storagePath)
 		}
 		return 0, fmt.Errorf("failed to stat object: %w", err)
 	}
 
-	// 检查文件大小限制
 	if maxSize > 0 && stat.Size > maxSize {
 		http.Error(w, fmt.Sprintf("file size %d exceeds maximum allowed size %d", stat.Size, maxSize), http.StatusRequestEntityTooLarge)
 		return 0, fmt.Errorf("file size %d exceeds maximum allowed size %d", stat.Size, maxSize)
@@ -251,7 +265,6 @@ func (s *MinioStorage) StreamToWithSize(ctx context.Context, storagePath string,
 	w.Header().Set("Content-Length", strconv.FormatInt(stat.Size, 10))
 	w.WriteHeader(http.StatusOK)
 
-	// 使用 buffer pool 复用缓冲区
 	bufPtr := pool.SharedBufferPool.Get().(*[]byte)
 	defer pool.SharedBufferPool.Put(bufPtr)
 
@@ -266,33 +279,18 @@ func (s *MinioStorage) StreamToWithSize(ctx context.Context, storagePath string,
 	return n, nil
 }
 
-// mustGetSystemCertPool 获取系统证书池
-func mustGetSystemCertPool() *x509.CertPool {
-	pool, err := x509.SystemCertPool()
-	if err != nil {
-		log.Printf("Failed to load system cert pool: %v", err)
-		return x509.NewCertPool()
-	}
-	return pool
-}
-
-// GetDirectURL 获取直链 URL
-func (s *MinioStorage) GetDirectURL(storagePath string) string {
+func (s *S3Storage) GetDirectURL(storagePath string) string {
 	if !s.SupportsDirectLink() {
 		return ""
 	}
 
-	// 构建 URL
-	base := s.publicEndpoint
+	base := s.publicDomain
 	if base == "" {
-		// 使用 MinIO 端点
-		base = s.client.EndpointURL().String()
+		base = s.endpoint
 	}
 
-	// 确保格式正确
 	base = strings.TrimRight(base, "/")
 
-	// URL 编码路径（处理中文、空格等）
 	segments := strings.Split(storagePath, "/")
 	encodedSegments := make([]string, len(segments))
 	for i, seg := range segments {
@@ -300,43 +298,35 @@ func (s *MinioStorage) GetDirectURL(storagePath string) string {
 	}
 	encodedPath := path.Join(encodedSegments...)
 
-	return fmt.Sprintf("%s/%s/%s", base, s.bucketName, encodedPath)
+	if s.forcePathStyle || s.publicDomain == "" {
+		return fmt.Sprintf("%s/%s/%s", base, s.bucketName, encodedPath)
+	}
+
+	return fmt.Sprintf("%s/%s", base, encodedPath)
 }
 
-// SupportsDirectLink 是否支持直链
-func (s *MinioStorage) SupportsDirectLink() bool {
-	return s.enableDirectLink && s.isPublicBucket
+func (s *S3Storage) SupportsDirectLink() bool {
+	return !s.isPrivate
 }
 
-// ShouldProxy 根据全局策略判断是否走代理
-func (s *MinioStorage) ShouldProxy(imageIsPublic bool, globalMode TransferMode) bool {
-	// 如果存储本身不支持直链，强制代理
+func (s *S3Storage) ShouldProxy(imageIsPublic bool, globalMode TransferMode) bool {
 	if !s.SupportsDirectLink() {
 		return true
 	}
 
-	// 使用全局策略控制行为
 	switch globalMode {
 	case TransferModeAlwaysProxy:
-		// 总是代理
 		return true
-
 	case TransferModeAlwaysDirect:
-		// 总是直链（存储能力已验证）
 		return false
-
-	case TransferModeAuto, "": // 默认 auto
-		// 自动：私有图片代理，公开图片直链
+	case TransferModeAuto, "":
 		return !imageIsPublic
-
 	default:
-		// 未知模式，安全起见走代理
 		return true
 	}
 }
 
-// getContentTypeFromPath 根据文件路径获取 Content-Type
-func getContentTypeFromPath(storagePath string) string {
+func getContentTypeFromPathS3(storagePath string) string {
 	ext := strings.ToLower(filepath.Ext(storagePath))
 	switch ext {
 	case ".jpg", ".jpeg":

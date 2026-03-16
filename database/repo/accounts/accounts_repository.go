@@ -27,7 +27,6 @@ func (r *Repository) DB() *gorm.DB {
 }
 
 // CreateDefaultAdminUser 创建默认管理员用户
-// 返回可能的错误，让调用者决定是否终止程序
 func (r *Repository) CreateDefaultAdminUser() (string, error) {
 	var count int64
 

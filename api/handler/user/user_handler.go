@@ -9,30 +9,26 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Handler 用户处理器
 type Handler struct {
 	service *user.Service
 }
 
-// NewHandler 创建新的用户处理器
 func NewHandler(service *user.Service) *Handler {
 	return &Handler{
 		service: service,
 	}
 }
 
-// ChangePasswordRequest 修改密码请求
 type ChangePasswordRequest struct {
 	OldPassword string `json:"old_password" binding:"required"`
 	NewPassword string `json:"new_password" binding:"required,min=6"`
 }
 
-// ChangePasswordResponse 修改密码响应
 type ChangePasswordResponse struct {
 	Message string `json:"message"`
 }
 
-// ChangePassword 修改密码
+// ChangePassword
 // @Summary      修改用户密码
 // @Description  验证旧密码并更新为新密码
 // @Tags         user

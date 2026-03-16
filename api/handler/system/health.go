@@ -15,13 +15,11 @@ import (
 
 var startTime = time.Now()
 
-// HealthHandler 健康检查处理器
 type HealthHandler struct {
-	db            *gorm.DB
+	db              *gorm.DB
 	storageProvider storage.Provider
 }
 
-// NewHealthHandler 创建健康检查处理器
 func NewHealthHandler(db *gorm.DB, storageProvider storage.Provider) *HealthHandler {
 	return &HealthHandler{
 		db:              db,
@@ -29,7 +27,7 @@ func NewHealthHandler(db *gorm.DB, storageProvider storage.Provider) *HealthHand
 	}
 }
 
-// Handle 处理健康检查请求
+// Handle
 // @Summary      Health check
 // @Description  Check the health status of the application and its dependencies (database, cache, storage)
 // @Tags         system

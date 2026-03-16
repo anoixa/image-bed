@@ -492,25 +492,29 @@ func (h *ConfigHandler) testStorageConfig(config map[string]any) *models.TestCon
 			Message: "Local storage connection successful",
 		}
 
-	case "minio":
-		minioCfg := storage.MinioConfig{
+	case "minio", "s3":
+		s3Cfg := storage.S3Config{
+			Type:            storageType,
 			Endpoint:        getString(config, "endpoint"),
+			Region:          getString(config, "region"),
+			BucketName:      getString(config, "bucket_name"),
 			AccessKeyID:     getString(config, "access_key_id"),
 			SecretAccessKey: getString(config, "secret_access_key"),
-			UseSSL:          getBool(config, "use_ssl"),
-			BucketName:      getString(config, "bucket_name"),
+			ForcePathStyle:  getBool(config, "force_path_style"),
+			PublicDomain:    getString(config, "public_domain"),
+			IsPrivate:       getBool(config, "is_private"),
 		}
-		if minioCfg.Endpoint == "" || minioCfg.AccessKeyID == "" || minioCfg.SecretAccessKey == "" {
+		if s3Cfg.Endpoint == "" || s3Cfg.AccessKeyID == "" || s3Cfg.SecretAccessKey == "" || s3Cfg.BucketName == "" {
 			return &models.TestConfigResponse{
 				Success: false,
-				Message: "Endpoint, access_key_id and secret_access_key are required",
+				Message: "Endpoint, access_key_id, secret_access_key and bucket_name are required",
 			}
 		}
-		provider, err := storage.NewMinioStorage(minioCfg)
+		provider, err := storage.NewS3Storage(s3Cfg)
 		if err != nil {
 			return &models.TestConfigResponse{
 				Success: false,
-				Message: fmt.Sprintf("Failed to create minio storage: %v", err),
+				Message: fmt.Sprintf("Failed to create S3 storage: %v", err),
 			}
 		}
 		ctx := context.Background()
@@ -522,7 +526,7 @@ func (h *ConfigHandler) testStorageConfig(config map[string]any) *models.TestCon
 		}
 		return &models.TestConfigResponse{
 			Success: true,
-			Message: "MinIO storage connection successful",
+			Message: "S3 storage connection successful",
 		}
 
 	case "webdav":
@@ -625,14 +629,17 @@ func (h *ConfigHandler) hotReloadStorageConfig(id uint, config map[string]any, i
 		if cfg.LocalPath == "" {
 			return fmt.Errorf("local_path is required for local storage")
 		}
-	case "minio":
+	case "minio", "s3":
 		cfg.Endpoint = getString(config, "endpoint")
+		cfg.Region = getString(config, "region")
+		cfg.BucketName = getString(config, "bucket_name")
 		cfg.AccessKeyID = getString(config, "access_key_id")
 		cfg.SecretAccessKey = getString(config, "secret_access_key")
-		cfg.UseSSL = getBool(config, "use_ssl")
-		cfg.BucketName = getString(config, "bucket_name")
-		if cfg.Endpoint == "" || cfg.AccessKeyID == "" || cfg.SecretAccessKey == "" {
-			return fmt.Errorf("endpoint, access_key_id and secret_access_key are required for minio storage")
+		cfg.ForcePathStyle = getBool(config, "force_path_style")
+		cfg.PublicDomain = getString(config, "public_domain")
+		cfg.IsPrivate = getBool(config, "is_private")
+		if cfg.Endpoint == "" || cfg.AccessKeyID == "" || cfg.SecretAccessKey == "" || cfg.BucketName == "" {
+			return fmt.Errorf("endpoint, access_key_id, secret_access_key and bucket_name are required for S3 storage")
 		}
 	case "webdav":
 		cfg.WebDAVURL = getString(config, "webdav_url")

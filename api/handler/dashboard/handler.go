@@ -8,20 +8,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Handler Dashboard 处理器
 type Handler struct {
 	svc *dashboard.Service
 }
 
-// NewHandler 创建新的 Dashboard 处理器
 func NewHandler(svc *dashboard.Service) *Handler {
 	return &Handler{
 		svc: svc,
 	}
 }
 
-// GetStats 获取 Dashboard 统计数据
-// @Summary      Get dashboard statistics
+// GetStats
 // @Description  Get dashboard statistics including image count, storage usage, and recent activity
 // @Tags         dashboard
 // @Accept       json
@@ -41,7 +38,7 @@ func (h *Handler) GetStats(c *gin.Context) {
 	common.RespondSuccess(c, stats)
 }
 
-// RefreshStats 刷新 Dashboard 统计缓存
+// RefreshStats
 // @Summary      Refresh dashboard statistics
 // @Description  Force refresh the dashboard statistics cache
 // @Tags         dashboard
@@ -61,7 +58,6 @@ func (h *Handler) RefreshStats(c *gin.Context) {
 	common.RespondSuccessMessage(c, "Stats refreshed successfully", nil)
 }
 
-// SetupRoutes 设置 Dashboard 路由
 func (h *Handler) SetupRoutes(router *gin.RouterGroup, authMiddleware gin.HandlerFunc) {
 	dashboard := router.Group("/dashboard")
 	dashboard.Use(authMiddleware)

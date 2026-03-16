@@ -456,18 +456,16 @@ func (m *Manager) GetStorageConfigs(ctx context.Context) ([]storage.StorageConfi
 		switch storageType {
 		case "local":
 			storageCfg.LocalPath = getStringFromMap(configMap, "local_path", "./data/upload")
-		case "minio":
+		case "minio", "s3":
+			// S3 兼容配置（支持 MinIO、AWS S3、Cloudflare R2 等）
 			storageCfg.Endpoint = getStringFromMap(configMap, "endpoint", "")
+			storageCfg.Region = getStringFromMap(configMap, "region", "us-east-1")
+			storageCfg.BucketName = getStringFromMap(configMap, "bucket_name", "")
 			storageCfg.AccessKeyID = getStringFromMap(configMap, "access_key_id", "")
 			storageCfg.SecretAccessKey = getStringFromMap(configMap, "secret_access_key", "")
-			storageCfg.BucketName = getStringFromMap(configMap, "bucket_name", "")
-			if val, ok := configMap["use_ssl"]; ok {
-				storageCfg.UseSSL = parseBool(val, false)
-			}
-			// 直链能力声明
-			storageCfg.EnableDirectLink = getBoolFromMap(configMap, "enable_direct_link", false)
-			storageCfg.PublicEndpoint = getStringFromMap(configMap, "public_endpoint", "")
-			storageCfg.IsPublicBucket = getBoolFromMap(configMap, "is_public_bucket", false)
+			storageCfg.ForcePathStyle = getBoolFromMap(configMap, "force_path_style", true)
+			storageCfg.PublicDomain = getStringFromMap(configMap, "public_domain", "")
+			storageCfg.IsPrivate = getBoolFromMap(configMap, "is_private", false)
 		case "webdav":
 			storageCfg.WebDAVURL = getStringFromMap(configMap, "webdav_url", "")
 			storageCfg.WebDAVUsername = getStringFromMap(configMap, "webdav_username", "")

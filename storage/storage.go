@@ -18,15 +18,11 @@ var (
 	defaultID       uint
 )
 
-// TransferMode 转发模式
 type TransferMode string
 
 const (
-	// TransferModeAuto 自动模式：公开图片走直链，私有图片走代理
-	TransferModeAuto TransferMode = "auto"
-	// TransferModeAlwaysProxy 总是代理：所有图片都经过 Go 转发
-	TransferModeAlwaysProxy TransferMode = "always_proxy"
-	// TransferModeAlwaysDirect 总是直链：所有图片（仅限 public bucket）走直链
+	TransferModeAuto         TransferMode = "auto"
+	TransferModeAlwaysProxy  TransferMode = "always_proxy"
 	TransferModeAlwaysDirect TransferMode = "always_direct"
 )
 
@@ -41,32 +37,25 @@ type ImageStream struct {
 type StorageConfig struct {
 	ID        uint
 	Name      string
-	Type      string // "local" | "minio" | "webdav"
+	Type      string // "local" | "s3" | "webdav"
 	IsDefault bool
 	// Local
 	LocalPath string
-	// MinIO
+	// S3
 	Endpoint        string
 	AccessKeyID     string
 	SecretAccessKey string
 	UseSSL          bool
 	BucketName      string
+	Region          string
+	ForcePathStyle  bool
+	PublicDomain    string
+	IsPrivate       bool
 	// WebDAV
 	WebDAVURL      string
 	WebDAVUsername string
 	WebDAVPassword string
 	WebDAVRootPath string
-	// === 直链能力声明 ===
-	// EnableDirectLink 是否启用直链功能
-	EnableDirectLink bool `json:"enable_direct_link"`
-	// PublicEndpoint 对外访问地址（如 CDN、反向代理、公网域名）
-	// 为空时使用 Endpoint
-	PublicEndpoint string `json:"public_endpoint"`
-	// IsPublicBucket 存储桶是否为 Public-read（必须 true 才能直链）
-	// 此字段仅声明存储能力，实际是否使用直链由全局设置控制
-	IsPublicBucket bool `json:"is_public_bucket"`
-	// 注意：直链行为由全局设置 system:transfer_mode 统一控制
-	// 存储级别只声明是否支持直链，不控制行为
 }
 
 // Provider 存储提供者接口
@@ -102,18 +91,9 @@ type StreamProvider interface {
 }
 
 // DirectURLProvider 直链提供者接口
-// 支持直链的存储（如 MinIO public bucket）可实现此接口
 type DirectURLProvider interface {
-	// GetDirectURL 获取直链 URL，返回空表示不支持或配置不完整
-	// 仅当图片为公开且存储配置 EnableDirectLink=true 时调用
 	GetDirectURL(storagePath string) string
-
-	// SupportsDirectLink 是否支持直链（配置正确且 IsPublicBucket=true）
 	SupportsDirectLink() bool
-
-	// ShouldProxy 根据策略判断是否走代理
-	// imageIsPublic: 图片是否公开
-	// globalMode: 全局转发模式
 	ShouldProxy(imageIsPublic bool, globalMode TransferMode) bool
 }
 
@@ -233,7 +213,6 @@ func RemoveProvider(id uint) error {
 		return fmt.Errorf("storage provider with ID %d not found", id)
 	}
 
-	// 不能移除默认存储
 	if id == defaultID {
 		return fmt.Errorf("cannot remove default storage provider (ID: %d)", id)
 	}
@@ -305,16 +284,17 @@ func createProvider(cfg StorageConfig) (Provider, error) {
 	switch cfg.Type {
 	case "local":
 		return NewLocalStorage(cfg.LocalPath)
-	case "minio":
-		return NewMinioStorage(MinioConfig{
-			Endpoint:         cfg.Endpoint,
-			AccessKeyID:      cfg.AccessKeyID,
-			SecretAccessKey:  cfg.SecretAccessKey,
-			UseSSL:           cfg.UseSSL,
-			BucketName:       cfg.BucketName,
-			EnableDirectLink: cfg.EnableDirectLink,
-			PublicEndpoint:   cfg.PublicEndpoint,
-			IsPublicBucket:   cfg.IsPublicBucket,
+	case "minio", "s3":
+		return NewS3Storage(S3Config{
+			Type:            cfg.Type,
+			Endpoint:        cfg.Endpoint,
+			Region:          cfg.Region,
+			BucketName:      cfg.BucketName,
+			AccessKeyID:     cfg.AccessKeyID,
+			SecretAccessKey: cfg.SecretAccessKey,
+			ForcePathStyle:  cfg.ForcePathStyle,
+			PublicDomain:    cfg.PublicDomain,
+			IsPrivate:       cfg.IsPrivate,
 		})
 	case "webdav":
 		return NewWebDAVStorage(WebDAVConfig{

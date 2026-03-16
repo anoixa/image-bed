@@ -12,30 +12,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// StatusResponse 系统状态响应
 type StatusResponse struct {
-	// 版本信息
-	Version    string `json:"version"`
-	CommitHash string `json:"commit_hash"`
-	GoVersion  string `json:"go_version"`
-
-	// 运行环境
-	Environment string `json:"environment"`
-
-	// 内存统计
-	Memory MemoryStatus `json:"memory"`
-
-	// 运行时信息
-	Runtime RuntimeStatus `json:"runtime"`
-
-	// 缓存信息
-	Cache CacheStatus `json:"cache"`
-
-	// 数据目录信息
-	DataDir DirStatus `json:"data_dir"`
+	Version     string       `json:"version"`
+	CommitHash  string       `json:"commit_hash"`
+	GoVersion   string       `json:"go_version"`
+	Environment string       `json:"environment"`
+	Memory      MemoryStatus `json:"memory"`
+	Runtime     RuntimeStatus `json:"runtime"`
+	Cache       CacheStatus  `json:"cache"`
+	DataDir     DirStatus    `json:"data_dir"`
 }
 
-// MemoryStatus 内存状态
 type MemoryStatus struct {
 	HeapAllocMB   float64 `json:"heap_alloc_mb"`
 	HeapAllocStr  string  `json:"heap_alloc_str"`
@@ -54,18 +41,15 @@ type MemoryStatus struct {
 	Goroutines    int     `json:"goroutines"`
 }
 
-// RuntimeStatus 运行时状态
 type RuntimeStatus struct {
 	NumCPU int `json:"num_cpu"`
 }
 
-// CacheStatus 缓存状态
 type CacheStatus struct {
 	Provider string `json:"provider"`
 	Type     string `json:"type"`
 }
 
-// DirStatus 目录状态
 type DirStatus struct {
 	Path      string `json:"path"`
 	FileCount int    `json:"file_count"`
@@ -73,15 +57,13 @@ type DirStatus struct {
 	SizeStr   string `json:"size_str"`
 }
 
-// Handler 系统处理器
 type Handler struct{}
 
-// NewHandler 创建系统处理器
 func NewHandler() *Handler {
 	return &Handler{}
 }
 
-// GetStatus 获取系统状态
+// GetStatus
 // @Summary      Get system status
 // @Description  Get detailed system runtime information including version, memory stats, goroutines, GC count, and cache info
 // @Tags         system
@@ -141,12 +123,10 @@ func (h *Handler) GetStatus(c *gin.Context) {
 	common.RespondSuccess(c, response)
 }
 
-// getGoVersion 获取 Go 版本（简化处理）
 func getGoVersion() string {
-	return "go1.26" // 从 go.mod 读取会更准确，这里简化处理
+	return "go1.26"
 }
 
-// getEnvironment 获取环境类型
 func getEnvironment() string {
 	if config.IsProduction() {
 		return "production"
@@ -154,12 +134,10 @@ func getEnvironment() string {
 	return "development"
 }
 
-// getNumCPU 获取 CPU 核心数
 func getNumCPU() int {
 	return utils.GetNumCPU()
 }
 
-// getDataDirInfo 获取数据目录信息
 func getDataDirInfo() DirStatus {
 	dataPath := "./data"
 	if _, err := os.Stat(dataPath); os.IsNotExist(err) {
@@ -181,14 +159,13 @@ func getDataDirInfo() DirStatus {
 	}
 }
 
-// countDirStats 统计目录文件数和大小
 func countDirStats(dirPath string) (int, int64) {
 	var fileCount int
 	var totalSize int64
 
 	_ = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil // 跳过错误
+			return nil
 		}
 		if !info.IsDir() {
 			fileCount++
@@ -200,18 +177,16 @@ func countDirStats(dirPath string) (int, int64) {
 	return fileCount, totalSize
 }
 
-// formatBytes 格式化字节数为人类可读格式
 func formatBytes(bytes uint64) string {
 	return utils.FormatBytes(int64(bytes))
 }
 
-// VersionResponse 版本响应
 type VersionResponse struct {
 	Version    string `json:"version"`
 	CommitHash string `json:"commit_hash"`
 }
 
-// GetVersion 获取版本信息
+// GetVersion
 // @Summary      Get version
 // @Description  Get application version and commit hash
 // @Tags         system
@@ -226,14 +201,13 @@ func (h *Handler) GetVersion(c *gin.Context) {
 	})
 }
 
-// MetricsResponse 指标响应
 type MetricsResponse struct {
 	RequestCount      int64   `json:"request_count"`
 	RequestDurationMs int64   `json:"request_duration_ms"`
 	AvgDurationMs     float64 `json:"avg_duration_ms"`
 }
 
-// GetMetrics 获取指标
+// GetMetrics
 // @Summary      Get metrics
 // @Description  Get application metrics and statistics
 // @Tags         system
