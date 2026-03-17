@@ -228,16 +228,7 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
 
 	var thumbResult, webpResult *pipelineResult
 
-	if t.WebPVariantID > 0 {
-		result, err := t.generateWebP(ctx, fileBytes)
-		if err != nil {
-			utils.LogIfDevf("[Pipeline] WebP failed: %v", err)
-			_ = t.VariantRepo.UpdateFailed(t.WebPVariantID, err.Error(), true)
-		} else {
-			webpResult = result
-		}
-	}
-
+	// 优先生成缩略图（响应更快，内存占用小）
 	if t.ThumbVariantID > 0 {
 		result, err := t.generateThumbnail(ctx, fileBytes)
 		if err != nil {
@@ -245,6 +236,17 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
 			_ = t.VariantRepo.UpdateFailed(t.ThumbVariantID, err.Error(), true)
 		} else {
 			thumbResult = result
+		}
+	}
+
+	// 再生成 WebP 原图
+	if t.WebPVariantID > 0 {
+		result, err := t.generateWebP(ctx, fileBytes)
+		if err != nil {
+			utils.LogIfDevf("[Pipeline] WebP failed: %v", err)
+			_ = t.VariantRepo.UpdateFailed(t.WebPVariantID, err.Error(), true)
+		} else {
+			webpResult = result
 		}
 	}
 
