@@ -147,7 +147,11 @@ func AutoMigrate(db *gorm.DB) error {
 	}
 
 	// 执行额外的索引修复
-	return fixSystemConfigIndexes(db)
+	if err := fixSystemConfigIndexes(db); err != nil {
+		return err
+	}
+
+	return fixImageIdentifierIndexes(db)
 }
 
 // fixSystemConfigIndexes 修复 system_configs 表的索引
@@ -200,6 +204,47 @@ func isIndexExistsError(err error) bool {
 	// SQLite: "index idx_key_unique already exists"
 	// PostgreSQL: "relation \"idx_key_unique\" already exists"
 	return strings.Contains(errStr, "already exists")
+}
+
+// fixImageIdentifierIndexes 创建部分唯一索引，只在未删除记录上强制 identifier 唯一性
+func fixImageIdentifierIndexes(db *gorm.DB) error {
+	var dbType string
+	if db.Name() == "sqlite" {
+		dbType = "sqlite"
+	} else {
+		dbType = "postgres"
+	}
+
+	if dbType == "sqlite" {
+		utils.LogIfDevf("[DB Migration] SQLite detected, skipping partial index for images.identifier")
+		return nil
+	}
+
+	dropOldIndexSQL := `DROP INDEX IF EXISTS idx_identifier`
+	if err := db.Exec(dropOldIndexSQL).Error; err != nil {
+		log.Printf("[DB Migration] Warning: failed to drop old index idx_identifier: %v", err)
+	} else {
+		log.Printf("[DB Migration] Dropped old index idx_identifier")
+	}
+
+	dropOldIndexSQL2 := `DROP INDEX IF EXISTS idx_images_identifier`
+	if err := db.Exec(dropOldIndexSQL2).Error; err != nil {
+		log.Printf("[DB Migration] Warning: failed to drop old index idx_images_identifier: %v", err)
+	} else {
+		log.Printf("[DB Migration] Dropped old index idx_images_identifier")
+	}
+
+	createIndexSQL := `CREATE UNIQUE INDEX IF NOT EXISTS idx_images_identifier_active ON images(identifier) WHERE deleted_at IS NULL`
+
+	if err := db.Exec(createIndexSQL).Error; err != nil {
+		if !isIndexExistsError(err) {
+			return fmt.Errorf("failed to create partial index for images.identifier: %w", err)
+		}
+	} else {
+		log.Printf("[DB Migration] Created partial unique index idx_images_identifier_active on images.identifier (WHERE deleted_at IS NULL)")
+	}
+
+	return nil
 }
 
 // Transaction 执行事务
