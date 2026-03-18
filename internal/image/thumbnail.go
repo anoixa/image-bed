@@ -79,16 +79,6 @@ func (s *ThumbnailService) GetThumbnail(ctx context.Context, image *models.Image
 	}, nil
 }
 
-// TriggerGeneration 触发缩略图生成
-func (s *ThumbnailService) TriggerGeneration(image *models.Image, width int) {
-	// 缩略图生成已完全迁移至 ImagePipelineTask
-}
-
-// TriggerGenerationForAllSizes 为所有配置尺寸生成缩略图
-func (s *ThumbnailService) TriggerGenerationForAllSizes(image *models.Image) {
-	// 缩略图生成已完全迁移至 ImagePipelineTask
-}
-
 // EnsureThumbnail 确保缩略图存在
 func (s *ThumbnailService) EnsureThumbnail(ctx context.Context, image *models.Image, width int) (*ThumbnailResult, bool, error) {
 	result, err := s.GetThumbnail(ctx, image, width)

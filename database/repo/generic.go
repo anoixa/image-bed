@@ -132,7 +132,7 @@ func (r *GenericRepository[T]) BatchDelete(ctx context.Context, ids []uint) erro
 	return r.db.WithContext(ctx).Where("id IN ?", ids).Delete(&entity).Error
 }
 
-// GetByIDWithLock 根据 ID 获取实体并加锁（用于更新）
+// GetByIDWithLock 根据 ID 获取实体并加锁
 func (r *GenericRepository[T]) GetByIDWithLock(ctx context.Context, id uint) (*T, error) {
 	var entity T
 	err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).First(&entity, id).Error
@@ -142,7 +142,7 @@ func (r *GenericRepository[T]) GetByIDWithLock(ctx context.Context, id uint) (*T
 	return &entity, nil
 }
 
-// SoftDelete 软删除（需要模型有 DeletedAt 字段）
+// SoftDelete 软删除
 func (r *GenericRepository[T]) SoftDelete(ctx context.Context, id uint) error {
 	var entity T
 	result := r.db.WithContext(ctx).Delete(&entity, id)

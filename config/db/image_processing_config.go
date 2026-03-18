@@ -29,7 +29,6 @@ type ImageProcessingSettings struct {
 	AVIFExperimental         bool     `json:"avif_experimental" mapstructure:"avif_experimental"`
 	SkipSmallerThan          int      `json:"skip_smaller_than" mapstructure:"skip_smaller_than"`
 	MaxDimension             int      `json:"max_dimension" mapstructure:"max_dimension"`
-	MaxRetries               int      `json:"max_retries" mapstructure:"max_retries"`
 
 	// 扫描器配置
 	ScannerEnabled       bool          `json:"scanner_enabled" mapstructure:"scanner_enabled"`
@@ -57,7 +56,6 @@ func DefaultImageProcessingSettings() *ImageProcessingSettings {
 		AVIFExperimental:         false,
 		SkipSmallerThan:          10,
 		MaxDimension:             4096,
-		MaxRetries:               3,
 
 		// 扫描器默认值
 		ScannerEnabled:       true,
@@ -194,7 +192,6 @@ func (m *Manager) ensureDefaultImageProcessingConfig(ctx context.Context) error 
 			"avif_experimental":          defaultSettings.AVIFExperimental,
 			"skip_smaller_than":          defaultSettings.SkipSmallerThan,
 			"max_dimension":              defaultSettings.MaxDimension,
-			"max_retries":                defaultSettings.MaxRetries,
 			"scanner_enabled":            defaultSettings.ScannerEnabled,
 			"scanner_interval":           defaultSettings.ScannerInterval,
 			"scanner_batch_size":         defaultSettings.ScannerBatchSize,
@@ -245,7 +242,6 @@ func (m *Manager) SaveImageProcessingSettings(ctx context.Context, settings *Ima
 			"avif_experimental":          settings.AVIFExperimental,
 			"skip_smaller_than":          settings.SkipSmallerThan,
 			"max_dimension":              settings.MaxDimension,
-			"max_retries":                settings.MaxRetries,
 			"scanner_enabled":            settings.ScannerEnabled,
 			"scanner_interval":           settings.ScannerInterval,
 			"scanner_batch_size":         settings.ScannerBatchSize,

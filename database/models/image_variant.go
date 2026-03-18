@@ -23,8 +23,6 @@ type ImageVariant struct {
 	Height       int            `json:"height"`
 	Status       string         `gorm:"default:pending;size:20;index" json:"status"`
 	ErrorMessage string         `gorm:"type:text" json:"error_message,omitempty"`
-	RetryCount   int            `gorm:"default:0" json:"retry_count"`
-	NextRetryAt  *time.Time     `gorm:"index" json:"next_retry_at,omitempty"`
 }
 
 // TableName 指定表名

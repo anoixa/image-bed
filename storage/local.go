@@ -288,19 +288,3 @@ func (s *LocalStorage) Health(ctx context.Context) error {
 func (s *LocalStorage) Name() string {
 	return "local"
 }
-
-// 为了兼容性，保留原有的方法名
-// Save 保存文件到本地存储（已废弃，请使用 SaveWithContext）
-func (s *LocalStorage) Save(storagePath string, file io.Reader) error {
-	return s.SaveWithContext(context.Background(), storagePath, file)
-}
-
-// Get 从本地存储获取文件（已废弃，请使用 GetWithContext）
-func (s *LocalStorage) Get(storagePath string) (io.ReadSeeker, error) {
-	return s.GetWithContext(context.Background(), storagePath)
-}
-
-// Delete 从本地存储删除文件（已废弃，请使用 DeleteWithContext）
-func (s *LocalStorage) Delete(storagePath string) error {
-	return s.DeleteWithContext(context.Background(), storagePath)
-}

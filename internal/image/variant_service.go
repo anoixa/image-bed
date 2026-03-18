@@ -61,10 +61,8 @@ func (s *VariantService) SelectBestVariant(ctx context.Context, image *models.Im
 
 	switch image.VariantStatus {
 	case models.ImageVariantStatusNone:
-		// 从未处理过，触发转换并返回原图
 		return s.handleOriginalWithConversion(image, acceptHeader, settings, true)
 	case models.ImageVariantStatusProcessing:
-		// 正在处理中，返回原图
 		return s.handleOriginalWithConversion(image, acceptHeader, settings, false)
 	case models.ImageVariantStatusFailed:
 		return s.handleOriginalWithConversion(image, acceptHeader, settings, true)
@@ -72,7 +70,6 @@ func (s *VariantService) SelectBestVariant(ctx context.Context, image *models.Im
 
 		return s.handleCompletedVariants(ctx, image, acceptHeader, settings)
 	default:
-		// 默认按 None 处理
 		return s.handleOriginalWithConversion(image, acceptHeader, settings, false)
 	}
 }
@@ -113,7 +110,6 @@ func (s *VariantService) handleCompletedVariants(_ context.Context, image *model
 		}
 	}
 
-	// 调试日志（仅在 dev 环境显示）
 	utils.LogIfDevf("[VariantNegotiation] image=%s, variantStatus=%d, acceptHeader=%s", image.Identifier, uint(image.VariantStatus), acceptHeader)
 	utils.LogIfDevf("[VariantNegotiation] availableVariants=%v, enabledFormats=%v", available, settings.ConversionEnabledFormats)
 

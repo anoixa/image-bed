@@ -45,6 +45,13 @@ func (r *Repository) CreateWithTx(tx *gorm.DB, image *models.Image) error {
 	return tx.Create(image).Error
 }
 
+// CountImagesByStoragePath 统计使用相同存储路径的图片数量（用于秒传引用计数）
+func (r *Repository) CountImagesByStoragePath(storagePath string) (int64, error) {
+	var count int64
+	err := r.db.Model(&models.Image{}).Where("storage_path = ? AND deleted_at IS NULL", storagePath).Count(&count).Error
+	return count, err
+}
+
 // GetImageByHash 通过哈希获取图片
 func (r *Repository) GetImageByHash(hash string) (*models.Image, error) {
 	var image models.Image
@@ -276,7 +283,7 @@ func (r *Repository) WithContext(ctx context.Context) *Repository {
 	return &Repository{db: r.db.WithContext(ctx)}
 }
 
-// DB 返回底层 *gorm.DB 实例
+// DB
 func (r *Repository) DB() *gorm.DB {
 	return r.db
 }
@@ -312,7 +319,6 @@ func (r *Repository) GetRandomPublicImage(filter *RandomImageFilter) (*models.Im
 
 	db := r.db.Where("is_public = ?", true)
 
-	// 相册筛选（仅当未配置包含所有公开图片时）
 	if filter != nil && filter.AlbumID != nil && !filter.IncludeAllPublic {
 		db = db.Joins("JOIN album_images ON album_images.image_id = images.id").
 			Where("album_images.album_id = ?", *filter.AlbumID)
@@ -336,7 +342,6 @@ func (r *Repository) GetRandomPublicImage(filter *RandomImageFilter) (*models.Im
 		if filter.MaxFileSize > 0 {
 			db = db.Where("file_size <= ?", filter.MaxFileSize)
 		}
-		// WebP变体要求：只返回变体状态为Completed的图片
 		if filter.RequireWebP {
 			db = db.Where("variant_status = ?", models.ImageVariantStatusCompleted)
 		}

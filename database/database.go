@@ -155,7 +155,6 @@ func AutoMigrate(db *gorm.DB) error {
 }
 
 // fixSystemConfigIndexes 修复 system_configs 表的索引
-// 将旧的唯一索引改为条件唯一索引（只针对未删除的记录）
 func fixSystemConfigIndexes(db *gorm.DB) error {
 	// 获取数据库类型
 	var dbType string
@@ -165,11 +164,10 @@ func fixSystemConfigIndexes(db *gorm.DB) error {
 		dbType = "postgres"
 	}
 
-	// 删除旧索引（如果存在）
+	// 删除旧索引
 	dropOldIndexSQL := `DROP INDEX IF EXISTS idx_system_configs_key`
 	if err := db.Exec(dropOldIndexSQL).Error; err != nil {
 		log.Printf("[DB Migration] Warning: failed to drop old index: %v", err)
-		// 继续执行，不要返回错误
 	} else {
 		log.Printf("[DB Migration] Dropped old index idx_system_configs_key")
 	}
@@ -184,7 +182,6 @@ func fixSystemConfigIndexes(db *gorm.DB) error {
 	}
 
 	if err := db.Exec(createIndexSQL).Error; err != nil {
-		// 如果索引已存在，会报错，忽略
 		if !isIndexExistsError(err) {
 			return fmt.Errorf("failed to create new index: %w", err)
 		}

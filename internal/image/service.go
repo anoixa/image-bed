@@ -11,6 +11,7 @@ import (
 	"log"
 	"mime/multipart"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -124,7 +125,7 @@ func NewService(
 	}
 }
 
-// submitBackgroundTask 提交后台任务到 worker pool，避免 goroutine 风暴
+// submitBackgroundTask 提交后台任务到 worker pool
 func (s *Service) submitBackgroundTask(task func()) {
 	if pool := worker.GetGlobalPool(); pool != nil {
 		utils.LogIfDevf("[Service] Submitting task to worker pool")
@@ -219,7 +220,7 @@ func (s *Service) UploadBatch(ctx context.Context, userID uint, files []*multipa
 	return results, nil
 }
 
-// UploadSingleWithName 单文件上传（使用存储名称，向后兼容）
+// UploadSingleWithName 单文件上传
 func (s *Service) UploadSingleWithName(ctx context.Context, userID uint, fileHeader *multipart.FileHeader, storageName string, isPublic bool) (*UploadResult, error) {
 	storageProvider, storageConfigID, err := s.getStorageProvider(storageName)
 	if err != nil {
@@ -241,7 +242,7 @@ func (s *Service) UploadSingleWithName(ctx context.Context, userID uint, fileHea
 	}, nil
 }
 
-// UploadBatchWithName 批量上传（使用存储名称，向后兼容）
+// UploadBatchWithName 批量上传
 func (s *Service) UploadBatchWithName(
 	ctx context.Context,
 	userID uint,
@@ -364,6 +365,17 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 	}
 
 	if err == nil {
+		// 如果是其他用户的图片，创建新的逻辑记录（物理去重 + 逻辑隔离）
+		if img.UserID != userID {
+			newImg, err := s.createDedupedImageRecord(img, userID, fileHeader.Filename, storageConfigID, isPublic)
+			if err != nil {
+				return nil, false, fmt.Errorf("failed to create deduped image record: %w", err)
+			}
+			s.submitBackgroundTask(func() { s.warmCache(newImg) })
+			return newImg, true, nil
+		}
+
+		// 同一用户重复上传，返回原记录
 		s.submitBackgroundTask(func() { s.warmCache(img) })
 		if s.converter != nil {
 			s.submitBackgroundTask(func() { s.converter.TriggerConversion(img) })
@@ -376,6 +388,11 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 	}
 
 	width, height := utils.GetImageDimensions(tmp)
+
+	// GetImageDimensions 会移动文件指针，保存前必须重置到开头
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		return nil, false, fmt.Errorf("failed to seek temp file after dimension extraction: %w", err)
+	}
 
 	ext := getSafeFileExtension(mimeType)
 	ids := s.pathGenerator.GenerateOriginalIdentifiers(fileHash, ext, time.Now())
@@ -416,6 +433,33 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 	}
 
 	return newImg, false, nil
+}
+
+// createDedupedImageRecord 为不同用户创建去重后的新图片记录
+// 物理文件复用，但逻辑上属于不同用户（物理去重 + 逻辑隔离）
+func (s *Service) createDedupedImageRecord(existing *models.Image, userID uint, originalName string, storageConfigID uint, isPublic bool) (*models.Image, error) {
+	// 生成新的 identifier（使用时间戳确保唯一性）
+	ids := s.pathGenerator.GenerateOriginalIdentifiers(existing.FileHash+fmt.Sprintf("_%d", userID), filepath.Ext(originalName), time.Now())
+
+	newImg := &models.Image{
+		Identifier:      ids.Identifier,
+		StoragePath:     existing.StoragePath, // 复用相同的物理文件路径
+		OriginalName:    originalName,
+		FileSize:        existing.FileSize,
+		MimeType:        existing.MimeType,
+		StorageConfigID: storageConfigID,
+		FileHash:        existing.FileHash,
+		Width:           existing.Width,
+		Height:          existing.Height,
+		IsPublic:        isPublic,
+		UserID:          userID,
+	}
+
+	if err := s.repo.SaveImage(newImg); err != nil {
+		return nil, err
+	}
+
+	return newImg, nil
 }
 
 func (s *Service) getStorageProvider(_ string) (storage.Provider, uint, error) {
@@ -513,7 +557,7 @@ func (s *Service) CheckImagePermission(image *models.Image, userID uint) bool {
 	return userID != 0 && userID == image.UserID
 }
 
-// GetImageWithNegotiation 获取图片（支持格式协商）
+// GetImageWithNegotiation 获取图片
 func (s *Service) GetImageWithNegotiation(ctx context.Context, image *models.Image, acceptHeader string) (*VariantResult, error) {
 	return s.variantService.SelectBestVariant(ctx, image, acceptHeader)
 }
@@ -638,13 +682,24 @@ func (s *Service) DeleteSingle(ctx context.Context, identifier string, userID ui
 		log.Printf("Failed to remove image %d from albums: %v", img.ID, err)
 	}
 
-	// 先删除原图文件
+	// 先删除变体，再删除原图文件，最后删除DB记录（避免幽灵文件）
+	s.deleteVariantsForImage(ctx, img)
+
+	// 检查是否还有其他图片引用同一个物理文件（秒传引用计数）
 	if img.StoragePath != "" {
-		provider, err := s.getStorageProviderByID(img.StorageConfigID)
+		refCount, err := s.repo.CountImagesByStoragePath(img.StoragePath)
 		if err != nil {
-			log.Printf("Failed to get storage provider for image %s: %v", img.Identifier, err)
-		} else if err := provider.DeleteWithContext(ctx, img.StoragePath); err != nil {
-			log.Printf("Failed to delete original image file %s: %v", img.StoragePath, err)
+			log.Printf("Failed to count references for storage path %s: %v", img.StoragePath, err)
+		} else if refCount <= 1 {
+			// 只有当前这一条记录引用，可以安全删除物理文件
+			provider, err := s.getStorageProviderByID(img.StorageConfigID)
+			if err != nil {
+				log.Printf("Failed to get storage provider for image %s: %v", img.Identifier, err)
+			} else if err := provider.DeleteWithContext(ctx, img.StoragePath); err != nil {
+				log.Printf("Failed to delete original image file %s: %v", img.StoragePath, err)
+			}
+		} else {
+			utils.LogIfDevf("[Delete] Skipping physical file deletion for %s, still referenced by %d images", img.StoragePath, refCount-1)
 		}
 	}
 
@@ -654,9 +709,6 @@ func (s *Service) DeleteSingle(ctx context.Context, identifier string, userID ui
 		}
 		return nil, fmt.Errorf("failed to delete image: %w", err)
 	}
-
-	// 级联删除变体
-	s.deleteVariantsForImage(ctx, img)
 
 	// 清除缓存
 	s.clearImageCache(ctx, identifier)
@@ -673,7 +725,7 @@ func (s *Service) DeleteBatch(ctx context.Context, identifiers []string, userID 
 	// 批量查询图片信息
 	imagesToDelete, err := s.repo.GetImagesByIdentifiersAndUser(identifiers, userID)
 	if err != nil {
-		log.Printf("Failed to get images for batch delete: %v", err)
+		return nil, fmt.Errorf("failed to get images for batch delete: %w", err)
 	}
 
 	// 从所有相册中移除关联
@@ -687,22 +739,36 @@ func (s *Service) DeleteBatch(ctx context.Context, identifiers []string, userID 
 		}
 	}
 
-	// 删除原图文件和变体
+	// 先删除变体
 	for _, img := range imagesToDelete {
-		if img.StoragePath != "" {
-			provider, err := s.getStorageProviderByID(img.StorageConfigID)
-			if err != nil {
-				log.Printf("Failed to get storage provider for image %s: %v", img.Identifier, err)
-			} else if err := provider.DeleteWithContext(ctx, img.StoragePath); err != nil {
-				log.Printf("Failed to delete original image file %s: %v", img.StoragePath, err)
-			}
-		}
 		s.deleteVariantsForImage(ctx, img)
 	}
 
 	affectedCount, err := s.repo.DeleteImagesByIdentifiersAndUser(identifiers, userID)
 	if err != nil {
-		log.Printf("Failed to delete image records: %v", err)
+		return nil, fmt.Errorf("failed to delete image records: %w", err)
+	}
+
+	// DB记录删除后，检查每个被删除图片的物理文件引用计数
+	// 只有没有其他引用时才删除物理文件（避免秒传共享文件被误删）
+	for _, img := range imagesToDelete {
+		if img.StoragePath != "" {
+			refCount, err := s.repo.CountImagesByStoragePath(img.StoragePath)
+			if err != nil {
+				log.Printf("Failed to count references for storage path %s: %v", img.StoragePath, err)
+				continue
+			}
+			if refCount == 0 {
+				provider, err := s.getStorageProviderByID(img.StorageConfigID)
+				if err != nil {
+					log.Printf("Failed to get storage provider for image %s: %v", img.Identifier, err)
+				} else if err := provider.DeleteWithContext(ctx, img.StoragePath); err != nil {
+					log.Printf("Failed to delete original image file %s: %v", img.StoragePath, err)
+				}
+			} else {
+				utils.LogIfDevf("[DeleteBatch] Skipping physical file deletion for %s, still referenced by %d images", img.StoragePath, refCount)
+			}
+		}
 	}
 
 	// 清除缓存
@@ -713,13 +779,13 @@ func (s *Service) DeleteBatch(ctx context.Context, identifiers []string, userID 
 	return &DeleteResult{Success: true, DeletedCount: affectedCount}, nil
 }
 
-// DeleteImageVariants 删除指定图片的所有变体（公开方法）
+// DeleteImageVariants 删除指定图片的所有变体
 func (s *Service) DeleteImageVariants(ctx context.Context, img *models.Image) error {
 	s.deleteVariantsForImage(ctx, img)
 	return nil
 }
 
-// ClearImageCache 清除指定图片的缓存（公开方法）
+// ClearImageCache 清除指定图片的缓存
 func (s *Service) ClearImageCache(ctx context.Context, identifier string) error {
 	s.clearImageCache(ctx, identifier)
 	return nil
@@ -777,9 +843,8 @@ func (s *Service) UpdateImageByIdentifier(identifier string, updates map[string]
 	return s.repo.UpdateImageByIdentifier(identifier, updates)
 }
 
-// GetImageWithVariant 获取图片（包含完整的业务逻辑）
+// GetImageWithVariant 获取图片
 func (s *Service) GetImageWithVariant(ctx context.Context, identifier string, acceptHeader string, userID uint) (*ImageResultDTO, error) {
-	// 使用 GetImageMetadata 以启用缓存和防击穿
 	image, err := s.GetImageMetadata(ctx, identifier)
 	if err != nil {
 		return nil, err
@@ -830,12 +895,12 @@ func (s *Service) GetImageWithVariant(ctx context.Context, identifier string, ac
 	return result, nil
 }
 
-// GetRandomImage 获取随机图片（支持筛选条件）
+// GetRandomImage 获取随机图片
 func (s *Service) GetRandomImage(filter *images.RandomImageFilter) (*models.Image, error) {
 	return s.repo.GetRandomPublicImage(filter)
 }
 
-// GetRandomImageWithVariant 获取随机图片（包含格式变体协商）
+// GetRandomImageWithVariant 获取随机图片
 func (s *Service) GetRandomImageWithVariant(ctx context.Context, filter *images.RandomImageFilter, acceptHeader string) (*ImageResultDTO, error) {
 	// 获取随机图片
 	image, err := s.repo.GetRandomPublicImage(filter)

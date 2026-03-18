@@ -154,7 +154,7 @@ func NewPool(workers, queueSize int) *Pool {
 	return p
 }
 
-// worker 是实际执行任务的 Goroutine
+// worker 实际执行任务的 Goroutine
 func (p *Pool) worker() {
 	defer p.wg.Done()
 	for task := range p.taskCh {

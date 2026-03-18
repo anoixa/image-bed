@@ -79,7 +79,7 @@ type Provider interface {
 	Name() string
 }
 
-// FileOpener 支持直接打开 *os.File 的存储（用于零拷贝传输）
+// FileOpener 支持直接打开 *os.File 的存储
 type FileOpener interface {
 	OpenFile(ctx context.Context, name string) (*os.File, error)
 }

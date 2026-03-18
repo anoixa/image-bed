@@ -47,7 +47,6 @@ func (s *Service) ChangePassword(req ChangePasswordRequest) error {
 		return errors.New("invalid old password")
 	}
 
-	// 新密码不能与旧密码相同
 	if req.OldPassword == req.NewPassword {
 		return errors.New("new password cannot be the same as old password")
 	}

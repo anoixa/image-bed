@@ -109,10 +109,6 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 			utils.LogIfDevf("[Converter] WebP variant %d status=%s, skip", webpVariant.ID, webpVariant.Status)
 			webpVariant = nil
 		}
-		if webpVariant != nil && webpVariant.RetryCount >= settings.MaxRetries {
-			utils.LogIfDevf("[Converter] WebP variant %d reached max retries", webpVariant.ID)
-			webpVariant = nil
-		}
 	}
 
 	// 如果没有需要处理的变体，直接返回
