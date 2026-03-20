@@ -1,6 +1,7 @@
 package core
 
 import (
+	"net/http/pprof"
 	"strings"
 
 	"github.com/anoixa/image-bed/api"
@@ -85,6 +86,11 @@ func registerBasicRoutes(router *gin.Engine, deps *RouterDependencies) {
 	// Swagger 文档路由（开发环境可用）
 	if !config.IsProduction() {
 		router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	}
+
+	// pprof 性能分析路由（仅开发环境）
+	if config.IsDevelopment() {
+		registerPprofRoutes(router)
 	}
 }
 
@@ -315,6 +321,39 @@ func isStaticAPIPath(p string) bool {
 		}
 	}
 	return false
+}
+
+// registerPprofRoutes 注册 pprof 性能分析路由
+func registerPprofRoutes(router *gin.Engine) {
+	// pprof 首页
+	router.GET("/debug/pprof", gin.WrapF(pprof.Index))
+	// 所有 pprof 端点
+	router.GET("/debug/pprof/:any", func(c *gin.Context) {
+		switch c.Param("any") {
+		case "cmdline":
+			pprof.Cmdline(c.Writer, c.Request)
+		case "profile":
+			pprof.Profile(c.Writer, c.Request)
+		case "symbol":
+			pprof.Symbol(c.Writer, c.Request)
+		case "trace":
+			pprof.Trace(c.Writer, c.Request)
+		case "goroutine":
+			pprof.Handler("goroutine").ServeHTTP(c.Writer, c.Request)
+		case "heap":
+			pprof.Handler("heap").ServeHTTP(c.Writer, c.Request)
+		case "threadcreate":
+			pprof.Handler("threadcreate").ServeHTTP(c.Writer, c.Request)
+		case "block":
+			pprof.Handler("block").ServeHTTP(c.Writer, c.Request)
+		case "mutex":
+			pprof.Handler("mutex").ServeHTTP(c.Writer, c.Request)
+		case "allocs":
+			pprof.Handler("allocs").ServeHTTP(c.Writer, c.Request)
+		default:
+			pprof.Index(c.Writer, c.Request)
+		}
+	})
 }
 
 // isStaticAssetFile 检查是否为明确的静态文件请求
