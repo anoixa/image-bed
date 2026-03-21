@@ -90,4 +90,22 @@ const (
 	keyJWT             = "config:jwt"
 	keyStorage         = "config:storage"
 	keyImageProcessing = "config:image_processing"
+	keyUserSettings    = "config:user_settings"
 )
+
+// GetUserSettings 获取用户设置
+func (c *CacheLayer) GetUserSettings() *UserSettings {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+	if val, ok := c.localCache[keyUserSettings]; ok {
+		return val.(*UserSettings)
+	}
+	return nil
+}
+
+// SetUserSettings 设置用户设置缓存
+func (c *CacheLayer) SetUserSettings(settings *UserSettings) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.localCache[keyUserSettings] = settings
+}

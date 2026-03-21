@@ -322,9 +322,9 @@ func (t *ImagePipelineTask) generateThumbnail(ctx context.Context, fileBytes []b
 	height := thumbImg.Height()
 
 	thumbWebp, _, err := thumbImg.ExportWebp(&vips.WebpExportParams{
-		Quality:         80,
+		Quality:         settings.ThumbnailQuality,
 		Lossless:        false,
-		ReductionEffort: 4,
+		ReductionEffort: settings.WebPEffort,
 		StripMetadata:   true,
 	})
 	if err != nil {

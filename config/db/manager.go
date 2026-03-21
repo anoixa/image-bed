@@ -79,6 +79,10 @@ func (m *Manager) Initialize() error {
 		return fmt.Errorf("failed to ensure local storage config: %w", err)
 	}
 
+	if err := m.ensureDefaultUserSettings(ctx); err != nil {
+		return fmt.Errorf("failed to ensure user settings: %w", err)
+	}
+
 	log.Println("[ConfigManager] Initialized successfully")
 	return nil
 }
