@@ -6,14 +6,13 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"time"
 
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/mitchellh/mapstructure"
 	"gorm.io/gorm"
 )
 
-// ImageProcessingSettings 图片处理配置（合并缩略图、格式转换、扫描器、用户偏好）
+// ImageProcessingSettings 图片处理配置（缩略图、格式转换、用户偏好）
 type ImageProcessingSettings struct {
 	// 缩略图配置
 	ThumbnailEnabled bool                   `json:"thumbnail_enabled" mapstructure:"thumbnail_enabled"`
@@ -29,14 +28,6 @@ type ImageProcessingSettings struct {
 	AVIFExperimental         bool     `json:"avif_experimental" mapstructure:"avif_experimental"`
 	SkipSmallerThan          int      `json:"skip_smaller_than" mapstructure:"skip_smaller_than"`
 	MaxDimension             int      `json:"max_dimension" mapstructure:"max_dimension"`
-
-	// 扫描器配置
-	ScannerEnabled       bool          `json:"scanner_enabled" mapstructure:"scanner_enabled"`
-	ScannerInterval      time.Duration `json:"scanner_interval" mapstructure:"scanner_interval"`
-	ScannerBatchSize     int           `json:"scanner_batch_size" mapstructure:"scanner_batch_size"`
-	ScannerMaxFileSizeMB int           `json:"scanner_max_file_size_mb" mapstructure:"scanner_max_file_size_mb"`
-	ScannerMaxAgeDays    int           `json:"scanner_max_age_days" mapstructure:"scanner_max_age_days"`
-	ScannerOnlyPublic    bool          `json:"scanner_only_public" mapstructure:"scanner_only_public"`
 
 	// 用户偏好配置
 	DefaultAlbumID        uint   `json:"default_album_id" mapstructure:"default_album_id"`
@@ -64,14 +55,6 @@ func DefaultImageProcessingSettings() *ImageProcessingSettings {
 		SkipSmallerThan:          10,
 		MaxDimension:             4096,
 
-		// 扫描器默认值
-		ScannerEnabled:       true,
-		ScannerInterval:      2 * time.Hour,
-		ScannerBatchSize:     50,
-		ScannerMaxFileSizeMB: 100,
-		ScannerMaxAgeDays:    30,
-		ScannerOnlyPublic:    false,
-
 		// 用户偏好默认值
 		DefaultAlbumID:        0,
 		DefaultVisibility:     "public",
@@ -83,18 +66,6 @@ func DefaultImageProcessingSettings() *ImageProcessingSettings {
 
 // Validate 验证配置有效性
 func (s *ImageProcessingSettings) Validate() error {
-	if s.ScannerInterval < time.Minute {
-		return fmt.Errorf("scan interval must be at least 1 minute")
-	}
-	if s.ScannerBatchSize < 1 || s.ScannerBatchSize > 1000 {
-		return fmt.Errorf("batch size must be between 1 and 1000")
-	}
-	if s.ScannerMaxFileSizeMB < 0 {
-		return fmt.Errorf("max file size cannot be negative")
-	}
-	if s.ScannerMaxAgeDays < 0 {
-		return fmt.Errorf("max age days cannot be negative")
-	}
 	if s.ThumbnailQuality < 1 || s.ThumbnailQuality > 100 {
 		return fmt.Errorf("thumbnail quality must be between 1 and 100")
 	}
@@ -216,13 +187,6 @@ func (m *Manager) ensureDefaultImageProcessingConfig(ctx context.Context) error 
 			"avif_experimental":          defaultSettings.AVIFExperimental,
 			"skip_smaller_than":          defaultSettings.SkipSmallerThan,
 			"max_dimension":              defaultSettings.MaxDimension,
-			"scanner_enabled":            defaultSettings.ScannerEnabled,
-			"scanner_interval":           defaultSettings.ScannerInterval,
-			"scanner_batch_size":         defaultSettings.ScannerBatchSize,
-			"scanner_max_file_size_mb":   defaultSettings.ScannerMaxFileSizeMB,
-			"scanner_max_age_days":       defaultSettings.ScannerMaxAgeDays,
-			"scanner_only_public":        defaultSettings.ScannerOnlyPublic,
-			// 用户偏好
 			"default_album_id":           defaultSettings.DefaultAlbumID,
 			"default_visibility":         defaultSettings.DefaultVisibility,
 			"concurrent_upload_limit":    defaultSettings.ConcurrentUploadLimit,
@@ -272,13 +236,6 @@ func (m *Manager) SaveImageProcessingSettings(ctx context.Context, settings *Ima
 			"avif_experimental":          settings.AVIFExperimental,
 			"skip_smaller_than":          settings.SkipSmallerThan,
 			"max_dimension":              settings.MaxDimension,
-			"scanner_enabled":            settings.ScannerEnabled,
-			"scanner_interval":           settings.ScannerInterval,
-			"scanner_batch_size":         settings.ScannerBatchSize,
-			"scanner_max_file_size_mb":   settings.ScannerMaxFileSizeMB,
-			"scanner_max_age_days":       settings.ScannerMaxAgeDays,
-			"scanner_only_public":        settings.ScannerOnlyPublic,
-			// 用户偏好
 			"default_album_id":           settings.DefaultAlbumID,
 			"default_visibility":         settings.DefaultVisibility,
 			"concurrent_upload_limit":    settings.ConcurrentUploadLimit,
