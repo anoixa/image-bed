@@ -258,11 +258,6 @@ func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies) {
 		adminGroup.GET("/conversion", conversionHandler.GetConfig)
 		adminGroup.PUT("/conversion", conversionHandler.UpdateConfig)
 
-		// 用户设置配置
-		settingsHandler := admin.NewSettingsHandler(deps.ConfigManager)
-		adminGroup.GET("/settings", settingsHandler.GetSettings)
-		adminGroup.PUT("/settings", settingsHandler.UpdateSettings)
-
 		// 随机图片源相册配置
 		adminGroup.GET("/random-source-album", imageHandler.GetRandomSourceAlbum)
 		adminGroup.POST("/random-source-album", imageHandler.SetRandomSourceAlbum)
