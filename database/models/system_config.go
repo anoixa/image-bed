@@ -69,34 +69,34 @@ func (sc *SystemConfig) ToResponse(config map[string]any) map[string]any {
 
 // ConfigResponse 配置响应结构
 type ConfigResponse struct {
-	ID          uint                   `json:"id"`
-	Category    ConfigCategory         `json:"category"`
-	Name        string                 `json:"name"`
-	Key         string                 `json:"key"`
-	IsEnabled   bool                   `json:"is_enabled"`
-	IsDefault   bool                   `json:"is_default"`
-	Priority    int                    `json:"priority"`
+	ID          uint           `json:"id"`
+	Category    ConfigCategory `json:"category"`
+	Name        string         `json:"name"`
+	Key         string         `json:"key"`
+	IsEnabled   bool           `json:"is_enabled"`
+	IsDefault   bool           `json:"is_default"`
+	Priority    int            `json:"priority"`
 	Config      map[string]any `json:"config"`
-	Description string                 `json:"description"`
-	CreatedBy   uint                   `json:"created_by"`
-	CreatedAt   time.Time              `json:"created_at"`
-	UpdatedAt   time.Time              `json:"updated_at"`
+	Description string         `json:"description"`
+	CreatedBy   uint           `json:"created_by"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
 }
 
 // SystemConfigStoreRequest 创建/更新配置请求
 type SystemConfigStoreRequest struct {
-	Category    ConfigCategory         `json:"category" binding:"required"`
-	Name        string                 `json:"name" binding:"required"`
+	Category    ConfigCategory `json:"category" binding:"required"`
+	Name        string         `json:"name" binding:"required"`
 	Config      map[string]any `json:"config" binding:"required"`
-	IsEnabled   *bool                  `json:"is_enabled,omitempty"`
-	IsDefault   *bool                  `json:"is_default,omitempty"`
-	Priority    *int                   `json:"priority,omitempty"`
-	Description string                 `json:"description"`
+	IsEnabled   *bool          `json:"is_enabled,omitempty"`
+	IsDefault   *bool          `json:"is_default,omitempty"`
+	Priority    *int           `json:"priority,omitempty"`
+	Description string         `json:"description"`
 }
 
 // TestConfigRequest 测试配置请求
 type TestConfigRequest struct {
-	Category ConfigCategory         `json:"category" binding:"required"`
+	Category ConfigCategory `json:"category" binding:"required"`
 	Config   map[string]any `json:"config" binding:"required"`
 }
 

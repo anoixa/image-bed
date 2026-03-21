@@ -32,14 +32,14 @@ func (h *Handler) getRandomSourceAlbum() (uint, bool) {
 
 // RandomImageQuery 随机图片查询参数
 type RandomImageQuery struct {
-	Format       string `form:"format"`        // 返回格式: json 或直接图片
-	AlbumID      uint   `form:"album_id"`      // 指定相册
-	MinWidth     int    `form:"min_width"`     // 最小宽度
-	MinHeight    int    `form:"min_height"`    // 最小高度
-	MaxWidth     int    `form:"max_width"`     // 最大宽度
-	MaxHeight    int    `form:"max_height"`    // 最大高度
-	RequireWebP  bool   `form:"require_webp"`  // 是否只返回有WebP变体的图片
-	MaxFileSize  int64  `form:"max_file_size"` // 最大文件大小（字节），例如10485760表示10MB
+	Format      string `form:"format"`        // 返回格式: json 或直接图片
+	AlbumID     uint   `form:"album_id"`      // 指定相册
+	MinWidth    int    `form:"min_width"`     // 最小宽度
+	MinHeight   int    `form:"min_height"`    // 最小高度
+	MaxWidth    int    `form:"max_width"`     // 最大宽度
+	MaxHeight   int    `form:"max_height"`    // 最大高度
+	RequireWebP bool   `form:"require_webp"`  // 是否只返回有WebP变体的图片
+	MaxFileSize int64  `form:"max_file_size"` // 最大文件大小（字节），例如10485760表示10MB
 }
 
 // RandomImage 随机图片API

@@ -394,7 +394,7 @@ func TestServeOriginalImage_WithDirectLink(t *testing.T) {
 				StorageConfigID: 1,
 				MimeType:        "image/jpeg",
 			},
-			directURL:      "", // 空表示不走直链
+			directURL:      "",            // 空表示不走直链
 			expectedStatus: http.StatusOK, // 会继续代理逻辑
 			expectedHeader: "",
 		},

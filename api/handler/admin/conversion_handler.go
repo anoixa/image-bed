@@ -45,22 +45,22 @@ func (h *ConversionHandler) GetConfig(c *gin.Context) {
 
 // UpdateConfigRequest 更新配置请求（所有字段可选）
 type UpdateConfigRequest struct {
-	ThumbnailEnabled         *bool                   `json:"thumbnail_enabled,omitempty"`
-	ThumbnailSizes           []models.ThumbnailSize  `json:"thumbnail_sizes,omitempty"`
-	ThumbnailQuality         *int                    `json:"thumbnail_quality,omitempty"`
-	ConversionEnabledFormats []string                `json:"conversion_enabled_formats,omitempty"`
-	WebPQuality              *int                    `json:"webp_quality,omitempty"`
-	WebPEffort               *int                    `json:"webp_effort,omitempty"`
-	AVIFQuality              *int                    `json:"avif_quality,omitempty"`
-	AVIFSpeed                *int                    `json:"avif_speed,omitempty"`
-	AVIFExperimental         *bool                   `json:"avif_experimental,omitempty"`
-	SkipSmallerThan          *int                    `json:"skip_smaller_than,omitempty"`
-	MaxDimension             *int                    `json:"max_dimension,omitempty"`
-	DefaultAlbumID           *uint                   `json:"default_album_id,omitempty"`
-	DefaultVisibility        *string                 `json:"default_visibility,omitempty"`
-	ConcurrentUploadLimit    *int                    `json:"concurrent_upload_limit,omitempty"`
-	MaxFileSizeMB            *int                    `json:"max_file_size_mb,omitempty"`
-	APIKeyEnabled            *bool                   `json:"api_key_enabled,omitempty"`
+	ThumbnailEnabled         *bool                  `json:"thumbnail_enabled,omitempty"`
+	ThumbnailSizes           []models.ThumbnailSize `json:"thumbnail_sizes,omitempty"`
+	ThumbnailQuality         *int                   `json:"thumbnail_quality,omitempty"`
+	ConversionEnabledFormats []string               `json:"conversion_enabled_formats,omitempty"`
+	WebPQuality              *int                   `json:"webp_quality,omitempty"`
+	WebPEffort               *int                   `json:"webp_effort,omitempty"`
+	AVIFQuality              *int                   `json:"avif_quality,omitempty"`
+	AVIFSpeed                *int                   `json:"avif_speed,omitempty"`
+	AVIFExperimental         *bool                  `json:"avif_experimental,omitempty"`
+	SkipSmallerThan          *int                   `json:"skip_smaller_than,omitempty"`
+	MaxDimension             *int                   `json:"max_dimension,omitempty"`
+	DefaultAlbumID           *uint                  `json:"default_album_id,omitempty"`
+	DefaultVisibility        *string                `json:"default_visibility,omitempty"`
+	ConcurrentUploadLimit    *int                   `json:"concurrent_upload_limit,omitempty"`
+	MaxFileSizeMB            *int                   `json:"max_file_size_mb,omitempty"`
+	APIKeyEnabled            *bool                  `json:"api_key_enabled,omitempty"`
 }
 
 // UpdateConfig 更新转换配置（支持部分更新）

@@ -13,14 +13,14 @@ import (
 )
 
 type StatusResponse struct {
-	Version     string       `json:"version"`
-	CommitHash  string       `json:"commit_hash"`
-	GoVersion   string       `json:"go_version"`
-	Environment string       `json:"environment"`
-	Memory      MemoryStatus `json:"memory"`
+	Version     string        `json:"version"`
+	CommitHash  string        `json:"commit_hash"`
+	GoVersion   string        `json:"go_version"`
+	Environment string        `json:"environment"`
+	Memory      MemoryStatus  `json:"memory"`
 	Runtime     RuntimeStatus `json:"runtime"`
-	Cache       CacheStatus  `json:"cache"`
-	DataDir     DirStatus    `json:"data_dir"`
+	Cache       CacheStatus   `json:"cache"`
+	DataDir     DirStatus     `json:"data_dir"`
 }
 
 type MemoryStatus struct {

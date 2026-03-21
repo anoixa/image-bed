@@ -110,33 +110,33 @@ func (s *WebDAVStorage) fullPath(storagePath string) string {
 func (s *WebDAVStorage) ensureParentDir(ctx context.Context, fullPath string) error {
 	// 获取父目录路径
 	parentDir := path.Dir(fullPath)
-	
+
 	// 根目录无需创建
 	if parentDir == "/" || parentDir == "." {
 		return nil
 	}
-	
+
 	// 逐级分解路径
 	parts := strings.Split(strings.Trim(parentDir, "/"), "/")
 	currentPath := ""
-	
+
 	for _, part := range parts {
 		if part == "" {
 			continue
 		}
-		
+
 		if currentPath == "" {
 			currentPath = "/" + part
 		} else {
 			currentPath = currentPath + "/" + part
 		}
-		
+
 		// 检查目录是否存在，不存在则创建
 		done := make(chan error, 1)
 		go func(p string) {
 			done <- s.client.Mkdir(p, os.FileMode(0755))
 		}(currentPath)
-		
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -148,7 +148,7 @@ func (s *WebDAVStorage) ensureParentDir(ctx context.Context, fullPath string) er
 			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -315,12 +315,12 @@ func (s *WebDAVStorage) Health(ctx context.Context) error {
 		return ctx.Err()
 	default:
 	}
-	
+
 	// 如果 client 为 nil（测试场景），直接返回
 	if s.client == nil {
 		return nil
 	}
-	
+
 	done := make(chan error, 1)
 	go func() {
 		_, err := s.client.ReadDir(s.rootPath)

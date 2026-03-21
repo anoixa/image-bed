@@ -64,25 +64,26 @@ func DefaultImageProcessingSettings() *ImageProcessingSettings {
 	}
 }
 
-// Validate 验证配置有效性
+// Validate 验证配置有效性（支持部分验证，零值跳过范围检查）
 func (s *ImageProcessingSettings) Validate() error {
-	if s.ThumbnailQuality < 1 || s.ThumbnailQuality > 100 {
+	// 只在值非零时进行范围验证（支持部分更新场景）
+	if s.ThumbnailQuality != 0 && (s.ThumbnailQuality < 1 || s.ThumbnailQuality > 100) {
 		return fmt.Errorf("thumbnail quality must be between 1 and 100")
 	}
-	if s.WebPQuality < 1 || s.WebPQuality > 100 {
+	if s.WebPQuality != 0 && (s.WebPQuality < 1 || s.WebPQuality > 100) {
 		return fmt.Errorf("webp quality must be between 1 and 100")
 	}
-	if s.AVIFQuality < 1 || s.AVIFQuality > 100 {
+	if s.AVIFQuality != 0 && (s.AVIFQuality < 1 || s.AVIFQuality > 100) {
 		return fmt.Errorf("avif quality must be between 1 and 100")
 	}
-	// 用户偏好验证
-	if s.ConcurrentUploadLimit < 1 || s.ConcurrentUploadLimit > 10 {
+	// 用户偏好验证（非零值才验证）
+	if s.ConcurrentUploadLimit != 0 && (s.ConcurrentUploadLimit < 1 || s.ConcurrentUploadLimit > 10) {
 		return fmt.Errorf("concurrent upload limit must be between 1 and 10")
 	}
-	if s.MaxFileSizeMB < 1 || s.MaxFileSizeMB > 500 {
+	if s.MaxFileSizeMB != 0 && (s.MaxFileSizeMB < 1 || s.MaxFileSizeMB > 500) {
 		return fmt.Errorf("max file size must be between 1 and 500 MB")
 	}
-	if s.DefaultVisibility != "public" && s.DefaultVisibility != "private" {
+	if s.DefaultVisibility != "" && s.DefaultVisibility != "public" && s.DefaultVisibility != "private" {
 		return fmt.Errorf("default visibility must be 'public' or 'private'")
 	}
 	return nil
