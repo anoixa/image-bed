@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/anoixa/image-bed/api/common"
@@ -65,7 +66,7 @@ func (h *ConversionHandler) UpdateConfig(c *gin.Context) {
 	userID := c.GetUint(middleware.ContextUserIDKey)
 
 	if err := h.configManager.SaveImageProcessingSettings(ctx, &req, userID); err != nil {
-		common.RespondError(c, http.StatusInternalServerError, "Failed to save config")
+		common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to save config: %v", err))
 		return
 	}
 
