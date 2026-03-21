@@ -18,12 +18,11 @@ type ImageVariant struct {
 	Identifier   string         `gorm:"not null;size:255" json:"identifier"`                          // 业务标识符: a1b2c3d4e5f6_300.webp
 	StoragePath  string         `gorm:"not null;size:255" json:"storage_path"`                        // 存储路径: thumbnails/2024/01/15/a1b2c3d4e5f6_300.webp
 	FileSize     int64          `gorm:"not null" json:"file_size"`
+	FileHash     string         `gorm:"not null;size:64;index:idx_variant_filehash" json:"file_hash"` // 文件哈希，用于 ETag 和缓存验证
 	Width        int            `json:"width"`
 	Height       int            `json:"height"`
 	Status       string         `gorm:"default:pending;size:20;index" json:"status"`
 	ErrorMessage string         `gorm:"type:text" json:"error_message,omitempty"`
-	RetryCount   int            `gorm:"default:0" json:"retry_count"`
-	NextRetryAt  *time.Time     `gorm:"index" json:"next_retry_at,omitempty"`
 }
 
 // TableName 指定表名

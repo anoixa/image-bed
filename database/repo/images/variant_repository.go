@@ -79,7 +79,7 @@ func (r *VariantRepository) UpsertPending(imageID uint, format string) (*models.
 
 // UpdateStatusCAS 条件更新状态
 func (r *VariantRepository) UpdateStatusCAS(id uint, expected, newStatus, errMsg string) (bool, error) {
-	updates := map[string]interface{}{
+	updates := map[string]any{
 		"status":     newStatus,
 		"updated_at": time.Now(),
 	}
@@ -92,12 +92,13 @@ func (r *VariantRepository) UpdateStatusCAS(id uint, expected, newStatus, errMsg
 }
 
 // UpdateCompleted 更新完成状态
-func (r *VariantRepository) UpdateCompleted(id uint, identifier, storagePath string, fileSize int64, width, height int) error {
-	result := r.db.Model(&models.ImageVariant{}).Where("id = ? AND status = ?", id, models.VariantStatusProcessing).Updates(map[string]interface{}{
+func (r *VariantRepository) UpdateCompleted(id uint, identifier, storagePath string, fileSize int64, fileHash string, width, height int) error {
+	result := r.db.Model(&models.ImageVariant{}).Where("id = ? AND status = ?", id, models.VariantStatusProcessing).Updates(map[string]any{
 		"status":        models.VariantStatusCompleted,
 		"identifier":    identifier,
 		"storage_path":  storagePath,
 		"file_size":     fileSize,
+		"file_hash":     fileHash,
 		"width":         width,
 		"height":        height,
 		"error_message": "",
@@ -114,17 +115,12 @@ func (r *VariantRepository) UpdateCompleted(id uint, identifier, storagePath str
 }
 
 // UpdateFailed 更新失败状态
-func (r *VariantRepository) UpdateFailed(id uint, errMsg string, allowRetry bool) error {
-	updates := map[string]interface{}{
+func (r *VariantRepository) UpdateFailed(id uint, errMsg string, _ bool) error {
+	return r.db.Model(&models.ImageVariant{}).Where("id = ?", id).Updates(map[string]any{
 		"status":        models.VariantStatusFailed,
 		"error_message": errMsg,
 		"updated_at":    time.Now(),
-	}
-	if allowRetry {
-		updates["retry_count"] = gorm.Expr("retry_count + 1")
-		updates["next_retry_at"] = time.Now().Add(5 * time.Minute)
-	}
-	return r.db.Model(&models.ImageVariant{}).Where("id = ?", id).Updates(updates).Error
+	}).Error
 }
 
 // GetImageByID 获取图片信息
@@ -137,6 +133,11 @@ func (r *VariantRepository) GetImageByID(imageID uint) (*models.Image, error) {
 // DeleteByImageID 根据图片ID删除所有变体
 func (r *VariantRepository) DeleteByImageID(imageID uint) error {
 	return r.db.Where("image_id = ?", imageID).Delete(&models.ImageVariant{}).Error
+}
+
+// DeleteVariant 根据ID删除单个变体
+func (r *VariantRepository) DeleteVariant(id uint) error {
+	return r.db.Delete(&models.ImageVariant{}, id).Error
 }
 
 // GetMissingThumbnailVariants 批量查询需要生成缩略图的变体

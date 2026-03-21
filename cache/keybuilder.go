@@ -34,7 +34,7 @@ func (kb *KeyBuilder) Build(parts ...string) string {
 }
 
 // BuildID 构建带 ID 的缓存键
-func (kb *KeyBuilder) BuildID(id interface{}) string {
+func (kb *KeyBuilder) BuildID(id any) string {
 	return fmt.Sprintf("%s%s%v", kb.prefix, kb.sep, id)
 }
 

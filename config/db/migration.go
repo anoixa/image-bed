@@ -8,7 +8,7 @@ import (
 )
 
 // MigrateFromLegacy 从旧配置（config.yaml）迁移到数据库
-func (m *Manager) MigrateFromLegacy(legacyStorage map[string]interface{}) error {
+func (m *Manager) MigrateFromLegacy(legacyStorage map[string]any) error {
 	ctx := context.Background()
 
 	storageCount, err := m.repo.CountByCategory(ctx, models.ConfigCategoryStorage)
@@ -52,7 +52,7 @@ func (m *Manager) migrateJWT(ctx context.Context, secret, expiresIn, refreshExpi
 		refreshExpiresIn = "168h"
 	}
 
-	configData := map[string]interface{}{
+	configData := map[string]any{
 		"secret":            secret,
 		"access_token_ttl":  expiresIn,
 		"refresh_token_ttl": refreshExpiresIn,
@@ -77,25 +77,25 @@ func (m *Manager) migrateJWT(ctx context.Context, secret, expiresIn, refreshExpi
 }
 
 // migrateStorage 迁移存储配置
-func (m *Manager) migrateStorage(ctx context.Context, legacy map[string]interface{}) error {
+func (m *Manager) migrateStorage(ctx context.Context, legacy map[string]any) error {
 	storageType, _ := legacy["type"].(string)
 	if storageType == "" {
 		storageType = "local"
 	}
 
-	configData := map[string]interface{}{
+	configData := map[string]any{
 		"type": storageType,
 	}
 
 	switch storageType {
 	case "local":
-		if local, ok := legacy["local"].(map[string]interface{}); ok {
+		if local, ok := legacy["local"].(map[string]any); ok {
 			configData["local_path"] = getStringFromMap(local, "path", "./data/upload")
 		} else {
 			configData["local_path"] = "./data/upload"
 		}
 	case "minio":
-		if minio, ok := legacy["minio"].(map[string]interface{}); ok {
+		if minio, ok := legacy["minio"].(map[string]any); ok {
 			configData["endpoint"] = getStringFromMap(minio, "endpoint", "")
 			configData["access_key_id"] = getStringFromMap(minio, "access_key_id", "")
 			configData["secret_access_key"] = getStringFromMap(minio, "secret_access_key", "")
@@ -166,7 +166,7 @@ func (m *Manager) CreateDefaultConfigs() error {
 
 // createDefaultStorage 创建默认存储配置（本地存储）
 func (m *Manager) createDefaultStorage(ctx context.Context) error {
-	configData := map[string]interface{}{
+	configData := map[string]any{
 		"type":       "local",
 		"local_path": "./data/upload",
 	}
@@ -190,9 +190,20 @@ func (m *Manager) createDefaultStorage(ctx context.Context) error {
 }
 
 // 辅助函数
-func getBoolFromMap(m map[string]interface{}, key string, defaultVal bool) bool {
-	if v, ok := m[key].(bool); ok {
-		return v
+func getBoolFromMap(m map[string]any, key string, defaultVal bool) bool {
+	if v, ok := m[key]; ok {
+		switch val := v.(type) {
+		case bool:
+			return val
+		case string:
+			return val == "true" || val == "1" || val == "yes" || val == "on"
+		case int:
+			return val != 0
+		case int64:
+			return val != 0
+		case float64:
+			return val != 0
+		}
 	}
 	return defaultVal
 }

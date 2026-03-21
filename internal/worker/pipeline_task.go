@@ -3,6 +3,7 @@ package worker
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -20,9 +21,10 @@ import (
 // VariantRepository 变体仓库接口
 type VariantRepository interface {
 	UpdateStatusCAS(id uint, expected, newStatus, errMsg string) (bool, error)
-	UpdateCompleted(id uint, identifier, storagePath string, fileSize int64, width, height int) error
-	UpdateFailed(id uint, errMsg string, allowRetry bool) error
+	UpdateCompleted(id uint, identifier, storagePath string, fileSize int64, fileHash string, width, height int) error
+	UpdateFailed(id uint, errMsg string, _ bool) error
 	GetByID(id uint) (*models.ImageVariant, error)
+	DeleteVariant(id uint) error
 }
 
 // ImageRepository 图片仓库接口
@@ -37,6 +39,63 @@ type pipelineResult struct {
 	Width       int
 	Height      int
 	FileSize    int64
+	FileHash    string
+}
+
+// ImageComplexity 图片复杂度级别
+type ImageComplexity int
+
+const (
+	ComplexityLow    ImageComplexity = 0 // 低复杂度（截图、纯色）
+	ComplexityMedium ImageComplexity = 1 // 中复杂度（普通图）
+	ComplexityHigh   ImageComplexity = 2 // 高复杂度（照片）
+)
+
+// detectImageComplexity 检测图片复杂度
+func detectImageComplexity(img *vips.ImageRef, fileBytes []byte) ImageComplexity {
+	hasAlpha := img.HasAlpha()
+	if hasAlpha {
+		return ComplexityLow
+	}
+
+	width := img.Width()
+	height := img.Height()
+	fileSize := len(fileBytes)
+	pixelCount := width * height
+
+	if pixelCount == 0 {
+		return ComplexityMedium
+	}
+
+	bytesPerPixel := float64(fileSize) / float64(pixelCount)
+
+	// JPEG 图片分析
+	switch {
+	case bytesPerPixel > 3.0:
+		return ComplexityLow
+	case bytesPerPixel > 2.0:
+		return ComplexityLow
+	case bytesPerPixel < 0.8:
+		return ComplexityHigh
+	case bytesPerPixel < 1.2:
+		return ComplexityMedium
+	default:
+		return ComplexityMedium
+	}
+}
+
+// adaptiveWebPQuality 根据图片复杂度返回自适应质量
+func adaptiveWebPQuality(complexity ImageComplexity, baseQuality int) int {
+	switch complexity {
+	case ComplexityLow:
+		return min(baseQuality-10, 75)
+	case ComplexityMedium:
+		return baseQuality
+	case ComplexityHigh:
+		return min(baseQuality+5, 90)
+	default:
+		return baseQuality
+	}
 }
 
 // readWithLimit 读取流并检查大小限制
@@ -113,7 +172,15 @@ func (t *ImagePipelineTask) Execute() {
 	semaphore := GetGlobalSemaphore()
 	if err := semaphore.Acquire(ctx); err != nil {
 		utils.LogIfDevf("[Pipeline] Failed to acquire semaphore: %v", err)
-		t.handleFailure(fmt.Errorf("acquire semaphore: %w", err), true, true)
+		if t.ThumbVariantID > 0 {
+			_ = t.VariantRepo.UpdateFailed(t.ThumbVariantID, fmt.Sprintf("semaphore: %v", err), true)
+		}
+		if t.WebPVariantID > 0 {
+			_ = t.VariantRepo.UpdateFailed(t.WebPVariantID, fmt.Sprintf("semaphore: %v", err), true)
+		}
+		// 更新主图片状态为失败
+		_ = t.ImageRepo.UpdateVariantStatus(t.ImageID, models.ImageVariantStatusFailed)
+		t.deleteCacheOnTerminalState("failed")
 		return
 	}
 	defer semaphore.Release()
@@ -122,7 +189,8 @@ func (t *ImagePipelineTask) Execute() {
 		t.StoragePath, t.ThumbVariantID, t.WebPVariantID)
 	if err := t.runPipeline(ctx); err != nil {
 		utils.LogIfDevf("[Pipeline] Processing failed: %v", err)
-		t.handleFailure(err, true, true)
+		_ = t.ImageRepo.UpdateVariantStatus(t.ImageID, models.ImageVariantStatusFailed)
+		t.deleteCacheOnTerminalState("failed")
 		return
 	}
 
@@ -130,7 +198,7 @@ func (t *ImagePipelineTask) Execute() {
 }
 
 // runPipeline 执行处理流水线
-// 流程：读取文件 -> 顺序处理（先 WebP 后缩略图）-> 统一释放
+// 流程：读取文件 -> 顺序处理（先 缩略图 后webp）-> 统一释放
 func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
 	maxSize := int64(config.Get().UploadMaxSizeMB) * 1024 * 1024
 	if maxSize <= 0 {
@@ -139,40 +207,79 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
 
 	stream, err := t.Storage.GetWithContext(ctx, t.StoragePath)
 	if err != nil {
+		// 获取流失败，标记所有变体为失败
+		if t.ThumbVariantID > 0 {
+			_ = t.VariantRepo.UpdateFailed(t.ThumbVariantID, fmt.Sprintf("get stream: %v", err), true)
+		}
+		if t.WebPVariantID > 0 {
+			_ = t.VariantRepo.UpdateFailed(t.WebPVariantID, fmt.Sprintf("get stream: %v", err), true)
+		}
 		return fmt.Errorf("get stream: %w", err)
+	}
+	if closer, ok := stream.(io.Closer); ok {
+		defer func() { _ = closer.Close() }()
 	}
 
 	fileBytes, err := readWithLimit(stream, maxSize)
-	if closer, ok := stream.(io.Closer); ok {
-		_ = closer.Close()
-	}
 	if err != nil {
+		// 读取失败，标记所有变体为失败
+		if t.ThumbVariantID > 0 {
+			_ = t.VariantRepo.UpdateFailed(t.ThumbVariantID, fmt.Sprintf("read: %v", err), true)
+		}
+		if t.WebPVariantID > 0 {
+			_ = t.VariantRepo.UpdateFailed(t.WebPVariantID, fmt.Sprintf("read: %v", err), true)
+		}
 		return fmt.Errorf("read file: %w", err)
 	}
 
 	var thumbResult, webpResult *pipelineResult
+	var hasSuccess, hasFailed bool
 
-	if t.WebPVariantID > 0 {
-		result, err := t.generateWebP(ctx, fileBytes)
-		if err != nil {
-			utils.LogIfDevf("[Pipeline] WebP failed: %v", err)
-			_ = t.VariantRepo.UpdateFailed(t.WebPVariantID, err.Error(), true)
-		} else {
-			webpResult = result
-		}
-	}
-
+	// 优先生成缩略图
 	if t.ThumbVariantID > 0 {
 		result, err := t.generateThumbnail(ctx, fileBytes)
-		if err != nil {
+		switch {
+		case err != nil:
 			utils.LogIfDevf("[Pipeline] Thumbnail failed: %v", err)
 			_ = t.VariantRepo.UpdateFailed(t.ThumbVariantID, err.Error(), true)
-		} else {
+			hasFailed = true
+		case result == nil:
+			utils.LogIfDevf("[Pipeline] Thumbnail skipped, deleting variant %d", t.ThumbVariantID)
+			_ = t.VariantRepo.DeleteVariant(t.ThumbVariantID)
+		default:
 			thumbResult = result
+			hasSuccess = true
 		}
 	}
 
-	t.handleSuccess(thumbResult, webpResult)
+	// 再生成 WebP 原图
+	if t.WebPVariantID > 0 {
+		result, err := t.generateWebP(ctx, fileBytes)
+		switch {
+		case err != nil:
+			utils.LogIfDevf("[Pipeline] WebP failed: %v", err)
+			_ = t.VariantRepo.UpdateFailed(t.WebPVariantID, err.Error(), true)
+			hasFailed = true
+		case result == nil:
+			utils.LogIfDevf("[Pipeline] WebP skipped, deleting variant %d", t.WebPVariantID)
+			_ = t.VariantRepo.DeleteVariant(t.WebPVariantID)
+		default:
+			webpResult = result
+			hasSuccess = true
+		}
+	}
+
+	if hasSuccess {
+		t.saveVariantResults(thumbResult, webpResult)
+	}
+
+	if hasFailed {
+		return fmt.Errorf("some variants failed")
+	}
+
+	// 全部成功或全部跳过（如 GIF），都是成功执行
+	_ = t.ImageRepo.UpdateVariantStatus(t.ImageID, models.ImageVariantStatusCompleted)
+	t.deleteCacheOnTerminalState("success")
 	return nil
 }
 
@@ -184,6 +291,12 @@ func (t *ImagePipelineTask) generateThumbnail(ctx context.Context, fileBytes []b
 	}
 	if !settings.ThumbnailEnabled {
 		utils.LogIfDevf("[Pipeline] Thumbnail generation disabled")
+		return nil, nil
+	}
+
+	// 跳过 GIF 格式
+	if len(fileBytes) > 6 && (string(fileBytes[:6]) == "GIF87a" || string(fileBytes[:6]) == "GIF89a") {
+		utils.LogIfDevf("[Pipeline] Skipping GIF thumbnail generation")
 		return nil, nil
 	}
 
@@ -218,7 +331,6 @@ func (t *ImagePipelineTask) generateThumbnail(ctx context.Context, fileBytes []b
 		return nil, fmt.Errorf("export thumbnail webp: %w", err)
 	}
 
-	// 使用路径生成器生成分层路径: thumbnails/2026/02/25/hash_600.webp
 	pg := generator.NewPathGenerator()
 	thumbIdentifiers := pg.GenerateThumbnailIdentifiers(t.StoragePath, size.Width)
 	thumbPath := thumbIdentifiers.StoragePath
@@ -229,11 +341,15 @@ func (t *ImagePipelineTask) generateThumbnail(ctx context.Context, fileBytes []b
 
 	utils.LogIfDevf("[Pipeline] Thumbnail saved: %s (%d bytes)", thumbPath, len(thumbWebp))
 
+	// 计算文件哈希
+	fileHash := fmt.Sprintf("%x", sha256.Sum256(thumbWebp))
+
 	return &pipelineResult{
 		StoragePath: thumbPath,
 		Width:       width,
 		Height:      height,
 		FileSize:    int64(len(thumbWebp)),
+		FileHash:    fileHash,
 	}, nil
 }
 
@@ -271,8 +387,15 @@ func (t *ImagePipelineTask) generateWebPWithSettings(ctx context.Context, fileBy
 		}
 	}
 
+	// 自适应调整质量
+	complexity := detectImageComplexity(originImg, fileBytes)
+	adaptiveQuality := adaptiveWebPQuality(complexity, settings.WebPQuality)
+
+	utils.LogIfDevf("[Pipeline] Image complexity=%d, adaptive quality=%d (base=%d)",
+		complexity, adaptiveQuality, settings.WebPQuality)
+
 	originWebp, _, err := originImg.ExportWebp(&vips.WebpExportParams{
-		Quality:         settings.WebPQuality,
+		Quality:         adaptiveQuality,
 		Lossless:        false,
 		ReductionEffort: settings.WebPEffort,
 		StripMetadata:   true,
@@ -281,7 +404,6 @@ func (t *ImagePipelineTask) generateWebPWithSettings(ctx context.Context, fileBy
 		return nil, fmt.Errorf("export webp: %w", err)
 	}
 
-	// 使用路径生成器生成分层路径: converted/webp/2026/02/25/hash.webp
 	pg := generator.NewPathGenerator()
 	webpIdentifiers := pg.GenerateConvertedIdentifiers(t.StoragePath, models.FormatWebP)
 	originPath := webpIdentifiers.StoragePath
@@ -290,29 +412,22 @@ func (t *ImagePipelineTask) generateWebPWithSettings(ctx context.Context, fileBy
 		return nil, fmt.Errorf("save webp: %w", err)
 	}
 
-	utils.LogIfDevf("[Pipeline] WebP saved: %s (%d bytes)", originPath, len(originWebp))
+	utils.LogIfDevf("[Pipeline] WebP saved: %s (%d bytes, quality=%d)", originPath, len(originWebp), adaptiveQuality)
+
+	// 计算文件哈希
+	fileHash := fmt.Sprintf("%x", sha256.Sum256(originWebp))
 
 	return &pipelineResult{
 		StoragePath: originPath,
 		Width:       width,
 		Height:      height,
 		FileSize:    int64(len(originWebp)),
+		FileHash:    fileHash,
 	}, nil
 }
 
-// handleFailure 处理失败
-func (t *ImagePipelineTask) handleFailure(err error, thumbFailed, webpFailed bool) {
-	if t.ThumbVariantID > 0 && thumbFailed {
-		_ = t.VariantRepo.UpdateFailed(t.ThumbVariantID, err.Error(), true)
-	}
-	if t.WebPVariantID > 0 && webpFailed {
-		_ = t.VariantRepo.UpdateFailed(t.WebPVariantID, err.Error(), true)
-	}
-	t.deleteCacheOnTerminalState("failed")
-}
-
-// handleSuccess 处理成功
-func (t *ImagePipelineTask) handleSuccess(thumbResult, webpResult *pipelineResult) {
+// saveVariantResults 保存变体结果
+func (t *ImagePipelineTask) saveVariantResults(thumbResult, webpResult *pipelineResult) {
 	// 更新缩略图变体
 	if t.ThumbVariantID > 0 && thumbResult != nil {
 		_ = t.VariantRepo.UpdateCompleted(
@@ -320,6 +435,7 @@ func (t *ImagePipelineTask) handleSuccess(thumbResult, webpResult *pipelineResul
 			filepath.Base(thumbResult.StoragePath),
 			thumbResult.StoragePath,
 			thumbResult.FileSize,
+			thumbResult.FileHash,
 			thumbResult.Width,
 			thumbResult.Height,
 		)
@@ -332,15 +448,11 @@ func (t *ImagePipelineTask) handleSuccess(thumbResult, webpResult *pipelineResul
 			filepath.Base(webpResult.StoragePath),
 			webpResult.StoragePath,
 			webpResult.FileSize,
+			webpResult.FileHash,
 			webpResult.Width,
 			webpResult.Height,
 		)
 	}
-
-	// 更新图片状态
-	_ = t.ImageRepo.UpdateVariantStatus(t.ImageID, models.ImageVariantStatusCompleted)
-
-	t.deleteCacheOnTerminalState("success")
 }
 
 // deleteCacheOnTerminalState 终端状态删除缓存
@@ -359,6 +471,7 @@ func (t *ImagePipelineTask) deleteCacheOnTerminalState(state string) {
 func (t *ImagePipelineTask) recovery() {
 	if rec := recover(); rec != nil {
 		utils.LogIfDevf("[Pipeline] Panic recovered: %v", rec)
+
 		if t.ThumbVariantID > 0 {
 			_, _ = t.VariantRepo.UpdateStatusCAS(
 				t.ThumbVariantID,
@@ -367,6 +480,7 @@ func (t *ImagePipelineTask) recovery() {
 				fmt.Sprintf("panic: %v", rec),
 			)
 		}
+
 		if t.WebPVariantID > 0 {
 			_, _ = t.VariantRepo.UpdateStatusCAS(
 				t.WebPVariantID,
@@ -375,5 +489,7 @@ func (t *ImagePipelineTask) recovery() {
 				fmt.Sprintf("panic: %v", rec),
 			)
 		}
+
+		_ = t.ImageRepo.UpdateVariantStatus(t.ImageID, models.ImageVariantStatusFailed)
 	}
 }

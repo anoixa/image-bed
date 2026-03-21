@@ -26,6 +26,10 @@ type DeleteRequestBody struct {
 // @Security     ApiKeyAuth
 // @Router       /api/v1/images/delete [post]
 func (h *Handler) DeleteImages(c *gin.Context) {
+	if c.IsAborted() {
+		return
+	}
+
 	userID := c.GetUint(middleware.ContextUserIDKey)
 	if userID == 0 {
 		common.RespondError(c, http.StatusUnauthorized, "Invalid user session")

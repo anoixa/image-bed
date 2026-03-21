@@ -18,6 +18,14 @@ var (
 	defaultID       uint
 )
 
+type TransferMode string
+
+const (
+	TransferModeAuto         TransferMode = "auto"
+	TransferModeAlwaysProxy  TransferMode = "always_proxy"
+	TransferModeAlwaysDirect TransferMode = "always_direct"
+)
+
 // ImageStream 图片流结构
 type ImageStream struct {
 	Reader      io.ReadSeeker
@@ -29,16 +37,20 @@ type ImageStream struct {
 type StorageConfig struct {
 	ID        uint
 	Name      string
-	Type      string // "local" | "minio" | "webdav"
+	Type      string // "local" | "s3" | "webdav"
 	IsDefault bool
 	// Local
 	LocalPath string
-	// MinIO
+	// S3
 	Endpoint        string
 	AccessKeyID     string
 	SecretAccessKey string
 	UseSSL          bool
 	BucketName      string
+	Region          string
+	ForcePathStyle  bool
+	PublicDomain    string
+	IsPrivate       bool
 	// WebDAV
 	WebDAVURL      string
 	WebDAVUsername string
@@ -67,7 +79,7 @@ type Provider interface {
 	Name() string
 }
 
-// FileOpener 支持直接打开 *os.File 的存储（用于零拷贝传输）
+// FileOpener 支持直接打开 *os.File 的存储
 type FileOpener interface {
 	OpenFile(ctx context.Context, name string) (*os.File, error)
 }
@@ -76,6 +88,13 @@ type FileOpener interface {
 type StreamProvider interface {
 	Provider
 	StreamTo(ctx context.Context, storagePath string, w http.ResponseWriter) (int64, error)
+}
+
+// DirectURLProvider 直链提供者接口
+type DirectURLProvider interface {
+	GetDirectURL(storagePath string) string
+	SupportsDirectLink() bool
+	ShouldProxy(imageIsPublic bool, globalMode TransferMode) bool
 }
 
 // InitStorage 初始化存储层
@@ -194,7 +213,6 @@ func RemoveProvider(id uint) error {
 		return fmt.Errorf("storage provider with ID %d not found", id)
 	}
 
-	// 不能移除默认存储
 	if id == defaultID {
 		return fmt.Errorf("cannot remove default storage provider (ID: %d)", id)
 	}
@@ -266,13 +284,17 @@ func createProvider(cfg StorageConfig) (Provider, error) {
 	switch cfg.Type {
 	case "local":
 		return NewLocalStorage(cfg.LocalPath)
-	case "minio":
-		return NewMinioStorage(MinioConfig{
+	case "s3":
+		return NewS3Storage(S3Config{
+			Type:            cfg.Type,
 			Endpoint:        cfg.Endpoint,
+			Region:          cfg.Region,
+			BucketName:      cfg.BucketName,
 			AccessKeyID:     cfg.AccessKeyID,
 			SecretAccessKey: cfg.SecretAccessKey,
-			UseSSL:          cfg.UseSSL,
-			BucketName:      cfg.BucketName,
+			ForcePathStyle:  cfg.ForcePathStyle,
+			PublicDomain:    cfg.PublicDomain,
+			IsPrivate:       cfg.IsPrivate,
 		})
 	case "webdav":
 		return NewWebDAVStorage(WebDAVConfig{

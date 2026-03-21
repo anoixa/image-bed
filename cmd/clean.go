@@ -205,10 +205,10 @@ func cleanOrphanStorageFiles(db *gorm.DB, stats *cleanStats, dryRun bool) error 
 }
 
 // cleanTempFiles 清理临时文件
-func cleanTempFiles(cfg *config.Config, stats *cleanStats, dryRun bool) error {
+func cleanTempFiles(_ *config.Config, stats *cleanStats, dryRun bool) error {
 	log.Println("Checking for temp files...")
 
-	tempDir := "./data/temp"
+	tempDir := config.TempDir
 
 	entries, err := os.ReadDir(tempDir)
 	if err != nil {

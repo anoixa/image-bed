@@ -6,6 +6,7 @@ import (
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
+	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/gin-gonic/gin"
@@ -13,6 +14,7 @@ import (
 
 type ImageDTO struct {
 	ID           uint   `json:"id"`
+	Identifier   string `json:"identifier"`
 	URL          string `json:"url"`
 	ThumbnailURL string `json:"thumbnail_url"`
 	OriginalName string `json:"original_name"`
@@ -73,13 +75,12 @@ func (h *Handler) ListImages(c *gin.Context) {
 		page = 1
 	}
 	if body.Limit <= 0 {
-		limit = 10
+		limit = config.DefaultPerPage
 	}
 
 	// 限制最大分页数量
-	const maxLimit = 100
-	if limit > maxLimit {
-		limit = maxLimit
+	if limit > config.MaxPerPage {
+		limit = config.MaxPerPage
 	}
 
 	result, err := h.imageService.ListImages(body.StorageType, body.Identifier, body.Search, body.AlbumID, body.StartTime, body.EndTime, body.Sort, page, limit, int(userID))
@@ -109,6 +110,7 @@ func (h *Handler) toImageDTO(image *models.Image) *ImageDTO {
 
 	return &ImageDTO{
 		ID:           image.ID,
+		Identifier:   image.Identifier,
 		URL:          imageUrl,
 		ThumbnailURL: thumbnailUrl,
 		OriginalName: image.OriginalName,

@@ -164,19 +164,19 @@ func TestAddImagesToAlbumRequest_Binding(t *testing.T) {
 		{
 			name: "valid request",
 			body: map[string]interface{}{
-				"image_ids": []uint{1, 2, 3},
+				"identifiers": []string{"abc123", "def456"},
 			},
 			wantStatus: http.StatusOK,
 		},
 		{
-			name: "empty image_ids",
+			name: "empty identifiers",
 			body: map[string]interface{}{
-				"image_ids": []uint{},
+				"identifiers": []string{},
 			},
 			wantStatus: http.StatusBadRequest,
 		},
 		{
-			name:       "missing image_ids",
+			name:       "missing identifiers",
 			body:       map[string]interface{}{},
 			wantStatus: http.StatusBadRequest,
 		},

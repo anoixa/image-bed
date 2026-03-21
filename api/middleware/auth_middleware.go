@@ -14,16 +14,6 @@ import (
 // jwtServiceAccessor 获取 JWT 服务
 var jwtServiceAccessor = api.GetJWTService
 
-const (
-	ContextUserIDKey   = "user_id"
-	ContextUsernameKey = "username"
-	ContextRoleKey     = "role"
-	AuthTypeKey        = "auth_type"
-
-	AuthTypeJWT         = "jwt"
-	AuthTypeStaticToken = "static_token"
-)
-
 func CombinedAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// 获取 Authorization 头
@@ -47,9 +37,9 @@ func CombinedAuth() gin.HandlerFunc {
 		var err error
 
 		switch scheme {
-		case "Bearer":
+		case AuthSchemeBearer:
 			err = handleJwtAuth(c, token)
-		case "ApiKey":
+		case AuthSchemeAPIKey:
 			err = handleStaticTokenAuth(c, token)
 		default:
 			common.RespondError(c, http.StatusUnauthorized, "Unsupported authentication scheme")
@@ -97,7 +87,7 @@ func handleJwtAuth(c *gin.Context, token string) error {
 
 	role, _ := claims["role"].(string)
 	if role == "" {
-		role = "user"
+		role = RoleUser
 	}
 
 	c.Set(ContextUserIDKey, uint(userID))

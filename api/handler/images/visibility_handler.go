@@ -13,7 +13,7 @@ import (
 
 // UpdateVisibilityRequest 更新图片可见性请求
 type UpdateVisibilityRequest struct {
-	IsPublic bool `json:"is_public" binding:"required"`
+	IsPublic bool `json:"is_public"`
 }
 
 // UpdateImageVisibility 更新图片可见性
@@ -33,6 +33,10 @@ type UpdateVisibilityRequest struct {
 // @Security     ApiKeyAuth
 // @Router       /api/v1/images/{identifier}/visibility [put]
 func (h *Handler) UpdateImageVisibility(c *gin.Context) {
+	if c.IsAborted() {
+		return
+	}
+
 	userID := c.GetUint(middleware.ContextUserIDKey)
 	if userID == 0 {
 		common.RespondError(c, http.StatusUnauthorized, "Invalid user session")
@@ -66,7 +70,7 @@ func (h *Handler) UpdateImageVisibility(c *gin.Context) {
 		return
 	}
 
-	updates := map[string]interface{}{
+	updates := map[string]any{
 		"is_public": req.IsPublic,
 	}
 	updatedImage, err := h.imageService.UpdateImageByIdentifier(identifier, updates)

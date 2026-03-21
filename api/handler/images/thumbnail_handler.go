@@ -1,16 +1,21 @@
 package images
 
 import (
+	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
+	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/internal/image"
-	"github.com/anoixa/image-bed/storage"
 	"github.com/gin-gonic/gin"
+	"golang.org/x/sync/singleflight"
 )
+
+var thumbnailGroup singleflight.Group
 
 // GetThumbnail 获取缩略图
 // @Summary      Get image thumbnail
@@ -36,8 +41,9 @@ func (h *Handler) GetThumbnail(c *gin.Context) {
 
 	width := h.parseThumbnailWidth(c)
 
-	// 使用 Service 层获取图片并检查权限
-	image, err := h.imageService.GetImageByIdentifier(identifier)
+	ctx := c.Request.Context()
+
+	image, err := h.imageService.GetImageMetadata(ctx, identifier)
 	if err != nil {
 		common.RespondError(c, http.StatusNotFound, "Image not found")
 		return
@@ -48,8 +54,6 @@ func (h *Handler) GetThumbnail(c *gin.Context) {
 		common.RespondError(c, http.StatusForbidden, "This image is private")
 		return
 	}
-
-	ctx := c.Request.Context()
 	settings, err := h.configManager.GetImageProcessingSettings(ctx)
 	if err != nil {
 		// return 原图
@@ -80,6 +84,34 @@ func (h *Handler) GetThumbnail(c *gin.Context) {
 	h.serveThumbnailImage(c, image, thumbnailResult)
 }
 
+// serveThumbnailImage 提供缩略图（支持直链模式）
+func (h *Handler) serveThumbnailImage(c *gin.Context, image *models.Image, result *image.ThumbnailResult) {
+	// 检查缩略图是否可以使用直链（使用缩略图自己的路径）
+	if directURL := h.getVariantDirectURLIfPossible(c, image, result.StoragePath); directURL != "" {
+		c.Header("Cache-Control", config.CacheControlPublic)
+		c.Redirect(http.StatusFound, directURL)
+		return
+	}
+
+	c.Header("Cache-Control", config.CacheControlPublic)
+	c.Header("Content-Type", config.ContentTypeWebP)
+
+	v, err, _ := thumbnailGroup.Do(result.StoragePath, func() (any, error) {
+		provider := h.getStorageProvider(image.StorageConfigID)
+		if provider == nil {
+			return nil, fmt.Errorf("storage provider not available")
+		}
+		return provider.GetWithContext(c.Request.Context(), result.StoragePath)
+	})
+	if err != nil {
+		h.serveOriginalImage(c, image)
+		return
+	}
+
+	c.Header("Content-Length", strconv.FormatInt(result.FileSize, 10))
+	c.DataFromReader(http.StatusOK, result.FileSize, result.MIMEType, v.(io.ReadCloser), nil)
+}
+
 // parseThumbnailWidth 解析缩略图宽度参数
 func (h *Handler) parseThumbnailWidth(c *gin.Context) int {
 	widthStr := c.DefaultQuery("width", "300")
@@ -88,21 +120,4 @@ func (h *Handler) parseThumbnailWidth(c *gin.Context) int {
 		return 300
 	}
 	return width
-}
-
-// serveThumbnailImage 提供缩略图
-func (h *Handler) serveThumbnailImage(c *gin.Context, image *models.Image, result *image.ThumbnailResult) {
-	c.Header("Cache-Control", "public, max-age=86400")
-	c.Header("Content-Type", "image/webp")
-
-	ctx := c.Request.Context()
-	reader, err := storage.GetDefault().GetWithContext(ctx, result.StoragePath)
-	if err != nil {
-		h.serveOriginalImage(c, image)
-		return
-	}
-
-	c.Header("Content-Length", strconv.FormatInt(result.FileSize, 10))
-
-	c.DataFromReader(http.StatusOK, result.FileSize, result.MIMEType, reader, nil)
 }

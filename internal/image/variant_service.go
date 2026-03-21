@@ -61,10 +61,8 @@ func (s *VariantService) SelectBestVariant(ctx context.Context, image *models.Im
 
 	switch image.VariantStatus {
 	case models.ImageVariantStatusNone:
-		// 从未处理过，触发转换并返回原图
 		return s.handleOriginalWithConversion(image, acceptHeader, settings, true)
 	case models.ImageVariantStatusProcessing:
-		// 正在处理中，返回原图
 		return s.handleOriginalWithConversion(image, acceptHeader, settings, false)
 	case models.ImageVariantStatusFailed:
 		return s.handleOriginalWithConversion(image, acceptHeader, settings, true)
@@ -72,13 +70,12 @@ func (s *VariantService) SelectBestVariant(ctx context.Context, image *models.Im
 
 		return s.handleCompletedVariants(ctx, image, acceptHeader, settings)
 	default:
-		// 默认按 None 处理
 		return s.handleOriginalWithConversion(image, acceptHeader, settings, false)
 	}
 }
 
 // handleOriginalWithConversion 返回原图，根据条件触发转换
-func (s *VariantService) handleOriginalWithConversion(image *models.Image, acceptHeader string, settings *config.ImageProcessingSettings, allowTrigger bool) (*VariantResult, error) {
+func (s *VariantService) handleOriginalWithConversion(image *models.Image, acceptHeader string, _ *config.ImageProcessingSettings, allowTrigger bool) (*VariantResult, error) {
 	result := &VariantResult{
 		Format:      format.FormatOriginal,
 		IsOriginal:  true,
@@ -95,7 +92,7 @@ func (s *VariantService) handleOriginalWithConversion(image *models.Image, accep
 }
 
 // handleCompletedVariants 处理已完成变体的情况
-func (s *VariantService) handleCompletedVariants(ctx context.Context, image *models.Image, acceptHeader string, settings *config.ImageProcessingSettings) (*VariantResult, error) {
+func (s *VariantService) handleCompletedVariants(_ context.Context, image *models.Image, acceptHeader string, settings *config.ImageProcessingSettings) (*VariantResult, error) {
 	variants, err := s.variantRepo.GetVariantsByImageID(image.ID)
 	if err != nil {
 		return nil, err
@@ -104,15 +101,15 @@ func (s *VariantService) handleCompletedVariants(ctx context.Context, image *mod
 	available := make(map[format.FormatType]bool)
 	variantMap := make(map[format.FormatType]*models.ImageVariant)
 
-	for _, v := range variants {
+	for i := range variants {
+		v := &variants[i]
 		if v.Status == models.VariantStatusCompleted {
 			ft := format.FormatType(v.Format)
 			available[ft] = true
-			variantMap[ft] = &v
+			variantMap[ft] = v
 		}
 	}
 
-	// 调试日志（仅在 dev 环境显示）
 	utils.LogIfDevf("[VariantNegotiation] image=%s, variantStatus=%d, acceptHeader=%s", image.Identifier, uint(image.VariantStatus), acceptHeader)
 	utils.LogIfDevf("[VariantNegotiation] availableVariants=%v, enabledFormats=%v", available, settings.ConversionEnabledFormats)
 

@@ -12,7 +12,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// Handler 图片处理器
 type Handler struct {
 	cacheHelper           *cache.Helper
 	repo                  *images.Repository
@@ -26,13 +25,12 @@ type Handler struct {
 	uploadMaxBatchTotalMB int
 }
 
-// NewHandler 图片处理器
-func NewHandler(cacheProvider cache.Provider, imagesRepo *images.Repository, db *gorm.DB, converter *image.Converter, configManager *configSvc.Manager, cfg *config.Config, baseURL string, uploadMaxBatchTotalMB int) *Handler {
+func NewHandler(cacheProvider cache.Provider, imagesRepo *images.Repository, db *gorm.DB, converter *image.Converter, configManager *configSvc.Manager, cfg *config.Config, baseURL string, uploadMaxBatchTotalMB int, storageProvider storage.Provider) *Handler {
 	variantRepo := images.NewVariantRepository(db)
 	variantService := image.NewVariantService(variantRepo, configManager, converter)
 
 	imageRepo := images.NewRepository(db)
-	thumbnailService := image.NewThumbnailService(variantRepo, imageRepo, configManager, storage.GetDefault(), converter)
+	thumbnailService := image.NewThumbnailService(variantRepo, imageRepo, configManager, storageProvider, converter)
 
 	helperCfg := cache.HelperConfig{
 		ImageCacheTTL:         cache.DefaultImageCacheExpiration,

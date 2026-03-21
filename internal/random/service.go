@@ -26,7 +26,7 @@ func NewService(configManager *configSvc.Manager) *Service {
 	service := &Service{
 		configManager: configManager,
 	}
-	// 启动时预热缓存
+
 	service.warmCache()
 	return service
 }

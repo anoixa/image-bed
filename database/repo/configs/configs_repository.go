@@ -143,10 +143,12 @@ func (r *ConfigRepository) CountByCategory(ctx context.Context, category models.
 	return count, err
 }
 
-// Exists 检查Key是否已存在
+// Exists 检查Key是否已存在（不区分大小写）
 func (r *ConfigRepository) Exists(ctx context.Context, key string) (bool, error) {
 	var count int64
-	err := r.db.WithContext(ctx).Model(&models.SystemConfig{}).Where("key = ?", key).Count(&count).Error
+	err := r.db.WithContext(ctx).Model(&models.SystemConfig{}).
+		Where("LOWER(key) = LOWER(?)", key).
+		Count(&count).Error
 	return count > 0, err
 }
 

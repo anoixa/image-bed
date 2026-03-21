@@ -27,7 +27,6 @@ func (r *Repository) DB() *gorm.DB {
 }
 
 // CreateDefaultAdminUser 创建默认管理员用户
-// 返回可能的错误，让调用者决定是否终止程序
 func (r *Repository) CreateDefaultAdminUser() (string, error) {
 	var count int64
 
@@ -126,6 +125,11 @@ func (r *Repository) GetAllUsers(page, pageSize int) ([]*models.User, int64, err
 	offset := (page - 1) * pageSize
 	err := db.Order("created_at desc").Offset(offset).Limit(pageSize).Find(&users).Error
 	return users, total, err
+}
+
+// UpdatePassword 更新用户密码
+func (r *Repository) UpdatePassword(userID uint, hashedPassword string) error {
+	return r.db.Model(&models.User{}).Where("id = ?", userID).Update("password", hashedPassword).Error
 }
 
 // WithContext 返回带上下文的仓库

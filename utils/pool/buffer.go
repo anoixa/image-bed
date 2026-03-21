@@ -7,7 +7,7 @@ const BufferSize = 256 * 1024
 
 // SharedBufferPool 共享缓冲区池
 var SharedBufferPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		buf := make([]byte, BufferSize)
 		return &buf
 	},

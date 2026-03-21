@@ -55,7 +55,7 @@ func (c *CryptoLayer) Initialize() error {
 }
 
 // Encrypt 加密配置
-func (c *CryptoLayer) Encrypt(config map[string]interface{}) (string, error) {
+func (c *CryptoLayer) Encrypt(config map[string]any) (string, error) {
 	jsonData, err := json.Marshal(config)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal data: %w", err)
@@ -64,7 +64,7 @@ func (c *CryptoLayer) Encrypt(config map[string]interface{}) (string, error) {
 }
 
 // Decrypt 解密配置
-func (c *CryptoLayer) Decrypt(encrypted string) (map[string]interface{}, error) {
+func (c *CryptoLayer) Decrypt(encrypted string) (map[string]any, error) {
 	return c.crypto.DecryptJSON(encrypted)
 }
 

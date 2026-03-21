@@ -80,7 +80,7 @@ func (m *Manager) SetRandomSourceAlbum(albumID uint, includeAllPublic bool) erro
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	config := map[string]interface{}{
+	config := map[string]any{
 		"album_id":           albumID,
 		"include_all_public": includeAllPublic,
 	}
@@ -97,7 +97,7 @@ func (m *Manager) SetRandomSourceAlbum(albumID uint, includeAllPublic bool) erro
 }
 
 // createRandomAlbumConfig 创建随机图源相册配置
-func (m *Manager) createRandomAlbumConfig(ctx context.Context, config map[string]interface{}) error {
+func (m *Manager) createRandomAlbumConfig(ctx context.Context, config map[string]any) error {
 	req := &models.SystemConfigStoreRequest{
 		Category:    models.ConfigCategorySystem,
 		Name:        RandomSourceAlbumConfigKey,
@@ -111,7 +111,7 @@ func (m *Manager) createRandomAlbumConfig(ctx context.Context, config map[string
 }
 
 // updateRandomAlbumConfig 更新随机图源相册配置
-func (m *Manager) updateRandomAlbumConfig(ctx context.Context, id uint, config map[string]interface{}) error {
+func (m *Manager) updateRandomAlbumConfig(ctx context.Context, id uint, config map[string]any) error {
 	req := &models.SystemConfigStoreRequest{
 		Category:    models.ConfigCategorySystem,
 		Name:        RandomSourceAlbumConfigKey,

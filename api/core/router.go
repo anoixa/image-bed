@@ -1,16 +1,17 @@
 package core
 
 import (
-	"net/http"
+	"net/http/pprof"
 	"strings"
 
 	"github.com/anoixa/image-bed/api"
-	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/handler/admin"
 	handlerAlbums "github.com/anoixa/image-bed/api/handler/albums"
 	handlerDashboard "github.com/anoixa/image-bed/api/handler/dashboard"
 	handlerImages "github.com/anoixa/image-bed/api/handler/images"
 	"github.com/anoixa/image-bed/api/handler/key"
+	handlerSystem "github.com/anoixa/image-bed/api/handler/system"
+	handlerUser "github.com/anoixa/image-bed/api/handler/user"
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
@@ -20,7 +21,9 @@ import (
 	"github.com/anoixa/image-bed/internal/auth"
 	svcDashboard "github.com/anoixa/image-bed/internal/dashboard"
 	imageSvc "github.com/anoixa/image-bed/internal/image"
+	svcUser "github.com/anoixa/image-bed/internal/user"
 	"github.com/anoixa/image-bed/public"
+	"github.com/anoixa/image-bed/storage"
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
@@ -64,39 +67,30 @@ func RegisterRoutes(router *gin.Engine, deps *RouterDependencies) {
 
 // registerBasicRoutes 注册基础路由
 func registerBasicRoutes(router *gin.Engine, deps *RouterDependencies) {
-	healthHandler := NewHealthHandler(deps.DB)
-	router.Any("/health", healthHandler.Handle)
+	// System Routes
+	systemGroup := router.Group("/system")
+	{
+		systemHandler := handlerSystem.NewHandler()
+		healthHandler := handlerSystem.NewHealthHandler(deps.DB, storage.GetDefault())
 
-	// Version 获取版本信息
-	// @Summary      Get version
-	// @Description  Get application version and commit hash
-	// @Tags         system
-	// @Accept       json
-	// @Produce      json
-	// @Success      200  {object}  common.Response  "Version info"
-	// @Router       /version [get]
-	router.GET("/version", func(context *gin.Context) {
-		common.RespondSuccess(context, gin.H{
-			"version": deps.ServerVersion.Version,
-			"commit":  deps.ServerVersion.CommitHash,
-		})
-	})
+		systemGroup.Any("/health", healthHandler.Handle)
+		systemGroup.GET("/version", systemHandler.GetVersion)
+		systemGroup.GET("/metrics", systemHandler.GetMetrics)
 
-	// Metrics 获取指标
-	// @Summary      Get metrics
-	// @Description  Get application metrics and statistics
-	// @Tags         system
-	// @Accept       json
-	// @Produce      json
-	// @Success      200  {object}  common.Response  "Metrics data"
-	// @Router       /metrics [get]
-	router.GET("/metrics", func(context *gin.Context) {
-		context.JSON(http.StatusOK, middleware.GetMetrics())
-	})
+		authSystemGroup := systemGroup.Group("")
+		authSystemGroup.Use(middleware.CombinedAuth())
+		authSystemGroup.Use(middleware.Authorize(middleware.AllowJWTOnly...))
+		authSystemGroup.GET("/status", systemHandler.GetStatus)
+	}
 
 	// Swagger 文档路由（开发环境可用）
 	if !config.IsProduction() {
 		router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	}
+
+	// pprof 性能分析路由（仅开发环境）
+	if config.IsDevelopment() {
+		registerPprofRoutes(router)
 	}
 }
 
@@ -109,7 +103,7 @@ func registerPublicRoutes(router *gin.Engine, deps *RouterDependencies) {
 		uploadMaxBatchTotalMB = cfg.UploadMaxBatchTotalMB
 	}
 
-	imageHandler := handlerImages.NewHandler(deps.CacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager, cfg, baseURL, uploadMaxBatchTotalMB)
+	imageHandler := handlerImages.NewHandler(deps.CacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager, cfg, baseURL, uploadMaxBatchTotalMB, storage.GetDefault())
 
 	// 公共图片访问
 	publicGroup := router.Group("/images")
@@ -136,7 +130,7 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
 		uploadMaxBatchTotalMB = cfg.UploadMaxBatchTotalMB
 	}
 
-	imageHandler := handlerImages.NewHandler(deps.CacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager, cfg, baseURL, uploadMaxBatchTotalMB)
+	imageHandler := handlerImages.NewHandler(deps.CacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager, cfg, baseURL, uploadMaxBatchTotalMB, storage.GetDefault())
 	albumService := svcAlbums.NewService(deps.Repositories.AlbumsRepo)
 	albumHandler := handlerAlbums.NewHandler(albumService, deps.CacheProvider, baseURL)
 	albumImageHandler := handlerAlbums.NewAlbumImageHandler(albumService, deps.Repositories.ImagesRepo, deps.CacheProvider, cfg)
@@ -148,9 +142,12 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
 	dashboardService := svcDashboard.NewService(dashboardRepository, deps.CacheProvider)
 	dashboardHandler := handlerDashboard.NewHandler(dashboardService)
 
+	userService := svcUser.NewService(deps.Repositories.AccountsRepo)
+	userHandler := handlerUser.NewHandler(userService)
+
 	apiGroup := router.Group("/api")
 	apiGroup.Use(func(context *gin.Context) {
-		context.Header("Cache-Control", "no-store")
+		context.Header("Cache-Control", config.CacheControlNoStore)
 		context.Next()
 	})
 	{
@@ -168,7 +165,7 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
 		{
 			// Images
 			imagesGroup := v1.Group("/images")
-			imagesGroup.Use(middleware.Authorize("jwt", "static_token"))
+			imagesGroup.Use(middleware.Authorize(middleware.AllowAllAuth...))
 			{
 				imagesGroup.POST("/upload", imageHandler.UploadImage)
 				imagesGroup.POST("/uploads", imageHandler.UploadImages)
@@ -178,9 +175,16 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
 				imagesGroup.PUT("/:identifier/visibility", imageHandler.UpdateImageVisibility)
 			}
 
+			// User
+			userGroup := v1.Group("/user")
+			userGroup.Use(middleware.Authorize(middleware.AllowJWTOnly...))
+			{
+				userGroup.POST("/password", userHandler.ChangePassword)
+			}
+
 			// Static Token
 			apiTokenGroup := v1.Group("/token")
-			apiTokenGroup.Use(middleware.Authorize("jwt"))
+			apiTokenGroup.Use(middleware.Authorize(middleware.AllowJWTOnly...))
 			{
 				apiTokenGroup.POST("", keyHandler.CreateStaticToken)
 				apiTokenGroup.GET("", keyHandler.GetToken)
@@ -191,7 +195,7 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
 
 			// Albums
 			albumsGroup := v1.Group("/albums")
-			albumsGroup.Use(middleware.Authorize("jwt"))
+			albumsGroup.Use(middleware.Authorize(middleware.AllowJWTOnly...))
 			{
 				albumsGroup.GET("", albumHandler.ListAlbumsHandler)
 				albumsGroup.POST("", albumHandler.CreateAlbumHandler)
@@ -200,10 +204,11 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
 				albumsGroup.DELETE("/:id", albumHandler.DeleteAlbumHandler)
 				albumsGroup.POST("/:id/images", albumImageHandler.AddImagesToAlbumHandler)
 				albumsGroup.DELETE("/:id/images/:imageId", albumImageHandler.RemoveImageFromAlbumHandler)
+				albumsGroup.POST("/:id/images/remove", albumImageHandler.RemoveImagesFromAlbumHandler)
 			}
 
 			dashboardGroup := v1.Group("/dashboard")
-			dashboardGroup.Use(middleware.Authorize("jwt"))
+			dashboardGroup.Use(middleware.Authorize(middleware.AllowJWTOnly...))
 			{
 				dashboardGroup.GET("/stats", dashboardHandler.GetStats)
 				dashboardGroup.POST("/stats/refresh", dashboardHandler.RefreshStats)
@@ -225,12 +230,12 @@ func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies) {
 	if cfg != nil {
 		uploadMaxBatchTotalMB = cfg.UploadMaxBatchTotalMB
 	}
-	imageHandler := handlerImages.NewHandler(deps.CacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager, cfg, baseURL, uploadMaxBatchTotalMB)
+	imageHandler := handlerImages.NewHandler(deps.CacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager, cfg, baseURL, uploadMaxBatchTotalMB, storage.GetDefault())
 
 	configHandler := admin.NewConfigHandler(deps.ConfigManager, deps.Repositories.ImagesRepo)
 	adminGroup := v1.Group("/admin")
-	adminGroup.Use(middleware.Authorize("jwt"))
-	adminGroup.Use(middleware.RequireRole("admin"))
+	adminGroup.Use(middleware.Authorize(middleware.AllowJWTOnly...))
+	adminGroup.Use(middleware.RequireRole(middleware.RoleAdmin))
 	{
 		// Configs
 		configsGroup := adminGroup.Group("/configs")
@@ -256,6 +261,10 @@ func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies) {
 		// 随机图片源相册配置
 		adminGroup.GET("/random-source-album", imageHandler.GetRandomSourceAlbum)
 		adminGroup.POST("/random-source-album", imageHandler.SetRandomSourceAlbum)
+
+		// 全局转发模式配置
+		adminGroup.GET("/transfer-mode", configHandler.GetGlobalTransferMode)
+		adminGroup.POST("/transfer-mode", configHandler.SetGlobalTransferMode)
 	}
 }
 
@@ -282,6 +291,12 @@ func registerStaticRoutes(router *gin.Engine) {
 			return
 		}
 
+		// 对于明确的静态文件请求（如 favicon.ico, robots.txt 等），如果不存在则返回 404
+		if isStaticAssetFile(filePath) {
+			c.JSON(404, gin.H{"error": "Not found"})
+			return
+		}
+
 		content, err := public.ReadFile("index.html")
 		if err != nil {
 			c.String(500, "Failed to load index.html")
@@ -297,13 +312,61 @@ func isStaticAPIPath(p string) bool {
 		"/api/",
 		"/images/",
 		"/thumbnails/",
-		"/health",
-		"/version",
-		"/metrics",
+		"/system/",
 		"/swagger/",
 	}
 	for _, prefix := range apiPaths {
 		if strings.HasPrefix(p, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// registerPprofRoutes 注册 pprof 性能分析路由
+func registerPprofRoutes(router *gin.Engine) {
+	// pprof 首页
+	router.GET("/debug/pprof", gin.WrapF(pprof.Index))
+	// 所有 pprof 端点
+	router.GET("/debug/pprof/:any", func(c *gin.Context) {
+		switch c.Param("any") {
+		case "cmdline":
+			pprof.Cmdline(c.Writer, c.Request)
+		case "profile":
+			pprof.Profile(c.Writer, c.Request)
+		case "symbol":
+			pprof.Symbol(c.Writer, c.Request)
+		case "trace":
+			pprof.Trace(c.Writer, c.Request)
+		case "goroutine":
+			pprof.Handler("goroutine").ServeHTTP(c.Writer, c.Request)
+		case "heap":
+			pprof.Handler("heap").ServeHTTP(c.Writer, c.Request)
+		case "threadcreate":
+			pprof.Handler("threadcreate").ServeHTTP(c.Writer, c.Request)
+		case "block":
+			pprof.Handler("block").ServeHTTP(c.Writer, c.Request)
+		case "mutex":
+			pprof.Handler("mutex").ServeHTTP(c.Writer, c.Request)
+		case "allocs":
+			pprof.Handler("allocs").ServeHTTP(c.Writer, c.Request)
+		default:
+			pprof.Index(c.Writer, c.Request)
+		}
+	})
+}
+
+// isStaticAssetFile 检查是否为明确的静态文件请求
+// 这些文件如果不存在应该返回 404，而不是返回 index.html
+func isStaticAssetFile(filePath string) bool {
+	staticExtensions := []string{
+		".ico", ".png", ".jpg", ".jpeg", ".gif", ".svg",
+		".css", ".js", ".map",
+		".woff", ".woff2", ".ttf", ".eot",
+		".txt", ".xml",
+	}
+	for _, ext := range staticExtensions {
+		if strings.HasSuffix(strings.ToLower(filePath), ext) {
 			return true
 		}
 	}

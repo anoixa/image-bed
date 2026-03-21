@@ -29,6 +29,10 @@ import (
 // @Security     ApiKeyAuth
 // @Router       /api/v1/albums/{id} [delete]
 func (h *Handler) DeleteAlbumHandler(c *gin.Context) {
+	if c.IsAborted() {
+		return
+	}
+
 	// 获取相册 ID
 	albumIDStr := c.Param("id")
 	albumID, err := strconv.ParseUint(albumIDStr, 10, 32)

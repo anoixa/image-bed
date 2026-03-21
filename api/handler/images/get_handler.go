@@ -8,10 +8,12 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
+	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/internal/image"
 	"github.com/anoixa/image-bed/internal/worker"
@@ -22,6 +24,29 @@ import (
 )
 
 var fileDownloadGroup singleflight.Group
+
+// checkETag 检查客户端缓存是否有效
+// 如果客户端发送的 If-None-Match 与当前 ETag 匹配，返回 true 并写入 304 响应
+func checkETag(c *gin.Context, etag string) bool {
+	if etag == "" {
+		return false
+	}
+
+	// 标准化 ETag（确保有引号）
+	if !strings.HasPrefix(etag, "\"") {
+		etag = "\"" + etag + "\""
+	}
+
+	// 检查 If-None-Match 头
+	if match := c.GetHeader("If-None-Match"); match == etag {
+		c.Status(http.StatusNotModified)
+		return true
+	}
+
+	// 设置 ETag 头
+	c.Header("ETag", etag)
+	return false
+}
 
 // GetImage 获取图片
 // @Summary      Get image by identifier
@@ -73,20 +98,21 @@ func (h *Handler) GetImage(c *gin.Context) {
 
 // serveOriginalImage 提供原图
 func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
-	// [DEBUG] 检查关键依赖
-	if storage.GetDefault() == nil {
-		utils.LogIfDevf("[DEBUG][serveOriginalImage] storage.GetDefault() is nil!")
-		common.RespondError(c, http.StatusInternalServerError, "Storage not initialized")
-		return
-	}
 	if h.cacheHelper == nil {
 		utils.LogIfDevf("[DEBUG][serveOriginalImage] h.cacheHelper is nil!")
 		common.RespondError(c, http.StatusInternalServerError, "Cache not initialized")
 		return
 	}
-	// [DEBUG] 记录图片存储配置ID
+
 	utils.LogIfDevf("[DEBUG][serveOriginalImage] image.ID=%d, StorageConfigID=%d, Identifier=%s",
 		image.ID, image.StorageConfigID, image.Identifier)
+
+	// 检查是否可以使用直链
+	if directURL := h.getDirectURLIfPossible(c, image); directURL != "" {
+		c.Header("Cache-Control", config.CacheControlPublic)
+		c.Redirect(http.StatusFound, directURL)
+		return
+	}
 
 	storagePath := image.StoragePath
 
@@ -127,10 +153,69 @@ func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 	h.serveImageData(c, image, data)
 }
 
+// getDirectURLIfPossible 尝试获取直链 URL
+func (h *Handler) getDirectURLIfPossible(c *gin.Context, img *models.Image) string {
+	return h.getVariantDirectURLIfPossible(c, img, img.StoragePath)
+}
+
+// getVariantDirectURLIfPossible 尝试获取变体的直链 URL
+func (h *Handler) getVariantDirectURLIfPossible(c *gin.Context, img *models.Image, storagePath string) string {
+	// 私有图片不支持直链
+	if !img.IsPublic {
+		utils.LogIfDevf("[getVariantDirectURLIfPossible] Image %s is not public, skip direct link", img.Identifier)
+		return ""
+	}
+
+	// 获取存储提供者
+	provider := h.getStorageProvider(img.StorageConfigID)
+	if provider == nil {
+		utils.LogIfDevf("[getVariantDirectURLIfPossible] Failed to get storage provider for image %s (StorageConfigID=%d)",
+			img.Identifier, img.StorageConfigID)
+		return ""
+	}
+
+	directProvider, ok := provider.(storage.DirectURLProvider)
+	if !ok {
+		utils.LogIfDevf("[getVariantDirectURLIfPossible] Provider does not support direct URL for image %s", img.Identifier)
+		return ""
+	}
+
+	globalMode := h.getGlobalTransferMode(c.Request.Context())
+
+	utils.LogIfDevf("[getVariantDirectURLIfPossible] Image %s (path=%s): SupportsDirectLink=%v, globalMode=%s, isPublic=%v",
+		img.Identifier, storagePath, directProvider.SupportsDirectLink(), globalMode, img.IsPublic)
+
+	if directProvider.ShouldProxy(img.IsPublic, globalMode) {
+		utils.LogIfDevf("[getVariantDirectURLIfPossible] Image %s: ShouldProxy returned true, using proxy", img.Identifier)
+		return ""
+	}
+
+	// 获取直链 URL
+	directURL := directProvider.GetDirectURL(storagePath)
+	utils.LogIfDevf("[getVariantDirectURLIfPossible] Image %s: Using direct URL %s", img.Identifier, directURL)
+	return directURL
+}
+
+// getGlobalTransferMode 获取全局转发模式
+func (h *Handler) getGlobalTransferMode(ctx context.Context) storage.TransferMode {
+	v, err, _ := fileDownloadGroup.Do("global_transfer_mode", func() (any, error) {
+		mode := h.configManager.GetGlobalTransferMode(ctx)
+		return mode, nil
+	})
+	if err != nil {
+		return storage.TransferModeAuto
+	}
+	return v.(storage.TransferMode)
+}
+
 func (h *Handler) serveByStreaming(c *gin.Context, img *models.Image, streamer storage.StreamProvider) bool {
-	c.Header("Cache-Control", "public, max-age=86400")
+	// 检查 ETag 缓存
+	if checkETag(c, img.FileHash) {
+		return true
+	}
+
+	c.Header("Cache-Control", config.CacheControlPublic)
 	c.Header("Content-Type", img.MimeType)
-	c.Header("ETag", "\""+img.FileHash+"\"")
 
 	_, err := streamer.StreamTo(c.Request.Context(), img.StoragePath, c.Writer)
 	if err != nil {
@@ -145,7 +230,7 @@ func (h *Handler) serveByStreaming(c *gin.Context, img *models.Image, streamer s
 
 // fetchFromRemoteWithProvider 从指定存储提供者获取图片数据
 func (h *Handler) fetchFromRemoteWithProvider(storagePath string, provider storage.Provider) ([]byte, error) {
-	v, err, _ := fileDownloadGroup.Do(storagePath, func() (interface{}, error) {
+	v, err, _ := fileDownloadGroup.Do(storagePath, func() (any, error) {
 		if data, err := h.cacheHelper.GetCachedImageData(context.Background(), storagePath); err == nil {
 			return data, nil
 		}
@@ -161,19 +246,18 @@ func (h *Handler) fetchFromRemoteWithProvider(storagePath string, provider stora
 			}
 		}()
 
-		const maxImageSize = 50 * 1024 * 1024
-		limitedReader := io.LimitReader(stream, maxImageSize)
+		limitedReader := io.LimitReader(stream, config.DefaultMaxUploadSize)
 		data, err := io.ReadAll(limitedReader)
 		if err != nil {
 			return nil, err
 		}
 
 		// 记录大图片日志
-		if len(data) > 10*1024*1024 {
+		if len(data) > config.DefaultMaxImageSize {
 			utils.LogIfDevf("[fetchFromRemote] Large image loaded: %d bytes, path: %s", len(data), storagePath)
 		}
 
-		if len(data) < 5*1024*1024 { // 只缓存小于 5MB 的图片
+		if len(data) < config.DefaultMaxThumbnailSize { // 只缓存小于 5MB 的图片
 			task := func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
@@ -212,15 +296,19 @@ func (h *Handler) getStorageProvider(storageConfigID uint) storage.Provider {
 
 // serveBySendfile 使用 sendfile 零拷贝传输
 func (h *Handler) serveBySendfile(c *gin.Context, img *models.Image, opener storage.FileOpener) bool {
+	// 检查 ETag 缓存（在打开文件前检查，避免不必要的 IO）
+	if checkETag(c, img.FileHash) {
+		return true
+	}
+
 	file, err := opener.OpenFile(c.Request.Context(), img.StoragePath)
 	if err != nil {
 		return false
 	}
 	defer func() { _ = file.Close() }()
 
-	c.Header("Cache-Control", "public, max-age=86400")
+	c.Header("Cache-Control", config.CacheControlPublic)
 	c.Header("Content-Type", img.MimeType)
-	c.Header("ETag", "\""+img.FileHash+"\"")
 
 	http.ServeContent(c.Writer, c.Request, img.Identifier, time.Time{}, file)
 	return true
@@ -228,19 +316,30 @@ func (h *Handler) serveBySendfile(c *gin.Context, img *models.Image, opener stor
 
 // serveImageData 从内存提供图片数据
 func (h *Handler) serveImageData(c *gin.Context, img *models.Image, data []byte) {
-	c.Header("Cache-Control", "public, max-age=86400")
+	// 检查 ETag 缓存
+	if checkETag(c, img.FileHash) {
+		return
+	}
+
+	c.Header("Cache-Control", config.CacheControlPublic)
 	c.Header("Content-Type", img.MimeType)
 	c.Header("Content-Length", strconv.Itoa(len(data)))
-	c.Header("ETag", "\""+img.FileHash+"\"")
 
 	c.Data(http.StatusOK, img.MimeType, data)
 }
 
-// serveVariantImage 提供格式变体
+// serveVariantImage 提供格式变体（支持直链模式）
 func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *image.VariantResult) {
 	// [DEBUG] 记录变体信息
-	utils.LogIfDevf("[DEBUG][serveVariantImage] img.ID=%d, img.StorageConfigID=%d, variant.Identifier=%s",
-		img.ID, img.StorageConfigID, result.Identifier)
+	utils.LogIfDevf("[DEBUG][serveVariantImage] img.ID=%d, img.StorageConfigID=%d, variant.Identifier=%s, variant.StoragePath=%s",
+		img.ID, img.StorageConfigID, result.Identifier, result.StoragePath)
+
+	// 检查变体是否可以使用直链（使用变体自己的路径）
+	if directURL := h.getVariantDirectURLIfPossible(c, img, result.StoragePath); directURL != "" {
+		c.Header("Cache-Control", config.CacheControlPublic)
+		c.Redirect(http.StatusFound, directURL)
+		return
+	}
 
 	// 使用原图指定的 StorageConfigID 获取正确的存储 provider
 	provider := h.getStorageProvider(img.StorageConfigID)
@@ -254,12 +353,12 @@ func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *i
 
 	imageData, err := h.cacheHelper.GetCachedImageData(c.Request.Context(), result.StoragePath)
 	if err == nil {
-		h.serveVariantData(c, img, result, imageData)
+		h.serveVariantData(c, result, imageData)
 		return
 	}
 
 	if opener, ok := provider.(storage.FileOpener); ok {
-		if h.serveVariantBySendfile(c, img, result, opener) {
+		if h.serveVariantBySendfile(c, result, opener) {
 			return
 		}
 	}
@@ -300,12 +399,17 @@ func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *i
 		go task()
 	}
 
-	h.serveVariantData(c, img, result, data)
+	h.serveVariantData(c, result, data)
 }
 
 // serveVariantByStreaming 使用流式传输格式变体
 func (h *Handler) serveVariantByStreaming(c *gin.Context, result *image.VariantResult, streamer storage.StreamProvider) bool {
-	c.Header("Cache-Control", "public, max-age=86400")
+	// 使用 FileHash 作为变体 ETag
+	if checkETag(c, result.Variant.FileHash) {
+		return true
+	}
+
+	c.Header("Cache-Control", config.CacheControlPublic)
 	c.Header("Content-Type", result.MIMEType)
 	c.Header("X-Content-Type-Options", "nosniff")
 
@@ -318,7 +422,12 @@ func (h *Handler) serveVariantByStreaming(c *gin.Context, result *image.VariantR
 }
 
 // serveVariantBySendfile 使用 sendfile 传输格式变体
-func (h *Handler) serveVariantBySendfile(c *gin.Context, img *models.Image, result *image.VariantResult, opener storage.FileOpener) bool {
+func (h *Handler) serveVariantBySendfile(c *gin.Context, result *image.VariantResult, opener storage.FileOpener) bool {
+	// 检查 ETag 缓存（使用 FileHash 作为变体 ETag）
+	if checkETag(c, result.Variant.FileHash) {
+		return true
+	}
+
 	file, err := opener.OpenFile(c.Request.Context(), result.StoragePath)
 	if err != nil {
 		return false
@@ -330,7 +439,7 @@ func (h *Handler) serveVariantBySendfile(c *gin.Context, img *models.Image, resu
 		return false
 	}
 
-	c.Header("Cache-Control", "public, max-age=86400")
+	c.Header("Cache-Control", config.CacheControlPublic)
 	c.Header("Content-Type", result.MIMEType)
 	c.Header("Content-Length", strconv.FormatInt(stat.Size(), 10))
 	c.Header("X-Content-Type-Options", "nosniff")
@@ -340,8 +449,13 @@ func (h *Handler) serveVariantBySendfile(c *gin.Context, img *models.Image, resu
 }
 
 // serveVariantData 从内存提供格式变体数据
-func (h *Handler) serveVariantData(c *gin.Context, img *models.Image, result *image.VariantResult, data []byte) {
-	c.Header("Cache-Control", "public, max-age=86400")
+func (h *Handler) serveVariantData(c *gin.Context, result *image.VariantResult, data []byte) {
+	// 使用 FileHash 作为变体 ETag
+	if checkETag(c, result.Variant.FileHash) {
+		return
+	}
+
+	c.Header("Cache-Control", config.CacheControlPublic)
 	c.Header("Content-Type", result.MIMEType)
 	c.Header("Content-Length", strconv.Itoa(len(data)))
 	c.Header("X-Content-Type-Options", "nosniff")

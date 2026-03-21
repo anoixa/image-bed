@@ -454,7 +454,7 @@ func (h *ConfigHandler) testConfig(req *models.TestConfigRequest) *models.TestCo
 }
 
 // testStorageConfig 测试存储配置
-func (h *ConfigHandler) testStorageConfig(config map[string]interface{}) *models.TestConfigResponse {
+func (h *ConfigHandler) testStorageConfig(config map[string]any) *models.TestConfigResponse {
 	storageType, _ := config["type"].(string)
 	if storageType == "" {
 		return &models.TestConfigResponse{
@@ -492,25 +492,29 @@ func (h *ConfigHandler) testStorageConfig(config map[string]interface{}) *models
 			Message: "Local storage connection successful",
 		}
 
-	case "minio":
-		minioCfg := storage.MinioConfig{
+	case "s3":
+		s3Cfg := storage.S3Config{
+			Type:            storageType,
 			Endpoint:        getString(config, "endpoint"),
+			Region:          getString(config, "region"),
+			BucketName:      getString(config, "bucket_name"),
 			AccessKeyID:     getString(config, "access_key_id"),
 			SecretAccessKey: getString(config, "secret_access_key"),
-			UseSSL:          getBool(config, "use_ssl"),
-			BucketName:      getString(config, "bucket_name"),
+			ForcePathStyle:  getBool(config, "force_path_style"),
+			PublicDomain:    getString(config, "public_domain"),
+			IsPrivate:       getBool(config, "is_private"),
 		}
-		if minioCfg.Endpoint == "" || minioCfg.AccessKeyID == "" || minioCfg.SecretAccessKey == "" {
+		if s3Cfg.Endpoint == "" || s3Cfg.AccessKeyID == "" || s3Cfg.SecretAccessKey == "" || s3Cfg.BucketName == "" {
 			return &models.TestConfigResponse{
 				Success: false,
-				Message: "Endpoint, access_key_id and secret_access_key are required",
+				Message: "Endpoint, access_key_id, secret_access_key and bucket_name are required",
 			}
 		}
-		provider, err := storage.NewMinioStorage(minioCfg)
+		provider, err := storage.NewS3Storage(s3Cfg)
 		if err != nil {
 			return &models.TestConfigResponse{
 				Success: false,
-				Message: fmt.Sprintf("Failed to create minio storage: %v", err),
+				Message: fmt.Sprintf("Failed to create S3 storage: %v", err),
 			}
 		}
 		ctx := context.Background()
@@ -522,7 +526,7 @@ func (h *ConfigHandler) testStorageConfig(config map[string]interface{}) *models
 		}
 		return &models.TestConfigResponse{
 			Success: true,
-			Message: "MinIO storage connection successful",
+			Message: "S3 storage connection successful",
 		}
 
 	case "webdav":
@@ -578,9 +582,9 @@ func (h *ConfigHandler) testStorageConfig(config map[string]interface{}) *models
 // @Router       /api/v1/admin/storage/providers [get]
 func (h *ConfigHandler) ListStorageProviders(c *gin.Context) {
 	providers := storage.ListProviders()
-	result := make([]map[string]interface{}, 0, len(providers))
+	result := make([]map[string]any, 0, len(providers))
 	for _, p := range providers {
-		result = append(result, map[string]interface{}{
+		result = append(result, map[string]any{
 			"id":         p.ID,
 			"name":       p.Name,
 			"type":       p.Type,
@@ -606,7 +610,7 @@ func (h *ConfigHandler) ReloadStorageConfig(c *gin.Context) {
 }
 
 // hotReloadStorageConfig 热重载存储配置
-func (h *ConfigHandler) hotReloadStorageConfig(id uint, config map[string]interface{}, isDefault bool) error {
+func (h *ConfigHandler) hotReloadStorageConfig(id uint, config map[string]any, isDefault bool) error {
 	storageType := getString(config, "type")
 	if storageType == "" {
 		return fmt.Errorf("storage type is required")
@@ -625,14 +629,17 @@ func (h *ConfigHandler) hotReloadStorageConfig(id uint, config map[string]interf
 		if cfg.LocalPath == "" {
 			return fmt.Errorf("local_path is required for local storage")
 		}
-	case "minio":
+	case "s3":
 		cfg.Endpoint = getString(config, "endpoint")
+		cfg.Region = getString(config, "region")
+		cfg.BucketName = getString(config, "bucket_name")
 		cfg.AccessKeyID = getString(config, "access_key_id")
 		cfg.SecretAccessKey = getString(config, "secret_access_key")
-		cfg.UseSSL = getBool(config, "use_ssl")
-		cfg.BucketName = getString(config, "bucket_name")
-		if cfg.Endpoint == "" || cfg.AccessKeyID == "" || cfg.SecretAccessKey == "" {
-			return fmt.Errorf("endpoint, access_key_id and secret_access_key are required for minio storage")
+		cfg.ForcePathStyle = getBool(config, "force_path_style")
+		cfg.PublicDomain = getString(config, "public_domain")
+		cfg.IsPrivate = getBool(config, "is_private")
+		if cfg.Endpoint == "" || cfg.AccessKeyID == "" || cfg.SecretAccessKey == "" || cfg.BucketName == "" {
+			return fmt.Errorf("endpoint, access_key_id, secret_access_key and bucket_name are required for S3 storage")
 		}
 	case "webdav":
 		cfg.WebDAVURL = getString(config, "webdav_url")
@@ -649,16 +656,86 @@ func (h *ConfigHandler) hotReloadStorageConfig(id uint, config map[string]interf
 	return storage.AddOrUpdateProvider(cfg)
 }
 
-func getString(m map[string]interface{}, key string) string {
+func getString(m map[string]any, key string) string {
 	if v, ok := m[key].(string); ok {
 		return v
 	}
 	return ""
 }
 
-func getBool(m map[string]interface{}, key string) bool {
+func getBool(m map[string]any, key string) bool {
 	if v, ok := m[key].(bool); ok {
 		return v
 	}
 	return false
+}
+
+// === 全局转发模式配置 ===
+
+// GetGlobalTransferMode 获取全局转发模式
+// @Summary      Get global transfer mode
+// @Description  Get the global image transfer mode (auto, always_proxy, always_direct)
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  common.Response{data=map[string]string}  "Transfer mode"
+// @Failure      401  {object}  common.Response  "Unauthorized"
+// @Security     ApiKeyAuth
+// @Router       /api/v1/admin/transfer-mode [get]
+func (h *ConfigHandler) GetGlobalTransferMode(c *gin.Context) {
+	ctx := c.Request.Context()
+	mode := h.manager.GetGlobalTransferMode(ctx)
+
+	common.RespondSuccess(c, map[string]string{
+		"mode": string(mode),
+	})
+}
+
+// SetGlobalTransferMode 设置全局转发模式
+// @Summary      Set global transfer mode
+// @Description  Set the global image transfer mode
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        request  body      SetTransferModeRequest  true  "Transfer mode request"
+// @Success      200  {object}  common.Response  "Success"
+// @Failure      400  {object}  common.Response  "Invalid mode"
+// @Failure      401  {object}  common.Response  "Unauthorized"
+// @Failure      500  {object}  common.Response  "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /api/v1/admin/transfer-mode [post]
+func (h *ConfigHandler) SetGlobalTransferMode(c *gin.Context) {
+	var req SetTransferModeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.RespondError(c, http.StatusBadRequest, "Invalid request: "+err.Error())
+		return
+	}
+
+	// 验证模式值
+	mode := storage.TransferMode(req.Mode)
+	switch mode {
+	case storage.TransferModeAuto, storage.TransferModeAlwaysProxy, storage.TransferModeAlwaysDirect:
+		// valid
+	default:
+		common.RespondError(c, http.StatusBadRequest, "Invalid mode. Must be: auto, always_proxy, or always_direct")
+		return
+	}
+
+	ctx := c.Request.Context()
+	if err := h.manager.SetGlobalTransferMode(ctx, mode); err != nil {
+		common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to set transfer mode: %v", err))
+		return
+	}
+
+	// 清除配置缓存，使新配置立即生效
+	h.manager.ClearCache()
+
+	common.RespondSuccess(c, map[string]string{
+		"mode": req.Mode,
+	})
+}
+
+// SetTransferModeRequest 设置转发模式请求
+type SetTransferModeRequest struct {
+	Mode string `json:"mode" binding:"required"` // auto, always_proxy, always_direct
 }

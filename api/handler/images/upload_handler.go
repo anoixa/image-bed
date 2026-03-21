@@ -27,6 +27,10 @@ import (
 // @Security     ApiKeyAuth
 // @Router       /api/v1/images/upload [post]
 func (h *Handler) UploadImage(c *gin.Context) {
+	if c.IsAborted() {
+		return
+	}
+
 	form, err := c.MultipartForm()
 	if err != nil {
 		common.RespondError(c, http.StatusBadRequest, "Invalid form data")
@@ -92,6 +96,10 @@ func (h *Handler) UploadImage(c *gin.Context) {
 // @Security     ApiKeyAuth
 // @Router       /api/v1/images/uploads [post]
 func (h *Handler) UploadImages(c *gin.Context) {
+	if c.IsAborted() {
+		return
+	}
+
 	form, err := c.MultipartForm()
 	if err != nil {
 		common.RespondError(c, http.StatusBadRequest, "Invalid form data")
@@ -131,7 +139,9 @@ func (h *Handler) UploadImages(c *gin.Context) {
 
 	results, err := h.imageService.UploadBatch(c.Request.Context(), userID, files, storageConfigID, isPublic)
 	if err != nil {
-		common.RespondError(c, http.StatusInternalServerError, "Failed to process uploads")
+		if !c.IsAborted() {
+			common.RespondError(c, http.StatusInternalServerError, "Failed to process uploads")
+		}
 		return
 	}
 

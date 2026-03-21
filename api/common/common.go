@@ -7,12 +7,12 @@ import (
 )
 
 type Response struct {
-	Status string      `json:"status"`
-	Msg    string      `json:"msg"`
-	Data   interface{} `json:"data,omitempty"`
+	Status string `json:"status"`
+	Msg    string `json:"msg"`
+	Data   any    `json:"data,omitempty"`
 }
 
-func Respond(c *gin.Context, httpStatus int, status string, message string, data interface{}) {
+func Respond(c *gin.Context, httpStatus int, status string, message string, data any) {
 	c.JSON(httpStatus, Response{
 		Status: status,
 		Msg:    message,
@@ -21,12 +21,12 @@ func Respond(c *gin.Context, httpStatus int, status string, message string, data
 }
 
 // RespondSuccess sends a success response with data.
-func RespondSuccess(c *gin.Context, data interface{}) {
+func RespondSuccess(c *gin.Context, data any) {
 	Respond(c, http.StatusOK, "success", "", data)
 }
 
 // RespondSuccessMessage sends a success response with message and data.
-func RespondSuccessMessage(c *gin.Context, message string, data interface{}) {
+func RespondSuccessMessage(c *gin.Context, message string, data any) {
 	Respond(c, http.StatusOK, "success", message, data)
 }
 

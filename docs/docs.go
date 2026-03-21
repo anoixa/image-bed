@@ -81,7 +81,7 @@ const docTemplate = `{
         },
         "/api/auth/logout": {
             "post": {
-                "description": "Logout user by invalidating refresh token (requires refresh_token and device_id cookies)",
+                "description": "Logout user by invalidating session. Works with any combination of cookies (refresh_token, device_id, or both). Always clears cookies and returns 200 for idempotency.",
                 "consumes": [
                     "application/json"
                 ],
@@ -94,19 +94,7 @@ const docTemplate = `{
                 "summary": "User logout",
                 "responses": {
                     "200": {
-                        "description": "Logout successful",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "401": {
-                        "description": "Refresh token not found / invalid session",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
+                        "description": "Logout successful or already logged out",
                         "schema": {
                             "$ref": "#/definitions/common.Response"
                         }
@@ -965,6 +953,110 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/admin/transfer-mode": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Get the global image transfer mode (auto, always_proxy, always_direct)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get global transfer mode",
+                "responses": {
+                    "200": {
+                        "description": "Transfer mode",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "object",
+                                            "additionalProperties": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Set the global image transfer mode",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Set global transfer mode",
+                "parameters": [
+                    {
+                        "description": "Transfer mode request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.SetTransferModeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid mode",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/albums": {
             "get": {
                 "security": [
@@ -1338,7 +1430,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Add multiple images to an existing album",
+                "description": "Add multiple images to an existing album using image identifiers",
                 "consumes": [
                     "application/json"
                 ],
@@ -1358,7 +1450,7 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "Image IDs to add",
+                        "description": "Image identifiers to add",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -1394,6 +1486,82 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Album or images not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/albums/{id}/images/remove": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Remove multiple images from an album at once (images themselves are not deleted)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "albums"
+                ],
+                "summary": "Remove multiple images from album",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Album ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Image identifiers to remove",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/albums.RemoveImagesFromAlbumRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Images removed from album successfully",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Permission denied",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Album not found",
                         "schema": {
                             "$ref": "#/definitions/common.Response"
                         }
@@ -2252,9 +2420,14 @@ const docTemplate = `{
                 }
             }
         },
-        "/health": {
-            "get": {
-                "description": "Check the health status of the application and its dependencies (database, cache, storage)",
+        "/api/v1/user/password": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "验证旧密码并更新为新密码",
                 "consumes": [
                     "application/json"
                 ],
@@ -2262,22 +2435,55 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "health"
+                    "user"
                 ],
-                "summary": "Health check",
+                "summary": "修改用户密码",
+                "parameters": [
+                    {
+                        "description": "修改密码请求",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_anoixa_image-bed_api_handler_user.ChangePasswordRequest"
+                        }
+                    }
+                ],
                 "responses": {
                     "200": {
-                        "description": "Service is healthy",
+                        "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/user.ChangePasswordResponse"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     },
-                    "503": {
-                        "description": "Service is unhealthy",
+                    "400": {
+                        "description": "请求参数错误",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "旧密码错误",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器内部错误",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
                         }
                     }
                 }
@@ -2285,7 +2491,7 @@ const docTemplate = `{
         },
         "/images/random": {
             "get": {
-                "description": "Get a random image, optionally filtered by album and dimensions",
+                "description": "Get a random image, optionally filtered by album, dimensions, WebP availability and file size",
                 "consumes": [
                     "application/json"
                 ],
@@ -2332,6 +2538,18 @@ const docTemplate = `{
                         "type": "integer",
                         "description": "Maximum image height",
                         "name": "max_height",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Only return images with WebP variant (default: false)",
+                        "name": "require_webp",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum file size in bytes (e.g., 10485760 for 10MB)",
+                        "name": "max_file_size",
                         "in": "query"
                     }
                 ],
@@ -2424,6 +2642,130 @@ const docTemplate = `{
                 }
             }
         },
+        "/system/health": {
+            "get": {
+                "description": "Check the health status of the application and its dependencies (database, cache, storage)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Health check",
+                "responses": {
+                    "200": {
+                        "description": "Service is healthy",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "503": {
+                        "description": "Service is unhealthy",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/system/metrics": {
+            "get": {
+                "description": "Get application metrics and statistics",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Get metrics",
+                "responses": {
+                    "200": {
+                        "description": "Metrics data",
+                        "schema": {
+                            "$ref": "#/definitions/system.MetricsResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/system/status": {
+            "get": {
+                "description": "Get detailed system runtime information including version, memory stats, goroutines, GC count, and cache info",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Get system status",
+                "responses": {
+                    "200": {
+                        "description": "System status",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/system.StatusResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/system/version": {
+            "get": {
+                "description": "Get application version and commit hash",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Get version",
+                "responses": {
+                    "200": {
+                        "description": "Version info",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/system.VersionResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
         "/thumbnails/{identifier}": {
             "get": {
                 "security": [
@@ -2493,17 +2835,29 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "admin.SetTransferModeRequest": {
+            "type": "object",
+            "required": [
+                "mode"
+            ],
+            "properties": {
+                "mode": {
+                    "description": "auto, always_proxy, always_direct",
+                    "type": "string"
+                }
+            }
+        },
         "albums.AddImagesToAlbumRequest": {
             "type": "object",
             "required": [
-                "image_ids"
+                "identifiers"
             ],
             "properties": {
-                "image_ids": {
+                "identifiers": {
                     "type": "array",
                     "minItems": 1,
                     "items": {
-                        "type": "integer"
+                        "type": "string"
                     }
                 }
             }
@@ -2635,6 +2989,21 @@ const docTemplate = `{
                 }
             }
         },
+        "albums.RemoveImagesFromAlbumRequest": {
+            "type": "object",
+            "required": [
+                "identifiers"
+            ],
+            "properties": {
+                "identifiers": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "albums.UpdateAlbumRequest": {
             "type": "object",
             "required": [
@@ -2725,6 +3094,22 @@ const docTemplate = `{
         "config.ImageProcessingSettings": {
             "type": "object"
         },
+        "github_com_anoixa_image-bed_api_handler_user.ChangePasswordRequest": {
+            "type": "object",
+            "required": [
+                "new_password",
+                "old_password"
+            ],
+            "properties": {
+                "new_password": {
+                    "type": "string",
+                    "minLength": 6
+                },
+                "old_password": {
+                    "type": "string"
+                }
+            }
+        },
         "images.DeleteRequestBody": {
             "type": "object",
             "required": [
@@ -2753,6 +3138,9 @@ const docTemplate = `{
                 },
                 "id": {
                     "type": "integer"
+                },
+                "identifier": {
+                    "type": "string"
                 },
                 "is_public": {
                     "type": "boolean"
@@ -2849,9 +3237,6 @@ const docTemplate = `{
         },
         "images.UpdateVisibilityRequest": {
             "type": "object",
-            "required": [
-                "is_public"
-            ],
             "properties": {
                 "is_public": {
                     "type": "boolean"
@@ -2896,7 +3281,7 @@ const docTemplate = `{
                 },
                 "config": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": {}
                 },
                 "description": {
                     "type": "string"
@@ -2927,7 +3312,7 @@ const docTemplate = `{
                 },
                 "config": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": {}
                 }
             }
         },
@@ -2954,6 +3339,176 @@ const docTemplate = `{
                 },
                 "width": {
                     "type": "integer"
+                }
+            }
+        },
+        "system.CacheStatus": {
+            "type": "object",
+            "properties": {
+                "provider": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "system.DirStatus": {
+            "type": "object",
+            "properties": {
+                "file_count": {
+                    "type": "integer"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "size_str": {
+                    "type": "string"
+                },
+                "total_size": {
+                    "type": "integer"
+                }
+            }
+        },
+        "system.MemoryStatus": {
+            "type": "object",
+            "properties": {
+                "gc_sys_mb": {
+                    "type": "number"
+                },
+                "gc_sys_str": {
+                    "type": "string"
+                },
+                "goroutines": {
+                    "type": "integer"
+                },
+                "heap_alloc_mb": {
+                    "type": "number"
+                },
+                "heap_alloc_str": {
+                    "type": "string"
+                },
+                "heap_in_use_mb": {
+                    "type": "number"
+                },
+                "heap_in_use_str": {
+                    "type": "string"
+                },
+                "heap_sys_mb": {
+                    "type": "number"
+                },
+                "heap_sys_str": {
+                    "type": "string"
+                },
+                "last_gc_time": {
+                    "type": "integer"
+                },
+                "num_gc": {
+                    "type": "integer"
+                },
+                "stack_sys_mb": {
+                    "type": "number"
+                },
+                "stack_sys_str": {
+                    "type": "string"
+                },
+                "total_alloc_mb": {
+                    "type": "number"
+                },
+                "total_alloc_str": {
+                    "type": "string"
+                }
+            }
+        },
+        "system.MetricsResponse": {
+            "type": "object",
+            "properties": {
+                "avg_duration_ms": {
+                    "type": "number"
+                },
+                "request_count": {
+                    "type": "integer"
+                },
+                "request_duration_ms": {
+                    "type": "integer"
+                }
+            }
+        },
+        "system.RuntimeStatus": {
+            "type": "object",
+            "properties": {
+                "num_cpu": {
+                    "type": "integer"
+                }
+            }
+        },
+        "system.StatusResponse": {
+            "type": "object",
+            "properties": {
+                "cache": {
+                    "description": "缓存信息",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/system.CacheStatus"
+                        }
+                    ]
+                },
+                "commit_hash": {
+                    "type": "string"
+                },
+                "data_dir": {
+                    "description": "数据目录信息",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/system.DirStatus"
+                        }
+                    ]
+                },
+                "environment": {
+                    "description": "运行环境",
+                    "type": "string"
+                },
+                "go_version": {
+                    "type": "string"
+                },
+                "memory": {
+                    "description": "内存统计",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/system.MemoryStatus"
+                        }
+                    ]
+                },
+                "runtime": {
+                    "description": "运行时信息",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/system.RuntimeStatus"
+                        }
+                    ]
+                },
+                "version": {
+                    "description": "版本信息",
+                    "type": "string"
+                }
+            }
+        },
+        "system.VersionResponse": {
+            "type": "object",
+            "properties": {
+                "commit_hash": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "user.ChangePasswordResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
                 }
             }
         }

@@ -15,7 +15,7 @@ func TestIsImage_JPEG(t *testing.T) {
 	data := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46}
 	reader := bytes.NewReader(data)
 
-	isValid, mimeType, err := IsImage(reader)
+	isValid, mimeType, err := IsImage(reader, "test.jpg")
 	require.NoError(t, err)
 	assert.True(t, isValid)
 	assert.Equal(t, "image/jpeg", mimeType)
@@ -30,7 +30,7 @@ func TestIsImage_PNG(t *testing.T) {
 	data := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}
 	reader := bytes.NewReader(data)
 
-	isValid, mimeType, err := IsImage(reader)
+	isValid, mimeType, err := IsImage(reader, "test.png")
 	require.NoError(t, err)
 	assert.True(t, isValid)
 	assert.Equal(t, "image/png", mimeType)
@@ -42,7 +42,7 @@ func TestIsImage_GIF(t *testing.T) {
 	data := []byte{0x47, 0x49, 0x46, 0x38, 0x39, 0x61}
 	reader := bytes.NewReader(data)
 
-	isValid, mimeType, err := IsImage(reader)
+	isValid, mimeType, err := IsImage(reader, "test.gif")
 	require.NoError(t, err)
 	assert.True(t, isValid)
 	assert.Equal(t, "image/gif", mimeType)
@@ -50,16 +50,18 @@ func TestIsImage_GIF(t *testing.T) {
 
 // TestIsImage_WebP 测试WebP图片验证
 func TestIsImage_WebP(t *testing.T) {
-	// WebP: RIFF....WEBP
-	data := []byte{0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50}
+	// WebP: RIFF....WEBP (offset 8-11)
+	data := []byte{
+		0x52, 0x49, 0x46, 0x46, // RIFF
+		0x00, 0x00, 0x00, 0x00, // size
+		0x57, 0x45, 0x42, 0x50, // WEBP
+	}
 	reader := bytes.NewReader(data)
 
-	isValid, mimeType, err := IsImage(reader)
+	isValid, mimeType, err := IsImage(reader, "test.webp")
 	require.NoError(t, err)
-	// WebP 可能不被所有系统支持，所以如果失败也不报错
-	if isValid {
-		assert.Equal(t, "image/webp", mimeType)
-	}
+	assert.True(t, isValid)
+	assert.Equal(t, "image/webp", mimeType)
 }
 
 // TestIsImage_BMP 测试BMP图片验证
@@ -68,11 +70,10 @@ func TestIsImage_BMP(t *testing.T) {
 	data := []byte{0x42, 0x4D, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
 	reader := bytes.NewReader(data)
 
-	isValid, mimeType, err := IsImage(reader)
+	isValid, mimeType, err := IsImage(reader, "test.bmp")
 	require.NoError(t, err)
 	assert.True(t, isValid)
-	// BMP MIME类型在不同系统可能不同
-	assert.Contains(t, []string{"image/bmp", "image/x-ms-bmp"}, mimeType)
+	assert.Equal(t, "image/bmp", mimeType)
 }
 
 // TestIsImage_InvalidType 测试非图片类型
@@ -81,7 +82,7 @@ func TestIsImage_InvalidType(t *testing.T) {
 	data := []byte("This is not an image file")
 	reader := bytes.NewReader(data)
 
-	isValid, mimeType, err := IsImage(reader)
+	isValid, mimeType, err := IsImage(reader, "test.txt")
 	require.NoError(t, err)
 	assert.False(t, isValid)
 	assert.Empty(t, mimeType)
@@ -91,7 +92,7 @@ func TestIsImage_InvalidType(t *testing.T) {
 func TestIsImage_Empty(t *testing.T) {
 	reader := strings.NewReader("")
 
-	isValid, mimeType, err := IsImage(reader)
+	isValid, mimeType, err := IsImage(reader, "test.jpg")
 	require.NoError(t, err)
 	assert.False(t, isValid)
 	assert.Empty(t, mimeType)
@@ -103,7 +104,7 @@ func TestIsImage_PDF(t *testing.T) {
 	data := []byte("%PDF-1.4")
 	reader := bytes.NewReader(data)
 
-	isValid, mimeType, err := IsImage(reader)
+	isValid, mimeType, err := IsImage(reader, "test.pdf")
 	require.NoError(t, err)
 	assert.False(t, isValid)
 	assert.Empty(t, mimeType)
@@ -115,7 +116,7 @@ func TestIsImage_Zip(t *testing.T) {
 	data := []byte{0x50, 0x4B, 0x03, 0x04}
 	reader := bytes.NewReader(data)
 
-	isValid, mimeType, err := IsImage(reader)
+	isValid, mimeType, err := IsImage(reader, "test.zip")
 	require.NoError(t, err)
 	assert.False(t, isValid)
 	assert.Empty(t, mimeType)
@@ -126,7 +127,7 @@ func TestIsImage_StreamReset(t *testing.T) {
 	data := []byte{0xFF, 0xD8, 0xFF, 0xE0}
 	reader := bytes.NewReader(data)
 
-	_, _, err := IsImage(reader)
+	_, _, err := IsImage(reader, "test.jpg")
 	require.NoError(t, err)
 
 	pos, _ := reader.Seek(0, 1)
@@ -137,6 +138,27 @@ func TestIsImage_StreamReset(t *testing.T) {
 	n, _ := reader.Read(buf)
 	assert.Equal(t, 4, n)
 	assert.Equal(t, data, buf)
+}
+
+// TestIsImage_WrongExtension 测试扩展名与内容不匹配
+func TestIsImage_WrongExtension(t *testing.T) {
+	// JPEG 内容但 PNG 扩展名
+	data := []byte{0xFF, 0xD8, 0xFF, 0xE0}
+	reader := bytes.NewReader(data)
+
+	isValid, _, err := IsImage(reader, "test.png")
+	require.NoError(t, err)
+	assert.False(t, isValid)
+}
+
+// TestIsImage_NoExtension 测试无扩展名
+func TestIsImage_NoExtension(t *testing.T) {
+	data := []byte{0xFF, 0xD8, 0xFF, 0xE0}
+	reader := bytes.NewReader(data)
+
+	isValid, _, err := IsImage(reader, "test")
+	require.NoError(t, err)
+	assert.False(t, isValid)
 }
 
 // TestIsImageBytes_JPEG 测试字节切片验证 - JPEG
@@ -189,7 +211,7 @@ func BenchmarkIsImage(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		reader := bytes.NewReader(data)
-		_, _, err := IsImage(reader)
+		_, _, err := IsImage(reader, "test.jpg")
 		if err != nil {
 			b.Fatal(err)
 		}

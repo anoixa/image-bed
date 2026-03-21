@@ -1,13 +1,21 @@
 definitions:
+  admin.SetTransferModeRequest:
+    properties:
+      mode:
+        description: auto, always_proxy, always_direct
+        type: string
+    required:
+    - mode
+    type: object
   albums.AddImagesToAlbumRequest:
     properties:
-      image_ids:
+      identifiers:
         items:
-          type: integer
+          type: string
         minItems: 1
         type: array
     required:
-    - image_ids
+    - identifiers
     type: object
   albums.AlbumDTO:
     properties:
@@ -92,6 +100,16 @@ definitions:
       total_pages:
         type: integer
     type: object
+  albums.RemoveImagesFromAlbumRequest:
+    properties:
+      identifiers:
+        items:
+          type: string
+        minItems: 1
+        type: array
+    required:
+    - identifiers
+    type: object
   albums.UpdateAlbumRequest:
     properties:
       description:
@@ -152,6 +170,17 @@ definitions:
     type: object
   config.ImageProcessingSettings:
     type: object
+  github_com_anoixa_image-bed_api_handler_user.ChangePasswordRequest:
+    properties:
+      new_password:
+        minLength: 6
+        type: string
+      old_password:
+        type: string
+    required:
+    - new_password
+    - old_password
+    type: object
   images.DeleteRequestBody:
     properties:
       identifiers:
@@ -171,6 +200,8 @@ definitions:
         type: integer
       id:
         type: integer
+      identifier:
+        type: string
       is_public:
         type: boolean
       mime_type:
@@ -237,8 +268,6 @@ definitions:
     properties:
       is_public:
         type: boolean
-    required:
-    - is_public
     type: object
   key.req:
     properties:
@@ -264,7 +293,7 @@ definitions:
       category:
         $ref: '#/definitions/models.ConfigCategory'
       config:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
       description:
         type: string
@@ -286,7 +315,7 @@ definitions:
       category:
         $ref: '#/definitions/models.ConfigCategory'
       config:
-        additionalProperties: true
+        additionalProperties: {}
         type: object
     required:
     - category
@@ -308,6 +337,112 @@ definitions:
         type: string
       width:
         type: integer
+    type: object
+  system.CacheStatus:
+    properties:
+      provider:
+        type: string
+      type:
+        type: string
+    type: object
+  system.DirStatus:
+    properties:
+      file_count:
+        type: integer
+      path:
+        type: string
+      size_str:
+        type: string
+      total_size:
+        type: integer
+    type: object
+  system.MemoryStatus:
+    properties:
+      gc_sys_mb:
+        type: number
+      gc_sys_str:
+        type: string
+      goroutines:
+        type: integer
+      heap_alloc_mb:
+        type: number
+      heap_alloc_str:
+        type: string
+      heap_in_use_mb:
+        type: number
+      heap_in_use_str:
+        type: string
+      heap_sys_mb:
+        type: number
+      heap_sys_str:
+        type: string
+      last_gc_time:
+        type: integer
+      num_gc:
+        type: integer
+      stack_sys_mb:
+        type: number
+      stack_sys_str:
+        type: string
+      total_alloc_mb:
+        type: number
+      total_alloc_str:
+        type: string
+    type: object
+  system.MetricsResponse:
+    properties:
+      avg_duration_ms:
+        type: number
+      request_count:
+        type: integer
+      request_duration_ms:
+        type: integer
+    type: object
+  system.RuntimeStatus:
+    properties:
+      num_cpu:
+        type: integer
+    type: object
+  system.StatusResponse:
+    properties:
+      cache:
+        allOf:
+        - $ref: '#/definitions/system.CacheStatus'
+        description: 缓存信息
+      commit_hash:
+        type: string
+      data_dir:
+        allOf:
+        - $ref: '#/definitions/system.DirStatus'
+        description: 数据目录信息
+      environment:
+        description: 运行环境
+        type: string
+      go_version:
+        type: string
+      memory:
+        allOf:
+        - $ref: '#/definitions/system.MemoryStatus'
+        description: 内存统计
+      runtime:
+        allOf:
+        - $ref: '#/definitions/system.RuntimeStatus'
+        description: 运行时信息
+      version:
+        description: 版本信息
+        type: string
+    type: object
+  system.VersionResponse:
+    properties:
+      commit_hash:
+        type: string
+      version:
+        type: string
+    type: object
+  user.ChangePasswordResponse:
+    properties:
+      message:
+        type: string
     type: object
 info:
   contact: {}
@@ -356,21 +491,14 @@ paths:
     post:
       consumes:
       - application/json
-      description: Logout user by invalidating refresh token (requires refresh_token
-        and device_id cookies)
+      description: Logout user by invalidating session. Works with any combination
+        of cookies (refresh_token, device_id, or both). Always clears cookies and
+        returns 200 for idempotency.
       produces:
       - application/json
       responses:
         "200":
-          description: Logout successful
-          schema:
-            $ref: '#/definitions/common.Response'
-        "401":
-          description: Refresh token not found / invalid session
-          schema:
-            $ref: '#/definitions/common.Response'
-        "500":
-          description: Internal server error
+          description: Logout successful or already logged out
           schema:
             $ref: '#/definitions/common.Response'
       summary: User logout
@@ -923,6 +1051,69 @@ paths:
       summary: Reload storage configuration
       tags:
       - admin
+  /api/v1/admin/transfer-mode:
+    get:
+      consumes:
+      - application/json
+      description: Get the global image transfer mode (auto, always_proxy, always_direct)
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Transfer mode
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  additionalProperties:
+                    type: string
+                  type: object
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Get global transfer mode
+      tags:
+      - admin
+    post:
+      consumes:
+      - application/json
+      description: Set the global image transfer mode
+      parameters:
+      - description: Transfer mode request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/admin.SetTransferModeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/common.Response'
+        "400":
+          description: Invalid mode
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Set global transfer mode
+      tags:
+      - admin
   /api/v1/albums:
     get:
       consumes:
@@ -1153,14 +1344,14 @@ paths:
     post:
       consumes:
       - application/json
-      description: Add multiple images to an existing album
+      description: Add multiple images to an existing album using image identifiers
       parameters:
       - description: Album ID
         in: path
         name: id
         required: true
         type: integer
-      - description: Image IDs to add
+      - description: Image identifiers to add
         in: body
         name: request
         required: true
@@ -1244,6 +1435,56 @@ paths:
       security:
       - ApiKeyAuth: []
       summary: Remove image from album
+      tags:
+      - albums
+  /api/v1/albums/{id}/images/remove:
+    post:
+      consumes:
+      - application/json
+      description: Remove multiple images from an album at once (images themselves
+        are not deleted)
+      parameters:
+      - description: Album ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Image identifiers to remove
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/albums.RemoveImagesFromAlbumRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Images removed from album successfully
+          schema:
+            $ref: '#/definitions/common.Response'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "403":
+          description: Permission denied
+          schema:
+            $ref: '#/definitions/common.Response'
+        "404":
+          description: Album not found
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Remove multiple images from album
       tags:
       - albums
   /api/v1/dashboard/stats:
@@ -1738,28 +1979,47 @@ paths:
       summary: Enable API key
       tags:
       - keys
-  /health:
-    get:
+  /api/v1/user/password:
+    post:
       consumes:
       - application/json
-      description: Check the health status of the application and its dependencies
-        (database, cache, storage)
+      description: 验证旧密码并更新为新密码
+      parameters:
+      - description: 修改密码请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_anoixa_image-bed_api_handler_user.ChangePasswordRequest'
       produces:
       - application/json
       responses:
         "200":
-          description: Service is healthy
+          description: OK
           schema:
-            additionalProperties: true
-            type: object
-        "503":
-          description: Service is unhealthy
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/user.ChangePasswordResponse'
+              type: object
+        "400":
+          description: 请求参数错误
           schema:
-            additionalProperties: true
-            type: object
-      summary: Health check
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: 旧密码错误
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: 服务器内部错误
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: 修改用户密码
       tags:
-      - health
+      - user
   /images/{identifier}:
     get:
       consumes:
@@ -1804,7 +2064,8 @@ paths:
     get:
       consumes:
       - application/json
-      description: Get a random image, optionally filtered by album and dimensions
+      description: Get a random image, optionally filtered by album, dimensions, WebP
+        availability and file size
       parameters:
       - description: 'Response format: json or image (default: image)'
         in: query
@@ -1830,6 +2091,14 @@ paths:
         in: query
         name: max_height
         type: integer
+      - description: 'Only return images with WebP variant (default: false)'
+        in: query
+        name: require_webp
+        type: boolean
+      - description: Maximum file size in bytes (e.g., 10485760 for 10MB)
+        in: query
+        name: max_file_size
+        type: integer
       produces:
       - image/*
       - application/json
@@ -1853,6 +2122,84 @@ paths:
       summary: Get random image
       tags:
       - images
+  /system/health:
+    get:
+      consumes:
+      - application/json
+      description: Check the health status of the application and its dependencies
+        (database, cache, storage)
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Service is healthy
+          schema:
+            additionalProperties: true
+            type: object
+        "503":
+          description: Service is unhealthy
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Health check
+      tags:
+      - system
+  /system/metrics:
+    get:
+      consumes:
+      - application/json
+      description: Get application metrics and statistics
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Metrics data
+          schema:
+            $ref: '#/definitions/system.MetricsResponse'
+      summary: Get metrics
+      tags:
+      - system
+  /system/status:
+    get:
+      consumes:
+      - application/json
+      description: Get detailed system runtime information including version, memory
+        stats, goroutines, GC count, and cache info
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: System status
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/system.StatusResponse'
+              type: object
+      summary: Get system status
+      tags:
+      - system
+  /system/version:
+    get:
+      consumes:
+      - application/json
+      description: Get application version and commit hash
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Version info
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/system.VersionResponse'
+              type: object
+      summary: Get version
+      tags:
+      - system
   /thumbnails/{identifier}:
     get:
       consumes:

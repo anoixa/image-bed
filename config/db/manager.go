@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -97,6 +98,11 @@ func (m *Manager) Subscribe(eventType EventType, handler EventHandler) {
 	m.eventBus.Subscribe(eventType, handler)
 }
 
+// ClearCache 清除配置缓存
+func (m *Manager) ClearCache() {
+	m.cache.Invalidate(models.ConfigCategoryStorage)
+}
+
 // CreateConfig 创建配置
 func (m *Manager) CreateConfig(ctx context.Context, req *models.SystemConfigStoreRequest, userID uint) (*models.ConfigResponse, error) {
 	baseKey := fmt.Sprintf("%s:%s", req.Category, req.Name)
@@ -170,7 +176,7 @@ func (m *Manager) UpdateConfig(ctx context.Context, id uint, req *models.SystemC
 }
 
 // mergeConfig 合并配置
-func (m *Manager) mergeConfig(config *models.SystemConfig, newConfig map[string]interface{}) error {
+func (m *Manager) mergeConfig(config *models.SystemConfig, newConfig map[string]any) error {
 	existingConfig, err := m.crypto.Decrypt(config.ConfigJSON)
 	if err != nil {
 		return fmt.Errorf("failed to decrypt existing config: %w", err)
@@ -372,7 +378,7 @@ func (m *Manager) EnsureDefaultJWTConfig(ctx context.Context) error {
 	req := &models.SystemConfigStoreRequest{
 		Category: models.ConfigCategoryJWT,
 		Name:     "JWT Settings",
-		Config: map[string]interface{}{
+		Config: map[string]any{
 			"secret":            secret,
 			"access_token_ttl":  "15m",
 			"refresh_token_ttl": "168h",
@@ -404,7 +410,7 @@ func (m *Manager) UpdateJWTConfig(ctx context.Context, jwtConfig *JWTConfig) err
 	req := &models.SystemConfigStoreRequest{
 		Category: config.Category,
 		Name:     config.Name,
-		Config: map[string]interface{}{
+		Config: map[string]any{
 			"secret":            jwtConfig.Secret,
 			"access_token_ttl":  jwtConfig.AccessTokenTTL,
 			"refresh_token_ttl": jwtConfig.RefreshTokenTTL,
@@ -424,7 +430,8 @@ func (m *Manager) GetStorageConfigs(ctx context.Context) ([]storage.StorageConfi
 		return cached, nil
 	}
 
-	configs, err := m.repo.List(ctx, models.ConfigCategoryStorage, true)
+	// 加载所有存储配置
+	configs, err := m.repo.List(ctx, models.ConfigCategoryStorage, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list storage configs: %w", err)
 	}
@@ -449,21 +456,15 @@ func (m *Manager) GetStorageConfigs(ctx context.Context) ([]storage.StorageConfi
 		switch storageType {
 		case "local":
 			storageCfg.LocalPath = getStringFromMap(configMap, "local_path", "./data/upload")
-		case "minio":
+		case "s3":
 			storageCfg.Endpoint = getStringFromMap(configMap, "endpoint", "")
+			storageCfg.Region = getStringFromMap(configMap, "region", "us-east-1")
+			storageCfg.BucketName = getStringFromMap(configMap, "bucket_name", "")
 			storageCfg.AccessKeyID = getStringFromMap(configMap, "access_key_id", "")
 			storageCfg.SecretAccessKey = getStringFromMap(configMap, "secret_access_key", "")
-			storageCfg.BucketName = getStringFromMap(configMap, "bucket_name", "")
-			if val, ok := configMap["use_ssl"]; ok {
-				switch v := val.(type) {
-				case bool:
-					storageCfg.UseSSL = v
-				case string:
-					storageCfg.UseSSL = v == "true" || v == "1" || v == "yes"
-				}
-			} else {
-				storageCfg.UseSSL = true
-			}
+			storageCfg.ForcePathStyle = getBoolFromMap(configMap, "force_path_style", true)
+			storageCfg.PublicDomain = getStringFromMap(configMap, "public_domain", "")
+			storageCfg.IsPrivate = getBoolFromMap(configMap, "is_private", false)
 		case "webdav":
 			storageCfg.WebDAVURL = getStringFromMap(configMap, "webdav_url", "")
 			storageCfg.WebDAVUsername = getStringFromMap(configMap, "webdav_username", "")
@@ -478,24 +479,25 @@ func (m *Manager) GetStorageConfigs(ctx context.Context) ([]storage.StorageConfi
 	return result, nil
 }
 
-// GetDefaultStorageConfigID 获取默认存储配置 ID
+// GetDefaultStorageConfigID 获取默认存储配置 ID（只考虑启用的）
 func (m *Manager) GetDefaultStorageConfigID(ctx context.Context) (uint, error) {
-	configs, err := m.GetStorageConfigs(ctx)
-	if err != nil {
-		return 0, err
+	// 优先获取启用的默认配置
+	config, err := m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryStorage)
+	if err == nil && config != nil {
+		return config.ID, nil
 	}
 
-	for _, cfg := range configs {
-		if cfg.IsDefault {
-			return cfg.ID, nil
-		}
+	// 如果没有默认配置，获取第一个启用的配置
+	configs, err := m.repo.List(ctx, models.ConfigCategoryStorage, true)
+	if err != nil {
+		return 0, err
 	}
 
 	if len(configs) > 0 {
 		return configs[0].ID, nil
 	}
 
-	return 0, fmt.Errorf("no storage config available")
+	return 0, fmt.Errorf("no enabled storage config available")
 }
 
 // ensureDefaultLocalStorageConfig 确保存在默认本地存储配置
@@ -524,7 +526,7 @@ func (m *Manager) ensureDefaultLocalStorageConfig(ctx context.Context) error {
 	req := &models.SystemConfigStoreRequest{
 		Category: models.ConfigCategoryStorage,
 		Name:     "Local Storage",
-		Config: map[string]interface{}{
+		Config: map[string]any{
 			"type":       "local",
 			"local_path": "./data/upload",
 		},
@@ -540,4 +542,81 @@ func (m *Manager) ensureDefaultLocalStorageConfig(ctx context.Context) error {
 
 	log.Println("[ConfigManager] Default local storage config created successfully")
 	return nil
+}
+
+// parseBool 解析任意类型的值为 bool
+// 支持 bool、string、int/float 类型
+func parseBool(val any, defaultValue bool) bool {
+	switch v := val.(type) {
+	case bool:
+		return v
+	case string:
+		return v == "true" || v == "1" || v == "yes" || v == "on"
+	case int:
+		return v != 0
+	case int64:
+		return v != 0
+	case float64:
+		return v != 0
+	case json.Number:
+		n, err := v.Int64()
+		return err == nil && n != 0
+	default:
+		return defaultValue
+	}
+}
+
+// === 全局转发模式配置 ===
+
+const globalTransferModeKey = "system:transfer_mode"
+
+// GetGlobalTransferMode 获取全局转发模式
+func (m *Manager) GetGlobalTransferMode(ctx context.Context) storage.TransferMode {
+	config, err := m.repo.GetByKey(ctx, globalTransferModeKey)
+	if err != nil {
+		return storage.TransferModeAuto // 默认 auto
+	}
+
+	configMap, err := m.crypto.Decrypt(config.ConfigJSON)
+	if err != nil {
+		log.Printf("[ConfigManager] Failed to decrypt transfer mode: %v", err)
+		return storage.TransferModeAuto
+	}
+
+	mode, ok := configMap["mode"].(string)
+	if !ok {
+		return storage.TransferModeAuto
+	}
+
+	return storage.TransferMode(mode)
+}
+
+// SetGlobalTransferMode 设置全局转发模式
+func (m *Manager) SetGlobalTransferMode(ctx context.Context, mode storage.TransferMode) error {
+	configMap := map[string]any{
+		"mode": string(mode),
+	}
+
+	encryptedJSON, err := m.crypto.Encrypt(configMap)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt transfer mode: %w", err)
+	}
+
+	// 查找或创建配置
+	existing, err := m.repo.GetByKey(ctx, globalTransferModeKey)
+	if err != nil {
+		// 创建新配置
+		return m.repo.Create(ctx, &models.SystemConfig{
+			Category:    models.ConfigCategorySystem,
+			Name:        "Global Transfer Mode",
+			Key:         globalTransferModeKey,
+			ConfigJSON:  encryptedJSON,
+			IsEnabled:   true,
+			Description: "全局图片转发模式: auto(自动), always_proxy(总是代理), always_direct(总是直链)",
+		})
+	}
+
+	// 更新配置
+	existing.ConfigJSON = encryptedJSON
+	return m.repo.Update(ctx, existing)
 }

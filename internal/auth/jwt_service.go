@@ -124,7 +124,7 @@ func (s *JWTService) applyConfig(jwtConfig *configSvc.JWTConfig) error {
 	return nil
 }
 
-// reloadConfig 重新加载 JWT 配置（热重载）
+// reloadConfig 重新加载 JWT 配置
 func (s *JWTService) reloadConfig() error {
 	if s.configManager == nil {
 		return errors.New("config manager not initialized")
@@ -141,7 +141,7 @@ func (s *JWTService) reloadConfig() error {
 	return s.applyConfig(jwtConfig)
 }
 
-// GetConfig 获取当前 JWT 配置（只读）
+// GetConfig 获取当前 JWT 配置
 func (s *JWTService) GetConfig() TokenConfig {
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
@@ -152,7 +152,7 @@ func (s *JWTService) GetConfig() TokenConfig {
 	}
 }
 
-// SetConfig 设置 JWT 配置（仅用于测试）
+// SetConfig 设置 JWT 配置
 func (s *JWTService) SetConfig(config TokenConfig) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -250,7 +250,7 @@ func (s *JWTService) ParseToken(tokenString string) (jwt.MapClaims, error) {
 		return nil, errors.New("JWT secret is not initialized")
 	}
 
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}

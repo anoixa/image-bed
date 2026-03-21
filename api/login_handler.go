@@ -120,8 +120,7 @@ func (h *LoginHandler) LoginHandlerFunc(context *gin.Context) {
 			common.RespondError(context, http.StatusUnauthorized, "Invalid credentials")
 			return
 		}
-		// TODO: remove detailed error message in production
-		common.RespondError(context, http.StatusInternalServerError, err.Error())
+		common.RespondError(context, http.StatusInternalServerError, "Login failed")
 		return
 	}
 
@@ -250,8 +249,9 @@ func (h *LoginHandler) clearAuthCookies(c *gin.Context) {
 	if h.cfg != nil {
 		domain = utils.ExtractCookieDomain(h.cfg.ServerDomain)
 	}
+	secure := config.IsProduction()
 
 	// 将 MaxAge 设置为 -1 来让浏览器删除 Cookie
-	c.SetCookie("refresh_token", "", -1, path, domain, false, true)
-	c.SetCookie("device_id", "", -1, path, domain, false, true)
+	c.SetCookie("refresh_token", "", -1, path, domain, secure, true)
+	c.SetCookie("device_id", "", -1, path, domain, secure, true)
 }

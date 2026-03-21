@@ -44,7 +44,7 @@ func NewMemoryCache(config MemoryConfig) (*MemoryCache, error) {
 }
 
 // Set 设置缓存项
-func (m *MemoryCache) Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error {
+func (m *MemoryCache) Set(ctx context.Context, key string, value any, expiration time.Duration) error {
 	size := int64(1)
 	if data, ok := value.([]byte); ok {
 		size = int64(len(data))
@@ -58,7 +58,7 @@ func (m *MemoryCache) Set(ctx context.Context, key string, value interface{}, ex
 }
 
 // Get 获取缓存项
-func (m *MemoryCache) Get(ctx context.Context, key string, dest interface{}) error {
+func (m *MemoryCache) Get(ctx context.Context, key string, dest any) error {
 	value, found := m.client.Get(key)
 	if !found {
 		return ErrCacheMiss

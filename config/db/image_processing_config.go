@@ -29,7 +29,6 @@ type ImageProcessingSettings struct {
 	AVIFExperimental         bool     `json:"avif_experimental" mapstructure:"avif_experimental"`
 	SkipSmallerThan          int      `json:"skip_smaller_than" mapstructure:"skip_smaller_than"`
 	MaxDimension             int      `json:"max_dimension" mapstructure:"max_dimension"`
-	MaxRetries               int      `json:"max_retries" mapstructure:"max_retries"`
 
 	// 扫描器配置
 	ScannerEnabled       bool          `json:"scanner_enabled" mapstructure:"scanner_enabled"`
@@ -57,7 +56,6 @@ func DefaultImageProcessingSettings() *ImageProcessingSettings {
 		AVIFExperimental:         false,
 		SkipSmallerThan:          10,
 		MaxDimension:             4096,
-		MaxRetries:               3,
 
 		// 扫描器默认值
 		ScannerEnabled:       true,
@@ -182,7 +180,7 @@ func (m *Manager) ensureDefaultImageProcessingConfig(ctx context.Context) error 
 	req := &models.SystemConfigStoreRequest{
 		Category: models.ConfigCategoryImageProcessing,
 		Name:     "Image Processing Settings",
-		Config: map[string]interface{}{
+		Config: map[string]any{
 			"thumbnail_enabled":          defaultSettings.ThumbnailEnabled,
 			"thumbnail_sizes":            defaultSettings.ThumbnailSizes,
 			"thumbnail_quality":          defaultSettings.ThumbnailQuality,
@@ -194,7 +192,6 @@ func (m *Manager) ensureDefaultImageProcessingConfig(ctx context.Context) error 
 			"avif_experimental":          defaultSettings.AVIFExperimental,
 			"skip_smaller_than":          defaultSettings.SkipSmallerThan,
 			"max_dimension":              defaultSettings.MaxDimension,
-			"max_retries":                defaultSettings.MaxRetries,
 			"scanner_enabled":            defaultSettings.ScannerEnabled,
 			"scanner_interval":           defaultSettings.ScannerInterval,
 			"scanner_batch_size":         defaultSettings.ScannerBatchSize,
@@ -233,7 +230,7 @@ func (m *Manager) SaveImageProcessingSettings(ctx context.Context, settings *Ima
 	req := &models.SystemConfigStoreRequest{
 		Category: models.ConfigCategoryImageProcessing,
 		Name:     "Image Processing Settings",
-		Config: map[string]interface{}{
+		Config: map[string]any{
 			"thumbnail_enabled":          settings.ThumbnailEnabled,
 			"thumbnail_sizes":            settings.ThumbnailSizes,
 			"thumbnail_quality":          settings.ThumbnailQuality,
@@ -245,7 +242,6 @@ func (m *Manager) SaveImageProcessingSettings(ctx context.Context, settings *Ima
 			"avif_experimental":          settings.AVIFExperimental,
 			"skip_smaller_than":          settings.SkipSmallerThan,
 			"max_dimension":              settings.MaxDimension,
-			"max_retries":                settings.MaxRetries,
 			"scanner_enabled":            settings.ScannerEnabled,
 			"scanner_interval":           settings.ScannerInterval,
 			"scanner_batch_size":         settings.ScannerBatchSize,
@@ -268,12 +264,12 @@ func (m *Manager) InitializeImageProcessingConfig(ctx context.Context) error {
 }
 
 // MaskSensitiveData 脱敏敏感数据
-func MaskSensitiveData(config map[string]interface{}) map[string]interface{} {
+func MaskSensitiveData(config map[string]any) map[string]any {
 	sensitiveFields := []string{
 		"secret", "secret_access_key", "access_key_id", "password",
 	}
 
-	result := make(map[string]interface{})
+	result := make(map[string]any)
 	for k, v := range config {
 		isSensitive := false
 		for _, sf := range sensitiveFields {
@@ -299,7 +295,7 @@ func BoolPtr(b bool) *bool {
 }
 
 // getStringFromMap 从 map 中获取字符串值，提供默认值
-func getStringFromMap(m map[string]interface{}, key, defaultValue string) string {
+func getStringFromMap(m map[string]any, key, defaultValue string) string {
 	if val, ok := m[key]; ok {
 		if str, ok := val.(string); ok {
 			return str

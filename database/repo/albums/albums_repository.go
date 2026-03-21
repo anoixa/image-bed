@@ -154,9 +154,9 @@ func (r *Repository) AddImagesToAlbum(albumID, userID uint, imageIDs []uint) err
 		}
 
 		// 批量插入关联记录
-		associations := make([]map[string]interface{}, len(imageIDs))
+		associations := make([]map[string]any, len(imageIDs))
 		for i, id := range imageIDs {
-			associations[i] = map[string]interface{}{
+			associations[i] = map[string]any{
 				"album_id": albumID,
 				"image_id": id,
 			}
@@ -205,6 +205,37 @@ func (r *Repository) AlbumExists(albumID uint) (bool, error) {
 // UpdateAlbum 更新相册
 func (r *Repository) UpdateAlbum(album *models.Album) error {
 	return r.db.Save(album).Error
+}
+
+// RemoveImagesFromAlbum 批量从相册移除图片
+func (r *Repository) RemoveImagesFromAlbum(albumID, userID uint, imageIDs []uint) (int64, error) {
+	if len(imageIDs) == 0 {
+		return 0, nil
+	}
+
+	var result int64
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		var album models.Album
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&album, "id = ? AND user_id = ?", albumID, userID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("album not found or access denied")
+			}
+			return err
+		}
+
+		// 批量删除关联记录
+		res := tx.Table("album_images").
+			Where("album_id = ? AND image_id IN ?", albumID, imageIDs).
+			Delete(nil)
+		if res.Error != nil {
+			return res.Error
+		}
+
+		result = res.RowsAffected
+		return nil
+	})
+
+	return result, err
 }
 
 // WithContext 返回带上下文的仓库

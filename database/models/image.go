@@ -1,6 +1,10 @@
 package models
 
-import "gorm.io/gorm"
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
 
 type ImageVariantStatus int8
 
@@ -23,15 +27,19 @@ func (s ImageVariantStatus) HasPendingVariants() bool {
 }
 
 type Image struct {
-	gorm.Model
-	Identifier      string `gorm:"uniqueIndex:idx_identifier;not null"`
+	ID        uint `gorm:"primarykey"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt gorm.DeletedAt `gorm:"uniqueIndex:idx_filehash_deleted;index"`
+
+	Identifier      string `gorm:"index:idx_identifier;not null"`
 	StoragePath     string `gorm:"not null"`
 	OriginalName    string `gorm:"not null"`
 	FileSize        int64  `gorm:"not null"`
 	MimeType        string `gorm:"not null"`
 	StorageConfigID uint   `gorm:"column:storage_config_id;not null"`
 
-	FileHash string `gorm:"uniqueIndex:idx_filehash;not null"`
+	FileHash string `gorm:"uniqueIndex:idx_filehash_deleted;not null"`
 	Width    int
 	Height   int
 	IsPublic bool `gorm:"default:true;not null"`

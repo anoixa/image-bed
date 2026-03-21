@@ -42,7 +42,7 @@ func LogIfDev(msg string) {
 }
 
 // LogIfDevf 仅在开发版本时格式化输出日志
-func LogIfDevf(format string, v ...interface{}) {
+func LogIfDevf(format string, v ...any) {
 	if config.IsDevelopment() {
 		log.Printf(format, v...)
 	}

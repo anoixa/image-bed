@@ -11,7 +11,6 @@ import (
 	"github.com/anoixa/image-bed/utils/format"
 )
 
-// StatsRepository 统计仓库接口
 type StatsRepository interface {
 	GetOverviewStats() (*dashboard.OverviewStats, error)
 	GetImageTimeStats() (*dashboard.ImageTimeStats, error)
@@ -19,14 +18,12 @@ type StatsRepository interface {
 	GetDailyStats(days int) ([]dashboard.DailyStat, error)
 }
 
-// Service Dashboard 统计服务
 type Service struct {
 	repo     StatsRepository
 	cache    cache.Provider
 	cacheTTL time.Duration
 }
 
-// NewService 创建新的 Dashboard 统计服务
 func NewService(repo StatsRepository, cacheProvider cache.Provider) *Service {
 	return &Service{
 		repo:     repo,
@@ -35,14 +32,12 @@ func NewService(repo StatsRepository, cacheProvider cache.Provider) *Service {
 	}
 }
 
-// StatsResponse Dashboard 统计响应
 type StatsResponse struct {
 	Overview     OverviewStats     `json:"overview"`
 	StorageStats []StorageStatItem `json:"storage_stats"`
 	Trend        TrendStats        `json:"trend"`
 }
 
-// OverviewStats 概览统计
 type OverviewStats struct {
 	Images  ImageStats   `json:"images"`
 	Albums  CountStats   `json:"albums"`
@@ -50,7 +45,6 @@ type OverviewStats struct {
 	Storage StorageStats `json:"storage"`
 }
 
-// ImageStats 图片统计
 type ImageStats struct {
 	Total     int64 `json:"total"`
 	Today     int64 `json:"today"`
@@ -59,18 +53,15 @@ type ImageStats struct {
 	ThisMonth int64 `json:"this_month"`
 }
 
-// CountStats 数量统计
 type CountStats struct {
 	Total int64 `json:"total"`
 }
 
-// StorageStats 存储统计
 type StorageStats struct {
 	TotalSize      int64  `json:"total_size"`
 	TotalSizeHuman string `json:"total_size_human"`
 }
 
-// StorageStatItem 单个存储统计
 type StorageStatItem struct {
 	StorageID   uint    `json:"storage_id"`
 	StorageName string  `json:"storage_name"`
@@ -80,14 +71,12 @@ type StorageStatItem struct {
 	Percentage  float64 `json:"percentage"`
 }
 
-// TrendStats 趋势统计
 type TrendStats struct {
 	Period string   `json:"period"`
 	Dates  []string `json:"dates"`
 	Data   []int64  `json:"data"`
 }
 
-// GetStats 获取 Dashboard 统计数据
 func (s *Service) GetStats(ctx context.Context) (*StatsResponse, error) {
 	cacheKey := "dashboard:stats"
 
@@ -129,13 +118,11 @@ func (s *Service) GetStats(ctx context.Context) (*StatsResponse, error) {
 	return response, nil
 }
 
-// RefreshCache 刷新统计数据缓存
 func (s *Service) RefreshCache(ctx context.Context) error {
 	cacheKey := "dashboard:stats"
 	return s.cache.Delete(ctx, cacheKey)
 }
 
-// buildResponse 组装响应数据
 func (s *Service) buildResponse(
 	overview *dashboard.OverviewStats,
 	timeStats *dashboard.ImageTimeStats,
@@ -194,7 +181,6 @@ func (s *Service) buildResponse(
 	}
 }
 
-// buildTrendData 构建趋势数据
 func (s *Service) buildTrendData(stats []dashboard.DailyStat, days int) TrendStats {
 	dates := make([]string, days)
 	data := make([]int64, days)

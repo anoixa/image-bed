@@ -1,4 +1,4 @@
-package core
+package system
 
 import (
 	"context"
@@ -15,31 +15,33 @@ import (
 
 var startTime = time.Now()
 
-// HealthHandler 健康检查处理器
 type HealthHandler struct {
-	db *gorm.DB
+	db              *gorm.DB
+	storageProvider storage.Provider
 }
 
-// NewHealthHandler 创建健康检查处理器
-func NewHealthHandler(db *gorm.DB) *HealthHandler {
-	return &HealthHandler{db: db}
+func NewHealthHandler(db *gorm.DB, storageProvider storage.Provider) *HealthHandler {
+	return &HealthHandler{
+		db:              db,
+		storageProvider: storageProvider,
+	}
 }
 
-// Handle 处理健康检查请求
+// Handle
 // @Summary      Health check
 // @Description  Check the health status of the application and its dependencies (database, cache, storage)
-// @Tags         health
+// @Tags         system
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "Service is healthy"
-// @Success      503  {object}  map[string]interface{}  "Service is unhealthy"
-// @Router       /health [get]
+// @Success      200  {object}  map[string]any  "Service is healthy"
+// @Success      503  {object}  map[string]any  "Service is unhealthy"
+// @Router       /system/health [get]
 func (h *HealthHandler) Handle(context *gin.Context) {
 	sqlDB, _ := h.db.DB()
 	checks := gin.H{
 		"database": checkDatabaseHealth(sqlDB),
 		"cache":    checkCacheHealth(),
-		"storage":  checkStorageHealth(context.Request.Context()),
+		"storage":  h.checkStorageHealth(context.Request.Context()),
 	}
 
 	httpStatus := http.StatusOK
@@ -79,13 +81,12 @@ func checkCacheHealth() string {
 	return "not initialized"
 }
 
-func checkStorageHealth(ctx context.Context) string {
-	provider := storage.GetDefault()
-	if provider == nil {
+func (h *HealthHandler) checkStorageHealth(ctx context.Context) string {
+	if h.storageProvider == nil {
 		return "error: no default storage provider"
 	}
 
-	if err := provider.Health(ctx); err != nil {
+	if err := h.storageProvider.Health(ctx); err != nil {
 		return "error: " + err.Error()
 	}
 

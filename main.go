@@ -6,9 +6,9 @@ import (
 
 	_ "github.com/anoixa/image-bed/docs"
 
-	"github.com/anoixa/image-bed/config"
-
 	"github.com/anoixa/image-bed/cmd"
+	"github.com/anoixa/image-bed/config"
+	"github.com/anoixa/image-bed/utils/pool"
 )
 
 func init() {
@@ -17,6 +17,8 @@ func init() {
 }
 
 func main() {
+	pool.InitProcessEnv()
+
 	log.Printf("image bed %s (%s)", config.Version, config.CommitHash)
 	cmd.Execute()
 }

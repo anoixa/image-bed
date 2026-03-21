@@ -5,17 +5,34 @@ import (
 	"time"
 
 	"github.com/anoixa/image-bed/database/models"
+	"github.com/anoixa/image-bed/database/repo"
 	"gorm.io/gorm"
 )
 
 // Repository 图片仓库
 type Repository struct {
 	db *gorm.DB
+	*repo.GenericRepository[models.Image]
+}
+
+// RandomImageFilter 随机图片筛选条件
+type RandomImageFilter struct {
+	AlbumID          *uint
+	IncludeAllPublic bool
+	MinWidth         int
+	MinHeight        int
+	MaxWidth         int
+	MaxHeight        int
+	RequireWebP      bool  // 是否要求必须有WebP变体
+	MaxFileSize      int64 // 最大文件大小（字节）
 }
 
 // NewRepository 创建新的图片仓库
 func NewRepository(db *gorm.DB) *Repository {
-	return &Repository{db: db}
+	return &Repository{
+		db:                db,
+		GenericRepository: repo.NewGenericRepository[models.Image](db),
+	}
 }
 
 // SaveImage 保存图片
@@ -26,6 +43,13 @@ func (r *Repository) SaveImage(image *models.Image) error {
 // CreateWithTx 在指定事务中创建图片记录
 func (r *Repository) CreateWithTx(tx *gorm.DB, image *models.Image) error {
 	return tx.Create(image).Error
+}
+
+// CountImagesByStoragePath 统计使用相同存储路径的图片数量（用于秒传引用计数）
+func (r *Repository) CountImagesByStoragePath(storagePath string) (int64, error) {
+	var count int64
+	err := r.db.Model(&models.Image{}).Where("storage_path = ? AND deleted_at IS NULL", storagePath).Count(&count).Error
+	return count, err
 }
 
 // GetImageByHash 通过哈希获取图片
@@ -57,7 +81,7 @@ func (r *Repository) DeleteImagesByIdentifiersAndUser(identifiers []string, user
 	return result.RowsAffected, result.Error
 }
 
-// GetImagesByIdentifiersAndUser 批量查询用户的图片（使用 IN 语句，避免 N+1 查询）
+// GetImagesByIdentifiersAndUser 批量查询用户的图片
 func (r *Repository) GetImagesByIdentifiersAndUser(identifiers []string, userID uint) ([]*models.Image, error) {
 	if len(identifiers) == 0 {
 		return []*models.Image{}, nil
@@ -178,7 +202,7 @@ func (r *Repository) GetSoftDeletedImageByHash(hash string) (*models.Image, erro
 }
 
 // UpdateImageByIdentifier 通过标识符更新图片
-func (r *Repository) UpdateImageByIdentifier(identifier string, updates map[string]interface{}) (*models.Image, error) {
+func (r *Repository) UpdateImageByIdentifier(identifier string, updates map[string]any) (*models.Image, error) {
 	result := r.db.Model(&models.Image{}).Where("identifier = ?", identifier).Updates(updates)
 	if result.Error != nil {
 		return nil, result.Error
@@ -259,9 +283,22 @@ func (r *Repository) WithContext(ctx context.Context) *Repository {
 	return &Repository{db: r.db.WithContext(ctx)}
 }
 
-// DB 返回底层 *gorm.DB 实例
+// DB
 func (r *Repository) DB() *gorm.DB {
 	return r.db
+}
+
+// RemoveImageFromAllAlbums 从所有相册中移除图片关联
+func (r *Repository) RemoveImageFromAllAlbums(imageID uint) error {
+	return r.db.Table("album_images").Where("image_id = ?", imageID).Delete(nil).Error
+}
+
+// RemoveImagesFromAllAlbums 批量从所有相册中移除图片关联
+func (r *Repository) RemoveImagesFromAllAlbums(imageIDs []uint) error {
+	if len(imageIDs) == 0 {
+		return nil
+	}
+	return r.db.Table("album_images").Where("image_id IN ?", imageIDs).Delete(nil).Error
 }
 
 // UpdateVariantStatus 更新图片变体状态
@@ -276,23 +313,12 @@ func (r *Repository) GetImagesByVariantStatus(statuses []models.ImageVariantStat
 	return images, err
 }
 
-// RandomImageFilter 随机图片筛选条件
-type RandomImageFilter struct {
-	AlbumID          *uint
-	IncludeAllPublic bool
-	MinWidth         int
-	MinHeight        int
-	MaxWidth         int
-	MaxHeight        int
-}
-
 // GetRandomPublicImage 随机获取一张公开图片
 func (r *Repository) GetRandomPublicImage(filter *RandomImageFilter) (*models.Image, error) {
 	var image models.Image
 
 	db := r.db.Where("is_public = ?", true)
 
-	// 相册筛选（仅当未配置包含所有公开图片时）
 	if filter != nil && filter.AlbumID != nil && !filter.IncludeAllPublic {
 		db = db.Joins("JOIN album_images ON album_images.image_id = images.id").
 			Where("album_images.album_id = ?", *filter.AlbumID)
@@ -311,6 +337,13 @@ func (r *Repository) GetRandomPublicImage(filter *RandomImageFilter) (*models.Im
 		}
 		if filter.MaxHeight > 0 {
 			db = db.Where("height <= ?", filter.MaxHeight)
+		}
+		// 文件大小限制
+		if filter.MaxFileSize > 0 {
+			db = db.Where("file_size <= ?", filter.MaxFileSize)
+		}
+		if filter.RequireWebP {
+			db = db.Where("variant_status = ?", models.ImageVariantStatusCompleted)
 		}
 	}
 
