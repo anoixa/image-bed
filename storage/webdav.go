@@ -27,12 +27,13 @@ type WebDAVConfig struct {
 
 // WebDAVStorage WebDAV 存储实现
 type WebDAVStorage struct {
-	client     *gowebdav.Client
-	httpClient *http.Client
-	baseURL    string
-	rootPath   string
-	username   string
-	password   string
+	client         *gowebdav.Client
+	httpClient     *http.Client
+	baseURL        string
+	rootPath       string
+	username       string
+	password       string
+	defaultTimeout time.Duration // 默认操作超时时间，防止 goroutine 泄漏
 }
 
 // NewWebDAVStorage 创建 WebDAV 存储提供者
@@ -70,13 +71,20 @@ func NewWebDAVStorage(cfg WebDAVConfig) (*WebDAVStorage, error) {
 		return nil, fmt.Errorf("webdav connection test failed: %w", err)
 	}
 
+	// 设置默认超时时间（如果配置中未指定）
+	defaultTimeout := cfg.Timeout
+	if defaultTimeout <= 0 {
+		defaultTimeout = 30 * time.Second
+	}
+
 	return &WebDAVStorage{
-		client:     client,
-		httpClient: httpClient,
-		rootPath:   rootPath,
-		baseURL:    strings.TrimRight(cfg.URL, "/"),
-		username:   cfg.Username,
-		password:   cfg.Password,
+		client:         client,
+		httpClient:     httpClient,
+		rootPath:       rootPath,
+		baseURL:        strings.TrimRight(cfg.URL, "/"),
+		username:       cfg.Username,
+		password:       cfg.Password,
+		defaultTimeout: defaultTimeout,
 	}, nil
 }
 
@@ -94,6 +102,50 @@ func testWebDAVConnection(ctx context.Context, client *gowebdav.Client, rootPath
 		return ctx.Err()
 	case err := <-done:
 		return err
+	}
+}
+
+// executeWithTimeout 执行带超时的 WebDAV 操作，防止 goroutine 泄漏
+func (s *WebDAVStorage) executeWithTimeout(ctx context.Context, operation func() error) error {
+	// 使用默认超时创建子上下文
+	ctx, cancel := context.WithTimeout(ctx, s.defaultTimeout)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- operation()
+	}()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-done:
+		return err
+	}
+}
+
+// executeWithTimeoutResult 执行带超时的 WebDAV 操作并返回结果
+func executeWithTimeoutResult[T any](ctx context.Context, timeout time.Duration, operation func() (T, error)) (T, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	type result struct {
+		value T
+		err   error
+	}
+
+	done := make(chan result, 1)
+	go func() {
+		val, err := operation()
+		done <- result{value: val, err: err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		var zero T
+		return zero, ctx.Err()
+	case res := <-done:
+		return res.value, res.err
 	}
 }
 
@@ -131,20 +183,14 @@ func (s *WebDAVStorage) ensureParentDir(ctx context.Context, fullPath string) er
 			currentPath = currentPath + "/" + part
 		}
 
-		// 检查目录是否存在，不存在则创建
-		done := make(chan error, 1)
-		go func(p string) {
-			done <- s.client.Mkdir(p, os.FileMode(0755))
-		}(currentPath)
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case err := <-done:
-			if err != nil {
-				if !isCollectionExistsError(err) {
-					return fmt.Errorf("failed to create directory %s: %w", currentPath, err)
-				}
+		// 检查目录是否存在，不存在则创建（带超时防止 goroutine 泄漏）
+		pathToCreate := currentPath
+		err := s.executeWithTimeout(ctx, func() error {
+			return s.client.Mkdir(pathToCreate, os.FileMode(0755))
+		})
+		if err != nil {
+			if !isCollectionExistsError(err) {
+				return fmt.Errorf("failed to create directory %s: %w", currentPath, err)
 			}
 		}
 	}
@@ -196,21 +242,13 @@ func (s *WebDAVStorage) SaveWithContext(ctx context.Context, storagePath string,
 		return fmt.Errorf("failed to read file content: %w", err)
 	}
 
-	// 执行写入
-	done := make(chan error, 1)
-	go func() {
-		done <- s.client.Write(fullPath, data, 0644)
-	}()
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case err := <-done:
-		if err != nil {
-			return fmt.Errorf("failed to write file %s: %w", storagePath, err)
-		}
-		return nil
+	// 执行写入（带超时防止 goroutine 泄漏）
+	if err := s.executeWithTimeout(ctx, func() error {
+		return s.client.Write(fullPath, data, 0644)
+	}); err != nil {
+		return fmt.Errorf("failed to write file %s: %w", storagePath, err)
 	}
+	return nil
 }
 
 // GetWithContext 从 WebDAV 获取文件
@@ -223,26 +261,13 @@ func (s *WebDAVStorage) GetWithContext(ctx context.Context, storagePath string) 
 
 	fullPath := s.fullPath(storagePath)
 
-	type result struct {
-		data []byte
-		err  error
+	data, err := executeWithTimeoutResult(ctx, s.defaultTimeout, func() ([]byte, error) {
+		return s.client.Read(fullPath)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file %s: %w", storagePath, err)
 	}
-
-	done := make(chan result, 1)
-	go func() {
-		data, err := s.client.Read(fullPath)
-		done <- result{data: data, err: err}
-	}()
-
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case res := <-done:
-		if res.err != nil {
-			return nil, fmt.Errorf("failed to read file %s: %w", storagePath, res.err)
-		}
-		return bytes.NewReader(res.data), nil
-	}
+	return bytes.NewReader(data), nil
 }
 
 // DeleteWithContext 从 WebDAV 删除文件
@@ -255,17 +280,9 @@ func (s *WebDAVStorage) DeleteWithContext(ctx context.Context, storagePath strin
 
 	fullPath := s.fullPath(storagePath)
 
-	done := make(chan error, 1)
-	go func() {
-		done <- s.client.Remove(fullPath)
-	}()
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case err := <-done:
-		return err
-	}
+	return s.executeWithTimeout(ctx, func() error {
+		return s.client.Remove(fullPath)
+	})
 }
 
 // Exists 检查文件是否存在
@@ -278,33 +295,17 @@ func (s *WebDAVStorage) Exists(ctx context.Context, storagePath string) (bool, e
 
 	fullPath := s.fullPath(storagePath)
 
-	type result struct {
-		exists bool
-		err    error
+	_, err := executeWithTimeoutResult(ctx, s.defaultTimeout, func() (any, error) {
+		return s.client.Stat(fullPath)
+	})
+	if err == nil {
+		return true, nil
 	}
-
-	done := make(chan result, 1)
-	go func() {
-		// 尝试获取文件信息
-		_, err := s.client.Stat(fullPath)
-		if err == nil {
-			done <- result{exists: true, err: nil}
-			return
-		}
-		// 如果返回 404，文件不存在
-		if gowebdav.IsErrNotFound(err) {
-			done <- result{exists: false, err: nil}
-			return
-		}
-		done <- result{exists: false, err: err}
-	}()
-
-	select {
-	case <-ctx.Done():
-		return false, ctx.Err()
-	case res := <-done:
-		return res.exists, res.err
+	// 如果返回 404，文件不存在
+	if gowebdav.IsErrNotFound(err) {
+		return false, nil
 	}
+	return false, err
 }
 
 // Health 检查存储健康状态
@@ -321,18 +322,10 @@ func (s *WebDAVStorage) Health(ctx context.Context) error {
 		return nil
 	}
 
-	done := make(chan error, 1)
-	go func() {
+	return s.executeWithTimeout(ctx, func() error {
 		_, err := s.client.ReadDir(s.rootPath)
-		done <- err
-	}()
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case err := <-done:
 		return err
-	}
+	})
 }
 
 // Name 返回存储名称

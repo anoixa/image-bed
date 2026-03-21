@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 
 	"github.com/anoixa/image-bed/cache"
-	"github.com/anoixa/image-bed/config"
 	dbconfig "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/storage"
@@ -200,9 +199,10 @@ func (t *ImagePipelineTask) Execute() {
 // runPipeline 执行处理流水线
 // 流程：读取文件 -> 顺序处理（先 缩略图 后webp）-> 统一释放
 func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
-	maxSize := int64(config.Get().UploadMaxSizeMB) * 1024 * 1024
-	if maxSize <= 0 {
-		maxSize = 50 * 1024 * 1024
+	// 从动态配置获取最大文件大小（默认50MB）
+	maxSize := int64(50) * 1024 * 1024
+	if settings, err := t.ConfigManager.GetImageProcessingSettings(ctx); err == nil && settings.MaxFileSizeMB > 0 {
+		maxSize = int64(settings.MaxFileSizeMB) * 1024 * 1024
 	}
 
 	stream, err := t.Storage.GetWithContext(ctx, t.StoragePath)

@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"time"
@@ -74,7 +75,14 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 		log.Printf("Warning: Failed to set trusted proxies: %v", err)
 	}
 
-	router.MaxMultipartMemory = int64(cfg.UploadMaxSizeMB) << 20
+	// 从动态配置获取最大上传文件大小（默认50MB）
+	maxUploadSizeMB := 50
+	if deps.ConfigManager != nil {
+		if settings, err := deps.ConfigManager.GetImageProcessingSettings(context.Background()); err == nil && settings.MaxFileSizeMB > 0 {
+			maxUploadSizeMB = settings.MaxFileSizeMB
+		}
+	}
+	router.MaxMultipartMemory = int64(maxUploadSizeMB) << 20
 	concurrencyLimiter := middleware.NewConcurrencyLimiter(100)
 	router.Use(concurrencyLimiter.Middleware())
 	requestBodyLimit := int64(cfg.UploadMaxBatchTotalMB) * 2 << 20

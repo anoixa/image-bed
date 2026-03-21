@@ -58,7 +58,6 @@ type Config struct {
 	RateLimitAuthBurst  int           `mapstructure:"rate_limit_auth_burst"`
 	RateLimitExpireTime time.Duration `mapstructure:"rate_limit_expire_time"`
 
-	UploadMaxSizeMB       int `mapstructure:"upload_max_size_mb"`
 	UploadMaxBatchTotalMB int `mapstructure:"upload_max_batch_total_mb"`
 
 	// Worker 配置
@@ -154,7 +153,6 @@ func setDefaults() {
 	viper.SetDefault("rate_limit_auth_burst", 5)
 	viper.SetDefault("rate_limit_expire_time", "10m")
 
-	viper.SetDefault("upload_max_size_mb", 50)
 	viper.SetDefault("upload_max_batch_total_mb", 500)
 
 	// Worker 配置默认值

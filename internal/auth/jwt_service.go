@@ -84,6 +84,13 @@ func (s *JWTService) initialize() error {
 	s.configManager.Subscribe(configSvc.EventConfigUpdated, func(event *configSvc.Event) {
 		if event.Config.Category == models.ConfigCategoryJWT {
 			log.Println("[JWT] Configuration updated, reloading...")
+			s.mutex.RLock()
+			cm := s.configManager
+			s.mutex.RUnlock()
+			if cm == nil {
+				log.Printf("[JWT] Config manager not available, skipping reload")
+				return
+			}
 			if err := s.reloadConfig(); err != nil {
 				log.Printf("[JWT] Failed to reload config: %v", err)
 			} else {
@@ -97,8 +104,10 @@ func (s *JWTService) initialize() error {
 
 // applyConfig 应用 JWT 配置
 func (s *JWTService) applyConfig(jwtConfig *configSvc.JWTConfig) error {
-	if len(jwtConfig.Secret) < 32 {
-		return fmt.Errorf("JWT secret must be at least 32 characters long, got %d", len(jwtConfig.Secret))
+	// 使用字符数而非字节长度，避免多字节UTF-8字符绕过检查
+	secretRunes := []rune(jwtConfig.Secret)
+	if len(secretRunes) < 32 {
+		return fmt.Errorf("JWT secret must be at least 32 characters long, got %d", len(secretRunes))
 	}
 
 	duration, err := time.ParseDuration(jwtConfig.AccessTokenTTL)
@@ -315,6 +324,14 @@ func (s *JWTService) IsAccessToken(tokenString string) (bool, error) {
 
 // ValidateStaticToken 验证静态令牌
 func (s *JWTService) ValidateStaticToken(token string) (*StaticTokenUser, error) {
+	// 检查 API Key 是否启用
+	if s.configManager != nil {
+		settings, err := s.configManager.GetImageProcessingSettings(context.Background())
+		if err == nil && !settings.APIKeyEnabled {
+			return nil, errors.New("API key authentication is disabled")
+		}
+	}
+
 	if s.keysRepo == nil {
 		return nil, errors.New("keys repository not initialized")
 	}

@@ -2,7 +2,6 @@ package admin
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 
 	"github.com/anoixa/image-bed/api/common"
@@ -94,15 +93,23 @@ func (h *ConversionHandler) UpdateConfig(c *gin.Context) {
 		return
 	}
 
-	// DEBUG: 记录当前配置
-	log.Printf("[DEBUG] Current config: %+v", current)
-	log.Printf("[DEBUG] Request: %+v", req)
-
 	// 合并更新（只更新提供的字段）
 	if req.ThumbnailEnabled != nil {
 		current.ThumbnailEnabled = *req.ThumbnailEnabled
 	}
 	if req.ThumbnailSizes != nil {
+		// 验证缩略图尺寸
+		const maxThumbnailSize = 4096
+		for i, size := range req.ThumbnailSizes {
+			if size.Width < 0 || size.Height < 0 {
+				common.RespondError(c, http.StatusBadRequest, fmt.Sprintf("Invalid thumbnail size at index %d: width and height must be non-negative", i))
+				return
+			}
+			if size.Width > maxThumbnailSize || size.Height > maxThumbnailSize {
+				common.RespondError(c, http.StatusBadRequest, fmt.Sprintf("Thumbnail size at index %d exceeds maximum allowed (%dx%d)", i, maxThumbnailSize, maxThumbnailSize))
+				return
+			}
+		}
 		current.ThumbnailSizes = req.ThumbnailSizes
 	}
 	if req.ThumbnailQuality != nil {
@@ -148,11 +155,7 @@ func (h *ConversionHandler) UpdateConfig(c *gin.Context) {
 		current.APIKeyEnabled = *req.APIKeyEnabled
 	}
 
-	// DEBUG: 记录合并后的配置
-	log.Printf("[DEBUG] Merged config before save: %+v", current)
-
 	if err := h.configManager.SaveImageProcessingSettings(ctx, current, userID); err != nil {
-		log.Printf("[ERROR] Failed to save config: %v", err)
 		common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to save config: %v", err))
 		return
 	}

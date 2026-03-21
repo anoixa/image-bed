@@ -50,7 +50,7 @@ func NewHandler(cacheProvider cache.Provider, imagesRepo *images.Repository, db 
 	}
 
 	cacheHelper := cache.NewHelper(cacheProvider, helperCfg)
-	imageService := image.NewService(imagesRepo, variantRepo, converter, thumbnailService, variantService, cacheHelper, baseURL)
+	imageService := image.NewService(imagesRepo, variantRepo, converter, thumbnailService, variantService, cacheHelper, configManager, baseURL)
 
 	return &Handler{
 		cacheHelper:           cacheHelper,

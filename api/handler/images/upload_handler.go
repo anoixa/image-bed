@@ -61,9 +61,31 @@ func (h *Handler) UploadImage(c *gin.Context) {
 	}
 
 	userID := c.GetUint(middleware.ContextUserIDKey)
-	isPublic := c.PostForm("is_public") != "false"
 
-	result, err := h.imageService.UploadSingle(c.Request.Context(), userID, fileHeader, storageConfigID, isPublic)
+	// 获取图片处理配置
+	ctx := c.Request.Context()
+	settings, err := h.configManager.GetImageProcessingSettings(ctx)
+	if err != nil {
+		common.RespondError(c, http.StatusInternalServerError, "Failed to get processing settings")
+		return
+	}
+
+	// 检查文件大小限制
+	if settings.MaxFileSizeMB > 0 {
+		maxSize := int64(settings.MaxFileSizeMB) * 1024 * 1024
+		if fileHeader.Size > maxSize {
+			common.RespondError(c, http.StatusRequestEntityTooLarge, fmt.Sprintf("File size (%.2f MB) exceeds maximum allowed (%d MB)", float64(fileHeader.Size)/1024/1024, settings.MaxFileSizeMB))
+			return
+		}
+	}
+
+	// 确定可见性：优先使用表单参数，否则使用配置默认值
+	isPublic := settings.DefaultVisibility != "private"
+	if visibility := c.PostForm("is_public"); visibility != "" {
+		isPublic = visibility != "false"
+	}
+
+	result, err := h.imageService.UploadSingle(ctx, userID, fileHeader, storageConfigID, isPublic, settings.DefaultAlbumID)
 	if err != nil {
 		if !c.IsAborted() {
 			common.RespondError(c, http.StatusInternalServerError, err.Error())
@@ -121,6 +143,25 @@ func (h *Handler) UploadImages(c *gin.Context) {
 	for _, f := range files {
 		totalSize += f.Size
 	}
+
+	// 获取图片处理配置（提前获取用于单文件检查）
+	ctx := c.Request.Context()
+	settings, err := h.configManager.GetImageProcessingSettings(ctx)
+	if err != nil {
+		common.RespondError(c, http.StatusInternalServerError, "Failed to get processing settings")
+		return
+	}
+
+	// 检查每个文件大小限制
+	if settings.MaxFileSizeMB > 0 {
+		maxSize := int64(settings.MaxFileSizeMB) * 1024 * 1024
+		for _, f := range files {
+			if f.Size > maxSize {
+				common.RespondError(c, http.StatusRequestEntityTooLarge, fmt.Sprintf("File %s size (%.2f MB) exceeds maximum allowed (%d MB)", f.Filename, float64(f.Size)/1024/1024, settings.MaxFileSizeMB))
+				return
+			}
+		}
+	}
 	maxBatchTotalMB := h.uploadMaxBatchTotalMB
 	maxTotalSize := int64(maxBatchTotalMB) * 1024 * 1024
 	if totalSize > maxTotalSize {
@@ -135,9 +176,14 @@ func (h *Handler) UploadImages(c *gin.Context) {
 	}
 
 	userID := c.GetUint(middleware.ContextUserIDKey)
-	isPublic := c.PostForm("is_public") != "false"
 
-	results, err := h.imageService.UploadBatch(c.Request.Context(), userID, files, storageConfigID, isPublic)
+	// 确定可见性：优先使用表单参数，否则使用配置默认值
+	isPublic := settings.DefaultVisibility != "private"
+	if visibility := c.PostForm("is_public"); visibility != "" {
+		isPublic = visibility != "false"
+	}
+
+	results, err := h.imageService.UploadBatch(ctx, userID, files, storageConfigID, isPublic, settings.DefaultAlbumID)
 	if err != nil {
 		if !c.IsAborted() {
 			common.RespondError(c, http.StatusInternalServerError, "Failed to process uploads")

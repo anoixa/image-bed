@@ -18,6 +18,7 @@ import (
 
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
+	dbconfig "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/internal/worker"
@@ -99,6 +100,7 @@ type Service struct {
 	thumbnailSvc   *ThumbnailService
 	variantService *VariantService
 	cacheHelper    *cache.Helper
+	configManager  *dbconfig.Manager
 	baseURL        string
 	pathGenerator  *generator.PathGenerator
 }
@@ -111,6 +113,7 @@ func NewService(
 	thumbnailSvc *ThumbnailService,
 	variantService *VariantService,
 	cacheHelper *cache.Helper,
+	configManager *dbconfig.Manager,
 	baseURL string,
 ) *Service {
 	return &Service{
@@ -120,6 +123,7 @@ func NewService(
 		thumbnailSvc:   thumbnailSvc,
 		variantService: variantService,
 		cacheHelper:    cacheHelper,
+		configManager:  configManager,
 		baseURL:        baseURL,
 		pathGenerator:  generator.NewPathGenerator(),
 	}
@@ -152,13 +156,14 @@ func (s *Service) UploadSingle(
 	fileHeader *multipart.FileHeader,
 	storageID uint,
 	isPublic bool,
+	defaultAlbumID uint,
 ) (*UploadResult, error) {
 	storageProvider, err := s.getStorageProviderByID(storageID)
 	if err != nil {
 		return nil, err
 	}
 
-	image, isDup, err := s.processAndSaveImage(ctx, userID, fileHeader, storageProvider, storageID, isPublic)
+	image, isDup, err := s.processAndSaveImage(ctx, userID, fileHeader, storageProvider, storageID, isPublic, defaultAlbumID)
 	if err != nil {
 		return nil, err
 	}
@@ -174,24 +179,38 @@ func (s *Service) UploadSingle(
 }
 
 // UploadBatch 批量上传
-func (s *Service) UploadBatch(ctx context.Context, userID uint, files []*multipart.FileHeader, storageID uint, isPublic bool) ([]*UploadResult, error) {
+func (s *Service) UploadBatch(ctx context.Context, userID uint, files []*multipart.FileHeader, storageID uint, isPublic bool, defaultAlbumID uint) ([]*UploadResult, error) {
 	storageProvider, err := s.getStorageProviderByID(storageID)
 	if err != nil {
 		return nil, err
+	}
+
+	// 获取并发限制配置
+	concurrentLimit := 3 // 默认值
+	if s.configManager != nil {
+		settings, err := s.configManager.GetImageProcessingSettings(ctx)
+		if err == nil && settings.ConcurrentUploadLimit > 0 {
+			concurrentLimit = settings.ConcurrentUploadLimit
+		}
 	}
 
 	results := make([]*UploadResult, len(files))
 	var resultsMutex sync.Mutex
 
 	g, ctx := errgroup.WithContext(ctx)
+	// 使用信号量限制并发数
+	sem := make(chan struct{}, concurrentLimit)
 
 	for i, fileHeader := range files {
 		g.Go(func() error {
+			sem <- struct{}{}        // 获取信号量
+			defer func() { <-sem }() // 释放信号量
+
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			default:
-				image, _, err := s.processAndSaveImage(ctx, userID, fileHeader, storageProvider, storageID, isPublic)
+				image, _, err := s.processAndSaveImage(ctx, userID, fileHeader, storageProvider, storageID, isPublic, defaultAlbumID)
 				result := &UploadResult{
 					FileName: fileHeader.Filename,
 				}
@@ -221,13 +240,13 @@ func (s *Service) UploadBatch(ctx context.Context, userID uint, files []*multipa
 }
 
 // UploadSingleWithName 单文件上传
-func (s *Service) UploadSingleWithName(ctx context.Context, userID uint, fileHeader *multipart.FileHeader, storageName string, isPublic bool) (*UploadResult, error) {
+func (s *Service) UploadSingleWithName(ctx context.Context, userID uint, fileHeader *multipart.FileHeader, storageName string, isPublic bool, defaultAlbumID uint) (*UploadResult, error) {
 	storageProvider, storageConfigID, err := s.getStorageProvider(storageName)
 	if err != nil {
 		return nil, err
 	}
 
-	image, isDup, err := s.processAndSaveImage(ctx, userID, fileHeader, storageProvider, storageConfigID, isPublic)
+	image, isDup, err := s.processAndSaveImage(ctx, userID, fileHeader, storageProvider, storageConfigID, isPublic, defaultAlbumID)
 	if err != nil {
 		return nil, err
 	}
@@ -249,6 +268,7 @@ func (s *Service) UploadBatchWithName(
 	files []*multipart.FileHeader,
 	storageName string,
 	isPublic bool,
+	defaultAlbumID uint,
 ) ([]*UploadResult, error) {
 	storageProvider, storageConfigID, err := s.getStorageProvider(storageName)
 	if err != nil {
@@ -266,7 +286,7 @@ func (s *Service) UploadBatchWithName(
 			case <-ctx.Done():
 				return ctx.Err()
 			default:
-				image, _, err := s.processAndSaveImage(ctx, userID, fileHeader, storageProvider, storageConfigID, isPublic)
+				image, _, err := s.processAndSaveImage(ctx, userID, fileHeader, storageProvider, storageConfigID, isPublic, defaultAlbumID)
 				result := &UploadResult{
 					FileName: fileHeader.Filename,
 				}
@@ -296,7 +316,7 @@ func (s *Service) UploadBatchWithName(
 }
 
 // processAndSaveImage 处理并保存图片
-func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHeader *multipart.FileHeader, storageProvider storage.Provider, storageConfigID uint, isPublic bool) (*models.Image, bool, error) {
+func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHeader *multipart.FileHeader, storageProvider storage.Provider, storageConfigID uint, isPublic bool, _ uint) (*models.Image, bool, error) {
 	src, err := fileHeader.Open()
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to open file: %w", err)
@@ -722,34 +742,18 @@ func (s *Service) DeleteBatch(ctx context.Context, identifiers []string, userID 
 		return &DeleteResult{Success: true, DeletedCount: 0}, nil
 	}
 
-	// 批量查询图片信息
-	imagesToDelete, err := s.repo.GetImagesByIdentifiersAndUser(identifiers, userID)
+	// 使用事务执行所有数据库删除操作，确保数据一致性
+	result, imagesToDelete, err := s.repo.DeleteBatchTransaction(identifiers, userID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get images for batch delete: %w", err)
+		return nil, fmt.Errorf("failed to execute batch delete: %w", err)
 	}
 
-	// 从所有相册中移除关联
-	if len(imagesToDelete) > 0 {
-		imageIDs := make([]uint, len(imagesToDelete))
-		for i, img := range imagesToDelete {
-			imageIDs[i] = img.ID
-		}
-		if err := s.repo.RemoveImagesFromAllAlbums(imageIDs); err != nil {
-			log.Printf("Failed to remove images from albums: %v", err)
-		}
-	}
-
-	// 先删除变体
+	// 删除变体的物理文件（在事务外执行，避免影响数据库一致性）
 	for _, img := range imagesToDelete {
 		s.deleteVariantsForImage(ctx, img)
 	}
 
-	affectedCount, err := s.repo.DeleteImagesByIdentifiersAndUser(identifiers, userID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to delete image records: %w", err)
-	}
-
-	// DB记录删除后，检查每个被删除图片的物理文件引用计数
+	// 检查每个被删除图片的物理文件引用计数
 	// 只有没有其他引用时才删除物理文件（避免秒传共享文件被误删）
 	for _, img := range imagesToDelete {
 		if img.StoragePath != "" {
@@ -776,7 +780,7 @@ func (s *Service) DeleteBatch(ctx context.Context, identifiers []string, userID 
 		s.clearImageCache(ctx, identifier)
 	}
 
-	return &DeleteResult{Success: true, DeletedCount: affectedCount}, nil
+	return &DeleteResult{Success: true, DeletedCount: result.DeletedCount}, nil
 }
 
 // DeleteImageVariants 删除指定图片的所有变体

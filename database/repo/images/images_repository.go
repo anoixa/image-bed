@@ -2,6 +2,7 @@ package images
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/anoixa/image-bed/database/models"
@@ -354,4 +355,63 @@ func (r *Repository) GetRandomPublicImage(filter *RandomImageFilter) (*models.Im
 	}
 
 	return &image, nil
+}
+
+// DeleteBatchResult 批量删除结果
+type DeleteBatchResult struct {
+	DeletedCount int64
+	ImageIDs     []uint
+}
+
+// DeleteBatchTransaction 在事务中批量删除图片及其关联数据
+func (r *Repository) DeleteBatchTransaction(identifiers []string, userID uint) (*DeleteBatchResult, []*models.Image, error) {
+	if len(identifiers) == 0 {
+		return &DeleteBatchResult{DeletedCount: 0, ImageIDs: []uint{}}, []*models.Image{}, nil
+	}
+
+	var result DeleteBatchResult
+	var imagesToDelete []*models.Image
+
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		// 1. 查询要删除的图片
+		if err := tx.Where("identifier IN ? AND user_id = ?", identifiers, userID).Find(&imagesToDelete).Error; err != nil {
+			return fmt.Errorf("failed to get images: %w", err)
+		}
+
+		if len(imagesToDelete) == 0 {
+			return nil
+		}
+
+		// 收集图片ID
+		imageIDs := make([]uint, len(imagesToDelete))
+		for i, img := range imagesToDelete {
+			imageIDs[i] = img.ID
+		}
+
+		// 2. 从所有相册中移除关联
+		if err := tx.Table("album_images").Where("image_id IN ?", imageIDs).Delete(nil).Error; err != nil {
+			return fmt.Errorf("failed to remove images from albums: %w", err)
+		}
+
+		// 3. 删除变体记录
+		if err := tx.Where("image_id IN ?", imageIDs).Delete(&models.ImageVariant{}).Error; err != nil {
+			return fmt.Errorf("failed to delete variants: %w", err)
+		}
+
+		// 4. 删除图片记录
+		deleteResult := tx.Where("identifier IN ? AND user_id = ?", identifiers, userID).Delete(&models.Image{})
+		if deleteResult.Error != nil {
+			return fmt.Errorf("failed to delete images: %w", deleteResult.Error)
+		}
+
+		result.DeletedCount = deleteResult.RowsAffected
+		result.ImageIDs = imageIDs
+		return nil
+	})
+
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return &result, imagesToDelete, nil
 }
