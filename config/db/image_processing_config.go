@@ -34,6 +34,7 @@ type ImageProcessingSettings struct {
 	DefaultVisibility     string `json:"default_visibility" mapstructure:"default_visibility"`
 	ConcurrentUploadLimit int    `json:"concurrent_upload_limit" mapstructure:"concurrent_upload_limit"`
 	MaxFileSizeMB         int    `json:"max_file_size_mb" mapstructure:"max_file_size_mb"`
+	MaxBatchTotalMB       int    `json:"max_batch_total_mb" mapstructure:"max_batch_total_mb"`
 	APIKeyEnabled         bool   `json:"api_key_enabled" mapstructure:"api_key_enabled"`
 }
 
@@ -60,6 +61,7 @@ func DefaultImageProcessingSettings() *ImageProcessingSettings {
 		DefaultVisibility:     "public",
 		ConcurrentUploadLimit: 3,
 		MaxFileSizeMB:         50,
+		MaxBatchTotalMB:       500,
 		APIKeyEnabled:         true,
 	}
 }
@@ -69,6 +71,16 @@ func (s *ImageProcessingSettings) Validate() error {
 	// 只在值非零时进行范围验证（支持部分更新场景）
 	if s.ThumbnailQuality != 0 && (s.ThumbnailQuality < 1 || s.ThumbnailQuality > 100) {
 		return fmt.Errorf("thumbnail quality must be between 1 and 100")
+	}
+	// 验证缩略图尺寸
+	const maxThumbnailSize = 4096
+	for i, size := range s.ThumbnailSizes {
+		if size.Width < 0 || size.Height < 0 {
+			return fmt.Errorf("invalid thumbnail size at index %d: width and height must be non-negative", i)
+		}
+		if size.Width > maxThumbnailSize || size.Height > maxThumbnailSize {
+			return fmt.Errorf("thumbnail size at index %d exceeds maximum allowed (%dx%d)", i, maxThumbnailSize, maxThumbnailSize)
+		}
 	}
 	if s.WebPQuality != 0 && (s.WebPQuality < 1 || s.WebPQuality > 100) {
 		return fmt.Errorf("webp quality must be between 1 and 100")
@@ -82,6 +94,9 @@ func (s *ImageProcessingSettings) Validate() error {
 	}
 	if s.MaxFileSizeMB != 0 && (s.MaxFileSizeMB < 1 || s.MaxFileSizeMB > 500) {
 		return fmt.Errorf("max file size must be between 1 and 500 MB")
+	}
+	if s.MaxBatchTotalMB != 0 && (s.MaxBatchTotalMB < 1 || s.MaxBatchTotalMB > 500) {
+		return fmt.Errorf("max batch total size must be between 1 and 500 MB")
 	}
 	if s.DefaultVisibility != "" && s.DefaultVisibility != "public" && s.DefaultVisibility != "private" {
 		return fmt.Errorf("default visibility must be 'public' or 'private'")
@@ -192,6 +207,7 @@ func (m *Manager) ensureDefaultImageProcessingConfig(ctx context.Context) error 
 			"default_visibility":         defaultSettings.DefaultVisibility,
 			"concurrent_upload_limit":    defaultSettings.ConcurrentUploadLimit,
 			"max_file_size_mb":           defaultSettings.MaxFileSizeMB,
+			"max_batch_total_mb":         defaultSettings.MaxBatchTotalMB,
 			"api_key_enabled":            defaultSettings.APIKeyEnabled,
 		},
 		IsEnabled:   BoolPtr(true),
@@ -241,6 +257,7 @@ func (m *Manager) SaveImageProcessingSettings(ctx context.Context, settings *Ima
 			"default_visibility":         settings.DefaultVisibility,
 			"concurrent_upload_limit":    settings.ConcurrentUploadLimit,
 			"max_file_size_mb":           settings.MaxFileSizeMB,
+			"max_batch_total_mb":         settings.MaxBatchTotalMB,
 			"api_key_enabled":            settings.APIKeyEnabled,
 		},
 		IsEnabled:   BoolPtr(settings.ThumbnailEnabled),

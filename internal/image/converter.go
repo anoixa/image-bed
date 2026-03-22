@@ -139,7 +139,7 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 			StoragePath:     image.StoragePath,
 			ImageIdentifier: image.Identifier,
 			Storage:         storageProvider,
-			ConfigManager:   c.configManager,
+			Settings:        settings,
 			VariantRepo:     c.variantRepo,
 			ImageRepo:       c.imageRepo,
 			CacheHelper:     c.cacheHelper,

@@ -11,6 +11,7 @@ import (
 	"github.com/anoixa/image-bed/database"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/storage"
+	"github.com/anoixa/image-bed/utils"
 	"github.com/spf13/cobra"
 	"gorm.io/gorm"
 )
@@ -107,7 +108,7 @@ func cleanOrphanDBRecords(db *gorm.DB, stats *cleanStats, dryRun bool) error {
 	for _, img := range images {
 		exists, err := storage.GetDefault().Exists(context.Background(), img.Identifier)
 		if err != nil {
-			log.Printf("Warning: failed to check existence of %s: %v", img.Identifier, err)
+			log.Printf("Warning: failed to check existence of %s: %v", utils.SanitizeLogMessage(img.Identifier), err)
 			continue
 		}
 
@@ -115,7 +116,7 @@ func cleanOrphanDBRecords(db *gorm.DB, stats *cleanStats, dryRun bool) error {
 			stats.orphanDBRecords++
 			orphanIDs = append(orphanIDs, img.ID)
 			if dryRun {
-				log.Printf("[DRY-RUN] Would delete orphan DB record: ID=%d, Identifier=%s", img.ID, img.Identifier)
+				log.Printf("[DRY-RUN] Would delete orphan DB record: ID=%d, Identifier=%s", img.ID, utils.SanitizeLogMessage(img.Identifier))
 			}
 		}
 	}

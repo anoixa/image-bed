@@ -162,7 +162,10 @@ func (h *Handler) UploadImages(c *gin.Context) {
 			}
 		}
 	}
-	maxBatchTotalMB := h.uploadMaxBatchTotalMB
+	maxBatchTotalMB := 500
+	if settings.MaxBatchTotalMB > 0 {
+		maxBatchTotalMB = settings.MaxBatchTotalMB
+	}
 	maxTotalSize := int64(maxBatchTotalMB) * 1024 * 1024
 	if totalSize > maxTotalSize {
 		common.RespondError(c, http.StatusRequestEntityTooLarge, fmt.Sprintf("Total size of all files (%.2f MB) exceeds maximum allowed (%d MB)", float64(totalSize)/1024/1024, maxBatchTotalMB))
@@ -183,7 +186,7 @@ func (h *Handler) UploadImages(c *gin.Context) {
 		isPublic = visibility != "false"
 	}
 
-	results, err := h.imageService.UploadBatch(ctx, userID, files, storageConfigID, isPublic, settings.DefaultAlbumID)
+	results, err := h.imageService.UploadBatch(ctx, userID, files, storageConfigID, isPublic, settings.DefaultAlbumID, settings.ConcurrentUploadLimit)
 	if err != nil {
 		if !c.IsAborted() {
 			common.RespondError(c, http.StatusInternalServerError, "Failed to process uploads")

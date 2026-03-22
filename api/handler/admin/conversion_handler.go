@@ -60,6 +60,7 @@ type UpdateConfigRequest struct {
 	DefaultVisibility        *string                `json:"default_visibility,omitempty"`
 	ConcurrentUploadLimit    *int                   `json:"concurrent_upload_limit,omitempty"`
 	MaxFileSizeMB            *int                   `json:"max_file_size_mb,omitempty"`
+	MaxBatchTotalMB          *int                   `json:"max_batch_total_mb,omitempty"`
 	APIKeyEnabled            *bool                  `json:"api_key_enabled,omitempty"`
 }
 
@@ -98,18 +99,6 @@ func (h *ConversionHandler) UpdateConfig(c *gin.Context) {
 		current.ThumbnailEnabled = *req.ThumbnailEnabled
 	}
 	if req.ThumbnailSizes != nil {
-		// 验证缩略图尺寸
-		const maxThumbnailSize = 4096
-		for i, size := range req.ThumbnailSizes {
-			if size.Width < 0 || size.Height < 0 {
-				common.RespondError(c, http.StatusBadRequest, fmt.Sprintf("Invalid thumbnail size at index %d: width and height must be non-negative", i))
-				return
-			}
-			if size.Width > maxThumbnailSize || size.Height > maxThumbnailSize {
-				common.RespondError(c, http.StatusBadRequest, fmt.Sprintf("Thumbnail size at index %d exceeds maximum allowed (%dx%d)", i, maxThumbnailSize, maxThumbnailSize))
-				return
-			}
-		}
 		current.ThumbnailSizes = req.ThumbnailSizes
 	}
 	if req.ThumbnailQuality != nil {
@@ -150,6 +139,9 @@ func (h *ConversionHandler) UpdateConfig(c *gin.Context) {
 	}
 	if req.MaxFileSizeMB != nil {
 		current.MaxFileSizeMB = *req.MaxFileSizeMB
+	}
+	if req.MaxBatchTotalMB != nil {
+		current.MaxBatchTotalMB = *req.MaxBatchTotalMB
 	}
 	if req.APIKeyEnabled != nil {
 		current.APIKeyEnabled = *req.APIKeyEnabled

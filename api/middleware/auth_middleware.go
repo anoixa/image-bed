@@ -103,7 +103,7 @@ func handleStaticTokenAuth(c *gin.Context, token string) error {
 	if jwtService == nil {
 		return errors.New("JWT service not initialized")
 	}
-	user, err := jwtService.ValidateStaticToken(token)
+	user, err := jwtService.ValidateStaticToken(c.Request.Context(), token)
 	if err != nil {
 		return fmt.Errorf("invalid token: %w", err)
 	}

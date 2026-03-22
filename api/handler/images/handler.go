@@ -6,6 +6,7 @@ import (
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
 	configSvc "github.com/anoixa/image-bed/config/db"
+	"github.com/anoixa/image-bed/database/repo/albums"
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/internal/image"
 	"github.com/anoixa/image-bed/storage"
@@ -13,19 +14,18 @@ import (
 )
 
 type Handler struct {
-	cacheHelper           *cache.Helper
-	repo                  *images.Repository
-	converter             *image.Converter
-	configManager         *configSvc.Manager
-	variantService        *image.VariantService
-	thumbnailService      *image.ThumbnailService
-	variantRepo           *images.VariantRepository
-	imageService          *image.Service
-	baseURL               string
-	uploadMaxBatchTotalMB int
+	cacheHelper      *cache.Helper
+	repo             *images.Repository
+	converter        *image.Converter
+	configManager    *configSvc.Manager
+	variantService   *image.VariantService
+	thumbnailService *image.ThumbnailService
+	variantRepo      *images.VariantRepository
+	imageService     *image.Service
+	baseURL          string
 }
 
-func NewHandler(cacheProvider cache.Provider, imagesRepo *images.Repository, db *gorm.DB, converter *image.Converter, configManager *configSvc.Manager, cfg *config.Config, baseURL string, uploadMaxBatchTotalMB int, storageProvider storage.Provider) *Handler {
+func NewHandler(cacheProvider cache.Provider, imagesRepo *images.Repository, db *gorm.DB, converter *image.Converter, configManager *configSvc.Manager, cfg *config.Config, baseURL string, storageProvider storage.Provider, albumsRepo *albums.Repository) *Handler {
 	variantRepo := images.NewVariantRepository(db)
 	variantService := image.NewVariantService(variantRepo, configManager, converter)
 
@@ -50,18 +50,17 @@ func NewHandler(cacheProvider cache.Provider, imagesRepo *images.Repository, db 
 	}
 
 	cacheHelper := cache.NewHelper(cacheProvider, helperCfg)
-	imageService := image.NewService(imagesRepo, variantRepo, converter, thumbnailService, variantService, cacheHelper, configManager, baseURL)
+	imageService := image.NewService(imagesRepo, variantRepo, albumsRepo, converter, thumbnailService, variantService, cacheHelper, configManager, baseURL)
 
 	return &Handler{
-		cacheHelper:           cacheHelper,
-		repo:                  imagesRepo,
-		converter:             converter,
-		configManager:         configManager,
-		variantRepo:           variantRepo,
-		variantService:        variantService,
-		thumbnailService:      thumbnailService,
-		imageService:          imageService,
-		baseURL:               baseURL,
-		uploadMaxBatchTotalMB: uploadMaxBatchTotalMB,
+		cacheHelper:      cacheHelper,
+		repo:             imagesRepo,
+		converter:        converter,
+		configManager:    configManager,
+		variantRepo:      variantRepo,
+		variantService:   variantService,
+		thumbnailService: thumbnailService,
+		imageService:     imageService,
+		baseURL:          baseURL,
 	}
 }

@@ -40,7 +40,7 @@ func (t *ImageDimensionsTask) Execute() {
 	width, height, err := t.extractFromStorage()
 
 	if err != nil {
-		log.Printf("Failed to extract image dimensions for %s: %v", t.Identifier, err)
+		log.Printf("Failed to extract image dimensions for %s: %v", utils.SanitizeLogMessage(t.Identifier), err)
 		return
 	}
 

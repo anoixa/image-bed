@@ -1,6 +1,7 @@
 package config
 
 import (
+	"log"
 	"sync"
 
 	"github.com/anoixa/image-bed/database/models"
@@ -57,6 +58,14 @@ func (eb *EventBus) Publish(eventType EventType, config any) {
 	}
 
 	for _, handler := range handlers {
-		go handler(event)
+		h := handler
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[EventBus] Handler panicked for event %s: %v", eventType, r)
+				}
+			}()
+			h(event)
+		}()
 	}
 }

@@ -1,7 +1,6 @@
 package core
 
 import (
-	"context"
 	"log"
 	"net/http"
 	"time"
@@ -75,19 +74,21 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 		log.Printf("Warning: Failed to set trusted proxies: %v", err)
 	}
 
-	// 从动态配置获取最大上传文件大小（默认50MB）
-	maxUploadSizeMB := 50
-	if deps.ConfigManager != nil {
-		if settings, err := deps.ConfigManager.GetImageProcessingSettings(context.Background()); err == nil && settings.MaxFileSizeMB > 0 {
-			maxUploadSizeMB = settings.MaxFileSizeMB
-		}
-	}
-	router.MaxMultipartMemory = int64(maxUploadSizeMB) << 20
+	const (
+		defaultMaxUploadSizeMB = 50
+		defaultMaxBatchTotalMB = 500
+		minBatchRequestLimitMB = 100
+		batchRequestLimitRatio = 2
+	)
+
+	// MaxMultipartMemory 使用静态默认值，避免动态配置变更导致的不一致
+	// 实际的文件大小限制在 upload handler 中按请求动态检查
+	router.MaxMultipartMemory = defaultMaxUploadSizeMB << 20
 	concurrencyLimiter := middleware.NewConcurrencyLimiter(100)
 	router.Use(concurrencyLimiter.Middleware())
-	requestBodyLimit := int64(cfg.UploadMaxBatchTotalMB) * 2 << 20
-	if requestBodyLimit < 100<<20 {
-		requestBodyLimit = 100 << 20 // 最小 100MB
+	requestBodyLimit := int64(defaultMaxBatchTotalMB) * batchRequestLimitRatio << 20
+	if requestBodyLimit < minBatchRequestLimitMB<<20 {
+		requestBodyLimit = minBatchRequestLimitMB << 20
 	}
 	router.Use(middleware.MaxBytesReader(requestBodyLimit))
 	router.Use(middleware.RequestID())

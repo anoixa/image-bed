@@ -364,7 +364,7 @@ type DeleteBatchResult struct {
 }
 
 // DeleteBatchTransaction 在事务中批量删除图片及其关联数据
-func (r *Repository) DeleteBatchTransaction(identifiers []string, userID uint) (*DeleteBatchResult, []*models.Image, error) {
+func (r *Repository) DeleteBatchTransaction(ctx context.Context, identifiers []string, userID uint) (*DeleteBatchResult, []*models.Image, error) {
 	if len(identifiers) == 0 {
 		return &DeleteBatchResult{DeletedCount: 0, ImageIDs: []uint{}}, []*models.Image{}, nil
 	}
@@ -372,7 +372,7 @@ func (r *Repository) DeleteBatchTransaction(identifiers []string, userID uint) (
 	var result DeleteBatchResult
 	var imagesToDelete []*models.Image
 
-	err := r.db.Transaction(func(tx *gorm.DB) error {
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 1. 查询要删除的图片
 		if err := tx.Where("identifier IN ? AND user_id = ?", identifiers, userID).Find(&imagesToDelete).Error; err != nil {
 			return fmt.Errorf("failed to get images: %w", err)

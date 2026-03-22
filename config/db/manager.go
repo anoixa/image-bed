@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/configs"
 	cryptoservice "github.com/anoixa/image-bed/internal/crypto"
@@ -35,21 +34,6 @@ type JWTConfig struct {
 
 // NewManager 创建配置管理器
 func NewManager(db *gorm.DB, dataPath string) *Manager {
-	repo := configs.NewRepository(db)
-	cryptoSvc := cryptoservice.NewService(dataPath)
-
-	return &Manager{
-		db:       db,
-		repo:     repo,
-		crypto:   NewCryptoLayer(repo, cryptoSvc),
-		cache:    NewCacheLayer(),
-		eventBus: NewEventBus(),
-		dataPath: dataPath,
-	}
-}
-
-// NewManagerWithCache 创建带缓存的配置管理器
-func NewManagerWithCache(db *gorm.DB, dataPath string, cacheProvider cache.Provider, cacheTTL int) *Manager {
 	repo := configs.NewRepository(db)
 	cryptoSvc := cryptoservice.NewService(dataPath)
 

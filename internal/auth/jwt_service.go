@@ -323,10 +323,10 @@ func (s *JWTService) IsAccessToken(tokenString string) (bool, error) {
 }
 
 // ValidateStaticToken 验证静态令牌
-func (s *JWTService) ValidateStaticToken(token string) (*StaticTokenUser, error) {
+func (s *JWTService) ValidateStaticToken(ctx context.Context, token string) (*StaticTokenUser, error) {
 	// 检查 API Key 是否启用
 	if s.configManager != nil {
-		settings, err := s.configManager.GetImageProcessingSettings(context.Background())
+		settings, err := s.configManager.GetImageProcessingSettings(ctx)
 		if err == nil && !settings.APIKeyEnabled {
 			return nil, errors.New("API key authentication is disabled")
 		}

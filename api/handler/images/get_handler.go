@@ -145,7 +145,7 @@ func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 
 	data, err := h.fetchFromRemoteWithProvider(storagePath, provider)
 	if err != nil {
-		log.Printf("[serveOriginal] Failed to get image %s (path: %s): %v", image.Identifier, storagePath, err)
+		log.Printf("[serveOriginal] Failed to get image %s (path: %s): %v", utils.SanitizeLogMessage(image.Identifier), storagePath, err)
 		common.RespondError(c, http.StatusNotFound, "Image file not found")
 		return
 	}
@@ -222,7 +222,7 @@ func (h *Handler) serveByStreaming(c *gin.Context, img *models.Image, streamer s
 		if utils.IsClientDisconnect(err) {
 			return true
 		}
-		log.Printf("[serveByStreaming] Failed to stream image %s (path: %s): %v", img.Identifier, img.StoragePath, err)
+		log.Printf("[serveByStreaming] Failed to stream image %s (path: %s): %v", utils.SanitizeLogMessage(img.Identifier), img.StoragePath, err)
 		return false
 	}
 	return true
@@ -371,7 +371,7 @@ func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *i
 
 	stream, err := provider.GetWithContext(c.Request.Context(), result.StoragePath)
 	if err != nil {
-		log.Printf("[serveVariant] Failed to get variant %s (path: %s): %v", result.Identifier, result.StoragePath, err)
+		log.Printf("[serveVariant] Failed to get variant %s (path: %s): %v", utils.SanitizeLogMessage(result.Identifier), result.StoragePath, err)
 		// 降级到原图
 		h.serveOriginalImage(c, img)
 		return
@@ -467,7 +467,7 @@ func (h *Handler) serveVariantData(c *gin.Context, result *image.VariantResult, 
 // handleMetadataError 处理元数据查询错误
 func (h *Handler) handleMetadataError(c *gin.Context, identifier string, err error) {
 	if errors.Is(err, context.DeadlineExceeded) {
-		log.Printf("Timeout fetching image metadata for '%s'", identifier)
+		log.Printf("Timeout fetching image metadata for '%s'", utils.SanitizeLogMessage(identifier))
 		common.RespondError(c, http.StatusGatewayTimeout, "Request timeout")
 		return
 	}
@@ -479,11 +479,11 @@ func (h *Handler) handleMetadataError(c *gin.Context, identifier string, err err
 
 	// 临时错误返回 503
 	if errors.Is(err, image.ErrTemporaryFailure) {
-		log.Printf("Temporary failure fetching metadata for '%s': %v", identifier, err)
+		log.Printf("Temporary failure fetching metadata for '%s': %v", utils.SanitizeLogMessage(identifier), err)
 		common.RespondError(c, http.StatusServiceUnavailable, "Service temporarily unavailable")
 		return
 	}
 
-	log.Printf("Failed to fetch image metadata for '%s': %v", identifier, err)
+	log.Printf("Failed to fetch image metadata for '%s': %v", utils.SanitizeLogMessage(identifier), err)
 	common.RespondError(c, http.StatusNotFound, "Image not found")
 }

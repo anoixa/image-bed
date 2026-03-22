@@ -98,12 +98,8 @@ func registerBasicRoutes(router *gin.Engine, deps *RouterDependencies) {
 func registerPublicRoutes(router *gin.Engine, deps *RouterDependencies) {
 	cfg := deps.Config
 	baseURL := getBaseURL(cfg)
-	uploadMaxBatchTotalMB := 500
-	if cfg != nil {
-		uploadMaxBatchTotalMB = cfg.UploadMaxBatchTotalMB
-	}
 
-	imageHandler := handlerImages.NewHandler(deps.CacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager, cfg, baseURL, uploadMaxBatchTotalMB, storage.GetDefault())
+	imageHandler := handlerImages.NewHandler(deps.CacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager, cfg, baseURL, storage.GetDefault(), deps.Repositories.AlbumsRepo)
 
 	// 公共图片访问
 	publicGroup := router.Group("/images")
@@ -125,12 +121,8 @@ func registerPublicRoutes(router *gin.Engine, deps *RouterDependencies) {
 func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
 	cfg := deps.Config
 	baseURL := getBaseURL(cfg)
-	uploadMaxBatchTotalMB := 500
-	if cfg != nil {
-		uploadMaxBatchTotalMB = cfg.UploadMaxBatchTotalMB
-	}
 
-	imageHandler := handlerImages.NewHandler(deps.CacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager, cfg, baseURL, uploadMaxBatchTotalMB, storage.GetDefault())
+	imageHandler := handlerImages.NewHandler(deps.CacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager, cfg, baseURL, storage.GetDefault(), deps.Repositories.AlbumsRepo)
 	albumService := svcAlbums.NewService(deps.Repositories.AlbumsRepo)
 	albumHandler := handlerAlbums.NewHandler(albumService, deps.CacheProvider, baseURL)
 	albumImageHandler := handlerAlbums.NewAlbumImageHandler(albumService, deps.Repositories.ImagesRepo, deps.CacheProvider, cfg)
@@ -226,11 +218,7 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
 func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies) {
 	cfg := deps.Config
 	baseURL := getBaseURL(cfg)
-	uploadMaxBatchTotalMB := 500
-	if cfg != nil {
-		uploadMaxBatchTotalMB = cfg.UploadMaxBatchTotalMB
-	}
-	imageHandler := handlerImages.NewHandler(deps.CacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager, cfg, baseURL, uploadMaxBatchTotalMB, storage.GetDefault())
+	imageHandler := handlerImages.NewHandler(deps.CacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager, cfg, baseURL, storage.GetDefault(), deps.Repositories.AlbumsRepo)
 
 	configHandler := admin.NewConfigHandler(deps.ConfigManager, deps.Repositories.ImagesRepo)
 	adminGroup := v1.Group("/admin")

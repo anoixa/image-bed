@@ -7,6 +7,47 @@ definitions:
     required:
     - mode
     type: object
+  admin.UpdateConfigRequest:
+    properties:
+      api_key_enabled:
+        type: boolean
+      avif_experimental:
+        type: boolean
+      avif_quality:
+        type: integer
+      avif_speed:
+        type: integer
+      concurrent_upload_limit:
+        type: integer
+      conversion_enabled_formats:
+        items:
+          type: string
+        type: array
+      default_album_id:
+        type: integer
+      default_visibility:
+        type: string
+      max_batch_total_mb:
+        type: integer
+      max_dimension:
+        type: integer
+      max_file_size_mb:
+        type: integer
+      skip_smaller_than:
+        type: integer
+      thumbnail_enabled:
+        type: boolean
+      thumbnail_quality:
+        type: integer
+      thumbnail_sizes:
+        items:
+          $ref: '#/definitions/models.ThumbnailSize'
+        type: array
+      webp_effort:
+        type: integer
+      webp_quality:
+        type: integer
+    type: object
   albums.AddImagesToAlbumRequest:
     properties:
       identifiers:
@@ -167,8 +208,6 @@ definitions:
         type: string
       status:
         type: string
-    type: object
-  config.ImageProcessingSettings:
     type: object
   github_com_anoixa_image-bed_api_handler_user.ChangePasswordRequest:
     properties:
@@ -406,30 +445,20 @@ definitions:
   system.StatusResponse:
     properties:
       cache:
-        allOf:
-        - $ref: '#/definitions/system.CacheStatus'
-        description: 缓存信息
+        $ref: '#/definitions/system.CacheStatus'
       commit_hash:
         type: string
       data_dir:
-        allOf:
-        - $ref: '#/definitions/system.DirStatus'
-        description: 数据目录信息
+        $ref: '#/definitions/system.DirStatus'
       environment:
-        description: 运行环境
         type: string
       go_version:
         type: string
       memory:
-        allOf:
-        - $ref: '#/definitions/system.MemoryStatus'
-        description: 内存统计
+        $ref: '#/definitions/system.MemoryStatus'
       runtime:
-        allOf:
-        - $ref: '#/definitions/system.RuntimeStatus'
-        description: 运行时信息
+        $ref: '#/definitions/system.RuntimeStatus'
       version:
-        description: 版本信息
         type: string
     type: object
   system.VersionResponse:
@@ -907,15 +936,14 @@ paths:
     put:
       consumes:
       - application/json
-      description: Update image processing settings including thumbnail and WebP conversion
-        options
+      description: Update image processing settings (partial update supported)
       parameters:
-      - description: Image processing settings
+      - description: Image processing settings (partial)
         in: body
         name: request
         required: true
         schema:
-          $ref: '#/definitions/config.ImageProcessingSettings'
+          $ref: '#/definitions/admin.UpdateConfigRequest'
       produces:
       - application/json
       responses:
@@ -1510,7 +1538,6 @@ paths:
             $ref: '#/definitions/common.Response'
       security:
       - ApiKeyAuth: []
-      summary: Get dashboard statistics
       tags:
       - dashboard
   /api/v1/dashboard/stats/refresh:

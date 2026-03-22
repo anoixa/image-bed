@@ -118,7 +118,7 @@ type ImagePipelineTask struct {
 	StoragePath     string
 	ImageIdentifier string
 	Storage         storage.Provider
-	ConfigManager   *dbconfig.Manager
+	Settings        *dbconfig.ImageProcessingSettings
 	VariantRepo     VariantRepository
 	ImageRepo       ImageRepository
 	CacheHelper     *cache.Helper
@@ -199,10 +199,10 @@ func (t *ImagePipelineTask) Execute() {
 // runPipeline 执行处理流水线
 // 流程：读取文件 -> 顺序处理（先 缩略图 后webp）-> 统一释放
 func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
-	// 从动态配置获取最大文件大小（默认50MB）
+	// 从预解析配置获取最大文件大小（默认50MB）
 	maxSize := int64(50) * 1024 * 1024
-	if settings, err := t.ConfigManager.GetImageProcessingSettings(ctx); err == nil && settings.MaxFileSizeMB > 0 {
-		maxSize = int64(settings.MaxFileSizeMB) * 1024 * 1024
+	if t.Settings != nil && t.Settings.MaxFileSizeMB > 0 {
+		maxSize = int64(t.Settings.MaxFileSizeMB) * 1024 * 1024
 	}
 
 	stream, err := t.Storage.GetWithContext(ctx, t.StoragePath)
@@ -285,9 +285,9 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
 
 // generateThumbnail 生成缩略图
 func (t *ImagePipelineTask) generateThumbnail(ctx context.Context, fileBytes []byte) (*pipelineResult, error) {
-	settings, err := t.ConfigManager.GetImageProcessingSettings(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("get image processing settings: %w", err)
+	settings := t.Settings
+	if settings == nil {
+		return nil, fmt.Errorf("image processing settings not provided")
 	}
 	if !settings.ThumbnailEnabled {
 		utils.LogIfDevf("[Pipeline] Thumbnail generation disabled")
@@ -355,9 +355,9 @@ func (t *ImagePipelineTask) generateThumbnail(ctx context.Context, fileBytes []b
 
 // generateWebP 生成 WebP 原图
 func (t *ImagePipelineTask) generateWebP(ctx context.Context, fileBytes []byte) (*pipelineResult, error) {
-	settings, err := t.ConfigManager.GetImageProcessingSettings(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("get image processing settings: %w", err)
+	settings := t.Settings
+	if settings == nil {
+		return nil, fmt.Errorf("image processing settings not provided")
 	}
 
 	return t.generateWebPWithSettings(ctx, fileBytes, settings)
