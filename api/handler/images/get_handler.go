@@ -69,6 +69,12 @@ func (h *Handler) GetImage(c *gin.Context) {
 		return
 	}
 
+	// 防止路径穿越攻击
+	if strings.ContainsAny(identifier, "/\\") || strings.Contains(identifier, "..") {
+		common.RespondError(c, http.StatusBadRequest, "Invalid image identifier")
+		return
+	}
+
 	userID := c.GetUint(middleware.ContextUserIDKey)
 	acceptHeader := c.GetHeader("Accept")
 

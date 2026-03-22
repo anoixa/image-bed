@@ -85,8 +85,14 @@ func (s *ImageProcessingSettings) Validate() error {
 	if s.WebPQuality != 0 && (s.WebPQuality < 1 || s.WebPQuality > 100) {
 		return fmt.Errorf("webp quality must be between 1 and 100")
 	}
+	if s.WebPEffort < 0 || s.WebPEffort > 6 {
+		return fmt.Errorf("webp effort must be between 0 and 6")
+	}
 	if s.AVIFQuality != 0 && (s.AVIFQuality < 1 || s.AVIFQuality > 100) {
 		return fmt.Errorf("avif quality must be between 1 and 100")
+	}
+	if s.AVIFSpeed < 0 || s.AVIFSpeed > 8 {
+		return fmt.Errorf("avif speed must be between 0 and 8")
 	}
 	// 用户偏好验证（非零值才验证）
 	if s.ConcurrentUploadLimit != 0 && (s.ConcurrentUploadLimit < 1 || s.ConcurrentUploadLimit > 10) {
@@ -260,7 +266,7 @@ func (m *Manager) SaveImageProcessingSettings(ctx context.Context, settings *Ima
 			"max_batch_total_mb":         settings.MaxBatchTotalMB,
 			"api_key_enabled":            settings.APIKeyEnabled,
 		},
-		IsEnabled:   BoolPtr(settings.ThumbnailEnabled),
+		IsEnabled:   BoolPtr(true),
 		IsDefault:   BoolPtr(true),
 		Description: "Image processing and user preference configuration",
 	}

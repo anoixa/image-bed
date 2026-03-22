@@ -77,6 +77,8 @@ func NewWebDAVStorage(cfg WebDAVConfig) (*WebDAVStorage, error) {
 		defaultTimeout = 30 * time.Second
 	}
 
+	client.SetTimeout(defaultTimeout)
+
 	return &WebDAVStorage{
 		client:         client,
 		httpClient:     httpClient,
@@ -183,7 +185,6 @@ func (s *WebDAVStorage) ensureParentDir(ctx context.Context, fullPath string) er
 			currentPath = currentPath + "/" + part
 		}
 
-		// 检查目录是否存在，不存在则创建（带超时防止 goroutine 泄漏）
 		pathToCreate := currentPath
 		err := s.executeWithTimeout(ctx, func() error {
 			return s.client.Mkdir(pathToCreate, os.FileMode(0755))

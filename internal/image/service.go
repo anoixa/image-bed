@@ -439,7 +439,8 @@ func (s *Service) warmCache(image *models.Image) {
 	if s.cacheHelper == nil {
 		return
 	}
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	_ = s.cacheHelper.CacheImage(ctx, image)
 }
 
@@ -460,7 +461,6 @@ func (s *Service) GetImageMetadata(ctx context.Context, identifier string) (*mod
 			return nil, err
 		}
 
-		// 异步写入缓存（使用独立上下文，避免 HTTP 请求取消影响后台任务）
 		go func(img *models.Image) {
 			defer func() {
 				if r := recover(); r != nil {
@@ -470,7 +470,7 @@ func (s *Service) GetImageMetadata(ctx context.Context, identifier string) (*mod
 			if s.cacheHelper == nil {
 				return
 			}
-			// 使用独立上下文，不依赖可能已被取消的 HTTP 请求上下文
+
 			cacheCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			if cacheErr := s.cacheHelper.CacheImage(cacheCtx, img); cacheErr != nil {
@@ -628,16 +628,13 @@ func (s *Service) DeleteSingle(ctx context.Context, identifier string, userID ui
 		log.Printf("Failed to remove image %d from albums: %v", img.ID, err)
 	}
 
-	// 先删除变体，再删除原图文件，最后删除DB记录（避免幽灵文件）
 	s.deleteVariantsForImage(ctx, img)
 
-	// 检查是否还有其他图片引用同一个物理文件（秒传引用计数）
 	if img.StoragePath != "" {
 		refCount, err := s.repo.CountImagesByStoragePath(img.StoragePath)
 		if err != nil {
 			log.Printf("Failed to count references for storage path %s: %v", img.StoragePath, err)
 		} else if refCount <= 1 {
-			// 只有当前这一条记录引用，可以安全删除物理文件
 			provider, err := s.getStorageProviderByID(img.StorageConfigID)
 			if err != nil {
 				log.Printf("Failed to get storage provider for image %s: %v", utils.SanitizeLogMessage(img.Identifier), err)
@@ -674,13 +671,10 @@ func (s *Service) DeleteBatch(ctx context.Context, identifiers []string, userID 
 		return nil, fmt.Errorf("failed to execute batch delete: %w", err)
 	}
 
-	// 删除变体的物理文件（在事务外执行，避免影响数据库一致性）
 	for _, img := range imagesToDelete {
 		s.deleteVariantsForImage(ctx, img)
 	}
 
-	// 检查每个被删除图片的物理文件引用计数
-	// 只有没有其他引用时才删除物理文件（避免秒传共享文件被误删）
 	for _, img := range imagesToDelete {
 		if img.StoragePath != "" {
 			refCount, err := s.repo.CountImagesByStoragePath(img.StoragePath)

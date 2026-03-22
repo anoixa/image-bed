@@ -104,9 +104,26 @@ func cleanOrphanDBRecords(db *gorm.DB, stats *cleanStats, dryRun bool) error {
 		return fmt.Errorf("failed to fetch images: %w", err)
 	}
 
+	total := len(images)
+	log.Printf("Checking %d images against storage (this may be slow for remote storage backends)...", total)
+
+	ctx := context.Background()
 	var orphanIDs []uint
-	for _, img := range images {
-		exists, err := storage.GetDefault().Exists(context.Background(), img.Identifier)
+	for i, img := range images {
+		if i > 0 && i%100 == 0 {
+			log.Printf("Progress: %d/%d checked, %d orphans found so far", i, total, len(orphanIDs))
+		}
+
+		exists, err := func() (bool, error) {
+			if img.StorageConfigID > 0 {
+				provider, provErr := storage.GetByID(img.StorageConfigID)
+				if provErr == nil {
+					return provider.Exists(ctx, img.StoragePath)
+				}
+				log.Printf("Warning: storage provider for config ID=%d not found, falling back to default: %v", img.StorageConfigID, provErr)
+			}
+			return storage.GetDefault().Exists(ctx, img.StoragePath)
+		}()
 		if err != nil {
 			log.Printf("Warning: failed to check existence of %s: %v", utils.SanitizeLogMessage(img.Identifier), err)
 			continue

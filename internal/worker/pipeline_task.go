@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"time"
 
 	"github.com/anoixa/image-bed/cache"
 	dbconfig "github.com/anoixa/image-bed/config/db"
@@ -128,7 +129,8 @@ type ImagePipelineTask struct {
 func (t *ImagePipelineTask) Execute() {
 	defer t.recovery()
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
 
 	if t.ThumbVariantID > 0 {
 		utils.LogIfDevf("[Pipeline] Attempting CAS: thumbnail variant %d pending->processing", t.ThumbVariantID)
@@ -277,7 +279,6 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
 		return fmt.Errorf("some variants failed")
 	}
 
-	// 全部成功或全部跳过（如 GIF），都是成功执行
 	_ = t.ImageRepo.UpdateVariantStatus(t.ImageID, models.ImageVariantStatusCompleted)
 	t.deleteCacheOnTerminalState("success")
 	return nil
@@ -491,5 +492,7 @@ func (t *ImagePipelineTask) recovery() {
 		}
 
 		_ = t.ImageRepo.UpdateVariantStatus(t.ImageID, models.ImageVariantStatusFailed)
+
+		utils.LogIfDevf("[Pipeline] Panic during processing for image %s; orphaned storage files (if any) can be cleaned with the 'clean' command", t.ImageIdentifier)
 	}
 }
