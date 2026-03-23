@@ -305,7 +305,10 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
 	}
 
 	if hasSuccess {
-		t.saveVariantResults(thumbResult, webpResult)
+		if err := t.saveVariantResults(thumbResult, webpResult); err != nil {
+			utils.LogIfDevf("[Pipeline] Failed to persist variant results: %v", err)
+			hasFailed = true
+		}
 	}
 
 	if hasFailed {
@@ -452,11 +455,12 @@ func (t *ImagePipelineTask) generateWebPWithSettings(ctx context.Context, filePa
 	}, nil
 }
 
-// saveVariantResults 保存变体结果
-func (t *ImagePipelineTask) saveVariantResults(thumbResult, webpResult *pipelineResult) {
-	// 更新缩略图变体
+// saveVariantResults 保存变体结果，任一变体写库失败时返回 error
+func (t *ImagePipelineTask) saveVariantResults(thumbResult, webpResult *pipelineResult) error {
+	var firstErr error
+
 	if t.ThumbVariantID > 0 && thumbResult != nil {
-		_ = t.VariantRepo.UpdateCompleted(
+		if err := t.VariantRepo.UpdateCompleted(
 			t.ThumbVariantID,
 			filepath.Base(thumbResult.StoragePath),
 			thumbResult.StoragePath,
@@ -464,12 +468,17 @@ func (t *ImagePipelineTask) saveVariantResults(thumbResult, webpResult *pipeline
 			thumbResult.FileHash,
 			thumbResult.Width,
 			thumbResult.Height,
-		)
+		); err != nil {
+			utils.LogIfDevf("[Pipeline] Failed to mark thumb variant %d completed: %v", t.ThumbVariantID, err)
+			_ = t.VariantRepo.UpdateFailed(t.ThumbVariantID, "failed to persist result: "+err.Error(), false)
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
 	}
 
-	// 更新 WebP 变体
 	if t.WebPVariantID > 0 && webpResult != nil {
-		_ = t.VariantRepo.UpdateCompleted(
+		if err := t.VariantRepo.UpdateCompleted(
 			t.WebPVariantID,
 			filepath.Base(webpResult.StoragePath),
 			webpResult.StoragePath,
@@ -477,8 +486,16 @@ func (t *ImagePipelineTask) saveVariantResults(thumbResult, webpResult *pipeline
 			webpResult.FileHash,
 			webpResult.Width,
 			webpResult.Height,
-		)
+		); err != nil {
+			utils.LogIfDevf("[Pipeline] Failed to mark webp variant %d completed: %v", t.WebPVariantID, err)
+			_ = t.VariantRepo.UpdateFailed(t.WebPVariantID, "failed to persist result: "+err.Error(), false)
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
 	}
+
+	return firstErr
 }
 
 // deleteCacheOnTerminalState 终端状态删除缓存
