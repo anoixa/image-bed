@@ -75,15 +75,16 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	}
 
 	const (
-		defaultMaxUploadSizeMB = 50
-		defaultMaxBatchTotalMB = 500
-		minBatchRequestLimitMB = 100
-		batchRequestLimitRatio = 2
+		defaultMaxUploadSizeMB    = 50
+		multipartMemoryMB         = 8 // gin in-memory multipart buffer; actual size limit enforced per-request
+		defaultMaxBatchTotalMB    = 500
+		minBatchRequestLimitMB    = 100
+		batchRequestLimitRatio    = 2
 	)
 
 	// MaxMultipartMemory 使用静态默认值，避免动态配置变更导致的不一致
 	// 实际的文件大小限制在 upload handler 中按请求动态检查
-	router.MaxMultipartMemory = defaultMaxUploadSizeMB << 20
+	router.MaxMultipartMemory = multipartMemoryMB << 20
 	concurrencyLimiter := middleware.NewConcurrencyLimiter(100)
 	router.Use(concurrencyLimiter.Middleware())
 	requestBodyLimit := int64(defaultMaxBatchTotalMB) * batchRequestLimitRatio << 20
