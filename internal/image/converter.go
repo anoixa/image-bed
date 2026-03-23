@@ -138,6 +138,8 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 			ImageID:         image.ID,
 			StoragePath:     image.StoragePath,
 			ImageIdentifier: image.Identifier,
+			FileSize:        image.FileSize,
+			MimeType:        image.MimeType,
 			Storage:         storageProvider,
 			Settings:        settings,
 			VariantRepo:     c.variantRepo,

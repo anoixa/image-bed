@@ -118,6 +118,8 @@ type ImagePipelineTask struct {
 	ImageID         uint
 	StoragePath     string
 	ImageIdentifier string
+	FileSize        int64  // used by detectImageComplexity instead of len(fileBytes)
+	MimeType        string // used for GIF guard in generateThumbnail
 	Storage         storage.Provider
 	Settings        *dbconfig.ImageProcessingSettings
 	VariantRepo     VariantRepository
