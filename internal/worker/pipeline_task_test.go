@@ -28,10 +28,11 @@ func TestGetProcessingFilePath_LocalStorage(t *testing.T) {
 
 	path, cleanup, err := task.getProcessingFilePath(context.Background())
 	require.NoError(t, err)
-	defer cleanup()
 
 	assert.Equal(t, full, path)
-	// local storage file must NOT be deleted by cleanup
+
+	// call cleanup explicitly first, then verify local file is untouched
+	cleanup()
 	_, statErr := os.Stat(full)
 	assert.NoError(t, statErr, "local storage file must not be deleted by cleanup")
 }
