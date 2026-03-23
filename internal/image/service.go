@@ -730,7 +730,7 @@ func (s *Service) deleteVariantsForImage(ctx context.Context, img *models.Image)
 	}
 
 	for _, variant := range variants {
-		if variant.StoragePath == "" || variant.Status != models.VariantStatusCompleted {
+		if variant.StoragePath == "" {
 			continue
 		}
 
