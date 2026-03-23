@@ -84,6 +84,13 @@ type FileOpener interface {
 	OpenFile(ctx context.Context, name string) (*os.File, error)
 }
 
+// PathProvider is implemented by storage backends that can expose a
+// local OS file path for a stored object. Only LocalStorage implements this.
+// Callers must not write to or delete the returned path.
+type PathProvider interface {
+	GetFilePath(storagePath string) (string, error)
+}
+
 // StreamProvider 流式传输到 ResponseWriter 的存储
 type StreamProvider interface {
 	Provider

@@ -170,6 +170,12 @@ func (s *LocalStorage) OpenFile(ctx context.Context, storagePath string) (*os.Fi
 	return file, nil
 }
 
+// GetFilePath returns the absolute OS path for storagePath.
+// Implements storage.PathProvider. The returned path must not be written to or deleted.
+func (s *LocalStorage) GetFilePath(storagePath string) (string, error) {
+	return s.validatePath(storagePath)
+}
+
 // DeleteWithContext 从本地存储删除文件
 func (s *LocalStorage) DeleteWithContext(ctx context.Context, storagePath string) error {
 	select {
