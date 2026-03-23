@@ -75,11 +75,11 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	}
 
 	const (
-		defaultMaxUploadSizeMB    = 50
-		multipartMemoryMB         = 8 // gin in-memory multipart buffer; actual size limit enforced per-request
-		defaultMaxBatchTotalMB    = 500
-		minBatchRequestLimitMB    = 100
-		batchRequestLimitRatio    = 2
+		defaultMaxUploadSizeMB = 50
+		multipartMemoryMB      = 8 // gin in-memory multipart buffer; actual size limit enforced per-request
+		defaultMaxBatchTotalMB = 500
+		minBatchRequestLimitMB = 100
+		batchRequestLimitRatio = 2
 	)
 
 	// MaxMultipartMemory 使用静态默认值，避免动态配置变更导致的不一致
