@@ -66,7 +66,7 @@ func detectImageComplexity(img *vips.ImageRef, fileSize int64) ImageComplexity {
 	height := img.Height()
 	pixelCount := width * height
 
-	if pixelCount == 0 {
+	if pixelCount == 0 || fileSize == 0 {
 		return ComplexityMedium
 	}
 
@@ -175,7 +175,7 @@ func (t *ImagePipelineTask) getProcessingFilePath(ctx context.Context) (path str
 		return "", noop, fmt.Errorf("file exceeds max size %d bytes", maxSize)
 	}
 	if err := tmp.Close(); err != nil {
-		cleanupFn()
+		_ = os.Remove(tmp.Name()) // avoid double-close; file may already be partially closed
 		return "", noop, fmt.Errorf("close temp file: %w", err)
 	}
 
