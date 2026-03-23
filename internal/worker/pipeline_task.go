@@ -6,15 +6,18 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/anoixa/image-bed/cache"
+	"github.com/anoixa/image-bed/config"
 	dbconfig "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/anoixa/image-bed/utils/generator"
+	"github.com/anoixa/image-bed/utils/pool"
 	"github.com/davidbyttow/govips/v2/vips"
 )
 
@@ -51,8 +54,9 @@ const (
 	ComplexityHigh   ImageComplexity = 2 // 高复杂度（照片）
 )
 
-// detectImageComplexity 检测图片复杂度
-func detectImageComplexity(img *vips.ImageRef, fileBytes []byte) ImageComplexity {
+// detectImageComplexity detects image complexity level.
+// fileSize is the compressed file size in bytes (used to estimate compression ratio).
+func detectImageComplexity(img *vips.ImageRef, fileSize int64) ImageComplexity {
 	hasAlpha := img.HasAlpha()
 	if hasAlpha {
 		return ComplexityLow
@@ -60,7 +64,6 @@ func detectImageComplexity(img *vips.ImageRef, fileBytes []byte) ImageComplexity
 
 	width := img.Width()
 	height := img.Height()
-	fileSize := len(fileBytes)
 	pixelCount := width * height
 
 	if pixelCount == 0 {
@@ -69,7 +72,6 @@ func detectImageComplexity(img *vips.ImageRef, fileBytes []byte) ImageComplexity
 
 	bytesPerPixel := float64(fileSize) / float64(pixelCount)
 
-	// JPEG 图片分析
 	switch {
 	case bytesPerPixel > 3.0:
 		return ComplexityLow
@@ -98,19 +100,6 @@ func adaptiveWebPQuality(complexity ImageComplexity, baseQuality int) int {
 	}
 }
 
-// readWithLimit 读取流并检查大小限制
-func readWithLimit(r io.Reader, limit int64) ([]byte, error) {
-	lr := io.LimitReader(r, limit+1)
-	data, err := io.ReadAll(lr)
-	if err != nil {
-		return nil, err
-	}
-	if int64(len(data)) > limit {
-		return nil, fmt.Errorf("file exceeds max size %d bytes", limit)
-	}
-	return data, nil
-}
-
 // ImagePipelineTask 统一图片处理任务
 type ImagePipelineTask struct {
 	ThumbVariantID  uint
@@ -125,6 +114,72 @@ type ImagePipelineTask struct {
 	VariantRepo     VariantRepository
 	ImageRepo       ImageRepository
 	CacheHelper     *cache.Helper
+}
+
+// getProcessingFilePath returns an OS file path suitable for vips file-based APIs.
+// For local storage it returns the stored file path directly (no I/O).
+// For remote storage it downloads to a temp file bounded by maxSize.
+// Caller must invoke the returned cleanup func exactly once via defer.
+func (t *ImagePipelineTask) getProcessingFilePath(ctx context.Context) (path string, cleanup func(), err error) {
+	noop := func() {}
+
+	// Local storage: return path directly, no temp file needed
+	if pp, ok := t.Storage.(storage.PathProvider); ok {
+		p, e := pp.GetFilePath(t.StoragePath)
+		if e != nil {
+			return "", noop, fmt.Errorf("get file path: %w", e)
+		}
+		return p, noop, nil
+	}
+
+	// Remote storage: download to temp file
+	maxSize := int64(50) * 1024 * 1024
+	if t.Settings != nil && t.Settings.MaxFileSizeMB > 0 {
+		maxSize = int64(t.Settings.MaxFileSizeMB) * 1024 * 1024
+	}
+
+	if err := os.MkdirAll(config.TempDir, 0700); err != nil {
+		return "", noop, fmt.Errorf("create temp dir: %w", err)
+	}
+
+	tmp, err := os.CreateTemp(config.TempDir, "pipeline-proc-*")
+	if err != nil {
+		return "", noop, fmt.Errorf("create temp file: %w", err)
+	}
+
+	cleanupFn := func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+	}
+
+	stream, err := t.Storage.GetWithContext(ctx, t.StoragePath)
+	if err != nil {
+		cleanupFn()
+		return "", noop, fmt.Errorf("get stream: %w", err)
+	}
+	if closer, ok := stream.(io.Closer); ok {
+		defer func() { _ = closer.Close() }()
+	}
+
+	bufPtr := pool.SharedBufferPool.Get().(*[]byte)
+	defer pool.SharedBufferPool.Put(bufPtr)
+
+	lr := io.LimitReader(stream, maxSize+1)
+	n, copyErr := io.CopyBuffer(tmp, lr, *bufPtr)
+	if copyErr != nil {
+		cleanupFn()
+		return "", noop, fmt.Errorf("write temp file: %w", copyErr)
+	}
+	if n > maxSize {
+		cleanupFn()
+		return "", noop, fmt.Errorf("file exceeds max size %d bytes", maxSize)
+	}
+	if err := tmp.Close(); err != nil {
+		cleanupFn()
+		return "", noop, fmt.Errorf("close temp file: %w", err)
+	}
+
+	return tmp.Name(), func() { _ = os.Remove(tmp.Name()) }, nil
 }
 
 // Execute 执行任务
@@ -201,47 +256,24 @@ func (t *ImagePipelineTask) Execute() {
 }
 
 // runPipeline 执行处理流水线
-// 流程：读取文件 -> 顺序处理（先 缩略图 后webp）-> 统一释放
 func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
-	// 从预解析配置获取最大文件大小（默认50MB）
-	maxSize := int64(50) * 1024 * 1024
-	if t.Settings != nil && t.Settings.MaxFileSizeMB > 0 {
-		maxSize = int64(t.Settings.MaxFileSizeMB) * 1024 * 1024
-	}
-
-	stream, err := t.Storage.GetWithContext(ctx, t.StoragePath)
+	filePath, cleanup, err := t.getProcessingFilePath(ctx)
 	if err != nil {
-		// 获取流失败，标记所有变体为失败
 		if t.ThumbVariantID > 0 {
-			_ = t.VariantRepo.UpdateFailed(t.ThumbVariantID, fmt.Sprintf("get stream: %v", err), true)
+			_ = t.VariantRepo.UpdateFailed(t.ThumbVariantID, fmt.Sprintf("get file: %v", err), true)
 		}
 		if t.WebPVariantID > 0 {
-			_ = t.VariantRepo.UpdateFailed(t.WebPVariantID, fmt.Sprintf("get stream: %v", err), true)
+			_ = t.VariantRepo.UpdateFailed(t.WebPVariantID, fmt.Sprintf("get file: %v", err), true)
 		}
-		return fmt.Errorf("get stream: %w", err)
+		return fmt.Errorf("get processing file: %w", err)
 	}
-	if closer, ok := stream.(io.Closer); ok {
-		defer func() { _ = closer.Close() }()
-	}
-
-	fileBytes, err := readWithLimit(stream, maxSize)
-	if err != nil {
-		// 读取失败，标记所有变体为失败
-		if t.ThumbVariantID > 0 {
-			_ = t.VariantRepo.UpdateFailed(t.ThumbVariantID, fmt.Sprintf("read: %v", err), true)
-		}
-		if t.WebPVariantID > 0 {
-			_ = t.VariantRepo.UpdateFailed(t.WebPVariantID, fmt.Sprintf("read: %v", err), true)
-		}
-		return fmt.Errorf("read file: %w", err)
-	}
+	defer cleanup()
 
 	var thumbResult, webpResult *pipelineResult
 	var hasSuccess, hasFailed bool
 
-	// 优先生成缩略图
 	if t.ThumbVariantID > 0 {
-		result, err := t.generateThumbnail(ctx, fileBytes)
+		result, err := t.generateThumbnail(ctx, filePath)
 		switch {
 		case err != nil:
 			utils.LogIfDevf("[Pipeline] Thumbnail failed: %v", err)
@@ -256,9 +288,8 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
 		}
 	}
 
-	// 再生成 WebP 原图
 	if t.WebPVariantID > 0 {
-		result, err := t.generateWebP(ctx, fileBytes)
+		result, err := t.generateWebP(ctx, filePath)
 		switch {
 		case err != nil:
 			utils.LogIfDevf("[Pipeline] WebP failed: %v", err)
@@ -287,7 +318,7 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
 }
 
 // generateThumbnail 生成缩略图
-func (t *ImagePipelineTask) generateThumbnail(ctx context.Context, fileBytes []byte) (*pipelineResult, error) {
+func (t *ImagePipelineTask) generateThumbnail(ctx context.Context, filePath string) (*pipelineResult, error) {
 	settings := t.Settings
 	if settings == nil {
 		return nil, fmt.Errorf("image processing settings not provided")
@@ -297,8 +328,9 @@ func (t *ImagePipelineTask) generateThumbnail(ctx context.Context, fileBytes []b
 		return nil, nil
 	}
 
-	// 跳过 GIF 格式
-	if len(fileBytes) >= 6 && (string(fileBytes[:6]) == "GIF87a" || string(fileBytes[:6]) == "GIF89a") {
+	// GIF guard: converter.go already blocks GIFs before task creation;
+	// this is defense-in-depth using the stored MIME type.
+	if t.MimeType == "image/gif" {
 		utils.LogIfDevf("[Pipeline] Skipping GIF thumbnail generation")
 		return nil, nil
 	}
@@ -310,14 +342,9 @@ func (t *ImagePipelineTask) generateThumbnail(ctx context.Context, fileBytes []b
 
 	utils.LogIfDevf("[Pipeline] Generating thumbnail: width=%d for variant %d", size.Width, t.ThumbVariantID)
 
-	thumbImg, err := vips.NewThumbnailFromBuffer(
-		fileBytes,
-		size.Width,
-		-1,
-		vips.InterestingNone,
-	)
+	thumbImg, err := vips.NewThumbnailFromFile(filePath, size.Width, -1, vips.InterestingNone)
 	if err != nil {
-		return nil, fmt.Errorf("thumbnail from buffer: %w", err)
+		return nil, fmt.Errorf("thumbnail from file: %w", err)
 	}
 	defer thumbImg.Close()
 
@@ -344,7 +371,6 @@ func (t *ImagePipelineTask) generateThumbnail(ctx context.Context, fileBytes []b
 
 	utils.LogIfDevf("[Pipeline] Thumbnail saved: %s (%d bytes)", thumbPath, len(thumbWebp))
 
-	// 计算文件哈希
 	fileHash := fmt.Sprintf("%x", sha256.Sum256(thumbWebp))
 
 	return &pipelineResult{
@@ -357,17 +383,17 @@ func (t *ImagePipelineTask) generateThumbnail(ctx context.Context, fileBytes []b
 }
 
 // generateWebP 生成 WebP 原图
-func (t *ImagePipelineTask) generateWebP(ctx context.Context, fileBytes []byte) (*pipelineResult, error) {
+func (t *ImagePipelineTask) generateWebP(ctx context.Context, filePath string) (*pipelineResult, error) {
 	settings := t.Settings
 	if settings == nil {
 		return nil, fmt.Errorf("image processing settings not provided")
 	}
 
-	return t.generateWebPWithSettings(ctx, fileBytes, settings)
+	return t.generateWebPWithSettings(ctx, filePath, settings)
 }
 
 // generateWebPWithSettings 使用指定设置生成 WebP
-func (t *ImagePipelineTask) generateWebPWithSettings(ctx context.Context, fileBytes []byte, settings *dbconfig.ImageProcessingSettings) (*pipelineResult, error) {
+func (t *ImagePipelineTask) generateWebPWithSettings(ctx context.Context, filePath string, settings *dbconfig.ImageProcessingSettings) (*pipelineResult, error) {
 	if !settings.IsFormatEnabled(models.FormatWebP) {
 		utils.LogIfDevf("[Pipeline] WebP format disabled")
 		return nil, nil
@@ -375,13 +401,12 @@ func (t *ImagePipelineTask) generateWebPWithSettings(ctx context.Context, fileBy
 
 	utils.LogIfDevf("[Pipeline] Generating WebP for variant %d", t.WebPVariantID)
 
-	originImg, err := vips.NewImageFromBuffer(fileBytes)
+	originImg, err := vips.NewImageFromFile(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("load image from buffer: %w", err)
+		return nil, fmt.Errorf("load image from file: %w", err)
 	}
 	defer originImg.Close()
 
-	// 检查尺寸限制
 	width := originImg.Width()
 	height := originImg.Height()
 	if settings.MaxDimension > 0 {
@@ -390,8 +415,7 @@ func (t *ImagePipelineTask) generateWebPWithSettings(ctx context.Context, fileBy
 		}
 	}
 
-	// 自适应调整质量
-	complexity := detectImageComplexity(originImg, fileBytes)
+	complexity := detectImageComplexity(originImg, t.FileSize)
 	adaptiveQuality := adaptiveWebPQuality(complexity, settings.WebPQuality)
 
 	utils.LogIfDevf("[Pipeline] Image complexity=%d, adaptive quality=%d (base=%d)",
@@ -417,7 +441,6 @@ func (t *ImagePipelineTask) generateWebPWithSettings(ctx context.Context, fileBy
 
 	utils.LogIfDevf("[Pipeline] WebP saved: %s (%d bytes, quality=%d)", originPath, len(originWebp), adaptiveQuality)
 
-	// 计算文件哈希
 	fileHash := fmt.Sprintf("%x", sha256.Sum256(originWebp))
 
 	return &pipelineResult{
