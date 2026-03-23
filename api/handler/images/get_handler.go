@@ -241,8 +241,10 @@ func (h *Handler) fetchFromRemoteWithProvider(storagePath string, provider stora
 			return data, nil
 		}
 
-		// 从指定的存储 provider 获取
-		stream, err := provider.GetWithContext(context.Background(), storagePath)
+		// 从指定的存储 provider 获取，设置超时避免慢请求无限阻塞所有等待者
+		fetchCtx, fetchCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer fetchCancel()
+		stream, err := provider.GetWithContext(fetchCtx, storagePath)
 		if err != nil {
 			return nil, err
 		}
