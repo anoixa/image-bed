@@ -160,7 +160,6 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
 			imagesGroup.Use(middleware.Authorize(middleware.AllowAllAuth...))
 			{
 				imagesGroup.POST("/upload", imageHandler.UploadImage)
-				imagesGroup.POST("/uploads", imageHandler.UploadImages)
 				imagesGroup.POST("", imageHandler.ListImages)
 				imagesGroup.POST("/delete", imageHandler.DeleteImages)
 				imagesGroup.DELETE("/:identifier", imageHandler.DeleteSingleImage)
