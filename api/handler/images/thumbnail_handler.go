@@ -77,6 +77,11 @@ func (h *Handler) GetThumbnail(c *gin.Context) {
 	}
 
 	if !exists {
+		webpResult, webpExists, _ := h.thumbnailService.GetWebPVariant(ctx, image)
+		if webpExists {
+			h.serveThumbnailImage(c, image, webpResult)
+			return
+		}
 		h.serveOriginalImage(c, image)
 		return
 	}
@@ -86,7 +91,6 @@ func (h *Handler) GetThumbnail(c *gin.Context) {
 
 // serveThumbnailImage 提供缩略图（支持直链模式）
 func (h *Handler) serveThumbnailImage(c *gin.Context, image *models.Image, result *image.ThumbnailResult) {
-	// 检查缩略图是否可以使用直链（使用缩略图自己的路径）
 	if directURL := h.getVariantDirectURLIfPossible(c, image, result.StoragePath); directURL != "" {
 		c.Header("Cache-Control", config.CacheControlPublic)
 		c.Redirect(http.StatusFound, directURL)

@@ -93,6 +93,31 @@ func (s *ThumbnailService) EnsureThumbnail(ctx context.Context, image *models.Im
 	return nil, false, nil
 }
 
+// GetWebPVariant 获取 WebP 格式变体（用于缩略图降级）
+func (s *ThumbnailService) GetWebPVariant(ctx context.Context, image *models.Image) (*ThumbnailResult, bool, error) {
+	variant, err := s.variantRepo.GetVariantByImageIDAndFormat(image.ID, "webp")
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+
+	if variant.Status != models.VariantStatusCompleted {
+		return nil, false, nil
+	}
+
+	return &ThumbnailResult{
+		Format:      "webp",
+		Identifier:  variant.Identifier,
+		StoragePath: variant.StoragePath,
+		Width:       variant.Width,
+		Height:      variant.Height,
+		FileSize:    variant.FileSize,
+		MIMEType:    "image/webp",
+	}, true, nil
+}
+
 // GenerateThumbnailIdentifiers 生成缩略图的 identifier 和 storage_path
 func (s *ThumbnailService) GenerateThumbnailIdentifiers(originalStoragePath string, width int) generator.StorageIdentifiers {
 	return s.pathGenerator.GenerateThumbnailIdentifiers(originalStoragePath, width)
