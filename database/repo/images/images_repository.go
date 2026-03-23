@@ -393,12 +393,7 @@ func (r *Repository) DeleteBatchTransaction(ctx context.Context, identifiers []s
 			return fmt.Errorf("failed to remove images from albums: %w", err)
 		}
 
-		// 3. 删除变体记录
-		if err := tx.Where("image_id IN ?", imageIDs).Delete(&models.ImageVariant{}).Error; err != nil {
-			return fmt.Errorf("failed to delete variants: %w", err)
-		}
-
-		// 4. 删除图片记录
+		// 3. 删除图片记录
 		deleteResult := tx.Where("identifier IN ? AND user_id = ?", identifiers, userID).Delete(&models.Image{})
 		if deleteResult.Error != nil {
 			return fmt.Errorf("failed to delete images: %w", deleteResult.Error)
