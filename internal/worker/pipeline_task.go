@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"image"
 	"io"
 	"os"
 	"path/filepath"
@@ -19,6 +20,10 @@ import (
 	"github.com/anoixa/image-bed/utils/generator"
 	"github.com/anoixa/image-bed/utils/pool"
 	"github.com/davidbyttow/govips/v2/vips"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
+	_ "golang.org/x/image/webp"
 )
 
 // VariantRepository 变体仓库接口
@@ -43,6 +48,21 @@ type pipelineResult struct {
 	Height      int
 	FileSize    int64
 	FileHash    string
+}
+
+// readImageDimensions reads image width and height from the file header without full decode.
+// Returns (width, height, ok). If the format is unrecognized, ok is false.
+func readImageDimensions(filePath string) (width, height int, ok bool) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return 0, 0, false
+	}
+	defer func() { _ = f.Close() }()
+	cfg, _, err := image.DecodeConfig(f)
+	if err != nil {
+		return 0, 0, false
+	}
+	return cfg.Width, cfg.Height, true
 }
 
 // ImageComplexity 图片复杂度级别
@@ -403,6 +423,15 @@ func (t *ImagePipelineTask) generateWebPWithSettings(ctx context.Context, filePa
 	}
 
 	utils.LogIfDevf("[Pipeline] Generating WebP for variant %d", t.WebPVariantID)
+
+	// Check dimensions from file header before full decode to avoid expensive decode of oversized images
+	if settings.MaxDimension > 0 {
+		if w, h, ok := readImageDimensions(filePath); ok {
+			if w > settings.MaxDimension || h > settings.MaxDimension {
+				return nil, fmt.Errorf("image exceeds max dimension: %dx%d", w, h)
+			}
+		}
+	}
 
 	originImg, err := vips.NewImageFromFile(filePath)
 	if err != nil {
