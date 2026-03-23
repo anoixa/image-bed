@@ -20,10 +20,10 @@ import (
 	"github.com/anoixa/image-bed/utils/generator"
 	"github.com/anoixa/image-bed/utils/pool"
 	"github.com/davidbyttow/govips/v2/vips"
+	_ "golang.org/x/image/webp"
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
-	_ "golang.org/x/image/webp"
 )
 
 // VariantRepository 变体仓库接口
