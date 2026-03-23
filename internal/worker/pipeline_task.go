@@ -296,7 +296,7 @@ func (t *ImagePipelineTask) generateThumbnail(ctx context.Context, fileBytes []b
 	}
 
 	// 跳过 GIF 格式
-	if len(fileBytes) > 6 && (string(fileBytes[:6]) == "GIF87a" || string(fileBytes[:6]) == "GIF89a") {
+	if len(fileBytes) >= 6 && (string(fileBytes[:6]) == "GIF87a" || string(fileBytes[:6]) == "GIF89a") {
 		utils.LogIfDevf("[Pipeline] Skipping GIF thumbnail generation")
 		return nil, nil
 	}

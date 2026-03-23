@@ -107,7 +107,7 @@ func testWebDAVConnection(ctx context.Context, client *gowebdav.Client, rootPath
 	}
 }
 
-// executeWithTimeout 执行带超时的 WebDAV 操作，防止 goroutine 泄漏
+// executeWithTimeout 执行带超时的 WebDAV 操作
 func (s *WebDAVStorage) executeWithTimeout(ctx context.Context, operation func() error) error {
 	// 使用默认超时创建子上下文
 	ctx, cancel := context.WithTimeout(ctx, s.defaultTimeout)

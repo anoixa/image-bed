@@ -101,15 +101,25 @@ func (h *Handler) serveThumbnailImage(c *gin.Context, image *models.Image, resul
 		if provider == nil {
 			return nil, fmt.Errorf("storage provider not available")
 		}
-		return provider.GetWithContext(c.Request.Context(), result.StoragePath)
+		stream, err := provider.GetWithContext(c.Request.Context(), result.StoragePath)
+		if err != nil {
+			return nil, err
+		}
+		defer func() {
+			if closer, ok := stream.(io.Closer); ok {
+				_ = closer.Close()
+			}
+		}()
+		return io.ReadAll(stream)
 	})
 	if err != nil {
 		h.serveOriginalImage(c, image)
 		return
 	}
 
-	c.Header("Content-Length", strconv.FormatInt(result.FileSize, 10))
-	c.DataFromReader(http.StatusOK, result.FileSize, result.MIMEType, v.(io.ReadCloser), nil)
+	data := v.([]byte)
+	c.Header("Content-Length", strconv.Itoa(len(data)))
+	c.Data(http.StatusOK, result.MIMEType, data)
 }
 
 // parseThumbnailWidth 解析缩略图宽度参数
