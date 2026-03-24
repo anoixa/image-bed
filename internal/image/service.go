@@ -132,16 +132,15 @@ func NewService(
 	}
 }
 
-// submitBackgroundTask 提交后台任务到 worker pool，队列满时 fallback 到新 goroutine
+// submitBackgroundTask 提交后台任务到 worker pool，队列满时丢弃并记录警告
 func (s *Service) submitBackgroundTask(task func()) {
-	if pool := worker.GetGlobalPool(); pool != nil {
-		if ok := pool.Submit(task); !ok {
-			utils.LogIfDevf("[Service] Worker pool queue full, running task in new goroutine")
-			go task()
-		}
-	} else {
-		utils.LogIfDevf("[Service] Worker pool not initialized, running task in new goroutine")
-		go task()
+	pool := worker.GetGlobalPool()
+	if pool == nil {
+		log.Printf("[Service] Worker pool not initialized, dropping background task")
+		return
+	}
+	if ok := pool.Submit(task); !ok {
+		log.Printf("[Service] Worker pool queue full, dropping background task")
 	}
 }
 
