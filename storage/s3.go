@@ -6,7 +6,6 @@ import (
 	"crypto/x509"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -26,7 +25,7 @@ import (
 func mustGetSystemCertPool() *x509.CertPool {
 	pool, err := x509.SystemCertPool()
 	if err != nil {
-		log.Printf("Failed to load system cert pool: %v", err)
+		utils.Errorf("Failed to load system cert pool: %v", err)
 		return x509.NewCertPool()
 	}
 	return pool
@@ -114,7 +113,7 @@ func NewS3Storage(cfg S3Config) (*S3Storage, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to create bucket '%s': %w", cfg.BucketName, err)
 		}
-		log.Printf("Successfully created bucket: %s", cfg.BucketName)
+		utils.Infof("Successfully created bucket: %s", cfg.BucketName)
 	}
 
 	return &S3Storage{
@@ -206,7 +205,7 @@ func (s *S3Storage) StreamTo(ctx context.Context, storagePath string, w http.Res
 		}
 
 		if !utils.IsClientDisconnect(err) {
-			log.Printf("[S3] Stat failed for %s: %v, continuing without Content-Length", storagePath, err)
+			utils.Errorf("[S3] Stat failed for %s: %v, continuing without Content-Length", storagePath, err)
 		}
 	} else {
 		if w.Header().Get("Content-Type") == "" {

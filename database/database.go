@@ -167,9 +167,9 @@ func fixSystemConfigIndexes(db *gorm.DB) error {
 	// 删除旧索引
 	dropOldIndexSQL := `DROP INDEX IF EXISTS idx_system_configs_key`
 	if err := db.Exec(dropOldIndexSQL).Error; err != nil {
-		log.Printf("[DB Migration] Warning: failed to drop old index: %v", err)
+		utils.Warnf("[DB Migration] Warning: failed to drop old index: %v", err)
 	} else {
-		log.Printf("[DB Migration] Dropped old index idx_system_configs_key")
+		utils.Errorf("[DB Migration] Dropped old index idx_system_configs_key")
 	}
 
 	// 创建新条件索引
@@ -186,7 +186,7 @@ func fixSystemConfigIndexes(db *gorm.DB) error {
 			return fmt.Errorf("failed to create new index: %w", err)
 		}
 	} else {
-		log.Printf("[DB Migration] Created new partial index idx_key_unique")
+		utils.Infof("[DB Migration] Created new partial index idx_key_unique")
 	}
 
 	return nil
@@ -219,16 +219,16 @@ func fixImageIdentifierIndexes(db *gorm.DB) error {
 
 	dropOldIndexSQL := `DROP INDEX IF EXISTS idx_identifier`
 	if err := db.Exec(dropOldIndexSQL).Error; err != nil {
-		log.Printf("[DB Migration] Warning: failed to drop old index idx_identifier: %v", err)
+		utils.Warnf("[DB Migration] Warning: failed to drop old index idx_identifier: %v", err)
 	} else {
-		log.Printf("[DB Migration] Dropped old index idx_identifier")
+		utils.Errorf("[DB Migration] Dropped old index idx_identifier")
 	}
 
 	dropOldIndexSQL2 := `DROP INDEX IF EXISTS idx_images_identifier`
 	if err := db.Exec(dropOldIndexSQL2).Error; err != nil {
-		log.Printf("[DB Migration] Warning: failed to drop old index idx_images_identifier: %v", err)
+		utils.Warnf("[DB Migration] Warning: failed to drop old index idx_images_identifier: %v", err)
 	} else {
-		log.Printf("[DB Migration] Dropped old index idx_images_identifier")
+		utils.Errorf("[DB Migration] Dropped old index idx_images_identifier")
 	}
 
 	createIndexSQL := `CREATE UNIQUE INDEX IF NOT EXISTS idx_images_identifier_active ON images(identifier) WHERE deleted_at IS NULL`
@@ -238,7 +238,7 @@ func fixImageIdentifierIndexes(db *gorm.DB) error {
 			return fmt.Errorf("failed to create partial index for images.identifier: %w", err)
 		}
 	} else {
-		log.Printf("[DB Migration] Created partial unique index idx_images_identifier_active on images.identifier (WHERE deleted_at IS NULL)")
+		utils.Infof("[DB Migration] Created partial unique index idx_images_identifier_active on images.identifier (WHERE deleted_at IS NULL)")
 	}
 
 	return nil

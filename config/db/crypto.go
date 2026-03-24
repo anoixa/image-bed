@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"github.com/anoixa/image-bed/utils"
 	"strings"
 
 	"github.com/anoixa/image-bed/database/models"
@@ -87,7 +87,7 @@ func (c *CryptoLayer) ensureCanary() error {
 		return fmt.Errorf("failed to decrypt canary, master key may be incorrect: %w", err)
 	}
 
-	log.Println("[CryptoLayer] Canary verified successfully")
+	utils.Infof("[CryptoLayer] Canary verified successfully")
 	return nil
 }
 
@@ -116,6 +116,6 @@ func (c *CryptoLayer) createCanary(ctx context.Context) error {
 		return err
 	}
 
-	log.Println("[CryptoLayer] Canary created successfully")
+	utils.Infof("[CryptoLayer] Canary created successfully")
 	return nil
 }

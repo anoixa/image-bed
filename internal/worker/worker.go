@@ -2,7 +2,7 @@ package worker
 
 import (
 	"context"
-	"log"
+	"github.com/anoixa/image-bed/utils"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -70,7 +70,7 @@ func InitGlobalSemaphore(config *ImageProcessingConfig) {
 			semaphore: make(chan struct{}, config.MaxConcurrentImages),
 			config:    config,
 		}
-		log.Printf("[WorkerPool] Image processing semaphore initialized, max concurrent: %d", config.MaxConcurrentImages)
+		utils.Infof("[WorkerPool] Image processing semaphore initialized, max concurrent: %d", config.MaxConcurrentImages)
 	})
 }
 
@@ -97,7 +97,7 @@ func (s *ImageProcessingSemaphore) Release() {
 	select {
 	case <-s.semaphore:
 	default:
-		log.Println("[WorkerPool] Warning: releasing unacquired semaphore")
+		utils.Warnf("[WorkerPool] Warning: releasing unacquired semaphore")
 	}
 }
 
@@ -150,7 +150,7 @@ func NewPool(workers, queueSize int) *Pool {
 	}
 
 	p.workerCount = workers
-	log.Printf("[WorkerPool] Started with %d workers, queue size %d", workers, queueSize)
+	utils.Infof("[WorkerPool] Started with %d workers, queue size %d", workers, queueSize)
 	return p
 }
 
@@ -170,7 +170,7 @@ func (p *Pool) executeTaskWithRecovery(task func()) {
 	defer func() {
 		if r := recover(); r != nil {
 			p.failedCount.Add(1)
-			log.Printf("[WorkerPool] Task panicked: %v", r)
+			utils.Errorf("[WorkerPool] Task panicked: %v", r)
 		}
 	}()
 	task()
@@ -191,7 +191,7 @@ func (p *Pool) Submit(task func()) (ok bool) {
 		p.submittedCount.Add(1)
 		return true
 	default:
-		log.Printf("[WorkerPool] Task queue full, dropping task")
+		utils.Warnf("[WorkerPool] Task queue full, dropping task")
 		return false
 	}
 }
@@ -199,10 +199,10 @@ func (p *Pool) Submit(task func()) (ok bool) {
 // Stop 关闭池
 func (p *Pool) Stop() {
 	if p.isClosed.CompareAndSwap(false, true) {
-		log.Println("[WorkerPool] Stopping...")
+		utils.Infof("[WorkerPool] Stopping...")
 		close(p.taskCh)
 		p.wg.Wait()
-		log.Println("[WorkerPool] Stopped gracefully.")
+		utils.Infof("[WorkerPool] Stopped gracefully.")
 	}
 }
 

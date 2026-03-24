@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"github.com/anoixa/image-bed/utils"
 	"strings"
 
 	"github.com/anoixa/image-bed/database/models"
@@ -226,7 +226,7 @@ func (m *Manager) ensureDefaultImageProcessingConfig(ctx context.Context) error 
 		return fmt.Errorf("failed to create default image processing config: %w", err)
 	}
 
-	log.Println("[ConfigManager] Default image processing config created successfully")
+	utils.Infof("[ConfigManager] Default image processing config created successfully")
 	return nil
 }
 

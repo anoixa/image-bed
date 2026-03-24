@@ -5,7 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"log"
+	"github.com/anoixa/image-bed/utils"
 	"time"
 
 	"github.com/anoixa/image-bed/database/models"
@@ -59,7 +59,7 @@ func (r *Repository) updateTokenLastUsed(tokenID uint) {
 	ctx := context.Background()
 	err := r.db.WithContext(ctx).Model(&models.ApiToken{}).Where("id = ?", tokenID).Update("last_used_at", time.Now()).Error
 	if err != nil {
-		log.Printf("Failed to update last_used_at for token ID %d: %v", tokenID, err)
+		utils.Errorf("Failed to update last_used_at for token ID %d: %v", tokenID, err)
 	}
 }
 

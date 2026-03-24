@@ -2,7 +2,6 @@ package utils
 
 import (
 	"fmt"
-	"log"
 	"runtime"
 	"runtime/debug"
 	"time"
@@ -57,7 +56,7 @@ func LogMemoryStats(prefix string) {
 		return
 	}
 	stats := GetMemoryStats()
-	log.Printf("[Memory][%s] HeapAlloc=%.2fMB, HeapSys=%.2fMB, HeapInUse=%.2fMB, Stack=%.2fMB, Goroutines=%d, NumGC=%d",
+	Debugf("[Memory][%s] HeapAlloc=%.2fMB, HeapSys=%.2fMB, HeapInUse=%.2fMB, Stack=%.2fMB, Goroutines=%d, NumGC=%d",
 		prefix,
 		stats.HeapAllocMB,
 		stats.HeapSysMB,
@@ -75,7 +74,7 @@ func LogMemoryDiff(prefix string, before MemoryStats) {
 	}
 	after := GetMemoryStats()
 	deltaHeap := after.HeapAllocMB - before.HeapAllocMB
-	log.Printf("[Memory][%s] Delta=%+.2fMB (Before=%.2fMB, After=%.2fMB), Goroutines=%d",
+	Debugf("[Memory][%s] Delta=%+.2fMB (Before=%.2fMB, After=%.2fMB), Goroutines=%d",
 		prefix,
 		deltaHeap,
 		before.HeapAllocMB,

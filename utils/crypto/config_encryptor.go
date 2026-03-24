@@ -10,7 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -130,8 +130,8 @@ func (m *MasterKeyManager) Initialize(checkDataExists func() (bool, error)) erro
 func (m *MasterKeyManager) printFingerprint() {
 	hash := sha256.Sum256(m.key.Get())
 	fingerprint := hex.EncodeToString(hash[:8])
-	log.Printf("[Config] Master key source: %s", m.source)
-	log.Printf("[Config] Master key fingerprint: %s", fingerprint)
+	slog.Info("[Config] Master key source: " + m.source)
+	slog.Info("[Config] Master key fingerprint: " + fingerprint)
 }
 
 // GetKey 获取主密钥
@@ -169,19 +169,19 @@ func (e *ConfigEncryptor) Encrypt(plaintext string) string {
 
 	block, err := aes.NewCipher(e.masterKey)
 	if err != nil {
-		log.Printf("[ConfigEncryptor] Failed to create cipher: %v", err)
+		slog.Error("[ConfigEncryptor] Failed to create cipher: " + err.Error())
 		return plaintext
 	}
 
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
-		log.Printf("[ConfigEncryptor] Failed to create GCM: %v", err)
+		slog.Error("[ConfigEncryptor] Failed to create GCM: " + err.Error())
 		return plaintext
 	}
 
 	nonce := make([]byte, gcm.NonceSize())
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		log.Printf("[ConfigEncryptor] Failed to generate nonce: %v", err)
+		slog.Error("[ConfigEncryptor] Failed to generate nonce: " + err.Error())
 		return plaintext
 	}
 

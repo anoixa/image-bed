@@ -7,7 +7,6 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
-	"log"
 
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/storage"
@@ -40,7 +39,7 @@ func (t *ImageDimensionsTask) Execute() {
 	width, height, err := t.extractFromStorage()
 
 	if err != nil {
-		log.Printf("Failed to extract image dimensions for %s: %v", utils.SanitizeLogMessage(t.Identifier), err)
+		utils.Errorf("Failed to extract image dimensions for %s: %v", utils.SanitizeLogMessage(t.Identifier), err)
 		return
 	}
 
@@ -52,7 +51,7 @@ func (t *ImageDimensionsTask) Execute() {
 		})
 
 	if result.Error != nil {
-		log.Printf("Failed to update image dimensions: %v", result.Error)
+		utils.Errorf("Failed to update image dimensions: %v", result.Error)
 		return
 	}
 

@@ -2,7 +2,7 @@ package config
 
 import (
 	"context"
-	"log"
+	"github.com/anoixa/image-bed/utils"
 
 	"github.com/anoixa/image-bed/database/models"
 )
@@ -19,7 +19,7 @@ func (m *Manager) MigrateFromLegacy(legacyStorage map[string]any) error {
 	// 只迁移 storage 配置（cache 配置现在从环境变量读取）
 	if storageCount == 0 && len(legacyStorage) > 0 {
 		if err := m.migrateStorage(ctx, legacyStorage); err != nil {
-			log.Printf("[ConfigMigration] Failed to migrate storage config: %v", err)
+			utils.Errorf("[ConfigMigration] Failed to migrate storage config: %v", err)
 		}
 	}
 
@@ -72,7 +72,7 @@ func (m *Manager) migrateJWT(ctx context.Context, secret, expiresIn, refreshExpi
 		return err
 	}
 
-	log.Println("[ConfigMigration] JWT config migrated successfully")
+	utils.Infof("[ConfigMigration] JWT config migrated successfully")
 	return nil
 }
 
@@ -118,7 +118,7 @@ func (m *Manager) migrateStorage(ctx context.Context, legacy map[string]any) err
 		return err
 	}
 
-	log.Println("[ConfigMigration] Storage config migrated successfully")
+	utils.Infof("[ConfigMigration] Storage config migrated successfully")
 	return nil
 }
 
@@ -145,19 +145,19 @@ func (m *Manager) CreateDefaultConfigs() error {
 
 	if storageCount == 0 {
 		if err := m.createDefaultStorage(ctx); err != nil {
-			log.Printf("[ConfigMigration] Failed to create default storage config: %v", err)
+			utils.Errorf("[ConfigMigration] Failed to create default storage config: %v", err)
 		}
 	}
 
 	if jwtCount == 0 {
 		if err := m.EnsureDefaultJWTConfig(ctx); err != nil {
-			log.Printf("[ConfigMigration] Failed to create default JWT config: %v", err)
+			utils.Errorf("[ConfigMigration] Failed to create default JWT config: %v", err)
 		}
 	}
 
 	if imageProcessingCount == 0 {
 		if err := m.ensureDefaultImageProcessingConfig(ctx); err != nil {
-			log.Printf("[ConfigMigration] Failed to create default image processing config: %v", err)
+			utils.Errorf("[ConfigMigration] Failed to create default image processing config: %v", err)
 		}
 	}
 
@@ -185,7 +185,7 @@ func (m *Manager) createDefaultStorage(ctx context.Context) error {
 		return err
 	}
 
-	log.Println("[ConfigMigration] Default storage config created")
+	utils.Infof("[ConfigMigration] Default storage config created")
 	return nil
 }
 

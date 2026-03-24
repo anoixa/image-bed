@@ -133,6 +133,8 @@ func RunServer() {
 	config.InitConfig()
 	cfg := config.Get()
 
+	utils.InitLogger(config.IsDevelopment())
+
 	dataDir := utils.GetDataDir()
 
 	if err := os.MkdirAll(dataDir, os.ModePerm); err != nil {

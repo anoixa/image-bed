@@ -1,7 +1,7 @@
 package core
 
 import (
-	"log"
+	"github.com/anoixa/image-bed/utils"
 	"net/http"
 	"time"
 
@@ -71,7 +71,7 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	}))
 
 	if err := router.SetTrustedProxies(nil); err != nil {
-		log.Printf("Warning: Failed to set trusted proxies: %v", err)
+		utils.Warnf("Warning: Failed to set trusted proxies: %v", err)
 	}
 
 	const (
@@ -114,7 +114,7 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 		var err error
 		jwtService, err = auth.NewJWTService(deps.ConfigManager, deps.Repositories.KeysRepo)
 		if err != nil {
-			log.Printf("[Server] Failed to initialize JWT service from config: %v, using defaults", err)
+			utils.Errorf("[Server] Failed to initialize JWT service from config: %v, using defaults", err)
 		}
 	}
 

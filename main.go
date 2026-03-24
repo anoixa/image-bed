@@ -1,7 +1,7 @@
 package main
 
 import (
-	"log"
+	"fmt"
 	"time"
 
 	_ "github.com/anoixa/image-bed/docs"
@@ -19,6 +19,6 @@ func init() {
 func main() {
 	pool.InitProcessEnv()
 
-	log.Printf("image bed %s (%s)", config.Version, config.CommitHash)
+	fmt.Printf("image bed %s (%s)\n", config.Version, config.CommitHash)
 	cmd.Execute()
 }

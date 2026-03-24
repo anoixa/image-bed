@@ -3,8 +3,8 @@ package storage
 import (
 	"context"
 	"fmt"
+	"github.com/anoixa/image-bed/utils"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"sync"
@@ -109,10 +109,10 @@ func InitStorage(configs []StorageConfig) error {
 	providersMu.Lock()
 	defer providersMu.Unlock()
 
-	log.Printf("[Storage] ============================================")
-	log.Printf("[Storage] Starting storage initialization...")
-	log.Printf("[Storage] Total configs to initialize: %d", len(configs))
-	log.Printf("[Storage] --------------------------------------------")
+	utils.Errorf("[Storage] ============================================")
+	utils.Infof("[Storage] Starting storage initialization...")
+	utils.Errorf("[Storage] Total configs to initialize: %d", len(configs))
+	utils.Errorf("[Storage] --------------------------------------------")
 
 	var initErrors []error
 	successCount := 0
@@ -124,44 +124,44 @@ func InitStorage(configs []StorageConfig) error {
 		// 记录默认配置信息
 		if cfg.IsDefault {
 			defaultCfg = cfg
-			log.Printf("[Storage] [DEFAULT] ID=%d, Name=%s, Type=%s", cfg.ID, cfg.Name, cfg.Type)
+			utils.Errorf("[Storage] [DEFAULT] ID=%d, Name=%s, Type=%s", cfg.ID, cfg.Name, cfg.Type)
 		}
 
-		log.Printf("[Storage] Initializing: ID=%d, Name=%s, Type=%s, IsDefault=%v",
+		utils.Errorf("[Storage] Initializing: ID=%d, Name=%s, Type=%s, IsDefault=%v",
 			cfg.ID, cfg.Name, cfg.Type, cfg.IsDefault)
 
 		provider, err := createProvider(*cfg)
 		if err != nil {
-			log.Printf("[Storage] [FAILED] ID=%d, Name=%s, Error: %v", cfg.ID, cfg.Name, err)
+			utils.Errorf("[Storage] [FAILED] ID=%d, Name=%s, Error: %v", cfg.ID, cfg.Name, err)
 			initErrors = append(initErrors, fmt.Errorf("ID=%d, Name=%s: %w", cfg.ID, cfg.Name, err))
 			continue
 		}
 
 		providers[cfg.ID] = provider
 		successCount++
-		log.Printf("[Storage] [SUCCESS] ID=%d, Name=%s, Type=%s", cfg.ID, cfg.Name, cfg.Type)
+		utils.Infof("[Storage] [SUCCESS] ID=%d, Name=%s, Type=%s", cfg.ID, cfg.Name, cfg.Type)
 
 		if cfg.IsDefault {
 			defaultProvider = provider
 			defaultID = cfg.ID
-			log.Printf("[Storage] [SET DEFAULT] ID=%d (%s)", cfg.ID, cfg.Name)
+			utils.Errorf("[Storage] [SET DEFAULT] ID=%d (%s)", cfg.ID, cfg.Name)
 		}
 	}
 
-	log.Printf("[Storage] --------------------------------------------")
-	log.Printf("[Storage] Initialization Summary:")
-	log.Printf("[Storage]   Total: %d, Success: %d, Failed: %d", len(configs), successCount, len(initErrors))
+	utils.Errorf("[Storage] --------------------------------------------")
+	utils.Errorf("[Storage] Initialization Summary:")
+	utils.Infof("[Storage]   Total: %d, Success: %d, Failed: %d", len(configs), successCount, len(initErrors))
 
 	if defaultProvider == nil {
 		if defaultCfg != nil {
-			log.Printf("[Storage] [ERROR] Default config (ID=%d, Name=%s) failed to initialize", defaultCfg.ID, defaultCfg.Name)
+			utils.Errorf("[Storage] [ERROR] Default config (ID=%d, Name=%s) failed to initialize", defaultCfg.ID, defaultCfg.Name)
 		}
-		log.Printf("[Storage] ============================================")
+		utils.Errorf("[Storage] ============================================")
 		return fmt.Errorf("no default storage available (checked %d configs, %d failed)", len(configs), len(initErrors))
 	}
 
-	log.Printf("[Storage] [DEFAULT STORAGE] ID=%d, Name=%s", defaultID, defaultProvider.Name())
-	log.Printf("[Storage] ============================================")
+	utils.Errorf("[Storage] [DEFAULT STORAGE] ID=%d, Name=%s", defaultID, defaultProvider.Name())
+	utils.Errorf("[Storage] ============================================")
 
 	return nil
 }

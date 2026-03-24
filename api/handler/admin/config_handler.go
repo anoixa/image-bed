@@ -3,7 +3,6 @@ package admin
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -147,7 +146,7 @@ func (h *ConfigHandler) CreateConfig(c *gin.Context) {
 	if req.Category == models.ConfigCategoryStorage {
 		if err := h.hotReloadStorageConfig(config.ID, req.Config, config.IsDefault); err != nil {
 			if rollbackErr := h.manager.DeleteConfig(c.Request.Context(), config.ID); rollbackErr != nil {
-				log.Printf("Failed to rollback storage config creation: %v", rollbackErr)
+				utils.Errorf("Failed to rollback storage config creation: %v", rollbackErr)
 			}
 			common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to load storage configuration: %v", err))
 			return
@@ -253,7 +252,7 @@ func (h *ConfigHandler) DeleteConfig(c *gin.Context) {
 
 		if err := storage.RemoveProvider(uint(id)); err != nil {
 			if !strings.Contains(err.Error(), "not found") {
-				log.Printf("Warning: failed to remove storage provider: %v", err)
+				utils.Warnf("Warning: failed to remove storage provider: %v", err)
 			}
 		}
 	}

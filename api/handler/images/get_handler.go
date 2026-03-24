@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -131,7 +130,7 @@ func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 	// 使用图片指定的 StorageConfigID 获取正确的存储 provider
 	provider := h.getStorageProvider(image.StorageConfigID)
 	if provider == nil {
-		log.Printf("[serveOriginalImage] Failed to get storage provider for image %s (StorageConfigID=%d)",
+		utils.Errorf("[serveOriginalImage] Failed to get storage provider for image %s (StorageConfigID=%d)",
 			image.Identifier, image.StorageConfigID)
 		common.RespondError(c, http.StatusInternalServerError, "Storage provider not available")
 		return
@@ -151,7 +150,7 @@ func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 
 	data, err := h.fetchFromRemoteWithProvider(storagePath, provider)
 	if err != nil {
-		log.Printf("[serveOriginal] Failed to get image %s (path: %s): %v", utils.SanitizeLogMessage(image.Identifier), storagePath, err)
+		utils.Errorf("[serveOriginal] Failed to get image %s (path: %s): %v", utils.SanitizeLogMessage(image.Identifier), storagePath, err)
 		common.RespondError(c, http.StatusNotFound, "Image file not found")
 		return
 	}
@@ -228,7 +227,7 @@ func (h *Handler) serveByStreaming(c *gin.Context, img *models.Image, streamer s
 		if utils.IsClientDisconnect(err) {
 			return true
 		}
-		log.Printf("[serveByStreaming] Failed to stream image %s (path: %s): %v", utils.SanitizeLogMessage(img.Identifier), img.StoragePath, err)
+		utils.Errorf("[serveByStreaming] Failed to stream image %s (path: %s): %v", utils.SanitizeLogMessage(img.Identifier), img.StoragePath, err)
 		return false
 	}
 	return true
@@ -352,7 +351,7 @@ func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *i
 	// 使用原图指定的 StorageConfigID 获取正确的存储 provider
 	provider := h.getStorageProvider(img.StorageConfigID)
 	if provider == nil {
-		log.Printf("[serveVariantImage] Failed to get storage provider for image %s (StorageConfigID=%d)",
+		utils.Errorf("[serveVariantImage] Failed to get storage provider for image %s (StorageConfigID=%d)",
 			img.Identifier, img.StorageConfigID)
 		// 降级到原图
 		h.serveOriginalImage(c, img)
@@ -379,7 +378,7 @@ func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *i
 
 	stream, err := provider.GetWithContext(c.Request.Context(), result.StoragePath)
 	if err != nil {
-		log.Printf("[serveVariant] Failed to get variant %s (path: %s): %v", utils.SanitizeLogMessage(result.Identifier), result.StoragePath, err)
+		utils.Errorf("[serveVariant] Failed to get variant %s (path: %s): %v", utils.SanitizeLogMessage(result.Identifier), result.StoragePath, err)
 		// 降级到原图
 		h.serveOriginalImage(c, img)
 		return
@@ -475,7 +474,7 @@ func (h *Handler) serveVariantData(c *gin.Context, result *image.VariantResult, 
 // handleMetadataError 处理元数据查询错误
 func (h *Handler) handleMetadataError(c *gin.Context, identifier string, err error) {
 	if errors.Is(err, context.DeadlineExceeded) {
-		log.Printf("Timeout fetching image metadata for '%s'", utils.SanitizeLogMessage(identifier))
+		utils.Errorf("Timeout fetching image metadata for '%s'", utils.SanitizeLogMessage(identifier))
 		common.RespondError(c, http.StatusGatewayTimeout, "Request timeout")
 		return
 	}
@@ -487,11 +486,11 @@ func (h *Handler) handleMetadataError(c *gin.Context, identifier string, err err
 
 	// 临时错误返回 503
 	if errors.Is(err, image.ErrTemporaryFailure) {
-		log.Printf("Temporary failure fetching metadata for '%s': %v", utils.SanitizeLogMessage(identifier), err)
+		utils.Errorf("Temporary failure fetching metadata for '%s': %v", utils.SanitizeLogMessage(identifier), err)
 		common.RespondError(c, http.StatusServiceUnavailable, "Service temporarily unavailable")
 		return
 	}
 
-	log.Printf("Failed to fetch image metadata for '%s': %v", utils.SanitizeLogMessage(identifier), err)
+	utils.Errorf("Failed to fetch image metadata for '%s': %v", utils.SanitizeLogMessage(identifier), err)
 	common.RespondError(c, http.StatusNotFound, "Image not found")
 }

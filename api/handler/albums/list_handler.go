@@ -2,7 +2,6 @@ package albums
 
 import (
 	"context"
-	"log"
 	"math"
 	"net/http"
 
@@ -106,7 +105,7 @@ func (h *Handler) ListAlbumsHandler(c *gin.Context) {
 			Total:  total,
 		}
 		if err := h.cacheHelper.CacheAlbumList(ctx, userID, req.Page, req.Limit, cacheData); err != nil {
-			log.Printf("Failed to cache album list for user %d: %v", userID, err)
+			utils.Errorf("Failed to cache album list for user %d: %v", userID, err)
 		}
 	})
 

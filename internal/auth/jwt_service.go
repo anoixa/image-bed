@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
@@ -83,18 +82,18 @@ func (s *JWTService) initialize() error {
 
 	s.configManager.Subscribe(configSvc.EventConfigUpdated, func(event *configSvc.Event) {
 		if event.Config.Category == models.ConfigCategoryJWT {
-			log.Println("[JWT] Configuration updated, reloading...")
+			utils.Infof("[JWT] Configuration updated, reloading...")
 			s.mutex.RLock()
 			cm := s.configManager
 			s.mutex.RUnlock()
 			if cm == nil {
-				log.Printf("[JWT] Config manager not available, skipping reload")
+				utils.Warnf("[JWT] Config manager not available, skipping reload")
 				return
 			}
 			if err := s.reloadConfig(); err != nil {
-				log.Printf("[JWT] Failed to reload config: %v", err)
+				utils.Errorf("[JWT] Failed to reload config: %v", err)
 			} else {
-				log.Println("[JWT] Configuration reloaded successfully")
+				utils.Infof("[JWT] Configuration reloaded successfully")
 			}
 		}
 	})
@@ -129,7 +128,7 @@ func (s *JWTService) applyConfig(jwtConfig *configSvc.JWTConfig) error {
 		RefreshExpiresIn: refreshDuration,
 	}
 
-	log.Printf("[JWT] Config loaded from database - Access: %v, Refresh: %v\n", duration, refreshDuration)
+	utils.Infof("[JWT] Config loaded from database - Access: %v, Refresh: %v\n", duration, refreshDuration)
 	return nil
 }
 
