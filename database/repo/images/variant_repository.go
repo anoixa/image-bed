@@ -115,7 +115,7 @@ func (r *VariantRepository) UpdateCompleted(id uint, identifier, storagePath str
 }
 
 // UpdateFailed 更新失败状态
-func (r *VariantRepository) UpdateFailed(id uint, errMsg string, _ bool) error {
+func (r *VariantRepository) UpdateFailed(id uint, errMsg string) error {
 	return r.db.Model(&models.ImageVariant{}).Where("id = ?", id).Updates(map[string]any{
 		"status":        models.VariantStatusFailed,
 		"error_message": errMsg,

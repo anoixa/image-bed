@@ -828,7 +828,7 @@ func (s *Service) GetImageWithVariant(ctx context.Context, identifier string, ac
 		}, nil
 	}
 
-	if !variantResult.IsOriginal && variantResult.Variant == nil && s.converter != nil {
+	if variantResult.ShouldTriggerConversion && s.converter != nil {
 		s.submitBackgroundTask(func() {
 			s.converter.TriggerConversion(image)
 		})
@@ -882,7 +882,7 @@ func (s *Service) GetRandomImageWithVariant(ctx context.Context, filter *images.
 		}, nil
 	}
 
-	if !variantResult.IsOriginal && variantResult.Variant == nil && s.converter != nil {
+	if variantResult.ShouldTriggerConversion && s.converter != nil {
 		s.submitBackgroundTask(func() {
 			s.converter.TriggerConversion(image)
 		})

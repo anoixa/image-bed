@@ -12,28 +12,27 @@ import (
 
 // VariantResult 变体选择结果
 type VariantResult struct {
-	Format      format.FormatType
-	IsOriginal  bool
-	Image       *models.Image
-	Variant     *models.ImageVariant
-	MIMEType    string
-	Identifier  string
-	StoragePath string
+	Format                  format.FormatType
+	IsOriginal              bool
+	ShouldTriggerConversion bool
+	Image                   *models.Image
+	Variant                 *models.ImageVariant
+	MIMEType                string
+	Identifier              string
+	StoragePath             string
 }
 
 // VariantService 变体服务
 type VariantService struct {
 	variantRepo   *images.VariantRepository
 	configManager *config.Manager
-	converter     *Converter
 }
 
 // NewVariantService 创建服务
-func NewVariantService(repo *images.VariantRepository, cm *config.Manager, converter *Converter) *VariantService {
+func NewVariantService(repo *images.VariantRepository, cm *config.Manager) *VariantService {
 	return &VariantService{
 		variantRepo:   repo,
 		configManager: cm,
-		converter:     converter,
 	}
 }
 
@@ -61,32 +60,30 @@ func (s *VariantService) SelectBestVariant(ctx context.Context, image *models.Im
 
 	switch image.VariantStatus {
 	case models.ImageVariantStatusNone:
-		return s.handleOriginalWithConversion(image, acceptHeader, settings, true)
+		return s.handleOriginalWithConversion(image, true)
 	case models.ImageVariantStatusProcessing:
-		return s.handleOriginalWithConversion(image, acceptHeader, settings, false)
+		return s.handleOriginalWithConversion(image, false)
 	case models.ImageVariantStatusFailed:
-		return s.handleOriginalWithConversion(image, acceptHeader, settings, true)
+		return s.handleOriginalWithConversion(image, true)
 	case models.ImageVariantStatusThumbnailCompleted, models.ImageVariantStatusCompleted:
 
 		return s.handleCompletedVariants(ctx, image, acceptHeader, settings)
 	default:
-		return s.handleOriginalWithConversion(image, acceptHeader, settings, false)
+		return s.handleOriginalWithConversion(image, false)
 	}
 }
 
-// handleOriginalWithConversion 返回原图，根据条件触发转换
-func (s *VariantService) handleOriginalWithConversion(image *models.Image, acceptHeader string, _ *config.ImageProcessingSettings, allowTrigger bool) (*VariantResult, error) {
+// handleOriginalWithConversion 返回原图。
+func (s *VariantService) handleOriginalWithConversion(image *models.Image, shouldTrigger bool) (*VariantResult, error) {
 	result := &VariantResult{
-		Format:      format.FormatOriginal,
-		IsOriginal:  true,
-		Image:       image,
-		MIMEType:    image.MimeType,
-		Identifier:  image.Identifier,
-		StoragePath: image.StoragePath,
+		Format:                  format.FormatOriginal,
+		IsOriginal:              true,
+		ShouldTriggerConversion: shouldTrigger,
+		Image:                   image,
+		MIMEType:                image.MimeType,
+		Identifier:              image.Identifier,
+		StoragePath:             image.StoragePath,
 	}
-
-	_ = allowTrigger
-	_ = acceptHeader
 
 	return result, nil
 }

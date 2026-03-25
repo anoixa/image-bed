@@ -16,7 +16,6 @@ import (
 type Handler struct {
 	cacheHelper      *cache.Helper
 	repo             *images.Repository
-	converter        *image.Converter
 	configManager    *configSvc.Manager
 	variantService   *image.VariantService
 	thumbnailService *image.ThumbnailService
@@ -27,7 +26,7 @@ type Handler struct {
 
 func NewHandler(cacheProvider cache.Provider, imagesRepo *images.Repository, db *gorm.DB, converter *image.Converter, configManager *configSvc.Manager, cfg *config.Config, baseURL string, storageProvider storage.Provider, albumsRepo *albums.Repository) *Handler {
 	variantRepo := images.NewVariantRepository(db)
-	variantService := image.NewVariantService(variantRepo, configManager, converter)
+	variantService := image.NewVariantService(variantRepo, configManager)
 
 	imageRepo := images.NewRepository(db)
 	thumbnailService := image.NewThumbnailService(variantRepo, imageRepo, configManager, storageProvider, converter)
@@ -55,7 +54,6 @@ func NewHandler(cacheProvider cache.Provider, imagesRepo *images.Repository, db 
 	return &Handler{
 		cacheHelper:      cacheHelper,
 		repo:             imagesRepo,
-		converter:        converter,
 		configManager:    configManager,
 		variantRepo:      variantRepo,
 		variantService:   variantService,

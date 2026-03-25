@@ -1,3 +1,6 @@
+#ifndef VIPSFILE_H
+#define VIPSFILE_H
+
 #include <vips/vips.h>
 
 int ib_load_image_from_file(
@@ -30,3 +33,5 @@ int ib_save_webp_file(
 
 void ib_unref_image(VipsImage *in);
 void ib_get_image_info(VipsImage *in, int *width, int *height, int *has_alpha);
+
+#endif

@@ -30,7 +30,7 @@ func (m *mockVariantRepo) UpdateCompleted(id uint, identifier, storagePath strin
 	return m.updateCompletedErr
 }
 
-func (m *mockVariantRepo) UpdateFailed(id uint, errMsg string, _ bool) error {
+func (m *mockVariantRepo) UpdateFailed(id uint, errMsg string) error {
 	m.updateFailedCalls = append(m.updateFailedCalls, id)
 	return nil
 }
@@ -108,4 +108,26 @@ func TestCreateVariantTempPath(t *testing.T) {
 	defer cleanup()
 
 	assert.FileExists(t, path)
+}
+
+func TestResolveImageVariantStatus(t *testing.T) {
+	t.Run("thumbnail completed and webp skipped", func(t *testing.T) {
+		status := resolveImageVariantStatus(true, true, true, false, false, true)
+		assert.Equal(t, models.ImageVariantStatusThumbnailCompleted, status)
+	})
+
+	t.Run("both completed", func(t *testing.T) {
+		status := resolveImageVariantStatus(true, true, true, true, false, false)
+		assert.Equal(t, models.ImageVariantStatusCompleted, status)
+	})
+
+	t.Run("webp only completed", func(t *testing.T) {
+		status := resolveImageVariantStatus(false, true, false, true, false, false)
+		assert.Equal(t, models.ImageVariantStatusCompleted, status)
+	})
+
+	t.Run("all skipped", func(t *testing.T) {
+		status := resolveImageVariantStatus(true, true, false, false, true, true)
+		assert.Equal(t, models.ImageVariantStatusNone, status)
+	})
 }

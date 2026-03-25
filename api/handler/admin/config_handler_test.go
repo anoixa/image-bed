@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/anoixa/image-bed/database/models"
@@ -107,4 +108,77 @@ func TestEnableConfigReloadsWithUnmaskedStorageSecrets(t *testing.T) {
 	require.NotNil(t, reloaded)
 	assert.Equal(t, "SECRET_VALUE", reloaded["secret_access_key"])
 	assert.Equal(t, "ACCESS_KEY", reloaded["access_key_id"])
+}
+
+func TestValidateRemoteStorageTestTarget(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name      string
+		target    string
+		wantError bool
+	}{
+		{name: "Public HTTPS URL", target: "https://s3.amazonaws.com", wantError: false},
+		{name: "Public endpoint without scheme", target: "s3.amazonaws.com", wantError: false},
+		{name: "Loopback IPv4", target: "http://127.0.0.1:9000", wantError: true},
+		{name: "Localhost hostname", target: "http://localhost:9000", wantError: true},
+		{name: "Localhost subdomain", target: "http://minio.localhost", wantError: true},
+		{name: "Private IPv4", target: "https://10.0.0.5", wantError: true},
+		{name: "Carrier grade NAT", target: "https://100.64.0.10", wantError: true},
+		{name: "Benchmark subnet", target: "https://198.18.0.1", wantError: true},
+		{name: "IPv6 loopback", target: "http://[::1]:9000", wantError: true},
+		{name: "IPv6 ULA", target: "http://[fd00::1]:9000", wantError: true},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := validateRemoteStorageTestTarget(tc.target)
+			if tc.wantError {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "refusing to test")
+				return
+			}
+
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestTestStorageConfigRejectsBlockedRemoteAddresses(t *testing.T) {
+	t.Parallel()
+
+	handler := &ConfigHandler{}
+
+	t.Run("Rejects blocked S3 endpoint", func(t *testing.T) {
+		t.Parallel()
+
+		result := handler.testStorageConfig(map[string]any{
+			"type":              "s3",
+			"endpoint":          "127.0.0.1:9000",
+			"bucket_name":       "images",
+			"access_key_id":     "key",
+			"secret_access_key": "secret",
+		})
+
+		require.NotNil(t, result)
+		assert.False(t, result.Success)
+		assert.True(t, strings.Contains(result.Message, "refusing to test"))
+	})
+
+	t.Run("Rejects blocked WebDAV URL", func(t *testing.T) {
+		t.Parallel()
+
+		result := handler.testStorageConfig(map[string]any{
+			"type":        "webdav",
+			"webdav_url":  "http://localhost:8080/dav",
+			"webdav_root": "/",
+		})
+
+		require.NotNil(t, result)
+		assert.False(t, result.Success)
+		assert.True(t, strings.Contains(result.Message, "refusing to test"))
+	})
 }

@@ -3,7 +3,9 @@ package admin
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -525,6 +527,12 @@ func (h *ConfigHandler) testStorageConfig(config map[string]any) *models.TestCon
 				Message: "Endpoint, access_key_id, secret_access_key and bucket_name are required",
 			}
 		}
+		if err := validateRemoteStorageTestTarget(s3Cfg.Endpoint); err != nil {
+			return &models.TestConfigResponse{
+				Success: false,
+				Message: err.Error(),
+			}
+		}
 		provider, err := storage.NewS3Storage(s3Cfg)
 		if err != nil {
 			return &models.TestConfigResponse{
@@ -558,6 +566,12 @@ func (h *ConfigHandler) testStorageConfig(config map[string]any) *models.TestCon
 				Message: "WebDAV URL is required",
 			}
 		}
+		if err := validateRemoteStorageTestTarget(webdavCfg.URL); err != nil {
+			return &models.TestConfigResponse{
+				Success: false,
+				Message: err.Error(),
+			}
+		}
 		provider, err := storage.NewWebDAVStorage(webdavCfg)
 		if err != nil {
 			return &models.TestConfigResponse{
@@ -583,6 +597,72 @@ func (h *ConfigHandler) testStorageConfig(config map[string]any) *models.TestCon
 			Message: fmt.Sprintf("Unsupported storage type: %s", storageType),
 		}
 	}
+}
+
+func validateRemoteStorageTestTarget(rawTarget string) error {
+	targetURL, err := parseRemoteStorageTestTarget(rawTarget)
+	if err != nil {
+		return fmt.Errorf("invalid remote storage address: %w", err)
+	}
+
+	host := strings.TrimSuffix(strings.ToLower(targetURL.Hostname()), ".")
+	if host == "" {
+		return fmt.Errorf("invalid remote storage address: missing host")
+	}
+
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return fmt.Errorf("refusing to test local or private address: %s", host)
+	}
+
+	if ip := net.ParseIP(host); ip != nil && isBlockedRemoteStorageTestIP(ip) {
+		return fmt.Errorf("refusing to test local or private address: %s", host)
+	}
+
+	return nil
+}
+
+func parseRemoteStorageTestTarget(rawTarget string) (*url.URL, error) {
+	normalized := strings.TrimSpace(rawTarget)
+	if normalized == "" {
+		return nil, fmt.Errorf("empty target")
+	}
+	if !strings.Contains(normalized, "://") {
+		normalized = "https://" + normalized
+	}
+
+	parsed, err := url.Parse(normalized)
+	if err != nil {
+		return nil, err
+	}
+	if parsed.Host == "" {
+		return nil, fmt.Errorf("missing host")
+	}
+
+	return parsed, nil
+}
+
+func isBlockedRemoteStorageTestIP(ip net.IP) bool {
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
+		return true
+	}
+
+	return isIPInCIDRs(ip, []string{
+		"100.64.0.0/10",
+		"198.18.0.0/15",
+	})
+}
+
+func isIPInCIDRs(ip net.IP, cidrs []string) bool {
+	for _, cidr := range cidrs {
+		_, network, err := net.ParseCIDR(cidr)
+		if err != nil {
+			continue
+		}
+		if network.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 // ListStorageProviders 列出所有存储提供者

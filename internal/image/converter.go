@@ -51,9 +51,10 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 		settings.ThumbnailEnabled,
 		settings.SkipSmallerThan)
 
-	// 检查是否启用 WebP 转换
-	if !settings.IsFormatEnabled(models.FormatWebP) {
-		utils.LogIfDevf("[Converter] WebP format disabled, skipping")
+	thumbnailEnabled := settings.ThumbnailEnabled && len(settings.ThumbnailSizes) > 0
+	webpEnabled := settings.IsFormatEnabled(models.FormatWebP)
+	if !shouldStartVariantPipeline(thumbnailEnabled, webpEnabled) {
+		utils.LogIfDevf("[Converter] All variant generation disabled, skipping")
 		return
 	}
 
@@ -72,18 +73,9 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 		}
 	}
 
-	// 更新图片状态为处理中
-	if image.VariantStatus == models.ImageVariantStatusNone || image.VariantStatus == models.ImageVariantStatusFailed {
-		if err := c.imageRepo.UpdateVariantStatus(image.ID, models.ImageVariantStatusProcessing); err != nil {
-			utils.LogIfDevf("[Converter] Failed to update image status: %v", err)
-		} else {
-			image.VariantStatus = models.ImageVariantStatusProcessing
-		}
-	}
-
 	// 创建缩略图变体记录（如果启用）
 	var thumbVariant *models.ImageVariant
-	if settings.ThumbnailEnabled && len(settings.ThumbnailSizes) > 0 {
+	if thumbnailEnabled {
 		size := settings.ThumbnailSizes[0]
 		thumbFormat := models.FormatThumbnailSize(size.Width)
 		thumbVariant, err = c.variantRepo.UpsertPending(image.ID, thumbFormat)
@@ -99,7 +91,7 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 
 	// 创建 WebP 变体记录（如果启用）
 	var webpVariant *models.ImageVariant
-	if settings.IsFormatEnabled(models.FormatWebP) {
+	if webpEnabled {
 		webpVariant, err = c.variantRepo.UpsertPending(image.ID, models.FormatWebP)
 		if err != nil {
 			utils.LogIfDevf("[Converter] Failed to upsert WebP variant: %v", err)
@@ -115,6 +107,15 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 	if thumbVariant == nil && webpVariant == nil {
 		utils.LogIfDevf("[Converter] No pending variants for %s, skip", image.Identifier)
 		return
+	}
+
+	// 更新图片状态为处理中
+	if image.VariantStatus != models.ImageVariantStatusProcessing {
+		if err := c.imageRepo.UpdateVariantStatus(image.ID, models.ImageVariantStatusProcessing); err != nil {
+			utils.LogIfDevf("[Converter] Failed to update image status: %v", err)
+		} else {
+			image.VariantStatus = models.ImageVariantStatusProcessing
+		}
 	}
 
 	pool := worker.GetGlobalPool()
@@ -152,6 +153,10 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 	if !ok {
 		utils.LogIfDevf("[Converter] Failed to submit pipeline task for %s", image.Identifier)
 	}
+}
+
+func shouldStartVariantPipeline(thumbnailEnabled, webpEnabled bool) bool {
+	return thumbnailEnabled || webpEnabled
 }
 
 // getVariantID 辅助函数：从变体指针获取ID

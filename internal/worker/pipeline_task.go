@@ -29,7 +29,7 @@ import (
 type VariantRepository interface {
 	UpdateStatusCAS(id uint, expected, newStatus, errMsg string) (bool, error)
 	UpdateCompleted(id uint, identifier, storagePath string, fileSize int64, fileHash string, width, height int) error
-	UpdateFailed(id uint, errMsg string, _ bool) error
+	UpdateFailed(id uint, errMsg string) error
 	GetByID(id uint) (*models.ImageVariant, error)
 	DeleteVariant(id uint) error
 }
@@ -297,10 +297,10 @@ func (t *ImagePipelineTask) Execute() {
 	if err := semaphore.Acquire(ctx); err != nil {
 		utils.LogIfDevf("[Pipeline] Failed to acquire semaphore: %v", err)
 		if t.ThumbVariantID > 0 {
-			_ = t.VariantRepo.UpdateFailed(t.ThumbVariantID, fmt.Sprintf("semaphore: %v", err), true)
+			_ = t.VariantRepo.UpdateFailed(t.ThumbVariantID, fmt.Sprintf("semaphore: %v", err))
 		}
 		if t.WebPVariantID > 0 {
-			_ = t.VariantRepo.UpdateFailed(t.WebPVariantID, fmt.Sprintf("semaphore: %v", err), true)
+			_ = t.VariantRepo.UpdateFailed(t.WebPVariantID, fmt.Sprintf("semaphore: %v", err))
 		}
 		// 更新主图片状态为失败
 		_ = t.ImageRepo.UpdateVariantStatus(t.ImageID, models.ImageVariantStatusFailed)
@@ -326,10 +326,10 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
 	filePath, cleanup, err := t.getProcessingFilePath(ctx)
 	if err != nil {
 		if t.ThumbVariantID > 0 {
-			_ = t.VariantRepo.UpdateFailed(t.ThumbVariantID, fmt.Sprintf("get file: %v", err), true)
+			_ = t.VariantRepo.UpdateFailed(t.ThumbVariantID, fmt.Sprintf("get file: %v", err))
 		}
 		if t.WebPVariantID > 0 {
-			_ = t.VariantRepo.UpdateFailed(t.WebPVariantID, fmt.Sprintf("get file: %v", err), true)
+			_ = t.VariantRepo.UpdateFailed(t.WebPVariantID, fmt.Sprintf("get file: %v", err))
 		}
 		return fmt.Errorf("get processing file: %w", err)
 	}
@@ -337,17 +337,19 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
 
 	var thumbResult, webpResult *pipelineResult
 	var hasSuccess, hasFailed bool
+	var thumbSkipped, webpSkipped bool
 
 	if t.ThumbVariantID > 0 {
 		result, err := t.generateThumbnail(ctx, filePath)
 		switch {
 		case err != nil:
 			utils.LogIfDevf("[Pipeline] Thumbnail failed: %v", err)
-			_ = t.VariantRepo.UpdateFailed(t.ThumbVariantID, err.Error(), true)
+			_ = t.VariantRepo.UpdateFailed(t.ThumbVariantID, err.Error())
 			hasFailed = true
 		case result == nil:
 			utils.LogIfDevf("[Pipeline] Thumbnail skipped, deleting variant %d", t.ThumbVariantID)
 			_ = t.VariantRepo.DeleteVariant(t.ThumbVariantID)
+			thumbSkipped = true
 		default:
 			thumbResult = result
 			hasSuccess = true
@@ -359,11 +361,12 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
 		switch {
 		case err != nil:
 			utils.LogIfDevf("[Pipeline] WebP failed: %v", err)
-			_ = t.VariantRepo.UpdateFailed(t.WebPVariantID, err.Error(), true)
+			_ = t.VariantRepo.UpdateFailed(t.WebPVariantID, err.Error())
 			hasFailed = true
 		case result == nil:
 			utils.LogIfDevf("[Pipeline] WebP skipped, deleting variant %d", t.WebPVariantID)
 			_ = t.VariantRepo.DeleteVariant(t.WebPVariantID)
+			webpSkipped = true
 		default:
 			webpResult = result
 			hasSuccess = true
@@ -381,7 +384,7 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
 		return fmt.Errorf("some variants failed")
 	}
 
-	_ = t.ImageRepo.UpdateVariantStatus(t.ImageID, models.ImageVariantStatusCompleted)
+	_ = t.ImageRepo.UpdateVariantStatus(t.ImageID, resolveImageVariantStatus(t.ThumbVariantID > 0, t.WebPVariantID > 0, thumbResult != nil, webpResult != nil, thumbSkipped, webpSkipped))
 	t.deleteCacheOnTerminalState("success")
 	return nil
 }
@@ -474,7 +477,8 @@ func (t *ImagePipelineTask) generateWebPWithSettings(ctx context.Context, filePa
 	if settings.MaxDimension > 0 {
 		if w, h, ok := readImageDimensions(filePath); ok {
 			if w > settings.MaxDimension || h > settings.MaxDimension {
-				return nil, fmt.Errorf("image exceeds max dimension: %dx%d", w, h)
+				utils.LogIfDevf("[Pipeline] Skipping WebP: image exceeds max dimension from header: %dx%d", w, h)
+				return nil, nil
 			}
 		}
 	}
@@ -489,7 +493,8 @@ func (t *ImagePipelineTask) generateWebPWithSettings(ctx context.Context, filePa
 	height := info.Height
 	if settings.MaxDimension > 0 {
 		if width > settings.MaxDimension || height > settings.MaxDimension {
-			return nil, fmt.Errorf("image exceeds max dimension: %dx%d", width, height)
+			utils.LogIfDevf("[Pipeline] Skipping WebP: image exceeds max dimension after load: %dx%d", width, height)
+			return nil, nil
 		}
 	}
 
@@ -538,6 +543,21 @@ func (t *ImagePipelineTask) generateWebPWithSettings(ctx context.Context, filePa
 	}, nil
 }
 
+func resolveImageVariantStatus(hasThumbVariant, hasWebPVariant, thumbCompleted, webpCompleted, thumbSkipped, webpSkipped bool) models.ImageVariantStatus {
+	switch {
+	case thumbCompleted && webpCompleted:
+		return models.ImageVariantStatusCompleted
+	case thumbCompleted:
+		return models.ImageVariantStatusThumbnailCompleted
+	case webpCompleted:
+		return models.ImageVariantStatusCompleted
+	case (hasThumbVariant && thumbSkipped) || (hasWebPVariant && webpSkipped):
+		return models.ImageVariantStatusNone
+	default:
+		return models.ImageVariantStatusNone
+	}
+}
+
 // saveVariantResults 保存变体结果，任一变体写库失败时返回 error
 func (t *ImagePipelineTask) saveVariantResults(thumbResult, webpResult *pipelineResult) error {
 	var firstErr error
@@ -553,7 +573,7 @@ func (t *ImagePipelineTask) saveVariantResults(thumbResult, webpResult *pipeline
 			thumbResult.Height,
 		); err != nil {
 			utils.LogIfDevf("[Pipeline] Failed to mark thumb variant %d completed: %v", t.ThumbVariantID, err)
-			_ = t.VariantRepo.UpdateFailed(t.ThumbVariantID, "failed to persist result: "+err.Error(), false)
+			_ = t.VariantRepo.UpdateFailed(t.ThumbVariantID, "failed to persist result: "+err.Error())
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -571,7 +591,7 @@ func (t *ImagePipelineTask) saveVariantResults(thumbResult, webpResult *pipeline
 			webpResult.Height,
 		); err != nil {
 			utils.LogIfDevf("[Pipeline] Failed to mark webp variant %d completed: %v", t.WebPVariantID, err)
-			_ = t.VariantRepo.UpdateFailed(t.WebPVariantID, "failed to persist result: "+err.Error(), false)
+			_ = t.VariantRepo.UpdateFailed(t.WebPVariantID, "failed to persist result: "+err.Error())
 			if firstErr == nil {
 				firstErr = err
 			}

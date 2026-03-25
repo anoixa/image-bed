@@ -14,7 +14,6 @@ import (
 type apiTokenResponse struct {
 	ID          uint       `json:"id"`
 	IsActive    bool       `json:"is_active"`
-	Hash        string     `json:"hash"`
 	Prefix      string     `json:"prefix"`
 	CreatedAt   time.Time  `json:"created_at"`
 	Description string     `json:"description"`
@@ -51,7 +50,6 @@ func (h *Handler) GetToken(context *gin.Context) {
 	for _, tokenModel := range apiTokens {
 		responseDTOs = append(responseDTOs, apiTokenResponse{
 			ID:          tokenModel.ID,
-			Hash:        tokenModel.Token,
 			Prefix:      tokenModel.TokenPrefix,
 			IsActive:    tokenModel.IsActive,
 			Description: tokenModel.Description,
