@@ -116,7 +116,9 @@ func TestDeleteSingleDoesNotDeletePhysicalFileWhenDatabaseDeleteFails(t *testing
 
 	require.NoError(t, db.Callback().Delete().Before("gorm:delete").Register("test:fail_image_delete", func(tx *gorm.DB) {
 		if tx.Statement != nil && tx.Statement.Schema != nil && tx.Statement.Schema.Table == "images" {
-			tx.AddError(errors.New("forced image delete failure"))
+			addErr := tx.AddError(errors.New("forced image delete failure"))
+			require.Error(t, addErr)
+			assert.Contains(t, addErr.Error(), "forced image delete failure")
 		}
 	}))
 

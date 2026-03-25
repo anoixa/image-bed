@@ -144,12 +144,14 @@ func RunServer() {
 		log.Fatalf("Failed to create temp directory: %v", err)
 	}
 
-	vips.Startup(&vips.Config{
+	if err := vips.Startup(&vips.Config{
 		MaxCacheMem:      0,
 		MaxCacheSize:     0,
 		MaxCacheFiles:    0,
 		ConcurrencyLevel: 2,
-	})
+	}); err != nil {
+		log.Fatalf("Failed to initialize govips: %v", err)
+	}
 	defer vips.Shutdown()
 
 	log.Println("[VIPS] Govips initialized with minimal cache (1 byte)")

@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"path"
 	"strings"
 	"time"
 
@@ -158,69 +156,6 @@ func (s *WebDAVStorage) fullPath(storagePath string) string {
 		return s.rootPath + "/" + storagePath
 	}
 	return "/" + storagePath
-}
-
-// ensureParentDir 递归创建父目录
-func (s *WebDAVStorage) ensureParentDir(ctx context.Context, fullPath string) error {
-	// 获取父目录路径
-	parentDir := path.Dir(fullPath)
-
-	// 根目录无需创建
-	if parentDir == "/" || parentDir == "." {
-		return nil
-	}
-
-	// 逐级分解路径
-	parts := strings.Split(strings.Trim(parentDir, "/"), "/")
-	currentPath := ""
-
-	for _, part := range parts {
-		if part == "" {
-			continue
-		}
-
-		if currentPath == "" {
-			currentPath = "/" + part
-		} else {
-			currentPath = currentPath + "/" + part
-		}
-
-		pathToCreate := currentPath
-		err := s.executeWithTimeout(ctx, func() error {
-			return s.client.Mkdir(pathToCreate, os.FileMode(0755))
-		})
-		if err != nil {
-			if !isCollectionExistsError(err) {
-				return fmt.Errorf("failed to create directory %s: %w", currentPath, err)
-			}
-		}
-	}
-
-	return nil
-}
-
-// isCollectionExistsError 判断是否为目录已存在的错误
-func isCollectionExistsError(err error) bool {
-	if err == nil {
-		return false
-	}
-	errStr := err.Error()
-	// 常见 WebDAV 服务器的 "目录已存在" 错误信息
-	containsAny := []string{
-		"already exists",
-		"already exists",
-		"conflict",
-		"Conflict",
-		"409",
-		"Method Not Allowed",
-		"405",
-	}
-	for _, s := range containsAny {
-		if strings.Contains(errStr, s) {
-			return true
-		}
-	}
-	return false
 }
 
 // SaveWithContext 保存文件到 WebDAV
