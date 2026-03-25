@@ -22,6 +22,7 @@ import (
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/database/repo/keys"
 	imageSvc "github.com/anoixa/image-bed/internal/image"
+	"github.com/anoixa/image-bed/internal/vipsfile"
 	"github.com/anoixa/image-bed/internal/worker"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
@@ -144,7 +145,7 @@ func RunServer() {
 		log.Fatalf("Failed to create temp directory: %v", err)
 	}
 
-	if err := vips.Startup(&vips.Config{
+	if err := vipsfile.Startup(&vips.Config{
 		MaxCacheMem:      0,
 		MaxCacheSize:     0,
 		MaxCacheFiles:    0,
@@ -152,7 +153,7 @@ func RunServer() {
 	}); err != nil {
 		log.Fatalf("Failed to initialize govips: %v", err)
 	}
-	defer vips.Shutdown()
+	defer vipsfile.Shutdown()
 
 	log.Println("[VIPS] Govips initialized with minimal cache (1 byte)")
 	if config.IsDevelopment() {

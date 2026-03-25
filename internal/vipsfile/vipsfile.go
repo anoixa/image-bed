@@ -9,6 +9,7 @@ package vipsfile
 import "C"
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"unsafe"
@@ -52,11 +53,31 @@ type ImageHandle struct {
 
 var startupOnce sync.Once
 var startupErr error
+var started bool
+
+var ErrNotInitialized = errors.New("vipsfile not initialized: call vipsfile.Startup before using file-based vips operations")
+
+func Startup(config *vips.Config) error {
+	startupOnce.Do(func() {
+		startupErr = vips.Startup(config)
+		if startupErr == nil {
+			started = true
+		}
+	})
+	return startupErr
+}
+
+func Shutdown() {
+	if started {
+		started = false
+		vips.Shutdown()
+	}
+}
 
 func ensureStarted() error {
-	startupOnce.Do(func() {
-		startupErr = vips.Startup(nil)
-	})
+	if !started {
+		return ErrNotInitialized
+	}
 	return startupErr
 }
 

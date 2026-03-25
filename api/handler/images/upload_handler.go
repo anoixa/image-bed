@@ -2,11 +2,18 @@ package images
 
 import (
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
+	"github.com/anoixa/image-bed/config"
+	dbconfig "github.com/anoixa/image-bed/config/db"
+	imagesvc "github.com/anoixa/image-bed/internal/image"
+	"github.com/anoixa/image-bed/utils/pool"
 	"github.com/gin-gonic/gin"
 )
 
@@ -31,23 +38,6 @@ func (h *Handler) UploadImage(c *gin.Context) {
 		return
 	}
 
-	form, err := c.MultipartForm()
-	if err != nil {
-		common.RespondError(c, http.StatusBadRequest, "Invalid form data")
-		return
-	}
-
-	files := form.File["files"]
-	if len(files) == 0 {
-		common.RespondError(c, http.StatusBadRequest, "At least one file is required under the 'files' key")
-		return
-	}
-
-	if len(files) > 10 {
-		common.RespondError(c, http.StatusBadRequest, "Maximum 10 files allowed per upload")
-		return
-	}
-
 	// 获取配置
 	ctx := c.Request.Context()
 	settings, err := h.configManager.GetImageProcessingSettings(ctx)
@@ -56,35 +46,23 @@ func (h *Handler) UploadImage(c *gin.Context) {
 		return
 	}
 
-	// 检查文件大小限制
-	if settings.MaxFileSizeMB > 0 {
-		maxSize := int64(settings.MaxFileSizeMB) * 1024 * 1024
-		for _, f := range files {
-			if f.Size > maxSize {
-				common.RespondError(c, http.StatusRequestEntityTooLarge, fmt.Sprintf("File %s size (%.2f MB) exceeds maximum allowed (%d MB)", f.Filename, float64(f.Size)/1024/1024, settings.MaxFileSizeMB))
-				return
-			}
-		}
-	}
-
-	// 检查批量总大小限制（多文件时）
-	if len(files) > 1 {
-		var totalSize int64
-		for _, f := range files {
-			totalSize += f.Size
-		}
-		maxBatchTotalMB := settings.MaxBatchTotalMB
-		if maxBatchTotalMB == 0 {
-			maxBatchTotalMB = 500
-		}
-		maxTotalSize := int64(maxBatchTotalMB) * 1024 * 1024
-		if totalSize > maxTotalSize {
-			common.RespondError(c, http.StatusRequestEntityTooLarge, fmt.Sprintf("Total size of all files (%.2f MB) exceeds maximum allowed (%d MB)", float64(totalSize)/1024/1024, maxBatchTotalMB))
+	request, cleanup, err := parseMultipartUploadRequest(c.Request, settings)
+	if err != nil {
+		if uploadErr, ok := err.(*uploadRequestError); ok {
+			common.RespondError(c, uploadErr.status, uploadErr.message)
 			return
 		}
+		common.RespondError(c, http.StatusBadRequest, "Invalid form data")
+		return
+	}
+	defer cleanup()
+
+	if len(request.files) == 0 {
+		common.RespondError(c, http.StatusBadRequest, "At least one file is required under the 'files' key")
+		return
 	}
 
-	storageConfigID, err := h.resolveStorageConfigID(c)
+	storageConfigID, err := h.resolveStorageConfigIDValue(c, request.strategyID)
 	if err != nil {
 		common.RespondError(c, http.StatusBadRequest, err.Error())
 		return
@@ -94,13 +72,13 @@ func (h *Handler) UploadImage(c *gin.Context) {
 
 	// 确定可见性
 	isPublic := settings.DefaultVisibility != "private"
-	if visibility := c.PostForm("is_public"); visibility != "" {
-		isPublic = visibility != "false"
+	if request.visibility != "" {
+		isPublic = request.visibility != "false"
 	}
 
 	// 单文件：保持旧格式兼容
-	if len(files) == 1 {
-		result, err := h.imageService.UploadSingle(ctx, userID, files[0], storageConfigID, isPublic, settings.DefaultAlbumID)
+	if len(request.files) == 1 {
+		result, err := h.imageService.UploadSingleSource(ctx, userID, request.files[0], storageConfigID, isPublic, settings.DefaultAlbumID)
 		if err != nil {
 			if !c.IsAborted() {
 				common.RespondError(c, http.StatusInternalServerError, err.Error())
@@ -118,7 +96,7 @@ func (h *Handler) UploadImage(c *gin.Context) {
 	}
 
 	// 多文件：返回批量格式
-	results, err := h.imageService.UploadBatch(ctx, userID, files, storageConfigID, isPublic, settings.DefaultAlbumID, settings.ConcurrentUploadLimit)
+	results, err := h.imageService.UploadBatchSources(ctx, userID, request.files, storageConfigID, isPublic, settings.DefaultAlbumID, settings.ConcurrentUploadLimit)
 	if err != nil {
 		if !c.IsAborted() {
 			common.RespondError(c, http.StatusInternalServerError, "Failed to process uploads")
@@ -143,7 +121,7 @@ func (h *Handler) UploadImage(c *gin.Context) {
 
 	common.RespondSuccess(c, gin.H{
 		"message":       "Upload completed",
-		"total_files":   len(files),
+		"total_files":   len(request.files),
 		"success_count": len(successResults),
 		"error_count":   len(errorResults),
 		"success":       successResults,
@@ -151,9 +129,7 @@ func (h *Handler) UploadImage(c *gin.Context) {
 	})
 }
 
-// resolveStorageConfigID 解析存储配置ID
-func (h *Handler) resolveStorageConfigID(c *gin.Context) (uint, error) {
-	strategyIDStr := c.PostForm("strategy_id")
+func (h *Handler) resolveStorageConfigIDValue(c *gin.Context, strategyIDStr string) (uint, error) {
 	if strategyIDStr == "" {
 		strategyIDStr = c.Query("strategy_id")
 	}
@@ -171,4 +147,189 @@ func (h *Handler) resolveStorageConfigID(c *gin.Context) (uint, error) {
 		return 0, nil
 	}
 	return defaultID, nil
+}
+
+type parsedUploadRequest struct {
+	files      []imagesvc.UploadSource
+	strategyID string
+	visibility string
+}
+
+type uploadRequestError struct {
+	status  int
+	message string
+}
+
+func (e *uploadRequestError) Error() string {
+	return e.message
+}
+
+type uploadTempFile struct {
+	path string
+}
+
+func (f uploadTempFile) cleanup() {
+	_ = os.Remove(f.path)
+}
+
+func parseMultipartUploadRequest(r *http.Request, settings *dbconfig.ImageProcessingSettings) (*parsedUploadRequest, func(), error) {
+	reader, err := r.MultipartReader()
+	if err != nil {
+		return nil, nil, &uploadRequestError{status: http.StatusBadRequest, message: "Invalid form data"}
+	}
+
+	if err := os.MkdirAll(config.TempDir, 0700); err != nil {
+		return nil, nil, fmt.Errorf("create temp dir: %w", err)
+	}
+
+	request := &parsedUploadRequest{}
+	var (
+		tempFiles []uploadTempFile
+		totalSize int64
+	)
+
+	cleanup := func() {
+		for _, tempFile := range tempFiles {
+			tempFile.cleanup()
+		}
+	}
+
+	maxFileSize := int64(0)
+	if settings.MaxFileSizeMB > 0 {
+		maxFileSize = int64(settings.MaxFileSizeMB) * 1024 * 1024
+	}
+
+	maxBatchTotalMB := settings.MaxBatchTotalMB
+	if maxBatchTotalMB == 0 {
+		maxBatchTotalMB = 500
+	}
+	maxTotalSize := int64(maxBatchTotalMB) * 1024 * 1024
+
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			cleanup()
+			return nil, nil, &uploadRequestError{status: http.StatusBadRequest, message: "Invalid form data"}
+		}
+
+		partName := part.FormName()
+		fileName := part.FileName()
+
+		if fileName == "" {
+			value, readErr := readSmallFormField(part, 4096)
+			_ = part.Close()
+			if readErr != nil {
+				cleanup()
+				return nil, nil, &uploadRequestError{status: http.StatusBadRequest, message: "Invalid form data"}
+			}
+			switch partName {
+			case "strategy_id":
+				request.strategyID = value
+			case "is_public":
+				request.visibility = strings.ToLower(value)
+			}
+			continue
+		}
+
+		if partName != "files" {
+			_ = part.Close()
+			continue
+		}
+
+		if len(request.files) >= 10 {
+			_ = part.Close()
+			cleanup()
+			return nil, nil, &uploadRequestError{status: http.StatusBadRequest, message: "Maximum 10 files allowed per upload"}
+		}
+
+		tempFile, size, writeErr := writePartToTempFile(part, maxFileSize)
+		_ = part.Close()
+		if writeErr != nil {
+			cleanup()
+			var sizeErr *uploadRequestError
+			if ok := asUploadRequestError(writeErr, &sizeErr); ok {
+				return nil, nil, sizeErr
+			}
+			return nil, nil, writeErr
+		}
+
+		totalSize += size
+		if totalSize > maxTotalSize {
+			tempFile.cleanup()
+			cleanup()
+			return nil, nil, &uploadRequestError{
+				status:  http.StatusRequestEntityTooLarge,
+				message: fmt.Sprintf("Total size of all files (%.2f MB) exceeds maximum allowed (%d MB)", float64(totalSize)/1024/1024, maxBatchTotalMB),
+			}
+		}
+
+		tempFiles = append(tempFiles, tempFile)
+		request.files = append(request.files, imagesvc.NewTempUploadSource(fileName, tempFile.path, size))
+	}
+
+	return request, cleanup, nil
+}
+
+func readSmallFormField(part io.Reader, maxBytes int64) (string, error) {
+	data, err := io.ReadAll(io.LimitReader(part, maxBytes+1))
+	if err != nil {
+		return "", err
+	}
+	if int64(len(data)) > maxBytes {
+		return "", fmt.Errorf("form field too large")
+	}
+	return string(data), nil
+}
+
+func writePartToTempFile(part io.Reader, maxFileSize int64) (uploadTempFile, int64, error) {
+	tmp, err := os.CreateTemp(config.TempDir, "upload-stream-*")
+	if err != nil {
+		return uploadTempFile{}, 0, fmt.Errorf("create temp file: %w", err)
+	}
+
+	tempFile := uploadTempFile{path: tmp.Name()}
+	cleanup := func() {
+		_ = tmp.Close()
+		tempFile.cleanup()
+	}
+
+	bufPtr := pool.SharedBufferPool.Get().(*[]byte)
+	defer pool.SharedBufferPool.Put(bufPtr)
+
+	reader := io.Reader(part)
+	if maxFileSize > 0 {
+		reader = io.LimitReader(part, maxFileSize+1)
+	}
+
+	written, err := io.CopyBuffer(tmp, reader, *bufPtr)
+	if err != nil {
+		cleanup()
+		return uploadTempFile{}, 0, fmt.Errorf("write temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		tempFile.cleanup()
+		return uploadTempFile{}, 0, fmt.Errorf("close temp file: %w", err)
+	}
+
+	if maxFileSize > 0 && written > maxFileSize {
+		tempFile.cleanup()
+		return uploadTempFile{}, 0, &uploadRequestError{
+			status:  http.StatusRequestEntityTooLarge,
+			message: fmt.Sprintf("File size (%.2f MB) exceeds maximum allowed (%d MB)", float64(written)/1024/1024, maxFileSize/(1024*1024)),
+		}
+	}
+
+	return tempFile, written, nil
+}
+
+func asUploadRequestError(err error, target **uploadRequestError) bool {
+	requestErr, ok := err.(*uploadRequestError)
+	if !ok {
+		return false
+	}
+	*target = requestErr
+	return true
 }

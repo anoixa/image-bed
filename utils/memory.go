@@ -2,23 +2,31 @@ package utils
 
 import (
 	"fmt"
+	"os"
 	"runtime"
 	"runtime/debug"
 	"time"
 
 	"github.com/anoixa/image-bed/config"
+	"github.com/davidbyttow/govips/v2/vips"
 )
 
 // MemoryStats 内存统计
 type MemoryStats struct {
-	HeapAllocMB float64
-	HeapSysMB   float64
-	HeapInUseMB float64
-	StackSysMB  float64
-	NumGC       uint32
-	GCSysMB     float64
-	LastGCTime  time.Time
-	Goroutines  int
+	HeapAllocMB   float64
+	HeapSysMB     float64
+	HeapInUseMB   float64
+	StackSysMB    float64
+	TotalAllocMB  float64
+	RSSMB         float64
+	NumGC         uint32
+	GCSysMB       float64
+	LastGCTime    time.Time
+	Goroutines    int
+	VipsMemMB     float64
+	VipsMemHighMB float64
+	VipsAllocs    int64
+	VipsOpenFiles int64
 }
 
 // bytesToMB 将字节转换为 MB
@@ -30,16 +38,24 @@ func bytesToMB(bytes uint64) float64 {
 func GetMemoryStats() MemoryStats {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
+	rssBytes, _ := readProcessRSSBytes()
+	vipsStats := getVipsMemoryStats()
 
 	return MemoryStats{
-		HeapAllocMB: bytesToMB(m.HeapAlloc),
-		HeapSysMB:   bytesToMB(m.HeapSys),
-		HeapInUseMB: bytesToMB(m.HeapInuse),
-		StackSysMB:  bytesToMB(m.StackSys),
-		NumGC:       m.NumGC,
-		GCSysMB:     bytesToMB(m.GCSys),
-		LastGCTime:  time.Unix(0, int64(m.LastGC)),
-		Goroutines:  runtime.NumGoroutine(),
+		HeapAllocMB:   bytesToMB(m.HeapAlloc),
+		HeapSysMB:     bytesToMB(m.HeapSys),
+		HeapInUseMB:   bytesToMB(m.HeapInuse),
+		StackSysMB:    bytesToMB(m.StackSys),
+		TotalAllocMB:  bytesToMB(m.TotalAlloc),
+		RSSMB:         bytesToMB(rssBytes),
+		NumGC:         m.NumGC,
+		GCSysMB:       bytesToMB(m.GCSys),
+		LastGCTime:    time.Unix(0, int64(m.LastGC)),
+		Goroutines:    runtime.NumGoroutine(),
+		VipsMemMB:     bytesToMB(uint64(vipsStats.Mem)),
+		VipsMemHighMB: bytesToMB(uint64(vipsStats.MemHigh)),
+		VipsAllocs:    vipsStats.Allocs,
+		VipsOpenFiles: vipsStats.Files,
 	}
 }
 
@@ -128,4 +144,58 @@ func FormatBytes(bytes int64) string {
 	default:
 		return fmt.Sprintf("%d B", bytes)
 	}
+}
+
+type vipsMemoryStats struct {
+	Mem     int64
+	MemHigh int64
+	Files   int64
+	Allocs  int64
+}
+
+func getVipsMemoryStats() (stats vipsMemoryStats) {
+	defer func() {
+		if recover() != nil {
+			stats = vipsMemoryStats{}
+		}
+	}()
+
+	var vipsStats vips.MemoryStats
+	vips.ReadVipsMemStats(&vipsStats)
+
+	return vipsMemoryStats{
+		Mem:     max(vipsStats.Mem, 0),
+		MemHigh: max(vipsStats.MemHigh, 0),
+		Files:   max(vipsStats.Files, 0),
+		Allocs:  max(vipsStats.Allocs, 0),
+	}
+}
+
+func max(v, floor int64) int64 {
+	if v < floor {
+		return floor
+	}
+	return v
+}
+
+func ReadProcessRSS() (float64, error) {
+	rssBytes, err := readProcessRSSBytes()
+	if err != nil {
+		return 0, err
+	}
+	return bytesToMB(rssBytes), nil
+}
+
+func readProcessRSSBytes() (uint64, error) {
+	data, err := os.ReadFile("/proc/self/statm")
+	if err != nil {
+		return 0, err
+	}
+
+	var totalPages, residentPages uint64
+	if _, err := fmt.Sscanf(string(data), "%d %d", &totalPages, &residentPages); err != nil {
+		return 0, err
+	}
+
+	return residentPages * uint64(os.Getpagesize()), nil
 }

@@ -6,13 +6,32 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
+	"github.com/davidbyttow/govips/v2/vips"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+var testStartupOnce sync.Once
+
+func ensureTestStartup(t *testing.T) {
+	t.Helper()
+	testStartupOnce.Do(func() {
+		err := Startup(&vips.Config{
+			MaxCacheMem:      0,
+			MaxCacheSize:     0,
+			MaxCacheFiles:    0,
+			ConcurrencyLevel: 1,
+		})
+		require.NoError(t, err)
+	})
+}
+
 func TestLoadImageFromFileAndSaveWebP(t *testing.T) {
+	ensureTestStartup(t)
+
 	src := writeTestPNG(t, 4, 2, true)
 	dst := filepath.Join(t.TempDir(), "out.webp")
 
@@ -37,6 +56,8 @@ func TestLoadImageFromFileAndSaveWebP(t *testing.T) {
 }
 
 func TestThumbnailFileToWebP(t *testing.T) {
+	ensureTestStartup(t)
+
 	src := writeTestPNG(t, 4, 2, false)
 	dst := filepath.Join(t.TempDir(), "thumb.webp")
 
@@ -62,12 +83,16 @@ func TestBuildFileOption(t *testing.T) {
 }
 
 func TestLoadImageFromFile_NotFound(t *testing.T) {
+	ensureTestStartup(t)
+
 	_, _, err := LoadImageFromFile("/tmp/does-not-exist-image-bed.png")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "load image from file")
 }
 
 func TestImageHandleSaveWebPToFile_NilHandle(t *testing.T) {
+	ensureTestStartup(t)
+
 	var handle *ImageHandle
 	err := handle.SaveWebPToFile(filepath.Join(t.TempDir(), "out.webp"), DefaultWebPOptions())
 	require.Error(t, err)

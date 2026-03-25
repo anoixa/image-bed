@@ -1,14 +1,15 @@
 package storage
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
+	"github.com/anoixa/image-bed/config"
 	"github.com/studio-b12/gowebdav"
 
 	"github.com/anoixa/image-bed/utils/pool"
@@ -205,14 +206,42 @@ func (s *WebDAVStorage) GetWithContext(ctx context.Context, storagePath string) 
 	}
 
 	fullPath := s.fullPath(storagePath)
+	if err := os.MkdirAll(config.TempDir, 0700); err != nil {
+		return nil, fmt.Errorf("failed to create temp dir: %w", err)
+	}
 
-	data, err := executeWithTimeoutResult(ctx, s.defaultTimeout, func() ([]byte, error) {
-		return s.client.Read(fullPath)
+	tmp, err := os.CreateTemp(config.TempDir, "webdav-get-*")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp file: %w", err)
+	}
+
+	cleanup := func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+	}
+
+	stream, err := executeWithTimeoutResult(ctx, s.defaultTimeout, func() (io.ReadCloser, error) {
+		return s.client.ReadStream(fullPath)
 	})
 	if err != nil {
+		cleanup()
 		return nil, fmt.Errorf("failed to read file %s: %w", storagePath, err)
 	}
-	return bytes.NewReader(data), nil
+	defer func() { _ = stream.Close() }()
+
+	bufPtr := pool.SharedBufferPool.Get().(*[]byte)
+	defer pool.SharedBufferPool.Put(bufPtr)
+
+	if _, err := io.CopyBuffer(tmp, stream, *bufPtr); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("failed to copy file %s to temp file: %w", storagePath, err)
+	}
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("failed to reset temp file for %s: %w", storagePath, err)
+	}
+
+	return tmp, nil
 }
 
 // DeleteWithContext 从 WebDAV 删除文件

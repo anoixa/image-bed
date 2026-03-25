@@ -1,7 +1,6 @@
 package image
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -166,7 +165,36 @@ func (s *Service) UploadSingle(
 		return nil, err
 	}
 
-	image, isDup, err := s.processAndSaveImage(ctx, userID, fileHeader, storageProvider, storageID, isPublic, defaultAlbumID)
+	image, isDup, err := s.processAndSaveImage(ctx, userID, uploadSourceFromFileHeader(fileHeader), storageProvider, storageID, isPublic, defaultAlbumID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &UploadResult{
+		Image:       image,
+		IsDuplicate: isDup,
+		Identifier:  image.Identifier,
+		FileName:    image.OriginalName,
+		FileSize:    image.FileSize,
+		Links:       utils.BuildLinkFormats(s.baseURL, image.Identifier),
+	}, nil
+}
+
+// UploadSingleSource 单文件上传（基于已准备好的上传源）
+func (s *Service) UploadSingleSource(
+	ctx context.Context,
+	userID uint,
+	source UploadSource,
+	storageID uint,
+	isPublic bool,
+	defaultAlbumID uint,
+) (*UploadResult, error) {
+	storageProvider, err := s.getStorageProviderByID(storageID)
+	if err != nil {
+		return nil, err
+	}
+
+	image, isDup, err := s.processAndSaveImage(ctx, userID, source, storageProvider, storageID, isPublic, defaultAlbumID)
 	if err != nil {
 		return nil, err
 	}
@@ -183,6 +211,15 @@ func (s *Service) UploadSingle(
 
 // UploadBatch 批量上传
 func (s *Service) UploadBatch(ctx context.Context, userID uint, files []*multipart.FileHeader, storageID uint, isPublic bool, defaultAlbumID uint, concurrentLimit int) ([]*UploadResult, error) {
+	sources := make([]UploadSource, 0, len(files))
+	for _, fileHeader := range files {
+		sources = append(sources, uploadSourceFromFileHeader(fileHeader))
+	}
+	return s.UploadBatchSources(ctx, userID, sources, storageID, isPublic, defaultAlbumID, concurrentLimit)
+}
+
+// UploadBatchSources 批量上传（基于已准备好的上传源）
+func (s *Service) UploadBatchSources(ctx context.Context, userID uint, files []UploadSource, storageID uint, isPublic bool, defaultAlbumID uint, concurrentLimit int) ([]*UploadResult, error) {
 	storageProvider, err := s.getStorageProviderByID(storageID)
 	if err != nil {
 		return nil, err
@@ -214,7 +251,7 @@ func (s *Service) UploadBatch(ctx context.Context, userID uint, files []*multipa
 			default:
 				image, _, err := s.processAndSaveImage(ctx, userID, fileHeader, storageProvider, storageID, isPublic, defaultAlbumID)
 				result := &UploadResult{
-					FileName: fileHeader.Filename,
+					FileName: fileHeader.FileName,
 				}
 
 				if err != nil {
@@ -242,8 +279,8 @@ func (s *Service) UploadBatch(ctx context.Context, userID uint, files []*multipa
 }
 
 // processAndSaveImage 处理并保存图片
-func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHeader *multipart.FileHeader, storageProvider storage.Provider, storageConfigID uint, isPublic bool, defaultAlbumID uint) (*models.Image, bool, error) {
-	src, err := fileHeader.Open()
+func (s *Service) processAndSaveImage(ctx context.Context, userID uint, source UploadSource, storageProvider storage.Provider, storageConfigID uint, isPublic bool, defaultAlbumID uint) (*models.Image, bool, error) {
+	src, err := source.Open()
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to open file: %w", err)
 	}
@@ -259,27 +296,16 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 		return nil, false, errors.New("the uploaded file type is not supported")
 	}
 
-	reader := io.MultiReader(bytes.NewReader(header), src)
-
-	tmp, err := os.CreateTemp(config.TempDir, "upload-*")
-	if err != nil {
-		return nil, false, fmt.Errorf("failed to create temp file: %w", err)
-	}
-	defer func() {
-		_ = tmp.Close()
-		_ = os.Remove(tmp.Name())
-	}()
-
-	// 同时计算哈希并写入临时文件
 	hash := sha256.New()
-	w := io.MultiWriter(tmp, hash)
+	if _, err := hash.Write(header); err != nil {
+		return nil, false, fmt.Errorf("failed to hash file header: %w", err)
+	}
 
 	bufPtr := pool.SharedBufferPool.Get().(*[]byte)
 	defer pool.SharedBufferPool.Put(bufPtr)
-	buf := *bufPtr
 
-	if _, err = io.CopyBuffer(w, reader, buf); err != nil {
-		return nil, false, fmt.Errorf("failed to process file stream: %w", err)
+	if _, err = io.CopyBuffer(hash, src, *bufPtr); err != nil {
+		return nil, false, fmt.Errorf("failed to hash file stream: %w", err)
 	}
 
 	fileHash := hex.EncodeToString(hash.Sum(nil))
@@ -292,7 +318,7 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 	if err == nil && img.DeletedAt.Valid {
 		updates := map[string]any{
 			"deleted_at":    nil,
-			"original_name": fileHeader.Filename,
+			"original_name": source.FileName,
 			"user_id":       userID,
 			"is_public":     isPublic,
 		}
@@ -312,7 +338,7 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 	if err == nil {
 		// 如果是其他用户的图片，创建新的逻辑记录（物理去重 + 逻辑隔离）
 		if img.UserID != userID {
-			newImg, err := s.createDedupedImageRecord(img, userID, fileHeader.Filename, storageConfigID, isPublic)
+			newImg, err := s.createDedupedImageRecord(img, userID, source.FileName, storageConfigID, isPublic)
 			if err != nil {
 				return nil, false, fmt.Errorf("failed to create deduped image record: %w", err)
 			}
@@ -328,35 +354,34 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 		return img, true, nil
 	}
 
-	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-		return nil, false, fmt.Errorf("failed to seek temp file: %w", err)
+	if _, err := src.Seek(0, io.SeekStart); err != nil {
+		return nil, false, fmt.Errorf("failed to seek upload source: %w", err)
 	}
 
-	width, height := utils.GetImageDimensions(tmp)
+	width, height := utils.GetImageDimensions(src)
 
 	// GetImageDimensions 会移动文件指针，保存前必须重置到开头
-	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-		return nil, false, fmt.Errorf("failed to seek temp file after dimension extraction: %w", err)
+	if _, err := src.Seek(0, io.SeekStart); err != nil {
+		return nil, false, fmt.Errorf("failed to seek upload source after dimension extraction: %w", err)
 	}
 
 	ext := getSafeFileExtension(mimeType)
 	ids := s.pathGenerator.GenerateOriginalIdentifiers(fileHash, ext, time.Now())
 	identifier := ids.Identifier
 	storagePath := ids.StoragePath
-	if err := storageProvider.SaveWithContext(ctx, storagePath, tmp); err != nil {
+	if err := storageProvider.SaveWithContext(ctx, storagePath, src); err != nil {
 		return nil, false, errors.New("failed to save uploaded file")
 	}
 
-	fileInfo, err := tmp.Stat()
+	actualFileSize, err := getUploadSourceSize(src, source.FileSize)
 	if err != nil {
-		return nil, false, fmt.Errorf("failed to get file size: %w", err)
+		return nil, false, fmt.Errorf("failed to determine file size: %w", err)
 	}
-	actualFileSize := fileInfo.Size()
 
 	newImg := &models.Image{
 		Identifier:      identifier,
 		StoragePath:     storagePath,
-		OriginalName:    fileHeader.Filename,
+		OriginalName:    source.FileName,
 		FileSize:        actualFileSize,
 		MimeType:        mimeType,
 		StorageConfigID: storageConfigID,
@@ -384,6 +409,25 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 	}
 
 	return newImg, false, nil
+}
+
+func getUploadSourceSize(src io.Seeker, hintedSize int64) (int64, error) {
+	if hintedSize > 0 {
+		return hintedSize, nil
+	}
+
+	currentPos, err := src.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return 0, err
+	}
+	endPos, err := src.Seek(0, io.SeekEnd)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := src.Seek(currentPos, io.SeekStart); err != nil {
+		return 0, err
+	}
+	return endPos, nil
 }
 
 // createDedupedImageRecord 为不同用户创建去重后的新图片记录
