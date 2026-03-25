@@ -12,7 +12,6 @@ import (
 
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/storage"
-	"github.com/davidbyttow/govips/v2/vips"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -85,10 +84,12 @@ func TestSaveVariantResults_UpdateCompletedError_CallsUpdateFailed(t *testing.T)
 	assert.Contains(t, repo.updateFailedCalls, uint(7), "UpdateFailed must be called for the variant")
 }
 
-func TestWriteVariantBufferToTempFile(t *testing.T) {
+func TestStageVariantFileFromPath(t *testing.T) {
 	data := []byte("variant-payload")
+	path := filepath.Join(t.TempDir(), "variant.webp")
+	require.NoError(t, os.WriteFile(path, data, 0600))
 
-	file, size, hashValue, cleanup, err := writeVariantBufferToTempFile(data)
+	file, size, hashValue, cleanup, err := stageVariantFileFromPath(path)
 	require.NoError(t, err)
 	defer cleanup()
 
@@ -101,12 +102,10 @@ func TestWriteVariantBufferToTempFile(t *testing.T) {
 	assert.Equal(t, data, readBack)
 }
 
-func TestNewSequentialImportParams(t *testing.T) {
-	params := newSequentialImportParams()
+func TestCreateVariantTempPath(t *testing.T) {
+	path, cleanup, err := createVariantTempPath()
+	require.NoError(t, err)
+	defer cleanup()
 
-	require.NotNil(t, params)
-	assert.True(t, params.FailOnError.IsSet())
-	assert.True(t, params.FailOnError.Get())
-	assert.True(t, params.Access.IsSet())
-	assert.Equal(t, vips.AccessSequential, params.Access.Get())
+	assert.FileExists(t, path)
 }

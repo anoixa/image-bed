@@ -1,11 +1,9 @@
 package worker
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"fmt"
-	"hash"
 	"image"
 	"io"
 	"os"
@@ -16,20 +14,15 @@ import (
 	"github.com/anoixa/image-bed/config"
 	dbconfig "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
+	"github.com/anoixa/image-bed/internal/vipsfile"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/anoixa/image-bed/utils/generator"
 	"github.com/anoixa/image-bed/utils/pool"
-	"github.com/davidbyttow/govips/v2/vips"
 	_ "golang.org/x/image/webp"
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
-)
-
-var (
-	vipsLoadImageFromFile     = vips.LoadImageFromFile
-	vipsLoadThumbnailFromFile = vips.LoadThumbnailFromFile
 )
 
 // VariantRepository 变体仓库接口
@@ -71,48 +64,54 @@ func readImageDimensions(filePath string) (width, height int, ok bool) {
 	return cfg.Width, cfg.Height, true
 }
 
-func writeVariantBufferToTempFile(data []byte) (*os.File, int64, string, func(), error) {
+func createVariantTempPath() (string, func(), error) {
 	if err := os.MkdirAll(config.TempDir, 0700); err != nil {
-		return nil, 0, "", nil, fmt.Errorf("create temp dir: %w", err)
+		return "", nil, fmt.Errorf("create temp dir: %w", err)
 	}
 
 	tmp, err := os.CreateTemp(config.TempDir, "variant-output-*")
 	if err != nil {
-		return nil, 0, "", nil, fmt.Errorf("create temp file: %w", err)
+		return "", nil, fmt.Errorf("create temp file: %w", err)
+	}
+	path := tmp.Name()
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", nil, fmt.Errorf("close temp file: %w", err)
+	}
+
+	return path, func() { _ = os.Remove(path) }, nil
+}
+
+func stageVariantFileFromPath(path string) (*os.File, int64, string, func(), error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, 0, "", nil, fmt.Errorf("open temp file: %w", err)
 	}
 
 	cleanup := func() {
-		_ = tmp.Close()
-		_ = os.Remove(tmp.Name())
+		_ = file.Close()
+		_ = os.Remove(path)
+	}
+
+	stat, err := file.Stat()
+	if err != nil {
+		cleanup()
+		return nil, 0, "", nil, fmt.Errorf("stat temp file: %w", err)
 	}
 
 	hasher := sha256.New()
-	written, err := copyBytesToVariantFile(tmp, data, hasher)
-	if err != nil {
+	bufPtr := pool.SharedBufferPool.Get().(*[]byte)
+	defer pool.SharedBufferPool.Put(bufPtr)
+	if _, err := io.CopyBuffer(hasher, file, *bufPtr); err != nil {
 		cleanup()
-		return nil, 0, "", nil, fmt.Errorf("write temp file: %w", err)
+		return nil, 0, "", nil, fmt.Errorf("hash temp file: %w", err)
 	}
-
-	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		cleanup()
 		return nil, 0, "", nil, fmt.Errorf("reset temp file: %w", err)
 	}
 
-	return tmp, written, fmt.Sprintf("%x", hasher.Sum(nil)), cleanup, nil
-}
-
-func copyBytesToVariantFile(dst *os.File, data []byte, hasher hash.Hash) (int64, error) {
-	bufPtr := pool.SharedBufferPool.Get().(*[]byte)
-	defer pool.SharedBufferPool.Put(bufPtr)
-
-	reader := bytes.NewReader(data)
-	return io.CopyBuffer(io.MultiWriter(dst, hasher), reader, *bufPtr)
-}
-
-func newSequentialImportParams() *vips.ImportParams {
-	params := vips.NewImportParams()
-	params.Access.Set(vips.AccessSequential)
-	return params
+	return file, stat.Size(), fmt.Sprintf("%x", hasher.Sum(nil)), cleanup, nil
 }
 
 // ImageComplexity 图片复杂度级别
@@ -126,15 +125,12 @@ const (
 
 // detectImageComplexity detects image complexity level.
 // fileSize is the compressed file size in bytes (used to estimate compression ratio).
-func detectImageComplexity(img *vips.ImageRef, fileSize int64) ImageComplexity {
-	hasAlpha := img.HasAlpha()
-	if hasAlpha {
+func detectImageComplexity(info vipsfile.ImageInfo, fileSize int64) ImageComplexity {
+	if info.HasAlpha {
 		return ComplexityLow
 	}
 
-	width := img.Width()
-	height := img.Height()
-	pixelCount := width * height
+	pixelCount := info.Width * info.Height
 
 	if pixelCount == 0 || fileSize == 0 {
 		return ComplexityMedium
@@ -341,24 +337,9 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
 
 	var thumbResult, webpResult *pipelineResult
 	var hasSuccess, hasFailed bool
-	var sourceImg *vips.ImageRef
-
-	if t.ThumbVariantID > 0 && t.WebPVariantID > 0 {
-		sourceImg, err = vipsLoadImageFromFile(filePath, newSequentialImportParams())
-		if err != nil {
-			if t.ThumbVariantID > 0 {
-				_ = t.VariantRepo.UpdateFailed(t.ThumbVariantID, "load image from file: "+err.Error(), true)
-			}
-			if t.WebPVariantID > 0 {
-				_ = t.VariantRepo.UpdateFailed(t.WebPVariantID, "load image from file: "+err.Error(), true)
-			}
-			return fmt.Errorf("load image from file: %w", err)
-		}
-		defer sourceImg.Close()
-	}
 
 	if t.ThumbVariantID > 0 {
-		result, err := t.generateThumbnail(ctx, filePath, sourceImg)
+		result, err := t.generateThumbnail(ctx, filePath)
 		switch {
 		case err != nil:
 			utils.LogIfDevf("[Pipeline] Thumbnail failed: %v", err)
@@ -374,7 +355,7 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
 	}
 
 	if t.WebPVariantID > 0 {
-		result, err := t.generateWebP(ctx, filePath, sourceImg)
+		result, err := t.generateWebP(ctx, filePath)
 		switch {
 		case err != nil:
 			utils.LogIfDevf("[Pipeline] WebP failed: %v", err)
@@ -406,7 +387,7 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
 }
 
 // generateThumbnail 生成缩略图
-func (t *ImagePipelineTask) generateThumbnail(ctx context.Context, filePath string, sourceImg *vips.ImageRef) (*pipelineResult, error) {
+func (t *ImagePipelineTask) generateThumbnail(ctx context.Context, filePath string) (*pipelineResult, error) {
 	settings := t.Settings
 	if settings == nil {
 		return nil, fmt.Errorf("image processing settings not provided")
@@ -430,46 +411,26 @@ func (t *ImagePipelineTask) generateThumbnail(ctx context.Context, filePath stri
 
 	utils.LogIfDevf("[Pipeline] Generating thumbnail: width=%d for variant %d", size.Width, t.ThumbVariantID)
 
-	var (
-		thumbImg *vips.ImageRef
-		err      error
-	)
-	if sourceImg != nil {
-		thumbImg, err = sourceImg.Copy()
-		if err != nil {
-			return nil, fmt.Errorf("copy image for thumbnail: %w", err)
-		}
-		if err := thumbImg.Thumbnail(size.Width, -1, vips.InterestingNone); err != nil {
-			thumbImg.Close()
-			return nil, fmt.Errorf("thumbnail from image: %w", err)
-		}
-	} else {
-		thumbImg, err = vipsLoadThumbnailFromFile(filePath, size.Width, -1, vips.InterestingNone, vips.SizeBoth, newSequentialImportParams())
-		if err != nil {
-			return nil, fmt.Errorf("thumbnail from file: %w", err)
-		}
-	}
-	defer thumbImg.Close()
-
-	width := thumbImg.Width()
-	height := thumbImg.Height()
-
-	thumbWebp, _, err := thumbImg.ExportWebp(&vips.WebpExportParams{
-		Quality:         settings.ThumbnailQuality,
-		Lossless:        false,
-		ReductionEffort: settings.WebPEffort,
-		StripMetadata:   true,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("export thumbnail webp: %w", err)
-	}
-
 	pg := generator.NewPathGenerator()
 	thumbIdentifiers := pg.GenerateThumbnailIdentifiers(t.StoragePath, size.Width)
 	thumbPath := thumbIdentifiers.StoragePath
 
-	tmpFile, fileSize, fileHash, cleanupTmp, err := writeVariantBufferToTempFile(thumbWebp)
-	thumbWebp = nil
+	tmpPath, cleanupTmpPath, err := createVariantTempPath()
+	if err != nil {
+		return nil, fmt.Errorf("create thumbnail temp path: %w", err)
+	}
+	defer cleanupTmpPath()
+
+	info, err := vipsfile.ThumbnailFileToWebP(filePath, tmpPath, size.Width, vipsfile.WebPOptions{
+		Quality:         settings.ThumbnailQuality,
+		ReductionEffort: settings.WebPEffort,
+		StripMetadata:   true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("thumbnail from file: %w", err)
+	}
+
+	tmpFile, fileSize, fileHash, cleanupTmp, err := stageVariantFileFromPath(tmpPath)
 	if err != nil {
 		return nil, fmt.Errorf("stage thumbnail: %w", err)
 	}
@@ -483,25 +444,25 @@ func (t *ImagePipelineTask) generateThumbnail(ctx context.Context, filePath stri
 
 	return &pipelineResult{
 		StoragePath: thumbPath,
-		Width:       width,
-		Height:      height,
+		Width:       info.Width,
+		Height:      info.Height,
 		FileSize:    fileSize,
 		FileHash:    fileHash,
 	}, nil
 }
 
 // generateWebP 生成 WebP 原图
-func (t *ImagePipelineTask) generateWebP(ctx context.Context, filePath string, sourceImg *vips.ImageRef) (*pipelineResult, error) {
+func (t *ImagePipelineTask) generateWebP(ctx context.Context, filePath string) (*pipelineResult, error) {
 	settings := t.Settings
 	if settings == nil {
 		return nil, fmt.Errorf("image processing settings not provided")
 	}
 
-	return t.generateWebPWithSettings(ctx, filePath, settings, sourceImg)
+	return t.generateWebPWithSettings(ctx, filePath, settings)
 }
 
 // generateWebPWithSettings 使用指定设置生成 WebP
-func (t *ImagePipelineTask) generateWebPWithSettings(ctx context.Context, filePath string, settings *dbconfig.ImageProcessingSettings, sourceImg *vips.ImageRef) (*pipelineResult, error) {
+func (t *ImagePipelineTask) generateWebPWithSettings(ctx context.Context, filePath string, settings *dbconfig.ImageProcessingSettings) (*pipelineResult, error) {
 	if !settings.IsFormatEnabled(models.FormatWebP) {
 		utils.LogIfDevf("[Pipeline] WebP format disabled")
 		return nil, nil
@@ -518,46 +479,45 @@ func (t *ImagePipelineTask) generateWebPWithSettings(ctx context.Context, filePa
 		}
 	}
 
-	originImg := sourceImg
-	if originImg == nil {
-		var err error
-		originImg, err = vipsLoadImageFromFile(filePath, newSequentialImportParams())
-		if err != nil {
-			return nil, fmt.Errorf("load image from file: %w", err)
-		}
-		defer originImg.Close()
+	originImg, info, err := vipsfile.LoadImageFromFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("load image from file: %w", err)
 	}
+	defer originImg.Close()
 
-	width := originImg.Width()
-	height := originImg.Height()
+	width := info.Width
+	height := info.Height
 	if settings.MaxDimension > 0 {
 		if width > settings.MaxDimension || height > settings.MaxDimension {
 			return nil, fmt.Errorf("image exceeds max dimension: %dx%d", width, height)
 		}
 	}
 
-	complexity := detectImageComplexity(originImg, t.FileSize)
+	complexity := detectImageComplexity(info, t.FileSize)
 	adaptiveQuality := adaptiveWebPQuality(complexity, settings.WebPQuality)
 
 	utils.LogIfDevf("[Pipeline] Image complexity=%d, adaptive quality=%d (base=%d)",
 		complexity, adaptiveQuality, settings.WebPQuality)
 
-	originWebp, _, err := originImg.ExportWebp(&vips.WebpExportParams{
-		Quality:         adaptiveQuality,
-		Lossless:        false,
-		ReductionEffort: settings.WebPEffort,
-		StripMetadata:   true,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("export webp: %w", err)
-	}
-
 	pg := generator.NewPathGenerator()
 	webpIdentifiers := pg.GenerateConvertedIdentifiers(t.StoragePath, models.FormatWebP)
 	originPath := webpIdentifiers.StoragePath
 
-	tmpFile, fileSize, fileHash, cleanupTmp, err := writeVariantBufferToTempFile(originWebp)
-	originWebp = nil
+	tmpPath, cleanupTmpPath, err := createVariantTempPath()
+	if err != nil {
+		return nil, fmt.Errorf("create webp temp path: %w", err)
+	}
+	defer cleanupTmpPath()
+
+	if err := originImg.SaveWebPToFile(tmpPath, vipsfile.WebPOptions{
+		Quality:         adaptiveQuality,
+		ReductionEffort: settings.WebPEffort,
+		StripMetadata:   true,
+	}); err != nil {
+		return nil, fmt.Errorf("export webp: %w", err)
+	}
+
+	tmpFile, fileSize, fileHash, cleanupTmp, err := stageVariantFileFromPath(tmpPath)
 	if err != nil {
 		return nil, fmt.Errorf("stage webp: %w", err)
 	}
