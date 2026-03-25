@@ -1,21 +1,20 @@
 package images
 
 import (
-	"fmt"
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/internal/image"
+	"github.com/anoixa/image-bed/storage"
+	"github.com/anoixa/image-bed/utils"
 	"github.com/gin-gonic/gin"
-	"golang.org/x/sync/singleflight"
 )
-
-var thumbnailGroup singleflight.Group
 
 // GetThumbnail 获取缩略图
 // @Summary      Get image thumbnail
@@ -97,33 +96,76 @@ func (h *Handler) serveThumbnailImage(c *gin.Context, image *models.Image, resul
 		return
 	}
 
-	c.Header("Cache-Control", config.CacheControlPublic)
-	c.Header("Content-Type", config.ContentTypeWebP)
-
-	v, err, _ := thumbnailGroup.Do(result.StoragePath, func() (any, error) {
-		provider := h.getStorageProvider(image.StorageConfigID)
-		if provider == nil {
-			return nil, fmt.Errorf("storage provider not available")
-		}
-		stream, err := provider.GetWithContext(c.Request.Context(), result.StoragePath)
-		if err != nil {
-			return nil, err
-		}
-		defer func() {
-			if closer, ok := stream.(io.Closer); ok {
-				_ = closer.Close()
-			}
-		}()
-		return io.ReadAll(stream)
-	})
-	if err != nil {
+	provider := h.getStorageProvider(image.StorageConfigID)
+	if provider == nil {
 		h.serveOriginalImage(c, image)
 		return
 	}
 
-	data := v.([]byte)
-	c.Header("Content-Length", strconv.Itoa(len(data)))
-	c.Data(http.StatusOK, result.MIMEType, data)
+	if opener, ok := provider.(storage.FileOpener); ok {
+		if h.serveThumbnailBySendfile(c, result, opener) {
+			return
+		}
+	}
+
+	if streamer, ok := provider.(storage.StreamProvider); ok {
+		if h.serveThumbnailByStreaming(c, result, streamer) {
+			return
+		}
+	}
+
+	stream, err := provider.GetWithContext(c.Request.Context(), result.StoragePath)
+	if err != nil {
+		h.serveOriginalImage(c, image)
+		return
+	}
+	defer func() {
+		if closer, ok := stream.(io.Closer); ok {
+			_ = closer.Close()
+		}
+	}()
+
+	c.Header("Cache-Control", config.CacheControlPublic)
+	c.Header("Content-Type", result.MIMEType)
+	c.Header("X-Content-Type-Options", "nosniff")
+
+	if _, err := io.Copy(c.Writer, stream); err != nil && !utils.IsClientDisconnect(err) {
+		utils.Errorf("[serveThumbnailImage] Failed to copy thumbnail %s (path: %s): %v",
+			utils.SanitizeLogMessage(result.Identifier), result.StoragePath, err)
+	}
+}
+
+func (h *Handler) serveThumbnailByStreaming(c *gin.Context, result *image.ThumbnailResult, streamer storage.StreamProvider) bool {
+	c.Header("Cache-Control", config.CacheControlPublic)
+	c.Header("Content-Type", result.MIMEType)
+	c.Header("X-Content-Type-Options", "nosniff")
+
+	_, err := streamer.StreamTo(c.Request.Context(), result.StoragePath, c.Writer)
+	if err != nil {
+		return utils.IsClientDisconnect(err)
+	}
+	return true
+}
+
+func (h *Handler) serveThumbnailBySendfile(c *gin.Context, result *image.ThumbnailResult, opener storage.FileOpener) bool {
+	file, err := opener.OpenFile(c.Request.Context(), result.StoragePath)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = file.Close() }()
+
+	stat, err := file.Stat()
+	if err != nil {
+		return false
+	}
+
+	c.Header("Cache-Control", config.CacheControlPublic)
+	c.Header("Content-Type", result.MIMEType)
+	c.Header("Content-Length", strconv.FormatInt(stat.Size(), 10))
+	c.Header("X-Content-Type-Options", "nosniff")
+
+	http.ServeContent(c.Writer, c.Request, result.Identifier, stat.ModTime().Truncate(time.Second), file)
+	return true
 }
 
 // parseThumbnailWidth 解析缩略图宽度参数

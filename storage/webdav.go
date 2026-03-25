@@ -233,19 +233,28 @@ func (s *WebDAVStorage) SaveWithContext(ctx context.Context, storagePath string,
 
 	fullPath := s.fullPath(storagePath)
 
-	// 递归创建父目录
-	if err := s.ensureParentDir(ctx, fullPath); err != nil {
-		return fmt.Errorf("failed to ensure parent directory for %s: %w", storagePath, err)
+	var contentLength int64 = -1
+	if seeker, ok := file.(io.Seeker); ok {
+		currentPos, err := seeker.Seek(0, io.SeekCurrent)
+		if err != nil {
+			return fmt.Errorf("failed to get current file position: %w", err)
+		}
+		endPos, err := seeker.Seek(0, io.SeekEnd)
+		if err != nil {
+			return fmt.Errorf("failed to determine file size: %w", err)
+		}
+		if _, err := seeker.Seek(currentPos, io.SeekStart); err != nil {
+			return fmt.Errorf("failed to restore file position: %w", err)
+		}
+		contentLength = endPos - currentPos
 	}
 
-	data, err := io.ReadAll(file)
-	if err != nil {
-		return fmt.Errorf("failed to read file content: %w", err)
-	}
-
-	// 执行写入（带超时防止 goroutine 泄漏）
+	// 执行流式写入（带超时防止 goroutine 泄漏）
 	if err := s.executeWithTimeout(ctx, func() error {
-		return s.client.Write(fullPath, data, 0644)
+		if contentLength >= 0 {
+			return s.client.WriteStreamWithLength(fullPath, file, contentLength, 0644)
+		}
+		return s.client.WriteStream(fullPath, file, 0644)
 	}); err != nil {
 		return fmt.Errorf("failed to write file %s: %w", storagePath, err)
 	}

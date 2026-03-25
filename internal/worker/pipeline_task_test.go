@@ -2,13 +2,17 @@ package worker
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/storage"
+	"github.com/davidbyttow/govips/v2/vips"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -79,4 +83,30 @@ func TestSaveVariantResults_UpdateCompletedError_CallsUpdateFailed(t *testing.T)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "db down")
 	assert.Contains(t, repo.updateFailedCalls, uint(7), "UpdateFailed must be called for the variant")
+}
+
+func TestWriteVariantBufferToTempFile(t *testing.T) {
+	data := []byte("variant-payload")
+
+	file, size, hashValue, cleanup, err := writeVariantBufferToTempFile(data)
+	require.NoError(t, err)
+	defer cleanup()
+
+	assert.IsType(t, &os.File{}, file)
+	assert.Equal(t, int64(len(data)), size)
+	assert.Equal(t, fmt.Sprintf("%x", sha256.Sum256(data)), hashValue)
+
+	readBack, err := io.ReadAll(file)
+	require.NoError(t, err)
+	assert.Equal(t, data, readBack)
+}
+
+func TestNewSequentialImportParams(t *testing.T) {
+	params := newSequentialImportParams()
+
+	require.NotNil(t, params)
+	assert.True(t, params.FailOnError.IsSet())
+	assert.True(t, params.FailOnError.Get())
+	assert.True(t, params.Access.IsSet())
+	assert.Equal(t, vips.AccessSequential, params.Access.Get())
 }

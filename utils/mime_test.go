@@ -2,6 +2,9 @@ package utils
 
 import (
 	"bytes"
+	"image"
+	"image/color"
+	"image/png"
 	"strings"
 	"testing"
 
@@ -109,4 +112,21 @@ func BenchmarkSniffContentType(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+}
+
+func TestGetImageDimensions(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 7, 5))
+	img.Set(0, 0, color.RGBA{R: 255, A: 255})
+
+	var buf bytes.Buffer
+	require.NoError(t, png.Encode(&buf, img))
+
+	reader := bytes.NewReader(buf.Bytes())
+	width, height := GetImageDimensions(reader)
+	assert.Equal(t, 7, width)
+	assert.Equal(t, 5, height)
+
+	pos, err := reader.Seek(0, 1)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), pos, "reader should be reset after dimension detection")
 }

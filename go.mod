@@ -3,7 +3,7 @@ module github.com/anoixa/image-bed
 go 1.26.0
 
 require (
-	github.com/davidbyttow/govips/v2 v2.16.0
+	github.com/davidbyttow/govips/v2 v2.17.0
 	github.com/dgraph-io/ristretto v0.2.0
 	github.com/gin-contrib/cors v1.7.6
 	github.com/gin-gonic/gin v1.11.0

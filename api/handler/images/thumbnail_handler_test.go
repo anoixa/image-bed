@@ -1,15 +1,57 @@
 package images
 
 import (
+	"context"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"os"
 	"testing"
 
+	"github.com/anoixa/image-bed/storage"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	imageSvc "github.com/anoixa/image-bed/internal/image"
 )
+
+type thumbnailStreamProvider struct {
+	streamCalls int
+}
+
+func (p *thumbnailStreamProvider) SaveWithContext(ctx context.Context, storagePath string, file io.Reader) error {
+	return nil
+}
+
+func (p *thumbnailStreamProvider) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeeker, error) {
+	return nil, os.ErrNotExist
+}
+
+func (p *thumbnailStreamProvider) DeleteWithContext(ctx context.Context, storagePath string) error {
+	return nil
+}
+
+func (p *thumbnailStreamProvider) Exists(ctx context.Context, storagePath string) (bool, error) {
+	return true, nil
+}
+
+func (p *thumbnailStreamProvider) Health(ctx context.Context) error {
+	return nil
+}
+
+func (p *thumbnailStreamProvider) Name() string {
+	return "thumbnail-stream"
+}
+
+func (p *thumbnailStreamProvider) StreamTo(ctx context.Context, storagePath string, w http.ResponseWriter) (int64, error) {
+	p.streamCalls++
+	n, err := io.WriteString(w, "thumb-body")
+	return int64(n), err
+}
+
+var _ storage.StreamProvider = (*thumbnailStreamProvider)(nil)
 
 func TestParseThumbnailWidth(t *testing.T) {
 	h := &Handler{}
@@ -70,4 +112,28 @@ func TestGetThumbnailURL(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestServeThumbnailByStreaming(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	h := &Handler{}
+	provider := &thumbnailStreamProvider{}
+	result := &imageSvc.ThumbnailResult{
+		Identifier:  "thumb.webp",
+		StoragePath: "thumbs/thumb.webp",
+		MIMEType:    "image/webp",
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/thumbnails/test", nil)
+
+	ok := h.serveThumbnailByStreaming(c, result, provider)
+
+	require.True(t, ok)
+	assert.Equal(t, 1, provider.streamCalls)
+	assert.Equal(t, "thumb-body", w.Body.String())
+	assert.Equal(t, "image/webp", w.Header().Get("Content-Type"))
+	assert.Equal(t, "nosniff", w.Header().Get("X-Content-Type-Options"))
 }
