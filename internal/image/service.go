@@ -291,11 +291,10 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 
 	if err == nil && img.DeletedAt.Valid {
 		updates := map[string]any{
-			"deleted_at":        nil,
-			"original_name":     fileHeader.Filename,
-			"user_id":           userID,
-			"is_public":         isPublic,
-			"storage_config_id": storageConfigID,
+			"deleted_at":    nil,
+			"original_name": fileHeader.Filename,
+			"user_id":       userID,
+			"is_public":     isPublic,
 		}
 		restored, err := s.repo.UpdateImageByIdentifier(img.Identifier, updates)
 		if err != nil {
@@ -389,17 +388,18 @@ func (s *Service) processAndSaveImage(ctx context.Context, userID uint, fileHead
 
 // createDedupedImageRecord 为不同用户创建去重后的新图片记录
 // 物理文件复用，但逻辑上属于不同用户（物理去重 + 逻辑隔离）
-func (s *Service) createDedupedImageRecord(existing *models.Image, userID uint, originalName string, storageConfigID uint, isPublic bool) (*models.Image, error) {
+func (s *Service) createDedupedImageRecord(existing *models.Image, userID uint, originalName string, _ uint, isPublic bool) (*models.Image, error) {
 	// 生成新的 identifier（使用时间戳确保唯一性）
 	ids := s.pathGenerator.GenerateOriginalIdentifiers(existing.FileHash+fmt.Sprintf("_%d", userID), filepath.Ext(originalName), time.Now())
 
 	newImg := &models.Image{
-		Identifier:      ids.Identifier,
-		StoragePath:     existing.StoragePath, // 复用相同的物理文件路径
-		OriginalName:    originalName,
-		FileSize:        existing.FileSize,
-		MimeType:        existing.MimeType,
-		StorageConfigID: storageConfigID,
+		Identifier:   ids.Identifier,
+		StoragePath:  existing.StoragePath, // 复用相同的物理文件路径
+		OriginalName: originalName,
+		FileSize:     existing.FileSize,
+		MimeType:     existing.MimeType,
+		// 复用物理文件时必须保留原始存储配置，否则后续读取/删除会指向错误的 provider。
+		StorageConfigID: existing.StorageConfigID,
 		FileHash:        existing.FileHash,
 		Width:           existing.Width,
 		Height:          existing.Height,
@@ -621,11 +621,15 @@ func (s *Service) DeleteSingle(ctx context.Context, identifier string, userID ui
 		return &DeleteResult{Success: false, Error: errors.New("permission denied")}, nil
 	}
 
-	// 从所有相册中移除关联
-	if err := s.repo.RemoveImageFromAllAlbums(img.ID); err != nil {
-		utils.Warnf("Failed to remove image %d from albums: %v", img.ID, err)
+	result, imagesToDelete, err := s.repo.DeleteBatchTransaction(ctx, []string{identifier}, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to delete image: %w", err)
+	}
+	if result.DeletedCount == 0 || len(imagesToDelete) == 0 {
+		return &DeleteResult{Success: false, Error: errors.New("image not found")}, nil
 	}
 
+	img = imagesToDelete[0]
 	s.deleteVariantsForImage(ctx, img)
 
 	if img.StoragePath != "" {
@@ -642,13 +646,6 @@ func (s *Service) DeleteSingle(ctx context.Context, identifier string, userID ui
 		} else {
 			utils.LogIfDevf("[Delete] Skipping physical file deletion for %s, still referenced by %d images", img.StoragePath, refCount-1)
 		}
-	}
-
-	if err := s.repo.DeleteImageByIdentifierAndUser(identifier, userID); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return &DeleteResult{Success: false, Error: errors.New("image not found")}, nil
-		}
-		return nil, fmt.Errorf("failed to delete image: %w", err)
 	}
 
 	// 清除缓存

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/anoixa/image-bed/api/common"
-	configSvc "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
 	imagesRepo "github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/storage"
@@ -17,18 +16,35 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type configManager interface {
+	ListConfigs(ctx context.Context, category models.ConfigCategory, enabledOnly, maskSensitive bool) ([]*models.ConfigResponse, error)
+	GetConfig(ctx context.Context, id uint, maskSensitive bool) (*models.ConfigResponse, error)
+	CreateConfig(ctx context.Context, req *models.SystemConfigStoreRequest, userID uint) (*models.ConfigResponse, error)
+	UpdateConfig(ctx context.Context, id uint, req *models.SystemConfigStoreRequest) (*models.ConfigResponse, error)
+	DeleteConfig(ctx context.Context, id uint) error
+	SetDefault(ctx context.Context, id uint) error
+	Enable(ctx context.Context, id uint) error
+	Disable(ctx context.Context, id uint) error
+	GetGlobalTransferMode(ctx context.Context) storage.TransferMode
+	SetGlobalTransferMode(ctx context.Context, mode storage.TransferMode) error
+	ClearCache()
+}
+
 // ConfigHandler 配置管理处理器
 type ConfigHandler struct {
-	manager    *configSvc.Manager
-	imagesRepo *imagesRepo.Repository
+	manager             configManager
+	imagesRepo          *imagesRepo.Repository
+	reloadStorageConfig func(id uint, config map[string]any, isDefault bool) error
 }
 
 // NewConfigHandler 创建配置处理器
-func NewConfigHandler(manager *configSvc.Manager, imagesRepo *imagesRepo.Repository) *ConfigHandler {
-	return &ConfigHandler{
+func NewConfigHandler(manager configManager, imagesRepo *imagesRepo.Repository) *ConfigHandler {
+	handler := &ConfigHandler{
 		manager:    manager,
 		imagesRepo: imagesRepo,
 	}
+	handler.reloadStorageConfig = handler.hotReloadStorageConfig
+	return handler
 }
 
 // ListConfigs 列出配置列表
@@ -144,7 +160,7 @@ func (h *ConfigHandler) CreateConfig(c *gin.Context) {
 	}
 
 	if req.Category == models.ConfigCategoryStorage {
-		if err := h.hotReloadStorageConfig(config.ID, req.Config, config.IsDefault); err != nil {
+		if err := h.reloadStorageConfig(config.ID, req.Config, config.IsDefault); err != nil {
 			if rollbackErr := h.manager.DeleteConfig(c.Request.Context(), config.ID); rollbackErr != nil {
 				utils.Errorf("Failed to rollback storage config creation: %v", rollbackErr)
 			}
@@ -205,7 +221,7 @@ func (h *ConfigHandler) UpdateConfig(c *gin.Context) {
 
 	// 如果是存储配置，热重载到存储层
 	if req.Category == models.ConfigCategoryStorage {
-		if err := h.hotReloadStorageConfig(config.ID, req.Config, config.IsDefault); err != nil {
+		if err := h.reloadStorageConfig(config.ID, req.Config, config.IsDefault); err != nil {
 			common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to reload storage configuration: %v", err))
 			return
 		}
@@ -298,7 +314,7 @@ func (h *ConfigHandler) SetDefaultConfig(c *gin.Context) {
 		_, err := storage.GetByID(uint(id))
 		if err != nil {
 			// Provider 未加载，尝试热重载
-			if loadErr := h.hotReloadStorageConfig(config.ID, config.Config, false); loadErr != nil {
+			if loadErr := h.reloadStorageConfig(config.ID, config.Config, false); loadErr != nil {
 				common.RespondError(c, http.StatusBadRequest, fmt.Sprintf("Storage provider not loaded and failed to reload: %v", loadErr))
 				return
 			}
@@ -343,7 +359,7 @@ func (h *ConfigHandler) EnableConfig(c *gin.Context) {
 	}
 
 	// 先获取配置信息，用于后续热重载
-	config, getErr := h.manager.GetConfig(ctx, uint(id), true)
+	config, getErr := h.manager.GetConfig(ctx, uint(id), false)
 	if getErr != nil {
 		common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to get config: %v", getErr))
 		return
@@ -356,7 +372,7 @@ func (h *ConfigHandler) EnableConfig(c *gin.Context) {
 
 	// 如果是存储配置，启用后热重载到内存
 	if config.Category == models.ConfigCategoryStorage {
-		if err := h.hotReloadStorageConfig(config.ID, config.Config, config.IsDefault); err != nil {
+		if err := h.reloadStorageConfig(config.ID, config.Config, config.IsDefault); err != nil {
 			// 热重载失败但不回滚启用操作，只是记录日志
 			utils.LogIfDevf("Failed to hot reload storage config %d after enable: %v", config.ID, err)
 		}

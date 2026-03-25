@@ -1,7 +1,6 @@
 package images
 
 import (
-	"math"
 	"net/http"
 
 	"github.com/anoixa/image-bed/api/common"
@@ -94,9 +93,9 @@ func (h *Handler) ListImages(c *gin.Context) {
 	common.RespondSuccess(c, ImageListResponse{
 		Images:     imageListDTO,
 		Total:      result.Total,
-		Page:       body.Page,
-		Limit:      body.Limit,
-		TotalPages: int(math.Ceil(float64(result.Total) / float64(body.Limit))),
+		Page:       result.Page,
+		Limit:      result.Limit,
+		TotalPages: result.TotalPages,
 	})
 }
 

@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/anoixa/image-bed/config"
 	cryptopackage "github.com/anoixa/image-bed/utils/crypto"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -289,6 +291,38 @@ func TestAuthCookies_ResponseFormat(t *testing.T) {
 	}
 	assert.True(t, hasRefreshToken)
 	assert.True(t, hasDeviceID)
+}
+
+func TestClearAuthCookiesClearsHostOnlyAndDomainCookies(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	handler := &LoginHandler{
+		cfg: &config.Config{
+			ServerDomain: "https://img.example.com",
+		},
+	}
+
+	handler.clearAuthCookies(c)
+
+	headers := w.Result().Header.Values("Set-Cookie")
+	assert.Len(t, headers, 4)
+
+	var foundHostOnlyRefresh bool
+	var foundDomainRefresh bool
+	for _, header := range headers {
+		if strings.Contains(header, "refresh_token=") && !strings.Contains(header, "Domain=") {
+			foundHostOnlyRefresh = true
+		}
+		if strings.Contains(header, "refresh_token=") && strings.Contains(header, "Domain=img.example.com") {
+			foundDomainRefresh = true
+		}
+	}
+
+	assert.True(t, foundHostOnlyRefresh, "host-only refresh cookie should be cleared")
+	assert.True(t, foundDomainRefresh, "domain refresh cookie should also be cleared when configured")
 }
 
 // --- 测试请求结构体验证 ---
