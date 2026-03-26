@@ -61,6 +61,11 @@ type Config struct {
 
 	UploadMaxBatchTotalMB int `mapstructure:"upload_max_batch_total_mb"`
 
+	// JWT 配置
+	JWTSecret          string `mapstructure:"jwt_secret"`
+	JWTAccessTokenTTL  string `mapstructure:"jwt_access_token_ttl"`
+	JWTRefreshTokenTTL string `mapstructure:"jwt_refresh_token_ttl"`
+
 	// Worker 配置
 	WorkerCount         int `mapstructure:"worker_count"`
 	WorkerMemoryLimitMB int `mapstructure:"worker_memory_limit_mb"`
@@ -103,7 +108,7 @@ func loadConfig() {
 		os.Exit(1)
 	}
 
-	// WorkerCount: -1 = 使用 CPU 线程数, 0 = 使用默认值 (max(2, CPU核心数)), >0 = 使用指定值
+	// WorkerCount: -1 = 使用当前 GOMAXPROCS, 0 = 使用默认值 (max(2, GOMAXPROCS)), >0 = 使用指定值
 	switch {
 	case globalConfig.WorkerCount < 0:
 		globalConfig.WorkerCount = runtime.GOMAXPROCS(0)
@@ -155,6 +160,10 @@ func setDefaults() {
 	viper.SetDefault("rate_limit_expire_time", "10m")
 
 	viper.SetDefault("upload_max_batch_total_mb", 500)
+
+	viper.SetDefault("jwt_secret", "")
+	viper.SetDefault("jwt_access_token_ttl", "15m")
+	viper.SetDefault("jwt_refresh_token_ttl", "168h")
 
 	// Worker 配置默认值
 	viper.SetDefault("worker_count", 0)             // 0 表示使用默认值

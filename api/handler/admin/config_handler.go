@@ -39,6 +39,11 @@ type ConfigHandler struct {
 	reloadStorageConfig func(id uint, config map[string]any, isDefault bool) error
 }
 
+var hiddenExternalConfigCategories = map[models.ConfigCategory]struct{}{
+	models.ConfigCategoryJWT:      {},
+	models.ConfigCategorySecurity: {},
+}
+
 // NewConfigHandler 创建配置处理器
 func NewConfigHandler(manager configManager, imagesRepo *imagesRepo.Repository) *ConfigHandler {
 	handler := &ConfigHandler{
@@ -73,6 +78,10 @@ func (h *ConfigHandler) ListConfigs(c *gin.Context) {
 	var cat models.ConfigCategory
 	if category != "" {
 		cat = models.ConfigCategory(category)
+		if isHiddenExternalConfigCategory(cat) {
+			common.RespondError(c, http.StatusBadRequest, "Unsupported config category")
+			return
+		}
 	}
 
 	configs, err := h.manager.ListConfigs(ctx, cat, enabledOnly, maskSensitive)
@@ -80,6 +89,8 @@ func (h *ConfigHandler) ListConfigs(c *gin.Context) {
 		common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to list configs: %v", err))
 		return
 	}
+
+	configs = filterVisibleConfigs(configs)
 
 	common.RespondSuccess(c, configs)
 }
@@ -115,6 +126,10 @@ func (h *ConfigHandler) GetConfig(c *gin.Context) {
 		common.RespondError(c, http.StatusNotFound, fmt.Sprintf("Config not found: %v", err))
 		return
 	}
+	if isHiddenExternalConfigCategory(config.Category) {
+		common.RespondError(c, http.StatusNotFound, "Config not found")
+		return
+	}
 
 	common.RespondSuccess(c, config)
 }
@@ -138,6 +153,10 @@ func (h *ConfigHandler) CreateConfig(c *gin.Context) {
 	var req models.SystemConfigStoreRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		common.RespondError(c, http.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err))
+		return
+	}
+	if isHiddenExternalConfigCategory(req.Category) {
+		common.RespondError(c, http.StatusBadRequest, "Unsupported config category")
 		return
 	}
 
@@ -203,6 +222,10 @@ func (h *ConfigHandler) UpdateConfig(c *gin.Context) {
 		common.RespondError(c, http.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err))
 		return
 	}
+	if isHiddenExternalConfigCategory(req.Category) {
+		common.RespondError(c, http.StatusBadRequest, "Unsupported config category")
+		return
+	}
 
 	if req.Category == models.ConfigCategoryStorage {
 		testResult := h.testConfig(&models.TestConfigRequest{
@@ -254,6 +277,10 @@ func (h *ConfigHandler) DeleteConfig(c *gin.Context) {
 	}
 
 	config, getErr := h.manager.GetConfig(c.Request.Context(), uint(id), false)
+	if getErr == nil && isHiddenExternalConfigCategory(config.Category) {
+		common.RespondError(c, http.StatusNotFound, "Config not found")
+		return
+	}
 	if getErr == nil && config.Category == models.ConfigCategoryStorage {
 		// 检查是否有图片使用该存储配置
 		if h.imagesRepo != nil {
@@ -311,6 +338,10 @@ func (h *ConfigHandler) SetDefaultConfig(c *gin.Context) {
 		common.RespondError(c, http.StatusNotFound, fmt.Sprintf("Config not found: %v", err))
 		return
 	}
+	if isHiddenExternalConfigCategory(config.Category) {
+		common.RespondError(c, http.StatusNotFound, "Config not found")
+		return
+	}
 
 	if config.Category == models.ConfigCategoryStorage {
 		_, err := storage.GetByID(uint(id))
@@ -364,6 +395,10 @@ func (h *ConfigHandler) EnableConfig(c *gin.Context) {
 	config, getErr := h.manager.GetConfig(ctx, uint(id), false)
 	if getErr != nil {
 		common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to get config: %v", getErr))
+		return
+	}
+	if isHiddenExternalConfigCategory(config.Category) {
+		common.RespondError(c, http.StatusNotFound, "Config not found")
 		return
 	}
 
@@ -447,9 +482,33 @@ func (h *ConfigHandler) TestConfig(c *gin.Context) {
 			Config:   config.Config,
 		}
 	}
+	if isHiddenExternalConfigCategory(req.Category) {
+		common.RespondError(c, http.StatusBadRequest, "Unsupported config category")
+		return
+	}
 
 	result := h.testConfig(&req)
 	common.RespondSuccess(c, result)
+}
+
+func isHiddenExternalConfigCategory(category models.ConfigCategory) bool {
+	_, hidden := hiddenExternalConfigCategories[category]
+	return hidden
+}
+
+func filterVisibleConfigs(configs []*models.ConfigResponse) []*models.ConfigResponse {
+	if len(configs) == 0 {
+		return configs
+	}
+
+	filtered := make([]*models.ConfigResponse, 0, len(configs))
+	for _, config := range configs {
+		if config == nil || isHiddenExternalConfigCategory(config.Category) {
+			continue
+		}
+		filtered = append(filtered, config)
+	}
+	return filtered
 }
 
 // testConfig 测试配置

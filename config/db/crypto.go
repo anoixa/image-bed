@@ -60,7 +60,11 @@ func (c *CryptoLayer) Encrypt(config map[string]any) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal data: %w", err)
 	}
-	return c.crypto.EncryptString(string(jsonData)), nil
+	encrypted, err := c.crypto.EncryptString(string(jsonData))
+	if err != nil {
+		return "", fmt.Errorf("failed to encrypt config: %w", err)
+	}
+	return encrypted, nil
 }
 
 // Decrypt 解密配置
@@ -100,7 +104,10 @@ func (c *CryptoLayer) createCanary(ctx context.Context) error {
 	}
 
 	jsonData, _ := json.Marshal(canaryData)
-	encrypted := c.crypto.EncryptString(string(jsonData))
+	encrypted, err := c.crypto.EncryptString(string(jsonData))
+	if err != nil {
+		return err
+	}
 
 	canary := &models.SystemConfig{
 		Category:    models.ConfigCategorySystem,

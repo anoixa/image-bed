@@ -109,11 +109,11 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 
 	if deps.JWTService != nil {
 		jwtService = deps.JWTService
-	} else if deps.ConfigManager != nil {
+	} else if deps.Config != nil {
 		var err error
-		jwtService, err = auth.NewJWTService(deps.ConfigManager, deps.Repositories.KeysRepo)
+		jwtService, err = auth.NewJWTService(deps.Config, deps.ConfigManager, deps.Repositories.KeysRepo)
 		if err != nil {
-			utils.Errorf("[Server] Failed to initialize JWT service from config: %v, using defaults", err)
+			utils.Errorf("[Server] Failed to initialize JWT service from app config: %v, using defaults", err)
 		}
 	}
 

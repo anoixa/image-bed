@@ -172,7 +172,7 @@ func RunServer() {
 
 	// 初始化 JWT
 	api.SetAuthKeysRepo(deps.Repositories.KeysRepo)
-	if err := api.TokenInitFromManager(deps.ConfigManager); err != nil {
+	if err := api.TokenInitFromConfig(cfg, deps.ConfigManager); err != nil {
 		log.Fatalf("Failed to initialize JWT: %s", err)
 	}
 

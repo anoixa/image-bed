@@ -40,7 +40,10 @@ type SecureKey struct {
 func (sk *SecureKey) Get() []byte {
 	sk.lock.RLock()
 	defer sk.lock.RUnlock()
-	return sk.key
+	if sk.key == nil {
+		return nil
+	}
+	return append([]byte(nil), sk.key...)
 }
 
 // Clear 清零内存并释放
@@ -158,35 +161,36 @@ func NewConfigEncryptor(masterKey []byte) *ConfigEncryptor {
 }
 
 // Encrypt 加密字符串，返回带版本前缀的密文
-func (e *ConfigEncryptor) Encrypt(plaintext string) string {
-	if e.masterKey == nil || plaintext == "" {
-		return plaintext
+func (e *ConfigEncryptor) Encrypt(plaintext string) (string, error) {
+	if plaintext == "" {
+		return plaintext, nil
+	}
+
+	if e.masterKey == nil {
+		return "", errors.New("master key not available")
 	}
 
 	if strings.HasPrefix(plaintext, EncPrefixV1) || strings.HasPrefix(plaintext, EncPrefixV2) {
-		return plaintext
+		return plaintext, nil
 	}
 
 	block, err := aes.NewCipher(e.masterKey)
 	if err != nil {
-		slog.Error("[ConfigEncryptor] Failed to create cipher: " + err.Error())
-		return plaintext
+		return "", fmt.Errorf("failed to create cipher: %w", err)
 	}
 
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
-		slog.Error("[ConfigEncryptor] Failed to create GCM: " + err.Error())
-		return plaintext
+		return "", fmt.Errorf("failed to create GCM: %w", err)
 	}
 
 	nonce := make([]byte, gcm.NonceSize())
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		slog.Error("[ConfigEncryptor] Failed to generate nonce: " + err.Error())
-		return plaintext
+		return "", fmt.Errorf("failed to generate nonce: %w", err)
 	}
 
 	ciphertext := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
-	return EncPrefixV1 + base64.StdEncoding.EncodeToString(ciphertext)
+	return EncPrefixV1 + base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
 // Decrypt 解密带版本前缀的密文

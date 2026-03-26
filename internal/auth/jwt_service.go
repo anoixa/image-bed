@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
+	appconfig "github.com/anoixa/image-bed/config"
 	configSvc "github.com/anoixa/image-bed/config/db"
-	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/keys"
 	"github.com/anoixa/image-bed/utils"
 
@@ -48,104 +48,67 @@ type TokenConfig struct {
 }
 
 // NewJWTService 创建新的 JWT 服务
-func NewJWTService(configManager *configSvc.Manager, keysRepo *keys.Repository) (*JWTService, error) {
+func NewJWTService(cfg *appconfig.Config, configManager *configSvc.Manager, keysRepo *keys.Repository) (*JWTService, error) {
 	svc := &JWTService{
 		configManager: configManager,
 		keysRepo:      keysRepo,
 	}
 
-	if err := svc.initialize(); err != nil {
+	if err := svc.initialize(cfg); err != nil {
 		return nil, err
 	}
 
 	return svc, nil
 }
 
-// initialize 从配置管理器初始化 JWT 配置
-func (s *JWTService) initialize() error {
-	if s.configManager == nil {
-		return errors.New("config manager is nil")
+// initialize 从应用配置初始化 JWT 配置
+func (s *JWTService) initialize(cfg *appconfig.Config) error {
+	if cfg == nil {
+		return errors.New("config is nil")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	jwtConfig, err := s.configManager.GetJWTConfig(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get JWT config from database: %w", err)
-	}
-
-	if err := s.applyConfig(jwtConfig); err != nil {
-		return err
-	}
-
-	s.configManager.Subscribe(configSvc.EventConfigUpdated, func(event *configSvc.Event) {
-		if event.Config.Category == models.ConfigCategoryJWT {
-			utils.Infof("[JWT] Configuration updated, reloading...")
-			s.mutex.RLock()
-			cm := s.configManager
-			s.mutex.RUnlock()
-			if cm == nil {
-				utils.Warnf("[JWT] Config manager not available, skipping reload")
-				return
-			}
-			if err := s.reloadConfig(); err != nil {
-				utils.Errorf("[JWT] Failed to reload config: %v", err)
-			} else {
-				utils.Infof("[JWT] Configuration reloaded successfully")
-			}
-		}
+	return s.applyConfig(TokenConfigInput{
+		Secret:          cfg.JWTSecret,
+		AccessTokenTTL:  cfg.JWTAccessTokenTTL,
+		RefreshTokenTTL: cfg.JWTRefreshTokenTTL,
 	})
+}
 
-	return nil
+type TokenConfigInput struct {
+	Secret          string
+	AccessTokenTTL  string
+	RefreshTokenTTL string
 }
 
 // applyConfig 应用 JWT 配置
-func (s *JWTService) applyConfig(jwtConfig *configSvc.JWTConfig) error {
+func (s *JWTService) applyConfig(input TokenConfigInput) error {
 	// 使用字符数而非字节长度，避免多字节UTF-8字符绕过检查
-	secretRunes := []rune(jwtConfig.Secret)
+	secretRunes := []rune(input.Secret)
 	if len(secretRunes) < 32 {
 		return fmt.Errorf("JWT secret must be at least 32 characters long, got %d", len(secretRunes))
 	}
 
-	duration, err := time.ParseDuration(jwtConfig.AccessTokenTTL)
+	duration, err := time.ParseDuration(input.AccessTokenTTL)
 	if err != nil {
-		return fmt.Errorf("invalid JWT access token TTL: %s", jwtConfig.AccessTokenTTL)
+		return fmt.Errorf("invalid JWT access token TTL: %s", input.AccessTokenTTL)
 	}
 
-	refreshDuration, err := time.ParseDuration(jwtConfig.RefreshTokenTTL)
+	refreshDuration, err := time.ParseDuration(input.RefreshTokenTTL)
 	if err != nil {
-		return fmt.Errorf("invalid JWT refresh token TTL: %s", jwtConfig.RefreshTokenTTL)
+		return fmt.Errorf("invalid JWT refresh token TTL: %s", input.RefreshTokenTTL)
 	}
 
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
 	s.config = TokenConfig{
-		Secret:           []byte(jwtConfig.Secret),
+		Secret:           []byte(input.Secret),
 		ExpiresIn:        duration,
 		RefreshExpiresIn: refreshDuration,
 	}
 
-	utils.Infof("[JWT] Config loaded from database - Access: %v, Refresh: %v\n", duration, refreshDuration)
+	utils.Infof("[JWT] Config loaded from environment - Access: %v, Refresh: %v", duration, refreshDuration)
 	return nil
-}
-
-// reloadConfig 重新加载 JWT 配置
-func (s *JWTService) reloadConfig() error {
-	if s.configManager == nil {
-		return errors.New("config manager not initialized")
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	jwtConfig, err := s.configManager.GetJWTConfig(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get JWT config: %w", err)
-	}
-
-	return s.applyConfig(jwtConfig)
 }
 
 // GetConfig 获取当前 JWT 配置

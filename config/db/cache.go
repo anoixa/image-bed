@@ -26,30 +26,11 @@ func (c *CacheLayer) Invalidate(category models.ConfigCategory) {
 	defer c.mutex.Unlock()
 
 	switch category {
-	case models.ConfigCategoryJWT:
-		delete(c.localCache, keyJWT)
 	case models.ConfigCategoryStorage:
 		delete(c.localCache, keyStorage)
 	case models.ConfigCategoryImageProcessing:
 		delete(c.localCache, keyImageProcessing)
 	}
-}
-
-// GetJWT 获取缓存的 JWT 配置
-func (c *CacheLayer) GetJWT() *JWTConfig {
-	c.mutex.RLock()
-	defer c.mutex.RUnlock()
-	if val, ok := c.localCache[keyJWT]; ok {
-		return val.(*JWTConfig)
-	}
-	return nil
-}
-
-// SetJWT 设置 JWT 配置缓存
-func (c *CacheLayer) SetJWT(cfg *JWTConfig) {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-	c.localCache[keyJWT] = cfg
 }
 
 // GetStorage 获取缓存的存储配置
@@ -87,7 +68,6 @@ func (c *CacheLayer) SetImageProcessing(settings *ImageProcessingSettings) {
 }
 
 const (
-	keyJWT             = "config:jwt"
 	keyStorage         = "config:storage"
 	keyImageProcessing = "config:image_processing"
 )

@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	appconfig "github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/utils"
 	"runtime"
 	"sync"
@@ -17,6 +18,10 @@ var (
 	globalPool     *Pool
 	globalPoolOnce sync.Once
 )
+
+var workerMemoryCheck = func() error {
+	return appconfig.Get().CheckMemoryLimitWithGC()
+}
 
 // ImageProcessingConfig 图片处理配置
 type ImageProcessingConfig struct {
@@ -179,6 +184,10 @@ func (p *Pool) executeTaskWithRecovery(task func()) {
 // Submit 提交异步任务到队列
 func (p *Pool) Submit(task func()) (ok bool) {
 	if p.isClosed.Load() {
+		return false
+	}
+	if err := workerMemoryCheck(); err != nil {
+		utils.Warnf("[WorkerPool] Rejecting task submission due to memory limit: %v", err)
 		return false
 	}
 	defer func() {

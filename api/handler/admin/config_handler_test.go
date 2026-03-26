@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -181,4 +182,64 @@ func TestTestStorageConfigRejectsBlockedRemoteAddresses(t *testing.T) {
 		assert.False(t, result.Success)
 		assert.True(t, strings.Contains(result.Message, "refusing to test"))
 	})
+}
+
+func TestListConfigsRejectsSecurityCategory(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	handler := NewConfigHandler(&stubConfigManager{}, nil)
+	router := gin.New()
+	router.GET("/configs", handler.ListConfigs)
+
+	req := httptest.NewRequest(http.MethodGet, "/configs?category=security", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestCreateConfigRejectsSecurityCategory(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	handler := NewConfigHandler(&stubConfigManager{}, nil)
+	router := gin.New()
+	router.POST("/configs", handler.CreateConfig)
+
+	body := bytes.NewBufferString(`{"category":"security","name":"x","config":{"enabled":true}}`)
+	req := httptest.NewRequest(http.MethodPost, "/configs", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestListConfigsRejectsJWTCategory(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	handler := NewConfigHandler(&stubConfigManager{}, nil)
+	router := gin.New()
+	router.GET("/configs", handler.ListConfigs)
+
+	req := httptest.NewRequest(http.MethodGet, "/configs?category=jwt", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestCreateConfigRejectsJWTCategory(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	handler := NewConfigHandler(&stubConfigManager{}, nil)
+	router := gin.New()
+	router.POST("/configs", handler.CreateConfig)
+
+	body := bytes.NewBufferString(`{"category":"jwt","name":"x","config":{"secret":"test-secret-key-at-least-32-characters-long"}}`)
+	req := httptest.NewRequest(http.MethodPost, "/configs", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
 }
