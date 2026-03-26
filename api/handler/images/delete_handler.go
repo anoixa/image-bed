@@ -48,7 +48,7 @@ func (h *Handler) DeleteImages(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	result, err := h.imageService.DeleteBatch(ctx, requestBody.Identifiers, userID)
+	result, err := h.deleteService.DeleteBatch(ctx, requestBody.Identifiers, userID)
 	if err != nil {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to delete images")
 		return
@@ -85,7 +85,7 @@ func (h *Handler) DeleteSingleImage(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	result, err := h.imageService.DeleteSingle(ctx, imageIdentifier, userID)
+	result, err := h.deleteService.DeleteSingle(ctx, imageIdentifier, userID)
 	if err != nil {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to delete the image")
 		return

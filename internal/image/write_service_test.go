@@ -32,7 +32,7 @@ func setupImageServiceTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-func newTestImageService(t *testing.T, db *gorm.DB) (*Service, *repoimages.Repository) {
+func newTestWriteService(t *testing.T, db *gorm.DB) (*WriteService, *repoimages.Repository, *repoimages.VariantRepository) {
 	t.Helper()
 
 	provider, err := cache.NewMemoryCache(cache.MemoryConfig{
@@ -49,13 +49,13 @@ func newTestImageService(t *testing.T, db *gorm.DB) (*Service, *repoimages.Repos
 	variantRepo := repoimages.NewVariantRepository(db)
 	helper := cache.NewHelper(provider)
 
-	service := NewService(repo, variantRepo, nil, nil, nil, nil, helper, nil, "http://localhost:8080")
-	return service, repo
+	service := NewWriteService(repo, nil, nil, helper, "http://localhost:8080")
+	return service, repo, variantRepo
 }
 
 func TestCreateDedupedImageRecordPreservesOriginalStorageConfig(t *testing.T) {
 	db := setupImageServiceTestDB(t)
-	service, repo := newTestImageService(t, db)
+	service, repo, _ := newTestWriteService(t, db)
 
 	existing := &models.Image{
 		Identifier:      "origin-image",
@@ -82,7 +82,8 @@ func TestCreateDedupedImageRecordPreservesOriginalStorageConfig(t *testing.T) {
 
 func TestDeleteSingleDoesNotDeletePhysicalFileWhenDatabaseDeleteFails(t *testing.T) {
 	db := setupImageServiceTestDB(t)
-	service, repo := newTestImageService(t, db)
+	service, repo, variantRepo := newTestWriteService(t, db)
+	deleteService := NewDeleteService(repo, variantRepo, service.cacheHelper)
 
 	const providerID uint = 91001
 	tempDir := t.TempDir()
@@ -122,7 +123,7 @@ func TestDeleteSingleDoesNotDeletePhysicalFileWhenDatabaseDeleteFails(t *testing
 		}
 	}))
 
-	result, err := service.DeleteSingle(context.Background(), image.Identifier, image.UserID)
+	result, err := deleteService.DeleteSingle(context.Background(), image.Identifier, image.UserID)
 	require.Error(t, err)
 	assert.Nil(t, result)
 

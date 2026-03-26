@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	appconfig "github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/utils"
 	"runtime"
@@ -20,7 +21,39 @@ var (
 )
 
 var workerMemoryCheck = func() error {
-	return appconfig.Get().CheckMemoryLimitWithGC()
+	cfg := appconfig.Get()
+	limit := cfg.GetWorkerMemoryLimitMB()
+	if limit <= 0 {
+		return nil
+	}
+
+	checkOnce := func() (float64, float64) {
+		stats := utils.GetMemoryStats()
+		effectiveMB := effectiveWorkerMemoryMB(stats)
+		return effectiveMB, stats.VipsMemMB
+	}
+
+	effectiveMB, _ := checkOnce()
+	if effectiveMB < float64(limit) {
+		return nil
+	}
+
+	runtime.GC()
+
+	effectiveMB, vipsMB := checkOnce()
+	if effectiveMB >= float64(limit) {
+		return fmt.Errorf("%w: effective=%.2fMB rss/vips threshold=%dMB vips=%.2fMB", appconfig.ErrMemoryLimitExceeded, effectiveMB, limit, vipsMB)
+	}
+
+	return nil
+}
+
+func effectiveWorkerMemoryMB(stats utils.MemoryStats) float64 {
+	effectiveMB := stats.RSSMB
+	if combined := stats.HeapAllocMB + stats.VipsMemMB; combined > effectiveMB {
+		effectiveMB = combined
+	}
+	return effectiveMB
 }
 
 // ImageProcessingConfig 图片处理配置

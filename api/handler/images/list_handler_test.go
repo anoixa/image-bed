@@ -42,14 +42,13 @@ func setupListHandler(t *testing.T) (*Handler, *repoimages.Repository) {
 	})
 
 	repo := repoimages.NewRepository(db)
-	variantRepo := repoimages.NewVariantRepository(db)
 	helper := cache.NewHelper(provider)
-	service := imagesvc.NewService(repo, variantRepo, nil, nil, nil, nil, helper, nil, "http://localhost:8080")
+	queryService := imagesvc.NewQueryService(repo, nil)
 
 	return &Handler{
 		cacheHelper:  helper,
 		repo:         repo,
-		imageService: service,
+		queryService: queryService,
 		baseURL:      "http://localhost:8080",
 	}, repo
 }

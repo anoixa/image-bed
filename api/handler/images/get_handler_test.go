@@ -1,6 +1,7 @@
 package images
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
@@ -10,13 +11,52 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/database/models"
 	imageSvc "github.com/anoixa/image-bed/internal/image"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
+
+func TestCheckETagSupportsWeakAndMultiValueIfNoneMatch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name        string
+		headerValue string
+		etag        string
+		wantMatch   bool
+	}{
+		{name: "strong_exact_match", headerValue: `"abc"`, etag: "abc", wantMatch: true},
+		{name: "weak_match", headerValue: `W/"abc"`, etag: "abc", wantMatch: true},
+		{name: "multi_value_match", headerValue: `"other", W/"abc"`, etag: "abc", wantMatch: true},
+		{name: "wildcard_match", headerValue: `*`, etag: "abc", wantMatch: true},
+		{name: "miss", headerValue: `"other"`, etag: "abc", wantMatch: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			req := httptest.NewRequest(http.MethodGet, "/images/test", nil)
+			req.Header.Set("If-None-Match", tt.headerValue)
+			c.Request = req
+
+			matched := checkETag(c, tt.etag)
+
+			assert.Equal(t, tt.wantMatch, matched)
+			assert.Equal(t, `"abc"`, w.Header().Get("ETag"))
+			if tt.wantMatch {
+				assert.Equal(t, http.StatusNotModified, c.Writer.Status())
+			} else {
+				assert.NotEqual(t, http.StatusNotModified, c.Writer.Status())
+			}
+		})
+	}
+}
 
 // MockConfigManager 用于测试的配置管理器 mock
 type MockConfigManager struct {
@@ -370,4 +410,160 @@ func TestSingleflightConcurrency(t *testing.T) {
 
 func TestRemoteImageDataCacheKey(t *testing.T) {
 	assert.Equal(t, "7:original/2026/03/26/hash.jpg", remoteImageDataCacheKey(7, "original/2026/03/26/hash.jpg"))
+}
+
+type testPathProvider struct{}
+
+func (p *testPathProvider) SaveWithContext(ctx context.Context, storagePath string, file io.Reader) error {
+	return nil
+}
+
+func (p *testPathProvider) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeeker, error) {
+	return nil, nil
+}
+
+func (p *testPathProvider) DeleteWithContext(ctx context.Context, storagePath string) error {
+	return nil
+}
+
+func (p *testPathProvider) Exists(ctx context.Context, storagePath string) (bool, error) {
+	return true, nil
+}
+
+func (p *testPathProvider) Health(ctx context.Context) error {
+	return nil
+}
+
+func (p *testPathProvider) Name() string {
+	return "local"
+}
+
+func (p *testPathProvider) GetFilePath(storagePath string) (string, error) {
+	return "/tmp/test", nil
+}
+
+type testRemoteProvider struct{}
+
+func (p *testRemoteProvider) SaveWithContext(ctx context.Context, storagePath string, file io.Reader) error {
+	return nil
+}
+
+func (p *testRemoteProvider) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeeker, error) {
+	return nil, nil
+}
+
+func (p *testRemoteProvider) DeleteWithContext(ctx context.Context, storagePath string) error {
+	return nil
+}
+
+func (p *testRemoteProvider) Exists(ctx context.Context, storagePath string) (bool, error) {
+	return true, nil
+}
+
+func (p *testRemoteProvider) Health(ctx context.Context) error {
+	return nil
+}
+
+func (p *testRemoteProvider) Name() string {
+	return "s3"
+}
+
+var _ storage.PathProvider = (*testPathProvider)(nil)
+var _ storage.Provider = (*testPathProvider)(nil)
+var _ storage.Provider = (*testRemoteProvider)(nil)
+
+func TestShouldUseImageDataCache(t *testing.T) {
+	handler := &Handler{
+		cacheHelper:      cache.NewHelper(nil),
+		imageDataCaching: true,
+	}
+
+	assert.False(t, handler.shouldUseImageDataCache(nil))
+	assert.True(t, handler.shouldUseImageDataCache(&testRemoteProvider{}))
+	assert.False(t, handler.shouldUseImageDataCache(&testPathProvider{}))
+
+	handler.imageDataCaching = false
+	assert.False(t, handler.shouldUseImageDataCache(&testRemoteProvider{}))
+}
+
+type cacheFillProvider struct {
+	data       []byte
+	getCalls   atomic.Int32
+	storageKey string
+}
+
+func (p *cacheFillProvider) SaveWithContext(ctx context.Context, storagePath string, file io.Reader) error {
+	return nil
+}
+
+func (p *cacheFillProvider) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeeker, error) {
+	p.getCalls.Add(1)
+	p.storageKey = storagePath
+	return bytes.NewReader(p.data), nil
+}
+
+func (p *cacheFillProvider) DeleteWithContext(ctx context.Context, storagePath string) error {
+	return nil
+}
+
+func (p *cacheFillProvider) Exists(ctx context.Context, storagePath string) (bool, error) {
+	return true, nil
+}
+
+func (p *cacheFillProvider) Health(ctx context.Context) error {
+	return nil
+}
+
+func (p *cacheFillProvider) Name() string {
+	return "s3"
+}
+
+func TestGetOrPopulateImageDataCachePopulatesRemoteCache(t *testing.T) {
+	providerCache, err := cache.NewMemoryCache(cache.MemoryConfig{
+		NumCounters: 1000,
+		MaxCost:     1024 * 1024,
+		BufferItems: 64,
+	})
+	require.NoError(t, err)
+	defer func() { _ = providerCache.Close() }()
+
+	handler := &Handler{
+		cacheHelper: cache.NewHelper(providerCache, cache.HelperConfig{
+			ImageCacheTTL:         time.Minute,
+			ImageDataCacheTTL:     time.Minute,
+			MaxCacheableImageSize: 1024,
+		}),
+		imageDataCaching: true,
+	}
+
+	provider := &cacheFillProvider{data: []byte("hello-image")}
+
+	data, ok := handler.getOrPopulateImageDataCache(context.Background(), provider, "image_data:test", "path/test.jpg")
+	require.True(t, ok)
+	assert.Equal(t, []byte("hello-image"), data)
+	assert.Equal(t, int32(1), provider.getCalls.Load())
+
+	data, ok = handler.getOrPopulateImageDataCache(context.Background(), provider, "image_data:test", "path/test.jpg")
+	require.True(t, ok)
+	assert.Equal(t, []byte("hello-image"), data)
+	assert.Equal(t, int32(1), provider.getCalls.Load())
+}
+
+func TestGetOrPopulateImageDataCacheSkipsLocalProvider(t *testing.T) {
+	providerCache, err := cache.NewMemoryCache(cache.MemoryConfig{
+		NumCounters: 1000,
+		MaxCost:     1024 * 1024,
+		BufferItems: 64,
+	})
+	require.NoError(t, err)
+	defer func() { _ = providerCache.Close() }()
+
+	handler := &Handler{
+		cacheHelper:      cache.NewHelper(providerCache),
+		imageDataCaching: true,
+	}
+
+	data, ok := handler.getOrPopulateImageDataCache(context.Background(), &testPathProvider{}, "image_data:test", "path/test.jpg")
+	assert.False(t, ok)
+	assert.Nil(t, data)
 }

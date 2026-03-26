@@ -15,6 +15,7 @@ type ThumbnailResult struct {
 	Format      string
 	Identifier  string
 	StoragePath string
+	FileHash    string
 	Width       int
 	Height      int
 	FileSize    int64
@@ -53,6 +54,7 @@ func (s *ThumbnailService) GetThumbnail(ctx context.Context, image *models.Image
 		Format:      format,
 		Identifier:  variant.Identifier,
 		StoragePath: variant.StoragePath,
+		FileHash:    variant.FileHash,
 		Width:       variant.Width,
 		Height:      variant.Height,
 		FileSize:    variant.FileSize,
@@ -92,6 +94,7 @@ func (s *ThumbnailService) GetWebPVariant(ctx context.Context, image *models.Ima
 		Format:      "webp",
 		Identifier:  variant.Identifier,
 		StoragePath: variant.StoragePath,
+		FileHash:    variant.FileHash,
 		Width:       variant.Width,
 		Height:      variant.Height,
 		FileSize:    variant.FileSize,

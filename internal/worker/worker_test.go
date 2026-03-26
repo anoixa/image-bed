@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/anoixa/image-bed/utils"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -27,4 +28,18 @@ func TestSubmitRejectsTaskWhenMemoryLimitExceeded(t *testing.T) {
 
 	assert.False(t, ok)
 	assert.False(t, executed.Load())
+}
+
+func TestEffectiveWorkerMemoryMB(t *testing.T) {
+	assert.Equal(t, 128.0, effectiveWorkerMemoryMB(utils.MemoryStats{
+		RSSMB:       128,
+		HeapAllocMB: 64,
+		VipsMemMB:   8,
+	}))
+
+	assert.Equal(t, 180.0, effectiveWorkerMemoryMB(utils.MemoryStats{
+		RSSMB:       90,
+		HeapAllocMB: 140,
+		VipsMemMB:   40,
+	}))
 }

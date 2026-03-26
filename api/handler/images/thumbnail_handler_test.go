@@ -97,6 +97,7 @@ func TestServeThumbnailByStreaming(t *testing.T) {
 	result := &imageSvc.ThumbnailResult{
 		Identifier:  "thumb.webp",
 		StoragePath: "thumbs/thumb.webp",
+		FileHash:    "thumb-hash",
 		MIMEType:    "image/webp",
 	}
 
@@ -111,4 +112,31 @@ func TestServeThumbnailByStreaming(t *testing.T) {
 	assert.Equal(t, "thumb-body", w.Body.String())
 	assert.Equal(t, "image/webp", w.Header().Get("Content-Type"))
 	assert.Equal(t, "nosniff", w.Header().Get("X-Content-Type-Options"))
+	assert.Equal(t, `"thumb-hash"`, w.Header().Get("ETag"))
+}
+
+func TestServeThumbnailByStreamingReturnsNotModifiedOnETagMatch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	h := &Handler{}
+	provider := &thumbnailStreamProvider{}
+	result := &imageSvc.ThumbnailResult{
+		Identifier:  "thumb.webp",
+		StoragePath: "thumbs/thumb.webp",
+		FileHash:    "thumb-hash",
+		MIMEType:    "image/webp",
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	req := httptest.NewRequest(http.MethodGet, "/thumbnails/test", nil)
+	req.Header.Set("If-None-Match", `W/"thumb-hash", "other"`)
+	c.Request = req
+
+	ok := h.serveThumbnailByStreaming(c, result, provider)
+
+	require.True(t, ok)
+	assert.Equal(t, 0, provider.streamCalls)
+	assert.Equal(t, http.StatusNotModified, c.Writer.Status())
+	assert.Equal(t, `"thumb-hash"`, w.Header().Get("ETag"))
 }

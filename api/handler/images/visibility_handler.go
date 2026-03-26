@@ -55,7 +55,7 @@ func (h *Handler) UpdateImageVisibility(c *gin.Context) {
 		return
 	}
 
-	image, err := h.imageService.GetImageByIdentifier(identifier)
+	image, err := h.queryService.GetImageByIdentifier(identifier)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			common.RespondError(c, http.StatusNotFound, "Image not found")
@@ -73,7 +73,7 @@ func (h *Handler) UpdateImageVisibility(c *gin.Context) {
 	updates := map[string]any{
 		"is_public": req.IsPublic,
 	}
-	updatedImage, err := h.imageService.UpdateImageByIdentifier(identifier, updates)
+	updatedImage, err := h.queryService.UpdateImageByIdentifier(identifier, updates)
 	if err != nil {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to update image visibility")
 		return

@@ -14,12 +14,16 @@ import (
 
 type Handler struct {
 	cacheHelper      *cache.Helper
+	imageDataCaching bool
 	repo             *images.Repository
 	configManager    *configSvc.Manager
 	variantService   *image.VariantService
 	thumbnailService *image.ThumbnailService
 	variantRepo      *images.VariantRepository
-	imageService     *image.Service
+	writeService     *image.WriteService
+	readService      *image.ReadService
+	deleteService    *image.DeleteService
+	queryService     *image.QueryService
 	baseURL          string
 }
 
@@ -47,16 +51,23 @@ func NewHandler(cacheProvider cache.Provider, imagesRepo *images.Repository, db 
 	}
 
 	cacheHelper := cache.NewHelper(cacheProvider, helperCfg)
-	imageService := image.NewService(imagesRepo, variantRepo, albumsRepo, converter, thumbnailService, variantService, cacheHelper, configManager, baseURL)
+	writeService := image.NewWriteService(imagesRepo, albumsRepo, converter, cacheHelper, baseURL)
+	readService := image.NewReadService(imagesRepo, variantService, converter, cacheHelper, baseURL, image.SubmitBackgroundTask)
+	deleteService := image.NewDeleteService(imagesRepo, variantRepo, cacheHelper)
+	queryService := image.NewQueryService(imagesRepo, configManager)
 
 	return &Handler{
 		cacheHelper:      cacheHelper,
+		imageDataCaching: cfg != nil && cfg.CacheEnableImageCaching,
 		repo:             imagesRepo,
 		configManager:    configManager,
 		variantRepo:      variantRepo,
 		variantService:   variantService,
 		thumbnailService: thumbnailService,
-		imageService:     imageService,
+		writeService:     writeService,
+		readService:      readService,
+		deleteService:    deleteService,
+		queryService:     queryService,
 		baseURL:          baseURL,
 	}
 }

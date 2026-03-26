@@ -82,7 +82,7 @@ func (h *Handler) UploadImage(c *gin.Context) {
 
 	// 单文件：保持旧格式兼容
 	if len(request.files) == 1 {
-		result, err := h.imageService.UploadSingleSource(ctx, userID, request.files[0], storageConfigID, isPublic, settings.DefaultAlbumID)
+		result, err := h.writeService.UploadSingleSource(ctx, userID, request.files[0], storageConfigID, isPublic, settings.DefaultAlbumID)
 		if err != nil {
 			if !c.IsAborted() {
 				common.RespondError(c, http.StatusInternalServerError, err.Error())
@@ -100,7 +100,7 @@ func (h *Handler) UploadImage(c *gin.Context) {
 	}
 
 	// 多文件：返回批量格式
-	results, err := h.imageService.UploadBatchSources(ctx, userID, request.files, storageConfigID, isPublic, settings.DefaultAlbumID, settings.ConcurrentUploadLimit)
+	results, err := h.writeService.UploadBatchSources(ctx, userID, request.files, storageConfigID, isPublic, settings.DefaultAlbumID, settings.ConcurrentUploadLimit)
 	if err != nil {
 		utils.Errorf("[UploadImage] Failed to process batch upload for user=%d: %v", userID, err)
 		if !c.IsAborted() {

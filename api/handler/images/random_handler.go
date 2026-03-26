@@ -95,7 +95,7 @@ func (h *Handler) RandomImage(c *gin.Context) {
 
 	// 获取随机图片（包含格式变体协商）
 	acceptHeader := c.GetHeader("Accept")
-	result, err := h.imageService.GetRandomImageWithVariant(c.Request.Context(), filter, acceptHeader)
+	result, err := h.readService.GetRandomImageWithVariant(c.Request.Context(), filter, acceptHeader)
 	if err != nil {
 		c.Status(http.StatusNoContent)
 		return

@@ -316,6 +316,11 @@ func (h *Helper) DeleteCachedImageData(ctx context.Context, identifier string) e
 	return h.provider.Delete(ctx, key)
 }
 
+// MaxCacheableImageSize 返回可缓存图片二进制的最大字节数
+func (h *Helper) MaxCacheableImageSize() int64 {
+	return h.config.MaxCacheableImageSize
+}
+
 // CacheAlbum 缓存相册信息
 func (h *Helper) CacheAlbum(ctx context.Context, album *models.Album) error {
 	if h.provider == nil {

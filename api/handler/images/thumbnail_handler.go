@@ -42,14 +42,14 @@ func (h *Handler) GetThumbnail(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
-	image, err := h.imageService.GetImageMetadata(ctx, identifier)
+	image, err := h.readService.GetImageMetadata(ctx, identifier)
 	if err != nil {
 		common.RespondError(c, http.StatusNotFound, "Image not found")
 		return
 	}
 
 	userID := c.GetUint(middleware.ContextUserIDKey)
-	if !h.imageService.CheckImagePermission(image, userID) {
+	if !h.readService.CheckImagePermission(image, userID) {
 		common.RespondError(c, http.StatusForbidden, "This image is private")
 		return
 	}
@@ -124,10 +124,14 @@ func (h *Handler) serveThumbnailImage(c *gin.Context, image *models.Image, resul
 			_ = closer.Close()
 		}
 	}()
-	h.serveReadSeekerContent(c, result.Identifier, result.MIMEType, "", stream, true)
+	h.serveReadSeekerContent(c, result.Identifier, result.MIMEType, result.FileHash, stream, true)
 }
 
 func (h *Handler) serveThumbnailByStreaming(c *gin.Context, result *image.ThumbnailResult, streamer storage.StreamProvider) bool {
+	if checkETag(c, result.FileHash) {
+		return true
+	}
+
 	c.Header("Cache-Control", config.CacheControlPublic)
 	c.Header("Content-Type", result.MIMEType)
 	c.Header("X-Content-Type-Options", "nosniff")
@@ -140,6 +144,10 @@ func (h *Handler) serveThumbnailByStreaming(c *gin.Context, result *image.Thumbn
 }
 
 func (h *Handler) serveThumbnailBySendfile(c *gin.Context, result *image.ThumbnailResult, opener storage.FileOpener) bool {
+	if checkETag(c, result.FileHash) {
+		return true
+	}
+
 	file, err := opener.OpenFile(c.Request.Context(), result.StoragePath)
 	if err != nil {
 		return false
