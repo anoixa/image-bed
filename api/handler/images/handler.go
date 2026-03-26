@@ -9,6 +9,7 @@ import (
 	"github.com/anoixa/image-bed/database/repo/albums"
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/internal/image"
+	"github.com/anoixa/image-bed/internal/random"
 	"gorm.io/gorm"
 )
 
@@ -24,6 +25,7 @@ type Handler struct {
 	readService      *image.ReadService
 	deleteService    *image.DeleteService
 	queryService     *image.QueryService
+	randomService    *random.Service
 	baseURL          string
 }
 
@@ -55,6 +57,10 @@ func NewHandler(cacheProvider cache.Provider, imagesRepo *images.Repository, db 
 	readService := image.NewReadService(imagesRepo, variantService, converter, cacheHelper, baseURL, image.SubmitBackgroundTask)
 	deleteService := image.NewDeleteService(imagesRepo, variantRepo, cacheHelper)
 	queryService := image.NewQueryService(imagesRepo, configManager)
+	var randomService *random.Service
+	if configManager != nil {
+		randomService = random.NewService(configManager)
+	}
 
 	return &Handler{
 		cacheHelper:      cacheHelper,
@@ -68,6 +74,7 @@ func NewHandler(cacheProvider cache.Provider, imagesRepo *images.Repository, db 
 		readService:      readService,
 		deleteService:    deleteService,
 		queryService:     queryService,
+		randomService:    randomService,
 		baseURL:          baseURL,
 	}
 }

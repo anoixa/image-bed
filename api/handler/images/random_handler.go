@@ -1,31 +1,22 @@
 package images
 
 import (
+	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/internal/image"
-	"github.com/anoixa/image-bed/internal/random"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
-
-// randomService 随机图片服务实例
-var randomService *random.Service
-
-// InitRandomService 初始化随机图片服务
-func (h *Handler) InitRandomService() {
-	if randomService == nil && h.configManager != nil {
-		randomService = random.NewService(h.configManager)
-	}
-}
 
 // getRandomSourceAlbum 获取配置的随机图源相册ID和是否包含所有公开图片的配置
 func (h *Handler) getRandomSourceAlbum() (uint, bool) {
-	h.InitRandomService()
-	if randomService != nil {
-		return randomService.GetSourceAlbum()
+	if h.randomService != nil {
+		return h.randomService.GetSourceAlbum()
 	}
 	return 0, false
 }
@@ -68,6 +59,10 @@ func (h *Handler) RandomImage(c *gin.Context) {
 		common.RespondError(c, http.StatusBadRequest, "Invalid query parameters")
 		return
 	}
+	if query.Format != "" && query.Format != "json" && query.Format != "image" {
+		common.RespondError(c, http.StatusBadRequest, "Invalid format parameter")
+		return
+	}
 
 	// 构建筛选条件
 	filter := &images.RandomImageFilter{
@@ -79,16 +74,24 @@ func (h *Handler) RandomImage(c *gin.Context) {
 		MaxFileSize: query.MaxFileSize,
 	}
 
-	// 优先使用请求参数中的相册ID，否则使用配置的推荐相册
-	if query.AlbumID > 0 {
-		filter.AlbumID = &query.AlbumID
+	albumIDRaw, hasAlbumOverride := c.GetQuery("album_id")
+	if hasAlbumOverride {
+		albumID, err := strconv.ParseUint(albumIDRaw, 10, 32)
+		if err != nil {
+			common.RespondError(c, http.StatusBadRequest, "Invalid album_id parameter")
+			return
+		}
+		if albumID == 0 {
+			filter.IncludeAllPublic = true
+		} else {
+			albumIDUint := uint(albumID)
+			filter.AlbumID = &albumIDUint
+		}
 	} else {
 		sourceAlbumID, includeAllPublic := h.getRandomSourceAlbum()
 		if includeAllPublic {
-			// 如果配置了包含所有公开图片，则设置标志位且不指定相册
 			filter.IncludeAllPublic = true
 		} else if sourceAlbumID > 0 {
-			// 否则使用配置中的特定相册
 			filter.AlbumID = &sourceAlbumID
 		}
 	}
@@ -97,7 +100,12 @@ func (h *Handler) RandomImage(c *gin.Context) {
 	acceptHeader := c.GetHeader("Accept")
 	result, err := h.readService.GetRandomImageWithVariant(c.Request.Context(), filter, acceptHeader)
 	if err != nil {
-		c.Status(http.StatusNoContent)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.Status(http.StatusNoContent)
+			return
+		}
+		utils.Errorf("[RandomImage] Failed to fetch random image: %v", err)
+		common.RespondError(c, http.StatusInternalServerError, "Failed to fetch random image")
 		return
 	}
 
@@ -125,24 +133,26 @@ func (h *Handler) RandomImage(c *gin.Context) {
 // respondRandomJSON 返回随机图片的JSON元数据
 func (h *Handler) respondRandomJSON(c *gin.Context, result *image.ImageResultDTO) {
 	img := result.Image
+	accessURL := utils.BuildImageURL(h.baseURL, img.Identifier)
 	response := gin.H{
-		"id":         img.ID,
-		"identifier": img.Identifier,
-		"url":        utils.BuildImageURL(h.baseURL, img.Identifier),
-		"width":      img.Width,
-		"height":     img.Height,
-		"size":       img.FileSize,
-		"mime_type":  img.MimeType,
-		"is_public":  img.IsPublic,
-		"created_at": img.CreatedAt,
+		"id":           img.ID,
+		"identifier":   img.Identifier,
+		"url":          accessURL,
+		"original_url": accessURL,
+		"width":        img.Width,
+		"height":       img.Height,
+		"size":         img.FileSize,
+		"mime_type":    img.MimeType,
+		"is_public":    img.IsPublic,
+		"created_at":   img.CreatedAt,
 	}
 
-	// 如果有格式变体，添加变体信息（url 使用基础 identifier，支持 Accept header 协商格式）
 	if !result.IsOriginal && result.Variant != nil {
 		response["variant"] = gin.H{
-			"identifier": result.Variant.Identifier,
-			"format":     result.Variant.Format,
-			"url":        utils.BuildImageURL(h.baseURL, img.Identifier),
+			"identifier":         result.Variant.Identifier,
+			"request_identifier": img.Identifier,
+			"format":             result.Variant.Format,
+			"url":                accessURL,
 		}
 		response["mime_type"] = result.MIMEType
 	}
@@ -196,13 +206,12 @@ func (h *Handler) SetRandomSourceAlbum(c *gin.Context) {
 		return
 	}
 
-	h.InitRandomService()
-	if randomService == nil {
+	if h.randomService == nil {
 		common.RespondError(c, http.StatusInternalServerError, "Random service not initialized")
 		return
 	}
 
-	if err := randomService.SetSourceAlbum(req.AlbumID, req.IncludeAllPublic); err != nil {
+	if err := h.randomService.SetSourceAlbum(req.AlbumID, req.IncludeAllPublic); err != nil {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to save configuration")
 		return
 	}

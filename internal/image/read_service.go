@@ -126,6 +126,15 @@ func (s *ReadService) GetRandomImageWithVariant(ctx context.Context, filter *ima
 }
 
 func (s *ReadService) buildImageResult(ctx context.Context, image *models.Image, acceptHeader string) *ImageResultDTO {
+	if s.variantService == nil {
+		return &ImageResultDTO{
+			Image:      image,
+			IsOriginal: true,
+			URL:        utils.BuildImageURL(s.baseURL, image.Identifier),
+			MIMEType:   image.MimeType,
+		}
+	}
+
 	variantResult, err := s.variantService.SelectBestVariant(ctx, image, acceptHeader)
 	if err != nil {
 		return &ImageResultDTO{

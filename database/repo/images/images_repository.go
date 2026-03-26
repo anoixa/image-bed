@@ -2,7 +2,9 @@ package images
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
+	"math/big"
 	"time"
 
 	"github.com/anoixa/image-bed/database/models"
@@ -316,9 +318,7 @@ func (r *Repository) GetImagesByVariantStatus(statuses []models.ImageVariantStat
 
 // GetRandomPublicImage 随机获取一张公开图片
 func (r *Repository) GetRandomPublicImage(filter *RandomImageFilter) (*models.Image, error) {
-	var image models.Image
-
-	db := r.db.Where("is_public = ?", true)
+	db := r.db.Model(&models.Image{}).Where("is_public = ?", true)
 
 	if filter != nil && filter.AlbumID != nil && !filter.IncludeAllPublic {
 		db = db.Joins("JOIN album_images ON album_images.image_id = images.id").
@@ -348,13 +348,47 @@ func (r *Repository) GetRandomPublicImage(filter *RandomImageFilter) (*models.Im
 		}
 	}
 
-	// 使用数据库随机排序
-	err := db.Order("RANDOM()").First(&image).Error
+	var total int64
+	if err := db.Distinct("images.id").Count(&total).Error; err != nil {
+		return nil, err
+	}
+	if total == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+
+	offset, err := randomOffset(total)
 	if err != nil {
 		return nil, err
 	}
 
+	var selected struct {
+		ID uint
+	}
+	if err := db.Distinct("images.id").
+		Select("images.id").
+		Order("images.id ASC").
+		Offset(offset).
+		Limit(1).
+		Take(&selected).Error; err != nil {
+		return nil, err
+	}
+
+	var image models.Image
+	if err := r.db.First(&image, selected.ID).Error; err != nil {
+		return nil, err
+	}
 	return &image, nil
+}
+
+func randomOffset(total int64) (int, error) {
+	if total <= 0 {
+		return 0, nil
+	}
+	n, err := rand.Int(rand.Reader, big.NewInt(total))
+	if err != nil {
+		return 0, err
+	}
+	return int(n.Int64()), nil
 }
 
 // DeleteBatchResult 批量删除结果

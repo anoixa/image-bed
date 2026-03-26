@@ -1,6 +1,7 @@
 package random
 
 import (
+	"sync"
 	"time"
 
 	configSvc "github.com/anoixa/image-bed/config/db"
@@ -9,6 +10,7 @@ import (
 // Service 随机图片服务
 type Service struct {
 	configManager *configSvc.Manager
+	mu            sync.RWMutex
 	cache         *albumCache
 }
 
@@ -33,10 +35,14 @@ func NewService(configManager *configSvc.Manager) *Service {
 
 // GetSourceAlbum 获取随机图源相册ID和是否包含所有公开图片的配置
 func (s *Service) GetSourceAlbum() (uint, bool) {
-	// 检查缓存
+	s.mu.RLock()
 	if s.cache != nil && time.Now().Before(s.cache.expiresAt) {
-		return s.cache.albumID, s.cache.includeAllPublic
+		albumID := s.cache.albumID
+		includeAllPublic := s.cache.includeAllPublic
+		s.mu.RUnlock()
+		return albumID, includeAllPublic
 	}
+	s.mu.RUnlock()
 
 	// 从数据库加载
 	var albumID uint
@@ -46,12 +52,13 @@ func (s *Service) GetSourceAlbum() (uint, bool) {
 		includeAllPublic = s.configManager.GetRandomIncludeAllPublic()
 	}
 
-	// 更新缓存
+	s.mu.Lock()
 	s.cache = &albumCache{
 		albumID:          albumID,
 		includeAllPublic: includeAllPublic,
 		expiresAt:        time.Now().Add(cacheTTL),
 	}
+	s.mu.Unlock()
 
 	return albumID, includeAllPublic
 }
@@ -65,12 +72,13 @@ func (s *Service) SetSourceAlbum(albumID uint, includeAllPublic bool) error {
 		}
 	}
 
-	// 更新缓存
+	s.mu.Lock()
 	s.cache = &albumCache{
 		albumID:          albumID,
 		includeAllPublic: includeAllPublic,
 		expiresAt:        time.Now().Add(cacheTTL),
 	}
+	s.mu.Unlock()
 
 	return nil
 }
