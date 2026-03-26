@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/anoixa/image-bed/database/models"
+	"github.com/anoixa/image-bed/utils"
 )
 
 // EventType 事件类型
@@ -45,18 +46,24 @@ func (eb *EventBus) Subscribe(eventType EventType, handler EventHandler) {
 }
 
 // Publish 发布事件
-func (eb *EventBus) Publish(eventType EventType, config any) {
+func (eb *EventBus) Publish(eventType EventType, config *models.SystemConfig) {
 	eb.mu.RLock()
-	handlers := eb.subscribers[eventType]
+	handlers := append([]EventHandler(nil), eb.subscribers[eventType]...)
 	eb.mu.RUnlock()
 
-	cfg, _ := config.(*models.SystemConfig)
 	event := &Event{
 		Type:   eventType,
-		Config: cfg,
+		Config: config,
 	}
 
 	for _, handler := range handlers {
-		go handler(event)
+		func(h EventHandler) {
+			defer func() {
+				if r := recover(); r != nil {
+					utils.Errorf("[EventBus] Handler panicked for event %s: %v", eventType, r)
+				}
+			}()
+			h(event)
+		}(handler)
 	}
 }

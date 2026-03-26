@@ -2,7 +2,9 @@ package worker
 
 import (
 	"context"
-	"log"
+	"fmt"
+	appconfig "github.com/anoixa/image-bed/config"
+	"github.com/anoixa/image-bed/utils"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -17,6 +19,42 @@ var (
 	globalPool     *Pool
 	globalPoolOnce sync.Once
 )
+
+var workerMemoryCheck = func() error {
+	cfg := appconfig.Get()
+	limit := cfg.GetWorkerMemoryLimitMB()
+	if limit <= 0 {
+		return nil
+	}
+
+	checkOnce := func() (float64, float64) {
+		stats := utils.GetMemoryStats()
+		effectiveMB := effectiveWorkerMemoryMB(stats)
+		return effectiveMB, stats.VipsMemMB
+	}
+
+	effectiveMB, _ := checkOnce()
+	if effectiveMB < float64(limit) {
+		return nil
+	}
+
+	runtime.GC()
+
+	effectiveMB, vipsMB := checkOnce()
+	if effectiveMB >= float64(limit) {
+		return fmt.Errorf("%w: effective=%.2fMB rss/vips threshold=%dMB vips=%.2fMB", appconfig.ErrMemoryLimitExceeded, effectiveMB, limit, vipsMB)
+	}
+
+	return nil
+}
+
+func effectiveWorkerMemoryMB(stats utils.MemoryStats) float64 {
+	effectiveMB := stats.RSSMB
+	if combined := stats.HeapAllocMB + stats.VipsMemMB; combined > effectiveMB {
+		effectiveMB = combined
+	}
+	return effectiveMB
+}
 
 // ImageProcessingConfig 图片处理配置
 type ImageProcessingConfig struct {
@@ -70,7 +108,7 @@ func InitGlobalSemaphore(config *ImageProcessingConfig) {
 			semaphore: make(chan struct{}, config.MaxConcurrentImages),
 			config:    config,
 		}
-		log.Printf("[WorkerPool] Image processing semaphore initialized, max concurrent: %d", config.MaxConcurrentImages)
+		utils.Infof("[WorkerPool] Image processing semaphore initialized, max concurrent: %d", config.MaxConcurrentImages)
 	})
 }
 
@@ -97,7 +135,7 @@ func (s *ImageProcessingSemaphore) Release() {
 	select {
 	case <-s.semaphore:
 	default:
-		log.Println("[WorkerPool] Warning: releasing unacquired semaphore")
+		utils.Warnf("[WorkerPool] Warning: releasing unacquired semaphore")
 	}
 }
 
@@ -150,7 +188,7 @@ func NewPool(workers, queueSize int) *Pool {
 	}
 
 	p.workerCount = workers
-	log.Printf("[WorkerPool] Started with %d workers, queue size %d", workers, queueSize)
+	utils.Infof("[WorkerPool] Started with %d workers, queue size %d", workers, queueSize)
 	return p
 }
 
@@ -170,7 +208,7 @@ func (p *Pool) executeTaskWithRecovery(task func()) {
 	defer func() {
 		if r := recover(); r != nil {
 			p.failedCount.Add(1)
-			log.Printf("[WorkerPool] Task panicked: %v", r)
+			utils.Errorf("[WorkerPool] Task panicked: %v", r)
 		}
 	}()
 	task()
@@ -179,6 +217,10 @@ func (p *Pool) executeTaskWithRecovery(task func()) {
 // Submit 提交异步任务到队列
 func (p *Pool) Submit(task func()) (ok bool) {
 	if p.isClosed.Load() {
+		return false
+	}
+	if err := workerMemoryCheck(); err != nil {
+		utils.Warnf("[WorkerPool] Rejecting task submission due to memory limit: %v", err)
 		return false
 	}
 	defer func() {
@@ -191,7 +233,7 @@ func (p *Pool) Submit(task func()) (ok bool) {
 		p.submittedCount.Add(1)
 		return true
 	default:
-		log.Printf("[WorkerPool] Task queue full, dropping task")
+		utils.Warnf("[WorkerPool] Task queue full, dropping task")
 		return false
 	}
 }
@@ -199,10 +241,10 @@ func (p *Pool) Submit(task func()) (ok bool) {
 // Stop 关闭池
 func (p *Pool) Stop() {
 	if p.isClosed.CompareAndSwap(false, true) {
-		log.Println("[WorkerPool] Stopping...")
+		utils.Infof("[WorkerPool] Stopping...")
 		close(p.taskCh)
 		p.wg.Wait()
-		log.Println("[WorkerPool] Stopped gracefully.")
+		utils.Infof("[WorkerPool] Stopped gracefully.")
 	}
 }
 

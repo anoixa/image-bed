@@ -54,42 +54,28 @@ func (r *Repository) GetUserAlbums(userID uint, page, pageSize int) ([]*AlbumInf
 		albumIDs[i] = album.ID
 	}
 
-	var imageCounts []struct {
+	// Single query: image count + cover per album using window functions
+	var coverCounts []struct {
 		AlbumID uint
 		Count   int64
+		Cover   string
 	}
-	if err := r.db.Table("album_images").
-		Select("album_id, COUNT(*) as count").
-		Where("album_id IN ?", albumIDs).
-		Group("album_id").
-		Scan(&imageCounts).Error; err != nil {
-		return nil, 0, err
-	}
-
-	countMap := make(map[uint]int64, len(imageCounts))
-	for _, c := range imageCounts {
-		countMap[c.AlbumID] = c.Count
-	}
-
-	var covers []struct {
-		AlbumID    uint
-		Identifier string
-	}
-
 	subQuery := r.db.Table("album_images ai").
-		Select("ai.album_id, i.identifier, ROW_NUMBER() OVER (PARTITION BY ai.album_id ORDER BY i.created_at DESC) as rn").
+		Select("ai.album_id, COUNT(*) OVER (PARTITION BY ai.album_id) AS count, i.identifier AS cover, ROW_NUMBER() OVER (PARTITION BY ai.album_id ORDER BY i.created_at DESC) AS rn").
 		Joins("JOIN images i ON ai.image_id = i.id").
 		Where("ai.album_id IN ?", albumIDs)
-
-	if err := r.db.Table("(?) as ranked", subQuery).
+	if err := r.db.Table("(?) AS sub", subQuery).
+		Select("album_id, count, cover").
 		Where("rn = 1").
-		Scan(&covers).Error; err != nil {
+		Scan(&coverCounts).Error; err != nil {
 		return nil, 0, err
 	}
 
-	coverMap := make(map[uint]string, len(covers))
-	for _, c := range covers {
-		coverMap[c.AlbumID] = c.Identifier
+	countMap := make(map[uint]int64, len(coverCounts))
+	coverMap := make(map[uint]string, len(coverCounts))
+	for _, c := range coverCounts {
+		countMap[c.AlbumID] = c.Count
+		coverMap[c.AlbumID] = c.Cover
 	}
 
 	result := make([]*AlbumInfo, len(albums))

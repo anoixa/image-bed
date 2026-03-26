@@ -137,8 +137,14 @@ DB_TYPE=sqlite
 # 缓存 (memory 或 redis)
 CACHE_TYPE=memory
 
-# 上传限制
-UPLOAD_MAX_SIZE_MB=50
+# JWT
+JWT_SECRET=change-this-to-a-strong-secret-with-at-least-32-chars
+JWT_ACCESS_TOKEN_TTL=15m
+JWT_REFRESH_TOKEN_TTL=168h
+
+# Worker
+WORKER_COUNT=-1
+WORKER_MEMORY_LIMIT_MB=512
 ```
 
 完整配置见 `.env.example`

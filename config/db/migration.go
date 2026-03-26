@@ -2,7 +2,7 @@ package config
 
 import (
 	"context"
-	"log"
+	"github.com/anoixa/image-bed/utils"
 
 	"github.com/anoixa/image-bed/database/models"
 )
@@ -19,60 +19,10 @@ func (m *Manager) MigrateFromLegacy(legacyStorage map[string]any) error {
 	// 只迁移 storage 配置（cache 配置现在从环境变量读取）
 	if storageCount == 0 && len(legacyStorage) > 0 {
 		if err := m.migrateStorage(ctx, legacyStorage); err != nil {
-			log.Printf("[ConfigMigration] Failed to migrate storage config: %v", err)
+			utils.Errorf("[ConfigMigration] Failed to migrate storage config: %v", err)
 		}
 	}
 
-	return nil
-}
-
-// MigrateJWTFromLegacy 从配置文件迁移 JWT 配置
-func (m *Manager) MigrateJWTFromLegacy(legacySecret, legacyExpiresIn, legacyRefreshExpiresIn string) error {
-	ctx := context.Background()
-
-	// 检查是否已有 JWT 配置
-	jwtCount, err := m.repo.CountByCategory(ctx, models.ConfigCategoryJWT)
-	if err != nil {
-		return err
-	}
-	if jwtCount > 0 || legacySecret == "" {
-		return nil
-	}
-
-	return m.migrateJWT(ctx, legacySecret, legacyExpiresIn, legacyRefreshExpiresIn)
-}
-
-// migrateJWT 迁移 JWT 配置
-func (m *Manager) migrateJWT(ctx context.Context, secret, expiresIn, refreshExpiresIn string) error {
-	// 使用默认值
-	if expiresIn == "" {
-		expiresIn = "15m"
-	}
-	if refreshExpiresIn == "" {
-		refreshExpiresIn = "168h"
-	}
-
-	configData := map[string]any{
-		"secret":            secret,
-		"access_token_ttl":  expiresIn,
-		"refresh_token_ttl": refreshExpiresIn,
-	}
-
-	req := &models.SystemConfigStoreRequest{
-		Category:    models.ConfigCategoryJWT,
-		Name:        "JWT Settings",
-		Config:      configData,
-		IsEnabled:   BoolPtr(true),
-		IsDefault:   BoolPtr(true),
-		Description: "Migrated from config.yaml",
-	}
-
-	_, err := m.CreateConfig(ctx, req, 0)
-	if err != nil {
-		return err
-	}
-
-	log.Println("[ConfigMigration] JWT config migrated successfully")
 	return nil
 }
 
@@ -118,7 +68,7 @@ func (m *Manager) migrateStorage(ctx context.Context, legacy map[string]any) err
 		return err
 	}
 
-	log.Println("[ConfigMigration] Storage config migrated successfully")
+	utils.Infof("[ConfigMigration] Storage config migrated successfully")
 	return nil
 }
 
@@ -131,12 +81,6 @@ func (m *Manager) CreateDefaultConfigs() error {
 		return err
 	}
 
-	// 检查是否已有 JWT 配置
-	jwtCount, err := m.repo.CountByCategory(ctx, models.ConfigCategoryJWT)
-	if err != nil {
-		return err
-	}
-
 	// 检查是否已有图片处理配置
 	imageProcessingCount, err := m.repo.CountByCategory(ctx, models.ConfigCategoryImageProcessing)
 	if err != nil {
@@ -145,19 +89,13 @@ func (m *Manager) CreateDefaultConfigs() error {
 
 	if storageCount == 0 {
 		if err := m.createDefaultStorage(ctx); err != nil {
-			log.Printf("[ConfigMigration] Failed to create default storage config: %v", err)
-		}
-	}
-
-	if jwtCount == 0 {
-		if err := m.EnsureDefaultJWTConfig(ctx); err != nil {
-			log.Printf("[ConfigMigration] Failed to create default JWT config: %v", err)
+			utils.Errorf("[ConfigMigration] Failed to create default storage config: %v", err)
 		}
 	}
 
 	if imageProcessingCount == 0 {
 		if err := m.ensureDefaultImageProcessingConfig(ctx); err != nil {
-			log.Printf("[ConfigMigration] Failed to create default image processing config: %v", err)
+			utils.Errorf("[ConfigMigration] Failed to create default image processing config: %v", err)
 		}
 	}
 
@@ -185,7 +123,7 @@ func (m *Manager) createDefaultStorage(ctx context.Context) error {
 		return err
 	}
 
-	log.Println("[ConfigMigration] Default storage config created")
+	utils.Infof("[ConfigMigration] Default storage config created")
 	return nil
 }
 

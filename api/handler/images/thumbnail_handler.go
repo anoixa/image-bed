@@ -1,21 +1,20 @@
 package images
 
 import (
-	"fmt"
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/internal/image"
+	"github.com/anoixa/image-bed/storage"
+	"github.com/anoixa/image-bed/utils"
 	"github.com/gin-gonic/gin"
-	"golang.org/x/sync/singleflight"
 )
-
-var thumbnailGroup singleflight.Group
 
 // GetThumbnail 获取缩略图
 // @Summary      Get image thumbnail
@@ -43,14 +42,14 @@ func (h *Handler) GetThumbnail(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
-	image, err := h.imageService.GetImageMetadata(ctx, identifier)
+	image, err := h.readService.GetImageMetadata(ctx, identifier)
 	if err != nil {
 		common.RespondError(c, http.StatusNotFound, "Image not found")
 		return
 	}
 
 	userID := c.GetUint(middleware.ContextUserIDKey)
-	if !h.imageService.CheckImagePermission(image, userID) {
+	if !h.readService.CheckImagePermission(image, userID) {
 		common.RespondError(c, http.StatusForbidden, "This image is private")
 		return
 	}
@@ -77,6 +76,11 @@ func (h *Handler) GetThumbnail(c *gin.Context) {
 	}
 
 	if !exists {
+		webpResult, webpExists, _ := h.thumbnailService.GetWebPVariant(ctx, image)
+		if webpExists {
+			h.serveThumbnailImage(c, image, webpResult)
+			return
+		}
 		h.serveOriginalImage(c, image)
 		return
 	}
@@ -86,30 +90,82 @@ func (h *Handler) GetThumbnail(c *gin.Context) {
 
 // serveThumbnailImage 提供缩略图（支持直链模式）
 func (h *Handler) serveThumbnailImage(c *gin.Context, image *models.Image, result *image.ThumbnailResult) {
-	// 检查缩略图是否可以使用直链（使用缩略图自己的路径）
 	if directURL := h.getVariantDirectURLIfPossible(c, image, result.StoragePath); directURL != "" {
 		c.Header("Cache-Control", config.CacheControlPublic)
 		c.Redirect(http.StatusFound, directURL)
 		return
 	}
 
-	c.Header("Cache-Control", config.CacheControlPublic)
-	c.Header("Content-Type", config.ContentTypeWebP)
-
-	v, err, _ := thumbnailGroup.Do(result.StoragePath, func() (any, error) {
-		provider := h.getStorageProvider(image.StorageConfigID)
-		if provider == nil {
-			return nil, fmt.Errorf("storage provider not available")
-		}
-		return provider.GetWithContext(c.Request.Context(), result.StoragePath)
-	})
+	provider, err := h.getStorageProvider(image.StorageConfigID)
 	if err != nil {
 		h.serveOriginalImage(c, image)
 		return
 	}
 
-	c.Header("Content-Length", strconv.FormatInt(result.FileSize, 10))
-	c.DataFromReader(http.StatusOK, result.FileSize, result.MIMEType, v.(io.ReadCloser), nil)
+	if opener, ok := provider.(storage.FileOpener); ok {
+		if h.serveThumbnailBySendfile(c, result, opener) {
+			return
+		}
+	}
+
+	if streamer, ok := provider.(storage.StreamProvider); ok {
+		if h.serveThumbnailByStreaming(c, result, streamer) {
+			return
+		}
+	}
+
+	stream, err := provider.GetWithContext(c.Request.Context(), result.StoragePath)
+	if err != nil {
+		h.serveOriginalImage(c, image)
+		return
+	}
+	defer func() {
+		if closer, ok := stream.(io.Closer); ok {
+			_ = closer.Close()
+		}
+	}()
+	h.serveReadSeekerContent(c, result.Identifier, result.MIMEType, result.FileHash, stream, true)
+}
+
+func (h *Handler) serveThumbnailByStreaming(c *gin.Context, result *image.ThumbnailResult, streamer storage.StreamProvider) bool {
+	if checkETag(c, result.FileHash) {
+		return true
+	}
+
+	c.Header("Cache-Control", config.CacheControlPublic)
+	c.Header("Content-Type", result.MIMEType)
+	c.Header("X-Content-Type-Options", "nosniff")
+
+	_, err := streamer.StreamTo(c.Request.Context(), result.StoragePath, c.Writer)
+	if err != nil {
+		return utils.IsClientDisconnect(err)
+	}
+	return true
+}
+
+func (h *Handler) serveThumbnailBySendfile(c *gin.Context, result *image.ThumbnailResult, opener storage.FileOpener) bool {
+	if checkETag(c, result.FileHash) {
+		return true
+	}
+
+	file, err := opener.OpenFile(c.Request.Context(), result.StoragePath)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = file.Close() }()
+
+	stat, err := file.Stat()
+	if err != nil {
+		return false
+	}
+
+	c.Header("Cache-Control", config.CacheControlPublic)
+	c.Header("Content-Type", result.MIMEType)
+	c.Header("Content-Length", strconv.FormatInt(stat.Size(), 10))
+	c.Header("X-Content-Type-Options", "nosniff")
+
+	http.ServeContent(c.Writer, c.Request, result.Identifier, stat.ModTime().Truncate(time.Second), file)
+	return true
 }
 
 // parseThumbnailWidth 解析缩略图宽度参数

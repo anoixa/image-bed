@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -58,8 +59,12 @@ type Config struct {
 	RateLimitAuthBurst  int           `mapstructure:"rate_limit_auth_burst"`
 	RateLimitExpireTime time.Duration `mapstructure:"rate_limit_expire_time"`
 
-	UploadMaxSizeMB       int `mapstructure:"upload_max_size_mb"`
 	UploadMaxBatchTotalMB int `mapstructure:"upload_max_batch_total_mb"`
+
+	// JWT 配置
+	JWTSecret          string `mapstructure:"jwt_secret"`
+	JWTAccessTokenTTL  string `mapstructure:"jwt_access_token_ttl"`
+	JWTRefreshTokenTTL string `mapstructure:"jwt_refresh_token_ttl"`
 
 	// Worker 配置
 	WorkerCount         int `mapstructure:"worker_count"`
@@ -103,7 +108,7 @@ func loadConfig() {
 		os.Exit(1)
 	}
 
-	// WorkerCount: -1 = 使用 CPU 线程数, 0 = 使用默认值 (max(2, CPU核心数)), >0 = 使用指定值
+	// WorkerCount: -1 = 使用当前 GOMAXPROCS, 0 = 使用默认值 (max(2, GOMAXPROCS)), >0 = 使用指定值
 	switch {
 	case globalConfig.WorkerCount < 0:
 		globalConfig.WorkerCount = runtime.GOMAXPROCS(0)
@@ -154,8 +159,11 @@ func setDefaults() {
 	viper.SetDefault("rate_limit_auth_burst", 5)
 	viper.SetDefault("rate_limit_expire_time", "10m")
 
-	viper.SetDefault("upload_max_size_mb", 50)
 	viper.SetDefault("upload_max_batch_total_mb", 500)
+
+	viper.SetDefault("jwt_secret", "")
+	viper.SetDefault("jwt_access_token_ttl", "15m")
+	viper.SetDefault("jwt_refresh_token_ttl", "168h")
 
 	// Worker 配置默认值
 	viper.SetDefault("worker_count", 0)             // 0 表示使用默认值
@@ -205,53 +213,14 @@ func (c *Config) GetCorsOrigins() []string {
 		return []string{"http://localhost:5173", "http://127.0.0.1:5173"}
 	}
 
-	var origins []string
-	for _, origin := range splitAndTrim(c.CorsOrigins, ",") {
-		if origin != "" {
-			origins = append(origins, origin)
+	parts := strings.Split(c.CorsOrigins, ",")
+	origins := make([]string, 0, len(parts))
+	for _, origin := range parts {
+		if trimmed := strings.TrimSpace(origin); trimmed != "" {
+			origins = append(origins, trimmed)
 		}
 	}
 	return origins
-}
-
-// splitAndTrim 分割字符串并去除空白
-func splitAndTrim(s, sep string) []string {
-	var parts []string
-	for _, part := range splitString(s, sep) {
-		trimmed := trimSpace(part)
-		if trimmed != "" {
-			parts = append(parts, trimmed)
-		}
-	}
-	return parts
-}
-
-// splitString 简单字符串分割
-func splitString(s, sep string) []string {
-	var result []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if i+len(sep) <= len(s) && s[i:i+len(sep)] == sep {
-			result = append(result, s[start:i])
-			start = i + len(sep)
-			i += len(sep) - 1
-		}
-	}
-	result = append(result, s[start:])
-	return result
-}
-
-// trimSpace 去除首尾空白字符
-func trimSpace(s string) string {
-	start := 0
-	end := len(s)
-	for start < end && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r') {
-		start++
-	}
-	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\n' || s[end-1] == '\r') {
-		end--
-	}
-	return s[start:end]
 }
 
 // getCpus 获取默认线程数量

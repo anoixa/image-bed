@@ -1,7 +1,6 @@
 package images
 
 import (
-	"math"
 	"net/http"
 
 	"github.com/anoixa/image-bed/api/common"
@@ -83,8 +82,9 @@ func (h *Handler) ListImages(c *gin.Context) {
 		limit = config.MaxPerPage
 	}
 
-	result, err := h.imageService.ListImages(body.StorageType, body.Identifier, body.Search, body.AlbumID, body.StartTime, body.EndTime, body.Sort, page, limit, int(userID))
+	result, err := h.queryService.ListImages(body.StorageType, body.Identifier, body.Search, body.AlbumID, body.StartTime, body.EndTime, body.Sort, page, limit, int(userID))
 	if err != nil {
+		utils.Errorf("[ListImages] Failed to get image list for user=%d: %v", userID, err)
 		common.RespondError(c, http.StatusInternalServerError, "Failed to get image list")
 		return
 	}
@@ -94,9 +94,9 @@ func (h *Handler) ListImages(c *gin.Context) {
 	common.RespondSuccess(c, ImageListResponse{
 		Images:     imageListDTO,
 		Total:      result.Total,
-		Page:       body.Page,
-		Limit:      body.Limit,
-		TotalPages: int(math.Ceil(float64(result.Total) / float64(body.Limit))),
+		Page:       result.Page,
+		Limit:      result.Limit,
+		TotalPages: result.TotalPages,
 	})
 }
 

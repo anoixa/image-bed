@@ -98,4 +98,3 @@ func readFloatFromFile(path string) float64 {
 	v, _ := strconv.ParseFloat(s, 64)
 	return v
 }
-

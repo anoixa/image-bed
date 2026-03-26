@@ -109,6 +109,16 @@ func (s *LocalStorage) SaveWithContext(ctx context.Context, storagePath string, 
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
+	// 上传链路会先把内容落到临时文件。对于本地存储，优先直接 rename，避免再做一次完整复制。
+	if srcFile, ok := file.(*os.File); ok {
+		if err := os.Rename(srcFile.Name(), dstPath); err == nil {
+			return nil
+		}
+		if _, err := srcFile.Seek(0, io.SeekStart); err != nil {
+			return fmt.Errorf("failed to reset source file: %w", err)
+		}
+	}
+
 	dst, err := os.Create(dstPath)
 	if err != nil {
 		return fmt.Errorf("failed to create file: %w", err)
@@ -168,6 +178,12 @@ func (s *LocalStorage) OpenFile(ctx context.Context, storagePath string) (*os.Fi
 	}
 
 	return file, nil
+}
+
+// GetFilePath returns the absolute OS path for storagePath.
+// Implements storage.PathProvider. The returned path must not be written to or deleted.
+func (s *LocalStorage) GetFilePath(storagePath string) (string, error) {
+	return s.validatePath(storagePath)
 }
 
 // DeleteWithContext 从本地存储删除文件

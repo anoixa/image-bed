@@ -22,6 +22,7 @@ import (
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/database/repo/keys"
 	imageSvc "github.com/anoixa/image-bed/internal/image"
+	"github.com/anoixa/image-bed/internal/vipsfile"
 	"github.com/anoixa/image-bed/internal/worker"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
@@ -133,6 +134,8 @@ func RunServer() {
 	config.InitConfig()
 	cfg := config.Get()
 
+	utils.InitLogger(config.IsDevelopment())
+
 	dataDir := utils.GetDataDir()
 
 	if err := os.MkdirAll(dataDir, os.ModePerm); err != nil {
@@ -142,13 +145,15 @@ func RunServer() {
 		log.Fatalf("Failed to create temp directory: %v", err)
 	}
 
-	vips.Startup(&vips.Config{
+	if err := vipsfile.Startup(&vips.Config{
 		MaxCacheMem:      0,
 		MaxCacheSize:     0,
 		MaxCacheFiles:    0,
 		ConcurrencyLevel: 2,
-	})
-	defer vips.Shutdown()
+	}); err != nil {
+		log.Fatalf("Failed to initialize govips: %v", err)
+	}
+	defer vipsfile.Shutdown()
 
 	log.Println("[VIPS] Govips initialized with minimal cache (1 byte)")
 	if config.IsDevelopment() {
@@ -167,7 +172,7 @@ func RunServer() {
 
 	// 初始化 JWT
 	api.SetAuthKeysRepo(deps.Repositories.KeysRepo)
-	if err := api.TokenInitFromManager(deps.ConfigManager); err != nil {
+	if err := api.TokenInitFromConfig(cfg, deps.ConfigManager); err != nil {
 		log.Fatalf("Failed to initialize JWT: %s", err)
 	}
 

@@ -115,7 +115,7 @@ func (r *VariantRepository) UpdateCompleted(id uint, identifier, storagePath str
 }
 
 // UpdateFailed 更新失败状态
-func (r *VariantRepository) UpdateFailed(id uint, errMsg string, _ bool) error {
+func (r *VariantRepository) UpdateFailed(id uint, errMsg string) error {
 	return r.db.Model(&models.ImageVariant{}).Where("id = ?", id).Updates(map[string]any{
 		"status":        models.VariantStatusFailed,
 		"error_message": errMsg,
@@ -138,35 +138,4 @@ func (r *VariantRepository) DeleteByImageID(imageID uint) error {
 // DeleteVariant 根据ID删除单个变体
 func (r *VariantRepository) DeleteVariant(id uint) error {
 	return r.db.Delete(&models.ImageVariant{}, id).Error
-}
-
-// GetMissingThumbnailVariants 批量查询需要生成缩略图的变体
-func (r *VariantRepository) GetMissingThumbnailVariants(imageIDs []uint, formats []string) (map[uint]map[string]bool, error) {
-	result := make(map[uint]map[string]bool, len(imageIDs))
-	for _, imageID := range imageIDs {
-		result[imageID] = make(map[string]bool, len(formats))
-		for _, format := range formats {
-			result[imageID][format] = false
-		}
-	}
-
-	if len(imageIDs) == 0 || len(formats) == 0 {
-		return result, nil
-	}
-
-	var variants []models.ImageVariant
-	err := r.db.Select("image_id, format, status").Where("image_id IN ? AND format IN ?", imageIDs, formats).Find(&variants).Error
-	if err != nil {
-		return nil, err
-	}
-
-	for _, v := range variants {
-		if v.Status == models.VariantStatusCompleted {
-			if _, ok := result[v.ImageID]; ok {
-				result[v.ImageID][v.Format] = true
-			}
-		}
-	}
-
-	return result, nil
 }

@@ -4,16 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"github.com/anoixa/image-bed/utils"
 	"strings"
-	"time"
 
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/mitchellh/mapstructure"
 	"gorm.io/gorm"
 )
 
-// ImageProcessingSettings 图片处理配置（合并缩略图、格式转换、扫描器）
+// ImageProcessingSettings 图片处理配置（缩略图、格式转换、用户偏好）
 type ImageProcessingSettings struct {
 	// 缩略图配置
 	ThumbnailEnabled bool                   `json:"thumbnail_enabled" mapstructure:"thumbnail_enabled"`
@@ -30,13 +29,13 @@ type ImageProcessingSettings struct {
 	SkipSmallerThan          int      `json:"skip_smaller_than" mapstructure:"skip_smaller_than"`
 	MaxDimension             int      `json:"max_dimension" mapstructure:"max_dimension"`
 
-	// 扫描器配置
-	ScannerEnabled       bool          `json:"scanner_enabled" mapstructure:"scanner_enabled"`
-	ScannerInterval      time.Duration `json:"scanner_interval" mapstructure:"scanner_interval"`
-	ScannerBatchSize     int           `json:"scanner_batch_size" mapstructure:"scanner_batch_size"`
-	ScannerMaxFileSizeMB int           `json:"scanner_max_file_size_mb" mapstructure:"scanner_max_file_size_mb"`
-	ScannerMaxAgeDays    int           `json:"scanner_max_age_days" mapstructure:"scanner_max_age_days"`
-	ScannerOnlyPublic    bool          `json:"scanner_only_public" mapstructure:"scanner_only_public"`
+	// 用户偏好配置
+	DefaultAlbumID        uint   `json:"default_album_id" mapstructure:"default_album_id"`
+	DefaultVisibility     string `json:"default_visibility" mapstructure:"default_visibility"`
+	ConcurrentUploadLimit int    `json:"concurrent_upload_limit" mapstructure:"concurrent_upload_limit"`
+	MaxFileSizeMB         int    `json:"max_file_size_mb" mapstructure:"max_file_size_mb"`
+	MaxBatchTotalMB       int    `json:"max_batch_total_mb" mapstructure:"max_batch_total_mb"`
+	APIKeyEnabled         bool   `json:"api_key_enabled" mapstructure:"api_key_enabled"`
 }
 
 // DefaultImageProcessingSettings 默认图片处理配置
@@ -57,38 +56,56 @@ func DefaultImageProcessingSettings() *ImageProcessingSettings {
 		SkipSmallerThan:          10,
 		MaxDimension:             4096,
 
-		// 扫描器默认值
-		ScannerEnabled:       true,
-		ScannerInterval:      2 * time.Hour,
-		ScannerBatchSize:     50,
-		ScannerMaxFileSizeMB: 100,
-		ScannerMaxAgeDays:    30,
-		ScannerOnlyPublic:    false,
+		// 用户偏好默认值
+		DefaultAlbumID:        0,
+		DefaultVisibility:     "public",
+		ConcurrentUploadLimit: 3,
+		MaxFileSizeMB:         50,
+		MaxBatchTotalMB:       500,
+		APIKeyEnabled:         true,
 	}
 }
 
-// Validate 验证配置有效性
+// Validate 验证配置有效性（支持部分验证，零值跳过范围检查）
 func (s *ImageProcessingSettings) Validate() error {
-	if s.ScannerInterval < time.Minute {
-		return fmt.Errorf("scan interval must be at least 1 minute")
-	}
-	if s.ScannerBatchSize < 1 || s.ScannerBatchSize > 1000 {
-		return fmt.Errorf("batch size must be between 1 and 1000")
-	}
-	if s.ScannerMaxFileSizeMB < 0 {
-		return fmt.Errorf("max file size cannot be negative")
-	}
-	if s.ScannerMaxAgeDays < 0 {
-		return fmt.Errorf("max age days cannot be negative")
-	}
-	if s.ThumbnailQuality < 1 || s.ThumbnailQuality > 100 {
+	// 只在值非零时进行范围验证（支持部分更新场景）
+	if s.ThumbnailQuality != 0 && (s.ThumbnailQuality < 1 || s.ThumbnailQuality > 100) {
 		return fmt.Errorf("thumbnail quality must be between 1 and 100")
 	}
-	if s.WebPQuality < 1 || s.WebPQuality > 100 {
+	// 验证缩略图尺寸
+	const maxThumbnailSize = 4096
+	for i, size := range s.ThumbnailSizes {
+		if size.Width < 0 || size.Height < 0 {
+			return fmt.Errorf("invalid thumbnail size at index %d: width and height must be non-negative", i)
+		}
+		if size.Width > maxThumbnailSize || size.Height > maxThumbnailSize {
+			return fmt.Errorf("thumbnail size at index %d exceeds maximum allowed (%dx%d)", i, maxThumbnailSize, maxThumbnailSize)
+		}
+	}
+	if s.WebPQuality != 0 && (s.WebPQuality < 1 || s.WebPQuality > 100) {
 		return fmt.Errorf("webp quality must be between 1 and 100")
 	}
-	if s.AVIFQuality < 1 || s.AVIFQuality > 100 {
+	if s.WebPEffort < 0 || s.WebPEffort > 6 {
+		return fmt.Errorf("webp effort must be between 0 and 6")
+	}
+	if s.AVIFQuality != 0 && (s.AVIFQuality < 1 || s.AVIFQuality > 100) {
 		return fmt.Errorf("avif quality must be between 1 and 100")
+	}
+	if s.AVIFSpeed < 0 || s.AVIFSpeed > 8 {
+		return fmt.Errorf("avif speed must be between 0 and 8")
+	}
+	// 用户偏好验证（非零值才验证）
+	if s.ConcurrentUploadLimit != 0 && (s.ConcurrentUploadLimit < 1 || s.ConcurrentUploadLimit > 10) {
+		return fmt.Errorf("concurrent upload limit must be between 1 and 10")
+	}
+	if s.MaxFileSizeMB != 0 && (s.MaxFileSizeMB < 1 || s.MaxFileSizeMB > 500) {
+		return fmt.Errorf("max file size must be between 1 and 500 MB")
+	}
+	if s.MaxBatchTotalMB != 0 && (s.MaxBatchTotalMB < 1 || s.MaxBatchTotalMB > 500) {
+		return fmt.Errorf("max batch total size must be between 1 and 500 MB")
+	}
+	if s.DefaultVisibility != "" && s.DefaultVisibility != "public" && s.DefaultVisibility != "private" {
+		return fmt.Errorf("default visibility must be 'public' or 'private'")
 	}
 	return nil
 }
@@ -192,16 +209,16 @@ func (m *Manager) ensureDefaultImageProcessingConfig(ctx context.Context) error 
 			"avif_experimental":          defaultSettings.AVIFExperimental,
 			"skip_smaller_than":          defaultSettings.SkipSmallerThan,
 			"max_dimension":              defaultSettings.MaxDimension,
-			"scanner_enabled":            defaultSettings.ScannerEnabled,
-			"scanner_interval":           defaultSettings.ScannerInterval,
-			"scanner_batch_size":         defaultSettings.ScannerBatchSize,
-			"scanner_max_file_size_mb":   defaultSettings.ScannerMaxFileSizeMB,
-			"scanner_max_age_days":       defaultSettings.ScannerMaxAgeDays,
-			"scanner_only_public":        defaultSettings.ScannerOnlyPublic,
+			"default_album_id":           defaultSettings.DefaultAlbumID,
+			"default_visibility":         defaultSettings.DefaultVisibility,
+			"concurrent_upload_limit":    defaultSettings.ConcurrentUploadLimit,
+			"max_file_size_mb":           defaultSettings.MaxFileSizeMB,
+			"max_batch_total_mb":         defaultSettings.MaxBatchTotalMB,
+			"api_key_enabled":            defaultSettings.APIKeyEnabled,
 		},
 		IsEnabled:   BoolPtr(true),
 		IsDefault:   BoolPtr(true),
-		Description: "Image processing configuration (thumbnail, conversion, scanner)",
+		Description: "Image processing and user preference configuration",
 	}
 
 	_, err = m.CreateConfig(ctx, req, 0)
@@ -209,7 +226,7 @@ func (m *Manager) ensureDefaultImageProcessingConfig(ctx context.Context) error 
 		return fmt.Errorf("failed to create default image processing config: %w", err)
 	}
 
-	log.Println("[ConfigManager] Default image processing config created successfully")
+	utils.Infof("[ConfigManager] Default image processing config created successfully")
 	return nil
 }
 
@@ -242,16 +259,16 @@ func (m *Manager) SaveImageProcessingSettings(ctx context.Context, settings *Ima
 			"avif_experimental":          settings.AVIFExperimental,
 			"skip_smaller_than":          settings.SkipSmallerThan,
 			"max_dimension":              settings.MaxDimension,
-			"scanner_enabled":            settings.ScannerEnabled,
-			"scanner_interval":           settings.ScannerInterval,
-			"scanner_batch_size":         settings.ScannerBatchSize,
-			"scanner_max_file_size_mb":   settings.ScannerMaxFileSizeMB,
-			"scanner_max_age_days":       settings.ScannerMaxAgeDays,
-			"scanner_only_public":        settings.ScannerOnlyPublic,
+			"default_album_id":           settings.DefaultAlbumID,
+			"default_visibility":         settings.DefaultVisibility,
+			"concurrent_upload_limit":    settings.ConcurrentUploadLimit,
+			"max_file_size_mb":           settings.MaxFileSizeMB,
+			"max_batch_total_mb":         settings.MaxBatchTotalMB,
+			"api_key_enabled":            settings.APIKeyEnabled,
 		},
-		IsEnabled:   BoolPtr(settings.ThumbnailEnabled),
+		IsEnabled:   BoolPtr(true),
 		IsDefault:   BoolPtr(true),
-		Description: "Image processing configuration (thumbnail, conversion, scanner)",
+		Description: "Image processing and user preference configuration",
 	}
 
 	_, err = m.UpdateConfig(ctx, config.ID, req)

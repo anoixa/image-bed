@@ -3,6 +3,7 @@ package system
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
@@ -13,32 +14,40 @@ import (
 )
 
 type StatusResponse struct {
-	Version     string       `json:"version"`
-	CommitHash  string       `json:"commit_hash"`
-	GoVersion   string       `json:"go_version"`
-	Environment string       `json:"environment"`
-	Memory      MemoryStatus `json:"memory"`
+	Version     string        `json:"version"`
+	CommitHash  string        `json:"commit_hash"`
+	GoVersion   string        `json:"go_version"`
+	Environment string        `json:"environment"`
+	Memory      MemoryStatus  `json:"memory"`
 	Runtime     RuntimeStatus `json:"runtime"`
-	Cache       CacheStatus  `json:"cache"`
-	DataDir     DirStatus    `json:"data_dir"`
+	Cache       CacheStatus   `json:"cache"`
+	DataDir     DirStatus     `json:"data_dir"`
 }
 
 type MemoryStatus struct {
-	HeapAllocMB   float64 `json:"heap_alloc_mb"`
-	HeapAllocStr  string  `json:"heap_alloc_str"`
-	HeapSysMB     float64 `json:"heap_sys_mb"`
-	HeapSysStr    string  `json:"heap_sys_str"`
-	HeapInUseMB   float64 `json:"heap_in_use_mb"`
-	HeapInUseStr  string  `json:"heap_in_use_str"`
-	StackSysMB    float64 `json:"stack_sys_mb"`
-	StackSysStr   string  `json:"stack_sys_str"`
-	TotalAllocMB  float64 `json:"total_alloc_mb"`
-	TotalAllocStr string  `json:"total_alloc_str"`
-	GCSysMB       float64 `json:"gc_sys_mb"`
-	GCSysStr      string  `json:"gc_sys_str"`
-	NumGC         uint32  `json:"num_gc"`
-	LastGCTime    int64   `json:"last_gc_time"`
-	Goroutines    int     `json:"goroutines"`
+	HeapAllocMB    float64 `json:"heap_alloc_mb"`
+	HeapAllocStr   string  `json:"heap_alloc_str"`
+	HeapSysMB      float64 `json:"heap_sys_mb"`
+	HeapSysStr     string  `json:"heap_sys_str"`
+	HeapInUseMB    float64 `json:"heap_in_use_mb"`
+	HeapInUseStr   string  `json:"heap_in_use_str"`
+	StackSysMB     float64 `json:"stack_sys_mb"`
+	StackSysStr    string  `json:"stack_sys_str"`
+	RSSMB          float64 `json:"rss_mb"`
+	RSSStr         string  `json:"rss_str"`
+	TotalAllocMB   float64 `json:"total_alloc_mb"`
+	TotalAllocStr  string  `json:"total_alloc_str"`
+	GCSysMB        float64 `json:"gc_sys_mb"`
+	GCSysStr       string  `json:"gc_sys_str"`
+	NumGC          uint32  `json:"num_gc"`
+	LastGCTime     int64   `json:"last_gc_time"`
+	Goroutines     int     `json:"goroutines"`
+	VipsMemMB      float64 `json:"vips_mem_mb"`
+	VipsMemStr     string  `json:"vips_mem_str"`
+	VipsMemHighMB  float64 `json:"vips_mem_high_mb"`
+	VipsMemHighStr string  `json:"vips_mem_high_str"`
+	VipsAllocs     int64   `json:"vips_allocs"`
+	VipsOpenFiles  int64   `json:"vips_open_files"`
 }
 
 type RuntimeStatus struct {
@@ -94,21 +103,29 @@ func (h *Handler) GetStatus(c *gin.Context) {
 		GoVersion:   getGoVersion(),
 		Environment: getEnvironment(),
 		Memory: MemoryStatus{
-			HeapAllocMB:   memStats.HeapAllocMB,
-			HeapAllocStr:  formatBytes(uint64(memStats.HeapAllocMB * 1024 * 1024)),
-			HeapSysMB:     memStats.HeapSysMB,
-			HeapSysStr:    formatBytes(uint64(memStats.HeapSysMB * 1024 * 1024)),
-			HeapInUseMB:   memStats.HeapInUseMB,
-			HeapInUseStr:  formatBytes(uint64(memStats.HeapInUseMB * 1024 * 1024)),
-			StackSysMB:    memStats.StackSysMB,
-			StackSysStr:   formatBytes(uint64(memStats.StackSysMB * 1024 * 1024)),
-			TotalAllocMB:  0, // 将在下方计算
-			TotalAllocStr: "",
-			GCSysMB:       memStats.GCSysMB,
-			GCSysStr:      formatBytes(uint64(memStats.GCSysMB * 1024 * 1024)),
-			NumGC:         memStats.NumGC,
-			LastGCTime:    memStats.LastGCTime.Unix(),
-			Goroutines:    memStats.Goroutines,
+			HeapAllocMB:    memStats.HeapAllocMB,
+			HeapAllocStr:   formatBytes(uint64(memStats.HeapAllocMB * 1024 * 1024)),
+			HeapSysMB:      memStats.HeapSysMB,
+			HeapSysStr:     formatBytes(uint64(memStats.HeapSysMB * 1024 * 1024)),
+			HeapInUseMB:    memStats.HeapInUseMB,
+			HeapInUseStr:   formatBytes(uint64(memStats.HeapInUseMB * 1024 * 1024)),
+			StackSysMB:     memStats.StackSysMB,
+			StackSysStr:    formatBytes(uint64(memStats.StackSysMB * 1024 * 1024)),
+			RSSMB:          memStats.RSSMB,
+			RSSStr:         formatBytes(uint64(memStats.RSSMB * 1024 * 1024)),
+			TotalAllocMB:   memStats.TotalAllocMB,
+			TotalAllocStr:  formatBytes(uint64(memStats.TotalAllocMB * 1024 * 1024)),
+			GCSysMB:        memStats.GCSysMB,
+			GCSysStr:       formatBytes(uint64(memStats.GCSysMB * 1024 * 1024)),
+			NumGC:          memStats.NumGC,
+			LastGCTime:     memStats.LastGCTime.Unix(),
+			Goroutines:     memStats.Goroutines,
+			VipsMemMB:      memStats.VipsMemMB,
+			VipsMemStr:     formatBytes(uint64(memStats.VipsMemMB * 1024 * 1024)),
+			VipsMemHighMB:  memStats.VipsMemHighMB,
+			VipsMemHighStr: formatBytes(uint64(memStats.VipsMemHighMB * 1024 * 1024)),
+			VipsAllocs:     memStats.VipsAllocs,
+			VipsOpenFiles:  memStats.VipsOpenFiles,
 		},
 		Runtime: RuntimeStatus{
 			NumCPU: getNumCPU(),
@@ -124,7 +141,7 @@ func (h *Handler) GetStatus(c *gin.Context) {
 }
 
 func getGoVersion() string {
-	return "go1.26"
+	return runtime.Version()
 }
 
 func getEnvironment() string {

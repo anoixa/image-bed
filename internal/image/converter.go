@@ -2,6 +2,7 @@ package image
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/anoixa/image-bed/cache"
 	config "github.com/anoixa/image-bed/config/db"
@@ -51,9 +52,10 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 		settings.ThumbnailEnabled,
 		settings.SkipSmallerThan)
 
-	// 检查是否启用 WebP 转换
-	if !settings.IsFormatEnabled(models.FormatWebP) {
-		utils.LogIfDevf("[Converter] WebP format disabled, skipping")
+	thumbnailEnabled := settings.ThumbnailEnabled && len(settings.ThumbnailSizes) > 0
+	webpEnabled := settings.IsFormatEnabled(models.FormatWebP)
+	if !shouldStartVariantPipeline(thumbnailEnabled, webpEnabled) {
+		utils.LogIfDevf("[Converter] All variant generation disabled, skipping")
 		return
 	}
 
@@ -72,18 +74,9 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 		}
 	}
 
-	// 更新图片状态为处理中
-	if image.VariantStatus == models.ImageVariantStatusNone || image.VariantStatus == models.ImageVariantStatusFailed {
-		if err := c.imageRepo.UpdateVariantStatus(image.ID, models.ImageVariantStatusProcessing); err != nil {
-			utils.LogIfDevf("[Converter] Failed to update image status: %v", err)
-		} else {
-			image.VariantStatus = models.ImageVariantStatusProcessing
-		}
-	}
-
 	// 创建缩略图变体记录（如果启用）
 	var thumbVariant *models.ImageVariant
-	if settings.ThumbnailEnabled && len(settings.ThumbnailSizes) > 0 {
+	if thumbnailEnabled {
 		size := settings.ThumbnailSizes[0]
 		thumbFormat := models.FormatThumbnailSize(size.Width)
 		thumbVariant, err = c.variantRepo.UpsertPending(image.ID, thumbFormat)
@@ -99,7 +92,7 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 
 	// 创建 WebP 变体记录（如果启用）
 	var webpVariant *models.ImageVariant
-	if settings.IsFormatEnabled(models.FormatWebP) {
+	if webpEnabled {
 		webpVariant, err = c.variantRepo.UpsertPending(image.ID, models.FormatWebP)
 		if err != nil {
 			utils.LogIfDevf("[Converter] Failed to upsert WebP variant: %v", err)
@@ -119,6 +112,7 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 
 	pool := worker.GetGlobalPool()
 	if pool == nil {
+		utils.LogIfDevf("[Converter] Worker pool not initialized for %s, skip conversion", image.Identifier)
 		return
 	}
 
@@ -138,8 +132,10 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 			ImageID:         image.ID,
 			StoragePath:     image.StoragePath,
 			ImageIdentifier: image.Identifier,
+			FileSize:        image.FileSize,
+			MimeType:        image.MimeType,
 			Storage:         storageProvider,
-			ConfigManager:   c.configManager,
+			Settings:        settings,
 			VariantRepo:     c.variantRepo,
 			ImageRepo:       c.imageRepo,
 			CacheHelper:     c.cacheHelper,
@@ -149,7 +145,16 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 
 	if !ok {
 		utils.LogIfDevf("[Converter] Failed to submit pipeline task for %s", image.Identifier)
+		return
 	}
+
+	if err := c.markImageProcessing(image); err != nil {
+		utils.LogIfDevf("[Converter] Failed to update image status after submit: %v", err)
+	}
+}
+
+func shouldStartVariantPipeline(thumbnailEnabled, webpEnabled bool) bool {
+	return thumbnailEnabled || webpEnabled
 }
 
 // getVariantID 辅助函数：从变体指针获取ID
@@ -160,6 +165,17 @@ func getVariantID(v *models.ImageVariant) uint {
 	return v.ID
 }
 
+func (c *Converter) markImageProcessing(image *models.Image) error {
+	if image.VariantStatus == models.ImageVariantStatusProcessing {
+		return nil
+	}
+	if err := c.imageRepo.UpdateVariantStatus(image.ID, models.ImageVariantStatusProcessing); err != nil {
+		return err
+	}
+	image.VariantStatus = models.ImageVariantStatusProcessing
+	return nil
+}
+
 // getStorageForImage 获取图片对应的存储提供者
 func (c *Converter) getStorageForImage(image *models.Image) storage.Provider {
 	// 如果图片指定了 StorageConfigID，尝试获取对应的 provider
@@ -168,9 +184,18 @@ func (c *Converter) getStorageForImage(image *models.Image) storage.Provider {
 		if err == nil {
 			return provider
 		}
-		utils.LogIfDevf("[Converter] Failed to get storage provider ID=%d: %v, fallback to default",
+		utils.LogIfDevf("[Converter] Failed to get storage provider ID=%d: %v",
 			image.StorageConfigID, err)
+		return nil
 	}
-	// Fallback 到默认 storage
-	return c.storage
+
+	if c.storage != nil {
+		return c.storage
+	}
+
+	provider := storage.GetDefault()
+	if provider == nil {
+		utils.LogIfDevf("[Converter] %v", fmt.Errorf("no default storage configured"))
+	}
+	return provider
 }

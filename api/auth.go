@@ -3,6 +3,7 @@ package api
 import (
 	"time"
 
+	appconfig "github.com/anoixa/image-bed/config"
 	configSvc "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/repo/keys"
 	"github.com/anoixa/image-bed/internal/auth"
@@ -24,10 +25,10 @@ func SetAuthKeysRepo(repo *keys.Repository) {
 	authKeysRepo = repo
 }
 
-// TokenInitFromManager 从配置管理器初始化 JWT
-func TokenInitFromManager(manager *configSvc.Manager) error {
+// TokenInitFromConfig 从应用配置初始化 JWT
+func TokenInitFromConfig(cfg *appconfig.Config, manager *configSvc.Manager) error {
 	var err error
-	jwtService, err = auth.NewJWTService(manager, authKeysRepo)
+	jwtService, err = auth.NewJWTService(cfg, manager, authKeysRepo)
 	return err
 }
 

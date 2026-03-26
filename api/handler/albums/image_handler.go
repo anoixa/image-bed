@@ -139,9 +139,9 @@ func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 	}
 
 	common.RespondSuccess(c, gin.H{
-		"album_id":             albumID,
-		"added_count":          addedCount,
-		"failed_identifiers":   failedIdentifiers,
+		"album_id":           albumID,
+		"added_count":        addedCount,
+		"failed_identifiers": failedIdentifiers,
 	})
 
 	if addedCount > 0 {

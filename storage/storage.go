@@ -3,20 +3,31 @@ package storage
 import (
 	"context"
 	"fmt"
+	"github.com/anoixa/image-bed/utils"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 var (
-	providers       = make(map[uint]Provider)
-	providersMu     sync.RWMutex
+	providersMu sync.Mutex
+	registryPtr atomic.Pointer[registryState]
+)
+
+type registryState struct {
+	providers       map[uint]Provider
 	defaultProvider Provider
 	defaultID       uint
-)
+}
+
+func init() {
+	registryPtr.Store(&registryState{
+		providers: make(map[uint]Provider),
+	})
+}
 
 type TransferMode string
 
@@ -25,13 +36,6 @@ const (
 	TransferModeAlwaysProxy  TransferMode = "always_proxy"
 	TransferModeAlwaysDirect TransferMode = "always_direct"
 )
-
-// ImageStream 图片流结构
-type ImageStream struct {
-	Reader      io.ReadSeeker
-	ContentType string
-	Size        int64
-}
 
 // StorageConfig 存储配置
 type StorageConfig struct {
@@ -84,6 +88,13 @@ type FileOpener interface {
 	OpenFile(ctx context.Context, name string) (*os.File, error)
 }
 
+// PathProvider is implemented by storage backends that can expose a
+// local OS file path for a stored object. Only LocalStorage implements this.
+// Callers must not write to or delete the returned path.
+type PathProvider interface {
+	GetFilePath(storagePath string) (string, error)
+}
+
 // StreamProvider 流式传输到 ResponseWriter 的存储
 type StreamProvider interface {
 	Provider
@@ -99,16 +110,16 @@ type DirectURLProvider interface {
 
 // InitStorage 初始化存储层
 func InitStorage(configs []StorageConfig) error {
-	providersMu.Lock()
-	defer providersMu.Unlock()
+	utils.Errorf("[Storage] ============================================")
+	utils.Infof("[Storage] Starting storage initialization...")
+	utils.Errorf("[Storage] Total configs to initialize: %d", len(configs))
+	utils.Errorf("[Storage] --------------------------------------------")
 
-	log.Printf("[Storage] ============================================")
-	log.Printf("[Storage] Starting storage initialization...")
-	log.Printf("[Storage] Total configs to initialize: %d", len(configs))
-	log.Printf("[Storage] --------------------------------------------")
-
+	nextProviders := make(map[uint]Provider, len(configs))
 	var initErrors []error
 	successCount := 0
+	var nextDefaultProvider Provider
+	var nextDefaultID uint
 	var defaultCfg *StorageConfig
 
 	for i := range configs {
@@ -117,67 +128,69 @@ func InitStorage(configs []StorageConfig) error {
 		// 记录默认配置信息
 		if cfg.IsDefault {
 			defaultCfg = cfg
-			log.Printf("[Storage] [DEFAULT] ID=%d, Name=%s, Type=%s", cfg.ID, cfg.Name, cfg.Type)
+			utils.Errorf("[Storage] [DEFAULT] ID=%d, Name=%s, Type=%s", cfg.ID, cfg.Name, cfg.Type)
 		}
 
-		log.Printf("[Storage] Initializing: ID=%d, Name=%s, Type=%s, IsDefault=%v",
+		utils.Errorf("[Storage] Initializing: ID=%d, Name=%s, Type=%s, IsDefault=%v",
 			cfg.ID, cfg.Name, cfg.Type, cfg.IsDefault)
 
 		provider, err := createProvider(*cfg)
 		if err != nil {
-			log.Printf("[Storage] [FAILED] ID=%d, Name=%s, Error: %v", cfg.ID, cfg.Name, err)
+			utils.Errorf("[Storage] [FAILED] ID=%d, Name=%s, Error: %v", cfg.ID, cfg.Name, err)
 			initErrors = append(initErrors, fmt.Errorf("ID=%d, Name=%s: %w", cfg.ID, cfg.Name, err))
 			continue
 		}
 
-		providers[cfg.ID] = provider
+		nextProviders[cfg.ID] = provider
 		successCount++
-		log.Printf("[Storage] [SUCCESS] ID=%d, Name=%s, Type=%s", cfg.ID, cfg.Name, cfg.Type)
+		utils.Infof("[Storage] [SUCCESS] ID=%d, Name=%s, Type=%s", cfg.ID, cfg.Name, cfg.Type)
 
 		if cfg.IsDefault {
-			defaultProvider = provider
-			defaultID = cfg.ID
-			log.Printf("[Storage] [SET DEFAULT] ID=%d (%s)", cfg.ID, cfg.Name)
+			nextDefaultProvider = provider
+			nextDefaultID = cfg.ID
+			utils.Errorf("[Storage] [SET DEFAULT] ID=%d (%s)", cfg.ID, cfg.Name)
 		}
 	}
 
-	log.Printf("[Storage] --------------------------------------------")
-	log.Printf("[Storage] Initialization Summary:")
-	log.Printf("[Storage]   Total: %d, Success: %d, Failed: %d", len(configs), successCount, len(initErrors))
+	utils.Errorf("[Storage] --------------------------------------------")
+	utils.Errorf("[Storage] Initialization Summary:")
+	utils.Infof("[Storage]   Total: %d, Success: %d, Failed: %d", len(configs), successCount, len(initErrors))
 
-	if defaultProvider == nil {
+	if nextDefaultProvider == nil {
 		if defaultCfg != nil {
-			log.Printf("[Storage] [ERROR] Default config (ID=%d, Name=%s) failed to initialize", defaultCfg.ID, defaultCfg.Name)
+			utils.Errorf("[Storage] [ERROR] Default config (ID=%d, Name=%s) failed to initialize", defaultCfg.ID, defaultCfg.Name)
 		}
-		log.Printf("[Storage] ============================================")
+		utils.Errorf("[Storage] ============================================")
 		return fmt.Errorf("no default storage available (checked %d configs, %d failed)", len(configs), len(initErrors))
 	}
 
-	log.Printf("[Storage] [DEFAULT STORAGE] ID=%d, Name=%s", defaultID, defaultProvider.Name())
-	log.Printf("[Storage] ============================================")
+	providersMu.Lock()
+	registryPtr.Store(&registryState{
+		providers:       nextProviders,
+		defaultProvider: nextDefaultProvider,
+		defaultID:       nextDefaultID,
+	})
+	providersMu.Unlock()
+
+	utils.Errorf("[Storage] [DEFAULT STORAGE] ID=%d, Name=%s", nextDefaultID, nextDefaultProvider.Name())
+	utils.Errorf("[Storage] ============================================")
 
 	return nil
 }
 
 // GetDefault 获取默认存储提供者
 func GetDefault() Provider {
-	providersMu.RLock()
-	defer providersMu.RUnlock()
-	return defaultProvider
+	return currentRegistry().defaultProvider
 }
 
 // GetDefaultID 获取默认存储配置ID
 func GetDefaultID() uint {
-	providersMu.RLock()
-	defer providersMu.RUnlock()
-	return defaultID
+	return currentRegistry().defaultID
 }
 
 // GetByID 按ID获取存储提供者
 func GetByID(id uint) (Provider, error) {
-	providersMu.RLock()
-	defer providersMu.RUnlock()
-	provider, ok := providers[id]
+	provider, ok := currentRegistry().providers[id]
 	if !ok {
 		return nil, fmt.Errorf("storage provider with ID %d not found", id)
 	}
@@ -194,12 +207,15 @@ func AddOrUpdateProvider(cfg StorageConfig) error {
 	providersMu.Lock()
 	defer providersMu.Unlock()
 
-	providers[cfg.ID] = provider
+	next := cloneRegistry(currentRegistry())
+	next.providers[cfg.ID] = provider
 
 	if cfg.IsDefault {
-		defaultProvider = provider
-		defaultID = cfg.ID
+		next.defaultProvider = provider
+		next.defaultID = cfg.ID
 	}
+
+	registryPtr.Store(next)
 
 	return nil
 }
@@ -209,15 +225,17 @@ func RemoveProvider(id uint) error {
 	providersMu.Lock()
 	defer providersMu.Unlock()
 
-	if _, ok := providers[id]; !ok {
+	next := cloneRegistry(currentRegistry())
+	if _, ok := next.providers[id]; !ok {
 		return fmt.Errorf("storage provider with ID %d not found", id)
 	}
 
-	if id == defaultID {
+	if id == next.defaultID {
 		return fmt.Errorf("cannot remove default storage provider (ID: %d)", id)
 	}
 
-	delete(providers, id)
+	delete(next.providers, id)
+	registryPtr.Store(next)
 	return nil
 }
 
@@ -226,23 +244,23 @@ func SetDefaultID(id uint) error {
 	providersMu.Lock()
 	defer providersMu.Unlock()
 
-	provider, ok := providers[id]
+	next := cloneRegistry(currentRegistry())
+	provider, ok := next.providers[id]
 	if !ok {
 		return fmt.Errorf("storage provider with ID %d not found", id)
 	}
 
-	defaultProvider = provider
-	defaultID = id
+	next.defaultProvider = provider
+	next.defaultID = id
+	registryPtr.Store(next)
 	return nil
 }
 
 // ListProviderIDs 列出所有可用的存储提供者ID
 func ListProviderIDs() []uint {
-	providersMu.RLock()
-	defer providersMu.RUnlock()
-
-	ids := make([]uint, 0, len(providers))
-	for id := range providers {
+	state := currentRegistry()
+	ids := make([]uint, 0, len(state.providers))
+	for id := range state.providers {
 		ids = append(ids, id)
 	}
 	return ids
@@ -258,16 +276,14 @@ type ProviderInfo struct {
 
 // ListProviders 列出所有存储提供者信息
 func ListProviders() []ProviderInfo {
-	providersMu.RLock()
-	defer providersMu.RUnlock()
-
-	result := make([]ProviderInfo, 0, len(providers))
-	for id, provider := range providers {
+	state := currentRegistry()
+	result := make([]ProviderInfo, 0, len(state.providers))
+	for id, provider := range state.providers {
 		result = append(result, ProviderInfo{
 			ID:        id,
 			Name:      provider.Name(),
 			Type:      "unknown",
-			IsDefault: id == defaultID,
+			IsDefault: id == state.defaultID,
 		})
 	}
 	return result
@@ -275,9 +291,33 @@ func ListProviders() []ProviderInfo {
 
 // GetProviderCount 获取存储提供者数量
 func GetProviderCount() int {
-	providersMu.RLock()
-	defer providersMu.RUnlock()
-	return len(providers)
+	return len(currentRegistry().providers)
+}
+
+func currentRegistry() *registryState {
+	state := registryPtr.Load()
+	if state != nil {
+		return state
+	}
+
+	fallback := &registryState{providers: make(map[uint]Provider)}
+	if registryPtr.CompareAndSwap(nil, fallback) {
+		return fallback
+	}
+	return registryPtr.Load()
+}
+
+func cloneRegistry(state *registryState) *registryState {
+	nextProviders := make(map[uint]Provider, len(state.providers))
+	for id, provider := range state.providers {
+		nextProviders[id] = provider
+	}
+
+	return &registryState{
+		providers:       nextProviders,
+		defaultProvider: state.defaultProvider,
+		defaultID:       state.defaultID,
+	}
 }
 
 func createProvider(cfg StorageConfig) (Provider, error) {

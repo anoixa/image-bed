@@ -10,7 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -40,7 +40,10 @@ type SecureKey struct {
 func (sk *SecureKey) Get() []byte {
 	sk.lock.RLock()
 	defer sk.lock.RUnlock()
-	return sk.key
+	if sk.key == nil {
+		return nil
+	}
+	return append([]byte(nil), sk.key...)
 }
 
 // Clear 清零内存并释放
@@ -130,8 +133,8 @@ func (m *MasterKeyManager) Initialize(checkDataExists func() (bool, error)) erro
 func (m *MasterKeyManager) printFingerprint() {
 	hash := sha256.Sum256(m.key.Get())
 	fingerprint := hex.EncodeToString(hash[:8])
-	log.Printf("[Config] Master key source: %s", m.source)
-	log.Printf("[Config] Master key fingerprint: %s", fingerprint)
+	slog.Info("[Config] Master key source: " + m.source)
+	slog.Info("[Config] Master key fingerprint: " + fingerprint)
 }
 
 // GetKey 获取主密钥
@@ -158,35 +161,36 @@ func NewConfigEncryptor(masterKey []byte) *ConfigEncryptor {
 }
 
 // Encrypt 加密字符串，返回带版本前缀的密文
-func (e *ConfigEncryptor) Encrypt(plaintext string) string {
-	if e.masterKey == nil || plaintext == "" {
-		return plaintext
+func (e *ConfigEncryptor) Encrypt(plaintext string) (string, error) {
+	if plaintext == "" {
+		return plaintext, nil
+	}
+
+	if e.masterKey == nil {
+		return "", errors.New("master key not available")
 	}
 
 	if strings.HasPrefix(plaintext, EncPrefixV1) || strings.HasPrefix(plaintext, EncPrefixV2) {
-		return plaintext
+		return plaintext, nil
 	}
 
 	block, err := aes.NewCipher(e.masterKey)
 	if err != nil {
-		log.Printf("[ConfigEncryptor] Failed to create cipher: %v", err)
-		return plaintext
+		return "", fmt.Errorf("failed to create cipher: %w", err)
 	}
 
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
-		log.Printf("[ConfigEncryptor] Failed to create GCM: %v", err)
-		return plaintext
+		return "", fmt.Errorf("failed to create GCM: %w", err)
 	}
 
 	nonce := make([]byte, gcm.NonceSize())
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		log.Printf("[ConfigEncryptor] Failed to generate nonce: %v", err)
-		return plaintext
+		return "", fmt.Errorf("failed to generate nonce: %w", err)
 	}
 
 	ciphertext := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
-	return EncPrefixV1 + base64.StdEncoding.EncodeToString(ciphertext)
+	return EncPrefixV1 + base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
 // Decrypt 解密带版本前缀的密文

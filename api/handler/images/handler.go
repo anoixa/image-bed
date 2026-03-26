@@ -6,31 +6,34 @@ import (
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
 	configSvc "github.com/anoixa/image-bed/config/db"
+	"github.com/anoixa/image-bed/database/repo/albums"
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/internal/image"
-	"github.com/anoixa/image-bed/storage"
+	"github.com/anoixa/image-bed/internal/random"
 	"gorm.io/gorm"
 )
 
 type Handler struct {
-	cacheHelper           *cache.Helper
-	repo                  *images.Repository
-	converter             *image.Converter
-	configManager         *configSvc.Manager
-	variantService        *image.VariantService
-	thumbnailService      *image.ThumbnailService
-	variantRepo           *images.VariantRepository
-	imageService          *image.Service
-	baseURL               string
-	uploadMaxBatchTotalMB int
+	cacheHelper      *cache.Helper
+	imageDataCaching bool
+	repo             *images.Repository
+	configManager    *configSvc.Manager
+	variantService   *image.VariantService
+	thumbnailService *image.ThumbnailService
+	variantRepo      *images.VariantRepository
+	writeService     *image.WriteService
+	readService      *image.ReadService
+	deleteService    *image.DeleteService
+	queryService     *image.QueryService
+	randomService    *random.Service
+	baseURL          string
 }
 
-func NewHandler(cacheProvider cache.Provider, imagesRepo *images.Repository, db *gorm.DB, converter *image.Converter, configManager *configSvc.Manager, cfg *config.Config, baseURL string, uploadMaxBatchTotalMB int, storageProvider storage.Provider) *Handler {
+func NewHandler(cacheProvider cache.Provider, imagesRepo *images.Repository, db *gorm.DB, converter *image.Converter, configManager *configSvc.Manager, cfg *config.Config, baseURL string, albumsRepo *albums.Repository) *Handler {
 	variantRepo := images.NewVariantRepository(db)
-	variantService := image.NewVariantService(variantRepo, configManager, converter)
+	variantService := image.NewVariantService(variantRepo, configManager)
 
-	imageRepo := images.NewRepository(db)
-	thumbnailService := image.NewThumbnailService(variantRepo, imageRepo, configManager, storageProvider, converter)
+	thumbnailService := image.NewThumbnailService(variantRepo)
 
 	helperCfg := cache.HelperConfig{
 		ImageCacheTTL:         cache.DefaultImageCacheExpiration,
@@ -50,18 +53,28 @@ func NewHandler(cacheProvider cache.Provider, imagesRepo *images.Repository, db 
 	}
 
 	cacheHelper := cache.NewHelper(cacheProvider, helperCfg)
-	imageService := image.NewService(imagesRepo, variantRepo, converter, thumbnailService, variantService, cacheHelper, baseURL)
+	writeService := image.NewWriteService(imagesRepo, albumsRepo, converter, cacheHelper, baseURL)
+	readService := image.NewReadService(imagesRepo, variantService, converter, cacheHelper, baseURL, image.SubmitBackgroundTask)
+	deleteService := image.NewDeleteService(imagesRepo, variantRepo, cacheHelper)
+	queryService := image.NewQueryService(imagesRepo, configManager)
+	var randomService *random.Service
+	if configManager != nil {
+		randomService = random.NewService(configManager)
+	}
 
 	return &Handler{
-		cacheHelper:           cacheHelper,
-		repo:                  imagesRepo,
-		converter:             converter,
-		configManager:         configManager,
-		variantRepo:           variantRepo,
-		variantService:        variantService,
-		thumbnailService:      thumbnailService,
-		imageService:          imageService,
-		baseURL:               baseURL,
-		uploadMaxBatchTotalMB: uploadMaxBatchTotalMB,
+		cacheHelper:      cacheHelper,
+		imageDataCaching: cfg != nil && cfg.CacheEnableImageCaching,
+		repo:             imagesRepo,
+		configManager:    configManager,
+		variantRepo:      variantRepo,
+		variantService:   variantService,
+		thumbnailService: thumbnailService,
+		writeService:     writeService,
+		readService:      readService,
+		deleteService:    deleteService,
+		queryService:     queryService,
+		randomService:    randomService,
+		baseURL:          baseURL,
 	}
 }

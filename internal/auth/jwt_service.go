@@ -4,12 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
+	appconfig "github.com/anoixa/image-bed/config"
 	configSvc "github.com/anoixa/image-bed/config/db"
-	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/keys"
 	"github.com/anoixa/image-bed/utils"
 
@@ -26,12 +25,11 @@ type TokenPair struct {
 
 // TokenClaims JWT 令牌声明
 type TokenClaims struct {
-	Username string
-	UserID   uint
-	Role     string
-	Type     string
-	Exp      int64
-	Iat      int64
+	Username string `json:"username"`
+	UserID   uint   `json:"user_id"`
+	Role     string `json:"role"`
+	Type     string `json:"type"`
+	jwt.RegisteredClaims
 }
 
 // JWTService JWT Token 服务 - 合并 TokenManager 功能
@@ -50,95 +48,67 @@ type TokenConfig struct {
 }
 
 // NewJWTService 创建新的 JWT 服务
-func NewJWTService(configManager *configSvc.Manager, keysRepo *keys.Repository) (*JWTService, error) {
+func NewJWTService(cfg *appconfig.Config, configManager *configSvc.Manager, keysRepo *keys.Repository) (*JWTService, error) {
 	svc := &JWTService{
 		configManager: configManager,
 		keysRepo:      keysRepo,
 	}
 
-	if err := svc.initialize(); err != nil {
+	if err := svc.initialize(cfg); err != nil {
 		return nil, err
 	}
 
 	return svc, nil
 }
 
-// initialize 从配置管理器初始化 JWT 配置
-func (s *JWTService) initialize() error {
-	if s.configManager == nil {
-		return errors.New("config manager is nil")
+// initialize 从应用配置初始化 JWT 配置
+func (s *JWTService) initialize(cfg *appconfig.Config) error {
+	if cfg == nil {
+		return errors.New("config is nil")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	jwtConfig, err := s.configManager.GetJWTConfig(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get JWT config from database: %w", err)
-	}
-
-	if err := s.applyConfig(jwtConfig); err != nil {
-		return err
-	}
-
-	s.configManager.Subscribe(configSvc.EventConfigUpdated, func(event *configSvc.Event) {
-		if event.Config.Category == models.ConfigCategoryJWT {
-			log.Println("[JWT] Configuration updated, reloading...")
-			if err := s.reloadConfig(); err != nil {
-				log.Printf("[JWT] Failed to reload config: %v", err)
-			} else {
-				log.Println("[JWT] Configuration reloaded successfully")
-			}
-		}
+	return s.applyConfig(TokenConfigInput{
+		Secret:          cfg.JWTSecret,
+		AccessTokenTTL:  cfg.JWTAccessTokenTTL,
+		RefreshTokenTTL: cfg.JWTRefreshTokenTTL,
 	})
+}
 
-	return nil
+type TokenConfigInput struct {
+	Secret          string
+	AccessTokenTTL  string
+	RefreshTokenTTL string
 }
 
 // applyConfig 应用 JWT 配置
-func (s *JWTService) applyConfig(jwtConfig *configSvc.JWTConfig) error {
-	if len(jwtConfig.Secret) < 32 {
-		return fmt.Errorf("JWT secret must be at least 32 characters long, got %d", len(jwtConfig.Secret))
+func (s *JWTService) applyConfig(input TokenConfigInput) error {
+	// 使用字符数而非字节长度，避免多字节UTF-8字符绕过检查
+	secretRunes := []rune(input.Secret)
+	if len(secretRunes) < 32 {
+		return fmt.Errorf("JWT secret must be at least 32 characters long, got %d", len(secretRunes))
 	}
 
-	duration, err := time.ParseDuration(jwtConfig.AccessTokenTTL)
+	duration, err := time.ParseDuration(input.AccessTokenTTL)
 	if err != nil {
-		return fmt.Errorf("invalid JWT access token TTL: %s", jwtConfig.AccessTokenTTL)
+		return fmt.Errorf("invalid JWT access token TTL: %s", input.AccessTokenTTL)
 	}
 
-	refreshDuration, err := time.ParseDuration(jwtConfig.RefreshTokenTTL)
+	refreshDuration, err := time.ParseDuration(input.RefreshTokenTTL)
 	if err != nil {
-		return fmt.Errorf("invalid JWT refresh token TTL: %s", jwtConfig.RefreshTokenTTL)
+		return fmt.Errorf("invalid JWT refresh token TTL: %s", input.RefreshTokenTTL)
 	}
 
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
 	s.config = TokenConfig{
-		Secret:           []byte(jwtConfig.Secret),
+		Secret:           []byte(input.Secret),
 		ExpiresIn:        duration,
 		RefreshExpiresIn: refreshDuration,
 	}
 
-	log.Printf("[JWT] Config loaded from database - Access: %v, Refresh: %v\n", duration, refreshDuration)
+	utils.Infof("[JWT] Config loaded from environment - Access: %v, Refresh: %v", duration, refreshDuration)
 	return nil
-}
-
-// reloadConfig 重新加载 JWT 配置
-func (s *JWTService) reloadConfig() error {
-	if s.configManager == nil {
-		return errors.New("config manager not initialized")
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	jwtConfig, err := s.configManager.GetJWTConfig(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get JWT config: %w", err)
-	}
-
-	return s.applyConfig(jwtConfig)
 }
 
 // GetConfig 获取当前 JWT 配置
@@ -169,13 +139,15 @@ func (s *JWTService) GenerateTokens(username string, userID uint, role string) (
 
 	// 生成 access token
 	accessTokenExpiry := time.Now().Add(config.ExpiresIn)
-	accessClaims := jwt.MapClaims{
-		"username": username,
-		"user_id":  userID,
-		"role":     role,
-		"type":     "access",
-		"exp":      accessTokenExpiry.Unix(),
-		"iat":      time.Now().Unix(),
+	accessClaims := &TokenClaims{
+		Username: username,
+		UserID:   userID,
+		Role:     role,
+		Type:     "access",
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(accessTokenExpiry),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
 	}
 
 	accessToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims).SignedString(config.Secret)
@@ -207,13 +179,15 @@ func (s *JWTService) GenerateAccessToken(username string, userID uint, role stri
 	}
 
 	accessTokenExpiry := time.Now().Add(config.ExpiresIn)
-	accessClaims := jwt.MapClaims{
-		"username": username,
-		"user_id":  userID,
-		"role":     role,
-		"type":     "access",
-		"exp":      accessTokenExpiry.Unix(),
-		"iat":      time.Now().Unix(),
+	accessClaims := &TokenClaims{
+		Username: username,
+		UserID:   userID,
+		Role:     role,
+		Type:     "access",
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(accessTokenExpiry),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
 	}
 
 	accessToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims).SignedString(config.Secret)
@@ -243,14 +217,15 @@ func (s *JWTService) GenerateStaticToken() (string, error) {
 }
 
 // ParseToken 解析和验证 JWT 令牌
-func (s *JWTService) ParseToken(tokenString string) (jwt.MapClaims, error) {
+func (s *JWTService) ParseToken(tokenString string) (*TokenClaims, error) {
 	config := s.GetConfig()
 
 	if len(config.Secret) == 0 {
 		return nil, errors.New("JWT secret is not initialized")
 	}
 
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
+	claims := &TokenClaims{}
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
@@ -261,8 +236,7 @@ func (s *JWTService) ParseToken(tokenString string) (jwt.MapClaims, error) {
 		return nil, fmt.Errorf("failed to parse token: %w", err)
 	}
 
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok || !token.Valid {
+	if !token.Valid {
 		return nil, errors.New("invalid token claims")
 	}
 
@@ -271,29 +245,7 @@ func (s *JWTService) ParseToken(tokenString string) (jwt.MapClaims, error) {
 
 // ExtractClaims 从令牌中提取声明
 func (s *JWTService) ExtractClaims(tokenString string) (*TokenClaims, error) {
-	claims, err := s.ParseToken(tokenString)
-	if err != nil {
-		return nil, err
-	}
-
-	username, _ := claims["username"].(string)
-	role, _ := claims["role"].(string)
-	tokenType, _ := claims["type"].(string)
-
-	userIDFloat, _ := claims["user_id"].(float64)
-	userID := uint(userIDFloat)
-
-	expFloat, _ := claims["exp"].(float64)
-	iatFloat, _ := claims["iat"].(float64)
-
-	return &TokenClaims{
-		Username: username,
-		UserID:   userID,
-		Role:     role,
-		Type:     tokenType,
-		Exp:      int64(expFloat),
-		Iat:      int64(iatFloat),
-	}, nil
+	return s.ParseToken(tokenString)
 }
 
 // ValidateToken 验证令牌是否有效
@@ -309,12 +261,19 @@ func (s *JWTService) IsAccessToken(tokenString string) (bool, error) {
 		return false, err
 	}
 
-	tokenType, _ := claims["type"].(string)
-	return tokenType == "access", nil
+	return claims.Type == "access", nil
 }
 
 // ValidateStaticToken 验证静态令牌
-func (s *JWTService) ValidateStaticToken(token string) (*StaticTokenUser, error) {
+func (s *JWTService) ValidateStaticToken(ctx context.Context, token string) (*StaticTokenUser, error) {
+	// 检查 API Key 是否启用
+	if s.configManager != nil {
+		settings, err := s.configManager.GetImageProcessingSettings(ctx)
+		if err == nil && !settings.APIKeyEnabled {
+			return nil, errors.New("API key authentication is disabled")
+		}
+	}
+
 	if s.keysRepo == nil {
 		return nil, errors.New("keys repository not initialized")
 	}

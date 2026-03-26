@@ -3,14 +3,14 @@ package admin
 import (
 	"context"
 	"fmt"
-	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/anoixa/image-bed/api/common"
-	configSvc "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
 	imagesRepo "github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/storage"
@@ -18,18 +18,40 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type configManager interface {
+	ListConfigs(ctx context.Context, category models.ConfigCategory, enabledOnly, maskSensitive bool) ([]*models.ConfigResponse, error)
+	GetConfig(ctx context.Context, id uint, maskSensitive bool) (*models.ConfigResponse, error)
+	CreateConfig(ctx context.Context, req *models.SystemConfigStoreRequest, userID uint) (*models.ConfigResponse, error)
+	UpdateConfig(ctx context.Context, id uint, req *models.SystemConfigStoreRequest) (*models.ConfigResponse, error)
+	DeleteConfig(ctx context.Context, id uint) error
+	SetDefault(ctx context.Context, id uint) error
+	Enable(ctx context.Context, id uint) error
+	Disable(ctx context.Context, id uint) error
+	GetGlobalTransferMode(ctx context.Context) storage.TransferMode
+	SetGlobalTransferMode(ctx context.Context, mode storage.TransferMode) error
+	ClearCache()
+}
+
 // ConfigHandler 配置管理处理器
 type ConfigHandler struct {
-	manager    *configSvc.Manager
-	imagesRepo *imagesRepo.Repository
+	manager             configManager
+	imagesRepo          *imagesRepo.Repository
+	reloadStorageConfig func(id uint, config map[string]any, isDefault bool) error
+}
+
+var hiddenExternalConfigCategories = map[models.ConfigCategory]struct{}{
+	models.ConfigCategoryJWT:      {},
+	models.ConfigCategorySecurity: {},
 }
 
 // NewConfigHandler 创建配置处理器
-func NewConfigHandler(manager *configSvc.Manager, imagesRepo *imagesRepo.Repository) *ConfigHandler {
-	return &ConfigHandler{
+func NewConfigHandler(manager configManager, imagesRepo *imagesRepo.Repository) *ConfigHandler {
+	handler := &ConfigHandler{
 		manager:    manager,
 		imagesRepo: imagesRepo,
 	}
+	handler.reloadStorageConfig = handler.hotReloadStorageConfig
+	return handler
 }
 
 // ListConfigs 列出配置列表
@@ -56,6 +78,10 @@ func (h *ConfigHandler) ListConfigs(c *gin.Context) {
 	var cat models.ConfigCategory
 	if category != "" {
 		cat = models.ConfigCategory(category)
+		if isHiddenExternalConfigCategory(cat) {
+			common.RespondError(c, http.StatusBadRequest, "Unsupported config category")
+			return
+		}
 	}
 
 	configs, err := h.manager.ListConfigs(ctx, cat, enabledOnly, maskSensitive)
@@ -63,6 +89,8 @@ func (h *ConfigHandler) ListConfigs(c *gin.Context) {
 		common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to list configs: %v", err))
 		return
 	}
+
+	configs = filterVisibleConfigs(configs)
 
 	common.RespondSuccess(c, configs)
 }
@@ -98,6 +126,10 @@ func (h *ConfigHandler) GetConfig(c *gin.Context) {
 		common.RespondError(c, http.StatusNotFound, fmt.Sprintf("Config not found: %v", err))
 		return
 	}
+	if isHiddenExternalConfigCategory(config.Category) {
+		common.RespondError(c, http.StatusNotFound, "Config not found")
+		return
+	}
 
 	common.RespondSuccess(c, config)
 }
@@ -123,6 +155,10 @@ func (h *ConfigHandler) CreateConfig(c *gin.Context) {
 		common.RespondError(c, http.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err))
 		return
 	}
+	if isHiddenExternalConfigCategory(req.Category) {
+		common.RespondError(c, http.StatusBadRequest, "Unsupported config category")
+		return
+	}
 
 	userID := c.GetUint("user_id")
 
@@ -145,9 +181,9 @@ func (h *ConfigHandler) CreateConfig(c *gin.Context) {
 	}
 
 	if req.Category == models.ConfigCategoryStorage {
-		if err := h.hotReloadStorageConfig(config.ID, req.Config, config.IsDefault); err != nil {
+		if err := h.reloadStorageConfig(config.ID, req.Config, config.IsDefault); err != nil {
 			if rollbackErr := h.manager.DeleteConfig(c.Request.Context(), config.ID); rollbackErr != nil {
-				log.Printf("Failed to rollback storage config creation: %v", rollbackErr)
+				utils.Errorf("Failed to rollback storage config creation: %v", rollbackErr)
 			}
 			common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to load storage configuration: %v", err))
 			return
@@ -186,6 +222,10 @@ func (h *ConfigHandler) UpdateConfig(c *gin.Context) {
 		common.RespondError(c, http.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err))
 		return
 	}
+	if isHiddenExternalConfigCategory(req.Category) {
+		common.RespondError(c, http.StatusBadRequest, "Unsupported config category")
+		return
+	}
 
 	if req.Category == models.ConfigCategoryStorage {
 		testResult := h.testConfig(&models.TestConfigRequest{
@@ -206,7 +246,7 @@ func (h *ConfigHandler) UpdateConfig(c *gin.Context) {
 
 	// 如果是存储配置，热重载到存储层
 	if req.Category == models.ConfigCategoryStorage {
-		if err := h.hotReloadStorageConfig(config.ID, req.Config, config.IsDefault); err != nil {
+		if err := h.reloadStorageConfig(config.ID, req.Config, config.IsDefault); err != nil {
 			common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to reload storage configuration: %v", err))
 			return
 		}
@@ -237,6 +277,10 @@ func (h *ConfigHandler) DeleteConfig(c *gin.Context) {
 	}
 
 	config, getErr := h.manager.GetConfig(c.Request.Context(), uint(id), false)
+	if getErr == nil && isHiddenExternalConfigCategory(config.Category) {
+		common.RespondError(c, http.StatusNotFound, "Config not found")
+		return
+	}
 	if getErr == nil && config.Category == models.ConfigCategoryStorage {
 		// 检查是否有图片使用该存储配置
 		if h.imagesRepo != nil {
@@ -253,7 +297,7 @@ func (h *ConfigHandler) DeleteConfig(c *gin.Context) {
 
 		if err := storage.RemoveProvider(uint(id)); err != nil {
 			if !strings.Contains(err.Error(), "not found") {
-				log.Printf("Warning: failed to remove storage provider: %v", err)
+				utils.Warnf("Warning: failed to remove storage provider: %v", err)
 			}
 		}
 	}
@@ -294,12 +338,16 @@ func (h *ConfigHandler) SetDefaultConfig(c *gin.Context) {
 		common.RespondError(c, http.StatusNotFound, fmt.Sprintf("Config not found: %v", err))
 		return
 	}
+	if isHiddenExternalConfigCategory(config.Category) {
+		common.RespondError(c, http.StatusNotFound, "Config not found")
+		return
+	}
 
 	if config.Category == models.ConfigCategoryStorage {
 		_, err := storage.GetByID(uint(id))
 		if err != nil {
 			// Provider 未加载，尝试热重载
-			if loadErr := h.hotReloadStorageConfig(config.ID, config.Config, false); loadErr != nil {
+			if loadErr := h.reloadStorageConfig(config.ID, config.Config, false); loadErr != nil {
 				common.RespondError(c, http.StatusBadRequest, fmt.Sprintf("Storage provider not loaded and failed to reload: %v", loadErr))
 				return
 			}
@@ -344,9 +392,13 @@ func (h *ConfigHandler) EnableConfig(c *gin.Context) {
 	}
 
 	// 先获取配置信息，用于后续热重载
-	config, getErr := h.manager.GetConfig(ctx, uint(id), true)
+	config, getErr := h.manager.GetConfig(ctx, uint(id), false)
 	if getErr != nil {
 		common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to get config: %v", getErr))
+		return
+	}
+	if isHiddenExternalConfigCategory(config.Category) {
+		common.RespondError(c, http.StatusNotFound, "Config not found")
 		return
 	}
 
@@ -357,7 +409,7 @@ func (h *ConfigHandler) EnableConfig(c *gin.Context) {
 
 	// 如果是存储配置，启用后热重载到内存
 	if config.Category == models.ConfigCategoryStorage {
-		if err := h.hotReloadStorageConfig(config.ID, config.Config, config.IsDefault); err != nil {
+		if err := h.reloadStorageConfig(config.ID, config.Config, config.IsDefault); err != nil {
 			// 热重载失败但不回滚启用操作，只是记录日志
 			utils.LogIfDevf("Failed to hot reload storage config %d after enable: %v", config.ID, err)
 		}
@@ -430,9 +482,33 @@ func (h *ConfigHandler) TestConfig(c *gin.Context) {
 			Config:   config.Config,
 		}
 	}
+	if isHiddenExternalConfigCategory(req.Category) {
+		common.RespondError(c, http.StatusBadRequest, "Unsupported config category")
+		return
+	}
 
 	result := h.testConfig(&req)
 	common.RespondSuccess(c, result)
+}
+
+func isHiddenExternalConfigCategory(category models.ConfigCategory) bool {
+	_, hidden := hiddenExternalConfigCategories[category]
+	return hidden
+}
+
+func filterVisibleConfigs(configs []*models.ConfigResponse) []*models.ConfigResponse {
+	if len(configs) == 0 {
+		return configs
+	}
+
+	filtered := make([]*models.ConfigResponse, 0, len(configs))
+	for _, config := range configs {
+		if config == nil || isHiddenExternalConfigCategory(config.Category) {
+			continue
+		}
+		filtered = append(filtered, config)
+	}
+	return filtered
 }
 
 // testConfig 测试配置
@@ -510,6 +586,12 @@ func (h *ConfigHandler) testStorageConfig(config map[string]any) *models.TestCon
 				Message: "Endpoint, access_key_id, secret_access_key and bucket_name are required",
 			}
 		}
+		if err := validateRemoteStorageTestTarget(s3Cfg.Endpoint); err != nil {
+			return &models.TestConfigResponse{
+				Success: false,
+				Message: err.Error(),
+			}
+		}
 		provider, err := storage.NewS3Storage(s3Cfg)
 		if err != nil {
 			return &models.TestConfigResponse{
@@ -543,6 +625,12 @@ func (h *ConfigHandler) testStorageConfig(config map[string]any) *models.TestCon
 				Message: "WebDAV URL is required",
 			}
 		}
+		if err := validateRemoteStorageTestTarget(webdavCfg.URL); err != nil {
+			return &models.TestConfigResponse{
+				Success: false,
+				Message: err.Error(),
+			}
+		}
 		provider, err := storage.NewWebDAVStorage(webdavCfg)
 		if err != nil {
 			return &models.TestConfigResponse{
@@ -568,6 +656,72 @@ func (h *ConfigHandler) testStorageConfig(config map[string]any) *models.TestCon
 			Message: fmt.Sprintf("Unsupported storage type: %s", storageType),
 		}
 	}
+}
+
+func validateRemoteStorageTestTarget(rawTarget string) error {
+	targetURL, err := parseRemoteStorageTestTarget(rawTarget)
+	if err != nil {
+		return fmt.Errorf("invalid remote storage address: %w", err)
+	}
+
+	host := strings.TrimSuffix(strings.ToLower(targetURL.Hostname()), ".")
+	if host == "" {
+		return fmt.Errorf("invalid remote storage address: missing host")
+	}
+
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return fmt.Errorf("refusing to test local or private address: %s", host)
+	}
+
+	if ip := net.ParseIP(host); ip != nil && isBlockedRemoteStorageTestIP(ip) {
+		return fmt.Errorf("refusing to test local or private address: %s", host)
+	}
+
+	return nil
+}
+
+func parseRemoteStorageTestTarget(rawTarget string) (*url.URL, error) {
+	normalized := strings.TrimSpace(rawTarget)
+	if normalized == "" {
+		return nil, fmt.Errorf("empty target")
+	}
+	if !strings.Contains(normalized, "://") {
+		normalized = "https://" + normalized
+	}
+
+	parsed, err := url.Parse(normalized)
+	if err != nil {
+		return nil, err
+	}
+	if parsed.Host == "" {
+		return nil, fmt.Errorf("missing host")
+	}
+
+	return parsed, nil
+}
+
+func isBlockedRemoteStorageTestIP(ip net.IP) bool {
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
+		return true
+	}
+
+	return isIPInCIDRs(ip, []string{
+		"100.64.0.0/10",
+		"198.18.0.0/15",
+	})
+}
+
+func isIPInCIDRs(ip net.IP, cidrs []string) bool {
+	for _, cidr := range cidrs {
+		_, network, err := net.ParseCIDR(cidr)
+		if err != nil {
+			continue
+		}
+		if network.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 // ListStorageProviders 列出所有存储提供者

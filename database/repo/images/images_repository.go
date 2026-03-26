@@ -2,6 +2,9 @@ package images
 
 import (
 	"context"
+	"crypto/rand"
+	"fmt"
+	"math/big"
 	"time"
 
 	"github.com/anoixa/image-bed/database/models"
@@ -217,14 +220,14 @@ func (r *Repository) UpdateImageByIdentifier(identifier string, updates map[stri
 }
 
 // GetImageList 获取图片列表
-func (r *Repository) GetImageList(storageType, identifier, search string, albumID *uint, startTime, endTime int64, sort string, page, pageSize, userID int) ([]*models.Image, int64, error) {
+func (r *Repository) GetImageList(storageConfigIDs []uint, identifier, search string, albumID *uint, startTime, endTime int64, sort string, page, pageSize, userID int) ([]*models.Image, int64, error) {
 	var imageList []*models.Image
 	var total int64
 
 	db := r.db.Model(&models.Image{}).Where("user_id = ?", userID)
 
-	if storageType != "" {
-		db = db.Where("storage_driver = ?", storageType)
+	if len(storageConfigIDs) > 0 {
+		db = db.Where("storage_config_id IN ?", storageConfigIDs)
 	}
 	if identifier != "" {
 		db = db.Where("identifier = ?", identifier)
@@ -315,9 +318,7 @@ func (r *Repository) GetImagesByVariantStatus(statuses []models.ImageVariantStat
 
 // GetRandomPublicImage 随机获取一张公开图片
 func (r *Repository) GetRandomPublicImage(filter *RandomImageFilter) (*models.Image, error) {
-	var image models.Image
-
-	db := r.db.Where("is_public = ?", true)
+	db := r.db.Model(&models.Image{}).Where("is_public = ?", true)
 
 	if filter != nil && filter.AlbumID != nil && !filter.IncludeAllPublic {
 		db = db.Joins("JOIN album_images ON album_images.image_id = images.id").
@@ -347,11 +348,99 @@ func (r *Repository) GetRandomPublicImage(filter *RandomImageFilter) (*models.Im
 		}
 	}
 
-	// 使用数据库随机排序
-	err := db.Order("RANDOM()").First(&image).Error
+	var total int64
+	if err := db.Distinct("images.id").Count(&total).Error; err != nil {
+		return nil, err
+	}
+	if total == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+
+	offset, err := randomOffset(total)
 	if err != nil {
 		return nil, err
 	}
 
+	var selected struct {
+		ID uint
+	}
+	if err := db.Distinct("images.id").
+		Select("images.id").
+		Order("images.id ASC").
+		Offset(offset).
+		Limit(1).
+		Take(&selected).Error; err != nil {
+		return nil, err
+	}
+
+	var image models.Image
+	if err := r.db.First(&image, selected.ID).Error; err != nil {
+		return nil, err
+	}
 	return &image, nil
+}
+
+func randomOffset(total int64) (int, error) {
+	if total <= 0 {
+		return 0, nil
+	}
+	n, err := rand.Int(rand.Reader, big.NewInt(total))
+	if err != nil {
+		return 0, err
+	}
+	return int(n.Int64()), nil
+}
+
+// DeleteBatchResult 批量删除结果
+type DeleteBatchResult struct {
+	DeletedCount int64
+	ImageIDs     []uint
+}
+
+// DeleteBatchTransaction 在事务中批量删除图片及其关联数据
+func (r *Repository) DeleteBatchTransaction(ctx context.Context, identifiers []string, userID uint) (*DeleteBatchResult, []*models.Image, error) {
+	if len(identifiers) == 0 {
+		return &DeleteBatchResult{DeletedCount: 0, ImageIDs: []uint{}}, []*models.Image{}, nil
+	}
+
+	var result DeleteBatchResult
+	var imagesToDelete []*models.Image
+
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 1. 查询要删除的图片
+		if err := tx.Where("identifier IN ? AND user_id = ?", identifiers, userID).Find(&imagesToDelete).Error; err != nil {
+			return fmt.Errorf("failed to get images: %w", err)
+		}
+
+		if len(imagesToDelete) == 0 {
+			return nil
+		}
+
+		// 收集图片ID
+		imageIDs := make([]uint, len(imagesToDelete))
+		for i, img := range imagesToDelete {
+			imageIDs[i] = img.ID
+		}
+
+		// 2. 从所有相册中移除关联
+		if err := tx.Table("album_images").Where("image_id IN ?", imageIDs).Delete(nil).Error; err != nil {
+			return fmt.Errorf("failed to remove images from albums: %w", err)
+		}
+
+		// 3. 删除图片记录
+		deleteResult := tx.Where("identifier IN ? AND user_id = ?", identifiers, userID).Delete(&models.Image{})
+		if deleteResult.Error != nil {
+			return fmt.Errorf("failed to delete images: %w", deleteResult.Error)
+		}
+
+		result.DeletedCount = deleteResult.RowsAffected
+		result.ImageIDs = imageIDs
+		return nil
+	})
+
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return &result, imagesToDelete, nil
 }

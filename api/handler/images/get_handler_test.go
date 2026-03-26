@@ -1,6 +1,7 @@
 package images
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
@@ -10,13 +11,52 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/database/models"
 	imageSvc "github.com/anoixa/image-bed/internal/image"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
+
+func TestCheckETagSupportsWeakAndMultiValueIfNoneMatch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name        string
+		headerValue string
+		etag        string
+		wantMatch   bool
+	}{
+		{name: "strong_exact_match", headerValue: `"abc"`, etag: "abc", wantMatch: true},
+		{name: "weak_match", headerValue: `W/"abc"`, etag: "abc", wantMatch: true},
+		{name: "multi_value_match", headerValue: `"other", W/"abc"`, etag: "abc", wantMatch: true},
+		{name: "wildcard_match", headerValue: `*`, etag: "abc", wantMatch: true},
+		{name: "miss", headerValue: `"other"`, etag: "abc", wantMatch: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			req := httptest.NewRequest(http.MethodGet, "/images/test", nil)
+			req.Header.Set("If-None-Match", tt.headerValue)
+			c.Request = req
+
+			matched := checkETag(c, tt.etag)
+
+			assert.Equal(t, tt.wantMatch, matched)
+			assert.Equal(t, `"abc"`, w.Header().Get("ETag"))
+			if tt.wantMatch {
+				assert.Equal(t, http.StatusNotModified, c.Writer.Status())
+			} else {
+				assert.NotEqual(t, http.StatusNotModified, c.Writer.Status())
+			}
+		})
+	}
+}
 
 // MockConfigManager 用于测试的配置管理器 mock
 type MockConfigManager struct {
@@ -77,113 +117,6 @@ func (m *MockDirectURLProvider) SupportsDirectLink() bool {
 
 func (m *MockDirectURLProvider) ShouldProxy(imageIsPublic bool, globalMode storage.TransferMode) bool {
 	return m.Called(imageIsPublic, globalMode).Bool(0)
-}
-
-func TestGetDirectURLIfPossible(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	tests := []struct {
-		name           string
-		image          *models.Image
-		setupMock      func(*MockConfigManager, *MockDirectURLProvider)
-		expectedResult string
-	}{
-		{
-			name: "private_image_should_not_use_direct",
-			image: &models.Image{
-				IsPublic:        false,
-				StoragePath:     "2024/01/test.jpg",
-				StorageConfigID: 1,
-			},
-			setupMock: func(cm *MockConfigManager, dsp *MockDirectURLProvider) {
-				// 私有图片不应该调用任何存储方法
-			},
-			expectedResult: "",
-		},
-		{
-			name: "public_image_with_direct_link_support",
-			image: &models.Image{
-				IsPublic:        true,
-				StoragePath:     "2024/01/public.jpg",
-				StorageConfigID: 1,
-			},
-			setupMock: func(cm *MockConfigManager, dsp *MockDirectURLProvider) {
-				cm.On("GetGlobalTransferMode", mock.Anything).Return(storage.TransferModeAuto).Once()
-				dsp.On("ShouldProxy", true, storage.TransferModeAuto).Return(false).Once()
-				dsp.On("GetDirectURL", "2024/01/public.jpg").Return("https://cdn.example.com/2024/01/public.jpg").Once()
-			},
-			expectedResult: "https://cdn.example.com/2024/01/public.jpg",
-		},
-		{
-			name: "public_image_but_should_proxy",
-			image: &models.Image{
-				IsPublic:        true,
-				StoragePath:     "2024/01/proxy.jpg",
-				StorageConfigID: 1,
-			},
-			setupMock: func(cm *MockConfigManager, dsp *MockDirectURLProvider) {
-				cm.On("GetGlobalTransferMode", mock.Anything).Return(storage.TransferModeAlwaysProxy).Once()
-				dsp.On("ShouldProxy", true, storage.TransferModeAlwaysProxy).Return(true).Once()
-			},
-			expectedResult: "",
-		},
-		{
-			name: "always_direct_mode_returns_url",
-			image: &models.Image{
-				IsPublic:        true,
-				StoragePath:     "2024/01/direct.jpg",
-				StorageConfigID: 1,
-			},
-			setupMock: func(cm *MockConfigManager, dsp *MockDirectURLProvider) {
-				cm.On("GetGlobalTransferMode", mock.Anything).Return(storage.TransferModeAlwaysDirect).Once()
-				dsp.On("ShouldProxy", true, storage.TransferModeAlwaysDirect).Return(false).Once()
-				dsp.On("GetDirectURL", "2024/01/direct.jpg").Return("https://cdn.example.com/2024/01/direct.jpg").Once()
-			},
-			expectedResult: "https://cdn.example.com/2024/01/direct.jpg",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cm := &MockConfigManager{}
-			dsp := &MockDirectURLProvider{}
-
-			if tt.setupMock != nil {
-				tt.setupMock(cm, dsp)
-			}
-
-			// 由于 getDirectURLIfPossible 依赖 storage 包的全局状态
-			// 我们测试逻辑而不是完整集成
-			result := simulateGetDirectURLIfPossible(tt.image, cm, dsp)
-
-			assert.Equal(t, tt.expectedResult, result)
-			cm.AssertExpectations(t)
-			dsp.AssertExpectations(t)
-		})
-	}
-}
-
-// simulateGetDirectURLIfPossible 模拟 getDirectURLIfPossible 的逻辑
-func simulateGetDirectURLIfPossible(img *models.Image, cm *MockConfigManager, provider storage.DirectURLProvider) string {
-	// 私有图片不支持直链
-	if !img.IsPublic {
-		return ""
-	}
-
-	if provider == nil {
-		return ""
-	}
-
-	// 获取全局模式
-	globalMode := cm.GetGlobalTransferMode(context.Background())
-
-	// 判断是否应该走代理
-	if provider.ShouldProxy(img.IsPublic, globalMode) {
-		return ""
-	}
-
-	// 获取直链 URL
-	return provider.GetDirectURL(img.StoragePath)
 }
 
 func TestGetGlobalTransferMode(t *testing.T) {
@@ -320,48 +253,6 @@ func simulateShouldProxy(imageIsPublic bool, globalMode storage.TransferMode, en
 	}
 }
 
-func TestGetStorageProvider(t *testing.T) {
-	tests := []struct {
-		name            string
-		storageConfigID uint
-		expectedCall    bool
-	}{
-		{
-			name:            "zero_id_returns_default",
-			storageConfigID: 0,
-			expectedCall:    false,
-		},
-		{
-			name:            "non_zero_id_tries_to_get_provider",
-			storageConfigID: 5,
-			expectedCall:    true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// 这个测试主要验证逻辑分支
-			result := simulateGetStorageProvider(tt.storageConfigID)
-			if tt.expectedCall {
-				// 非零 ID 应该尝试获取特定 provider
-				assert.NotNil(t, result)
-			} else {
-				// 零 ID 应该返回默认 provider
-				assert.NotNil(t, result)
-			}
-		})
-	}
-}
-
-// simulateGetStorageProvider 模拟 getStorageProvider 逻辑
-func simulateGetStorageProvider(storageConfigID uint) interface{} {
-	if storageConfigID == 0 {
-		return "default"
-	}
-	// 实际会调用 storage.GetByID
-	return "specific"
-}
-
 func TestServeOriginalImage_WithDirectLink(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -394,7 +285,7 @@ func TestServeOriginalImage_WithDirectLink(t *testing.T) {
 				StorageConfigID: 1,
 				MimeType:        "image/jpeg",
 			},
-			directURL:      "", // 空表示不走直链
+			directURL:      "",            // 空表示不走直链
 			expectedStatus: http.StatusOK, // 会继续代理逻辑
 			expectedHeader: "",
 		},
@@ -515,4 +406,164 @@ func TestSingleflightConcurrency(t *testing.T) {
 	// 验证 mock 被调用了10次（因为不是真正的 singleflight，只是测试 mock）
 	// 真正的 singleflight 会在 getGlobalTransferMode 方法中实现
 	assert.Equal(t, int32(10), callCount.Load())
+}
+
+func TestRemoteImageDataCacheKey(t *testing.T) {
+	assert.Equal(t, "7:original/2026/03/26/hash.jpg", remoteImageDataCacheKey(7, "original/2026/03/26/hash.jpg"))
+}
+
+type testPathProvider struct{}
+
+func (p *testPathProvider) SaveWithContext(ctx context.Context, storagePath string, file io.Reader) error {
+	return nil
+}
+
+func (p *testPathProvider) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeeker, error) {
+	return nil, nil
+}
+
+func (p *testPathProvider) DeleteWithContext(ctx context.Context, storagePath string) error {
+	return nil
+}
+
+func (p *testPathProvider) Exists(ctx context.Context, storagePath string) (bool, error) {
+	return true, nil
+}
+
+func (p *testPathProvider) Health(ctx context.Context) error {
+	return nil
+}
+
+func (p *testPathProvider) Name() string {
+	return "local"
+}
+
+func (p *testPathProvider) GetFilePath(storagePath string) (string, error) {
+	return "/tmp/test", nil
+}
+
+type testRemoteProvider struct{}
+
+func (p *testRemoteProvider) SaveWithContext(ctx context.Context, storagePath string, file io.Reader) error {
+	return nil
+}
+
+func (p *testRemoteProvider) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeeker, error) {
+	return nil, nil
+}
+
+func (p *testRemoteProvider) DeleteWithContext(ctx context.Context, storagePath string) error {
+	return nil
+}
+
+func (p *testRemoteProvider) Exists(ctx context.Context, storagePath string) (bool, error) {
+	return true, nil
+}
+
+func (p *testRemoteProvider) Health(ctx context.Context) error {
+	return nil
+}
+
+func (p *testRemoteProvider) Name() string {
+	return "s3"
+}
+
+var _ storage.PathProvider = (*testPathProvider)(nil)
+var _ storage.Provider = (*testPathProvider)(nil)
+var _ storage.Provider = (*testRemoteProvider)(nil)
+
+func TestShouldUseImageDataCache(t *testing.T) {
+	handler := &Handler{
+		cacheHelper:      cache.NewHelper(nil),
+		imageDataCaching: true,
+	}
+
+	assert.False(t, handler.shouldUseImageDataCache(nil))
+	assert.True(t, handler.shouldUseImageDataCache(&testRemoteProvider{}))
+	assert.False(t, handler.shouldUseImageDataCache(&testPathProvider{}))
+
+	handler.imageDataCaching = false
+	assert.False(t, handler.shouldUseImageDataCache(&testRemoteProvider{}))
+}
+
+type cacheFillProvider struct {
+	data       []byte
+	getCalls   atomic.Int32
+	storageKey string
+}
+
+func (p *cacheFillProvider) SaveWithContext(ctx context.Context, storagePath string, file io.Reader) error {
+	return nil
+}
+
+func (p *cacheFillProvider) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeeker, error) {
+	p.getCalls.Add(1)
+	p.storageKey = storagePath
+	return bytes.NewReader(p.data), nil
+}
+
+func (p *cacheFillProvider) DeleteWithContext(ctx context.Context, storagePath string) error {
+	return nil
+}
+
+func (p *cacheFillProvider) Exists(ctx context.Context, storagePath string) (bool, error) {
+	return true, nil
+}
+
+func (p *cacheFillProvider) Health(ctx context.Context) error {
+	return nil
+}
+
+func (p *cacheFillProvider) Name() string {
+	return "s3"
+}
+
+func TestGetOrPopulateImageDataCachePopulatesRemoteCache(t *testing.T) {
+	providerCache, err := cache.NewMemoryCache(cache.MemoryConfig{
+		NumCounters: 1000,
+		MaxCost:     1024 * 1024,
+		BufferItems: 64,
+	})
+	require.NoError(t, err)
+	defer func() { _ = providerCache.Close() }()
+
+	handler := &Handler{
+		cacheHelper: cache.NewHelper(providerCache, cache.HelperConfig{
+			ImageCacheTTL:         time.Minute,
+			ImageDataCacheTTL:     time.Minute,
+			MaxCacheableImageSize: 1024,
+		}),
+		imageDataCaching: true,
+	}
+
+	provider := &cacheFillProvider{data: []byte("hello-image")}
+
+	data, ok := handler.getOrPopulateImageDataCache(context.Background(), provider, "image_data:test", "path/test.jpg")
+	require.True(t, ok)
+	assert.Equal(t, []byte("hello-image"), data)
+	assert.Equal(t, int32(1), provider.getCalls.Load())
+
+	data, ok = handler.getOrPopulateImageDataCache(context.Background(), provider, "image_data:test", "path/test.jpg")
+	require.True(t, ok)
+	assert.Equal(t, []byte("hello-image"), data)
+	assert.Equal(t, int32(1), provider.getCalls.Load())
+}
+
+func TestGetOrPopulateImageDataCacheSkipsLocalProvider(t *testing.T) {
+	providerCache, err := cache.NewMemoryCache(cache.MemoryConfig{
+		NumCounters: 1000,
+		MaxCost:     1024 * 1024,
+		BufferItems: 64,
+	})
+	require.NoError(t, err)
+	defer func() { _ = providerCache.Close() }()
+
+	handler := &Handler{
+		cacheHelper:      cache.NewHelper(providerCache),
+		imageDataCaching: true,
+	}
+
+	data, ok := handler.getOrPopulateImageDataCache(context.Background(), &testPathProvider{}, "image_data:test", "path/test.jpg")
+	assert.False(t, ok)
+	assert.Nil(t, data)
 }

@@ -2,7 +2,6 @@ package albums
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -48,7 +47,7 @@ func (h *Handler) DeleteAlbumHandler(c *gin.Context) {
 		if strings.Contains(err.Error(), "not found or access denied") {
 			common.RespondError(c, http.StatusNotFound, err.Error())
 		} else {
-			log.Printf("Error deleting album %d for user %d: %v", albumID, userID, err)
+			utils.Errorf("Error deleting album %d for user %d: %v", albumID, userID, err)
 			common.RespondError(c, http.StatusInternalServerError, "Failed to delete album due to an internal error")
 		}
 		return

@@ -1,9 +1,10 @@
 package core
 
 import (
-	"log"
 	"net/http"
 	"time"
+
+	"github.com/anoixa/image-bed/utils"
 
 	"github.com/anoixa/image-bed/api"
 	"github.com/anoixa/image-bed/api/middleware"
@@ -71,15 +72,23 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	}))
 
 	if err := router.SetTrustedProxies(nil); err != nil {
-		log.Printf("Warning: Failed to set trusted proxies: %v", err)
+		utils.Warnf("Warning: Failed to set trusted proxies: %v", err)
 	}
 
-	router.MaxMultipartMemory = int64(cfg.UploadMaxSizeMB) << 20
+	const (
+		defaultMaxUploadSizeMB = 50
+		multipartMemoryMB      = 8 // gin in-memory multipart buffer; actual size limit enforced per-request
+		defaultMaxBatchTotalMB = 500
+		minBatchRequestLimitMB = 100
+		batchRequestLimitRatio = 2
+	)
+
+	router.MaxMultipartMemory = multipartMemoryMB << 20
 	concurrencyLimiter := middleware.NewConcurrencyLimiter(100)
 	router.Use(concurrencyLimiter.Middleware())
-	requestBodyLimit := int64(cfg.UploadMaxBatchTotalMB) * 2 << 20
-	if requestBodyLimit < 100<<20 {
-		requestBodyLimit = 100 << 20 // 最小 100MB
+	requestBodyLimit := int64(defaultMaxBatchTotalMB) * batchRequestLimitRatio << 20
+	if requestBodyLimit < minBatchRequestLimitMB<<20 {
+		requestBodyLimit = minBatchRequestLimitMB << 20
 	}
 	router.Use(middleware.MaxBytesReader(requestBodyLimit))
 	router.Use(middleware.RequestID())
@@ -100,11 +109,11 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 
 	if deps.JWTService != nil {
 		jwtService = deps.JWTService
-	} else if deps.ConfigManager != nil {
+	} else if deps.Config != nil {
 		var err error
-		jwtService, err = auth.NewJWTService(deps.ConfigManager, deps.Repositories.KeysRepo)
+		jwtService, err = auth.NewJWTService(deps.Config, deps.ConfigManager, deps.Repositories.KeysRepo)
 		if err != nil {
-			log.Printf("[Server] Failed to initialize JWT service from config: %v, using defaults", err)
+			utils.Errorf("[Server] Failed to initialize JWT service from app config: %v, using defaults", err)
 		}
 	}
 

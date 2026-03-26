@@ -731,7 +731,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Update image processing settings including thumbnail and WebP conversion options",
+                "description": "Update image processing settings (partial update supported)",
                 "consumes": [
                     "application/json"
                 ],
@@ -744,12 +744,12 @@ const docTemplate = `{
                 "summary": "Update image processing configuration",
                 "parameters": [
                     {
-                        "description": "Image processing settings",
+                        "description": "Image processing settings (partial)",
                         "name": "request",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/config.ImageProcessingSettings"
+                            "$ref": "#/definitions/admin.UpdateConfigRequest"
                         }
                     }
                 ],
@@ -1666,7 +1666,6 @@ const docTemplate = `{
                 "tags": [
                     "dashboard"
                 ],
-                "summary": "Get dashboard statistics",
                 "responses": {
                     "200": {
                         "description": "Dashboard statistics",
@@ -2847,6 +2846,68 @@ const docTemplate = `{
                 }
             }
         },
+        "admin.UpdateConfigRequest": {
+            "type": "object",
+            "properties": {
+                "api_key_enabled": {
+                    "type": "boolean"
+                },
+                "avif_experimental": {
+                    "type": "boolean"
+                },
+                "avif_quality": {
+                    "type": "integer"
+                },
+                "avif_speed": {
+                    "type": "integer"
+                },
+                "concurrent_upload_limit": {
+                    "type": "integer"
+                },
+                "conversion_enabled_formats": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "default_album_id": {
+                    "type": "integer"
+                },
+                "default_visibility": {
+                    "type": "string"
+                },
+                "max_batch_total_mb": {
+                    "type": "integer"
+                },
+                "max_dimension": {
+                    "type": "integer"
+                },
+                "max_file_size_mb": {
+                    "type": "integer"
+                },
+                "skip_smaller_than": {
+                    "type": "integer"
+                },
+                "thumbnail_enabled": {
+                    "type": "boolean"
+                },
+                "thumbnail_quality": {
+                    "type": "integer"
+                },
+                "thumbnail_sizes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.ThumbnailSize"
+                    }
+                },
+                "webp_effort": {
+                    "type": "integer"
+                },
+                "webp_quality": {
+                    "type": "integer"
+                }
+            }
+        },
         "albums.AddImagesToAlbumRequest": {
             "type": "object",
             "required": [
@@ -3090,9 +3151,6 @@ const docTemplate = `{
                     "type": "string"
                 }
             }
-        },
-        "config.ImageProcessingSettings": {
-            "type": "object"
         },
         "github_com_anoixa_image-bed_api_handler_user.ChangePasswordRequest": {
             "type": "object",
@@ -3446,49 +3504,27 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "cache": {
-                    "description": "缓存信息",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/system.CacheStatus"
-                        }
-                    ]
+                    "$ref": "#/definitions/system.CacheStatus"
                 },
                 "commit_hash": {
                     "type": "string"
                 },
                 "data_dir": {
-                    "description": "数据目录信息",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/system.DirStatus"
-                        }
-                    ]
+                    "$ref": "#/definitions/system.DirStatus"
                 },
                 "environment": {
-                    "description": "运行环境",
                     "type": "string"
                 },
                 "go_version": {
                     "type": "string"
                 },
                 "memory": {
-                    "description": "内存统计",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/system.MemoryStatus"
-                        }
-                    ]
+                    "$ref": "#/definitions/system.MemoryStatus"
                 },
                 "runtime": {
-                    "description": "运行时信息",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/system.RuntimeStatus"
-                        }
-                    ]
+                    "$ref": "#/definitions/system.RuntimeStatus"
                 },
                 "version": {
-                    "description": "版本信息",
                     "type": "string"
                 }
             }

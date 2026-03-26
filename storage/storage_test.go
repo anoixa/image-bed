@@ -1,9 +1,13 @@
 package storage
 
 import (
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // setupTestDir 创建测试用的临时目录
@@ -18,9 +22,9 @@ func resetStorage(t *testing.T) {
 	t.Helper()
 	providersMu.Lock()
 	defer providersMu.Unlock()
-	providers = make(map[uint]Provider)
-	defaultProvider = nil
-	defaultID = 0
+	registryPtr.Store(&registryState{
+		providers: make(map[uint]Provider),
+	})
 }
 
 // TestConcurrentAccess 测试并发访问 providers map
@@ -254,4 +258,37 @@ func TestGetProviderCount(t *testing.T) {
 	if GetProviderCount() != 1 {
 		t.Fatalf("Should have 1 provider, got %d", GetProviderCount())
 	}
+}
+
+func TestLocalStoragePathProvider(t *testing.T) {
+	dir := t.TempDir()
+	ls, err := NewLocalStorage(dir)
+	require.NoError(t, err)
+
+	// Write a file to test with
+	testPath := "2024/01/test.jpg"
+	fullPath := filepath.Join(dir, testPath)
+	require.NoError(t, os.MkdirAll(filepath.Dir(fullPath), 0755))
+	require.NoError(t, os.WriteFile(fullPath, []byte("data"), 0600))
+
+	pp, ok := Provider(ls).(PathProvider)
+	require.True(t, ok, "LocalStorage must implement PathProvider")
+
+	got, err := pp.GetFilePath(testPath)
+	require.NoError(t, err)
+	assert.Equal(t, fullPath, got)
+}
+
+func TestLocalStoragePathProvider_Traversal(t *testing.T) {
+	dir := t.TempDir()
+	ls, err := NewLocalStorage(dir)
+	require.NoError(t, err)
+
+	pp := Provider(ls).(PathProvider)
+
+	_, err = pp.GetFilePath("../etc/passwd")
+	assert.Error(t, err, "path traversal must be rejected")
+
+	_, err = pp.GetFilePath("/etc/passwd")
+	assert.Error(t, err, "absolute path must be rejected")
 }

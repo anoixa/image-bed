@@ -1,7 +1,7 @@
 package key
 
 import (
-	"log"
+	"github.com/anoixa/image-bed/utils"
 	"net/http"
 	"sort"
 	"time"
@@ -14,7 +14,6 @@ import (
 type apiTokenResponse struct {
 	ID          uint       `json:"id"`
 	IsActive    bool       `json:"is_active"`
-	Hash        string     `json:"hash"`
 	Prefix      string     `json:"prefix"`
 	CreatedAt   time.Time  `json:"created_at"`
 	Description string     `json:"description"`
@@ -41,7 +40,7 @@ func (h *Handler) GetToken(context *gin.Context) {
 
 	apiTokens, err := h.svc.GetAllApiTokensByUser(userID)
 	if err != nil {
-		log.Printf("Failed to get API tokens for user %d: %v", userID, err)
+		utils.Errorf("Failed to get API tokens for user %d: %v", userID, err)
 
 		common.RespondError(context, http.StatusInternalServerError, "Failed to retrieve API tokens due to an internal error.")
 		return
@@ -51,7 +50,6 @@ func (h *Handler) GetToken(context *gin.Context) {
 	for _, tokenModel := range apiTokens {
 		responseDTOs = append(responseDTOs, apiTokenResponse{
 			ID:          tokenModel.ID,
-			Hash:        tokenModel.Token,
 			Prefix:      tokenModel.TokenPrefix,
 			IsActive:    tokenModel.IsActive,
 			Description: tokenModel.Description,

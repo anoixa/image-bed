@@ -3,16 +3,14 @@ package config
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"log"
 
-	"github.com/anoixa/image-bed/cache"
+	"github.com/anoixa/image-bed/utils"
+
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/configs"
 	cryptoservice "github.com/anoixa/image-bed/internal/crypto"
 	"github.com/anoixa/image-bed/storage"
-	cryptoutils "github.com/anoixa/image-bed/utils/crypto"
 	"gorm.io/gorm"
 )
 
@@ -26,30 +24,8 @@ type Manager struct {
 	dataPath string
 }
 
-// JWTConfig JWT 配置结构
-type JWTConfig struct {
-	Secret          string
-	AccessTokenTTL  string
-	RefreshTokenTTL string
-}
-
 // NewManager 创建配置管理器
 func NewManager(db *gorm.DB, dataPath string) *Manager {
-	repo := configs.NewRepository(db)
-	cryptoSvc := cryptoservice.NewService(dataPath)
-
-	return &Manager{
-		db:       db,
-		repo:     repo,
-		crypto:   NewCryptoLayer(repo, cryptoSvc),
-		cache:    NewCacheLayer(),
-		eventBus: NewEventBus(),
-		dataPath: dataPath,
-	}
-}
-
-// NewManagerWithCache 创建带缓存的配置管理器
-func NewManagerWithCache(db *gorm.DB, dataPath string, cacheProvider cache.Provider, cacheTTL int) *Manager {
 	repo := configs.NewRepository(db)
 	cryptoSvc := cryptoservice.NewService(dataPath)
 
@@ -79,7 +55,7 @@ func (m *Manager) Initialize() error {
 		return fmt.Errorf("failed to ensure local storage config: %w", err)
 	}
 
-	log.Println("[ConfigManager] Initialized successfully")
+	utils.Infof("[ConfigManager] Initialized successfully")
 	return nil
 }
 
@@ -237,7 +213,7 @@ func (m *Manager) ListConfigs(ctx context.Context, category models.ConfigCategor
 	for _, config := range configs {
 		resp, err := m.ToResponseWithMask(ctx, &config, maskSensitive)
 		if err != nil {
-			log.Printf("[ConfigManager] Failed to decrypt config ID=%d, Key=%s: %v", config.ID, config.Key, err)
+			utils.Errorf("[ConfigManager] Failed to decrypt config ID=%d, Key=%s: %v", config.ID, config.Key, err)
 			continue
 		}
 		responses = append(responses, resp)
@@ -301,10 +277,12 @@ func (m *Manager) Enable(ctx context.Context, id uint) error {
 		return err
 	}
 
-	config, _ := m.repo.GetByID(ctx, id)
-	if config != nil {
-		m.cache.Invalidate(config.Category)
+	config, err := m.repo.GetByID(ctx, id)
+	if err != nil {
+		utils.Errorf("[ConfigManager] Enable: failed to fetch config %d after update: %v", id, err)
+		return nil
 	}
+	m.cache.Invalidate(config.Category)
 	m.eventBus.Publish(EventConfigUpdated, config)
 
 	return nil
@@ -316,111 +294,15 @@ func (m *Manager) Disable(ctx context.Context, id uint) error {
 		return err
 	}
 
-	config, _ := m.repo.GetByID(ctx, id)
-	if config != nil {
-		m.cache.Invalidate(config.Category)
+	config, err := m.repo.GetByID(ctx, id)
+	if err != nil {
+		utils.Errorf("[ConfigManager] Disable: failed to fetch config %d after update: %v", id, err)
+		return nil
 	}
+	m.cache.Invalidate(config.Category)
 	m.eventBus.Publish(EventConfigUpdated, config)
 
 	return nil
-}
-
-// GetJWTConfig 获取 JWT 配置
-func (m *Manager) GetJWTConfig(ctx context.Context) (*JWTConfig, error) {
-	// 先从缓存获取
-	if cfg := m.cache.GetJWT(); cfg != nil {
-		return cfg, nil
-	}
-
-	config, err := m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryJWT)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			if err := m.EnsureDefaultJWTConfig(ctx); err != nil {
-				return nil, fmt.Errorf("failed to create default JWT config: %w", err)
-			}
-			config, err = m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryJWT)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get JWT config after creation: %w", err)
-			}
-		} else {
-			return nil, fmt.Errorf("failed to get JWT config: %w", err)
-		}
-	}
-
-	configMap, err := m.crypto.Decrypt(config.ConfigJSON)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decrypt JWT config: %w", err)
-	}
-
-	jwtConfig := &JWTConfig{
-		Secret:          getStringFromMap(configMap, "secret", ""),
-		AccessTokenTTL:  getStringFromMap(configMap, "access_token_ttl", "15m"),
-		RefreshTokenTTL: getStringFromMap(configMap, "refresh_token_ttl", "168h"),
-	}
-
-	m.cache.SetJWT(jwtConfig)
-	return jwtConfig, nil
-}
-
-// EnsureDefaultJWTConfig 确保默认 JWT 配置存在
-func (m *Manager) EnsureDefaultJWTConfig(ctx context.Context) error {
-	count, err := m.repo.CountByCategory(ctx, models.ConfigCategoryJWT)
-	if err != nil {
-		return err
-	}
-
-	if count > 0 {
-		return nil
-	}
-
-	secret := cryptoutils.GenerateRandomKey(32)
-
-	req := &models.SystemConfigStoreRequest{
-		Category: models.ConfigCategoryJWT,
-		Name:     "JWT Settings",
-		Config: map[string]any{
-			"secret":            secret,
-			"access_token_ttl":  "15m",
-			"refresh_token_ttl": "168h",
-		},
-		IsEnabled:   BoolPtr(true),
-		IsDefault:   BoolPtr(true),
-		Description: "JWT authentication configuration",
-	}
-
-	_, err = m.CreateConfig(ctx, req, 0)
-	if err != nil {
-		return fmt.Errorf("failed to create default JWT config: %w", err)
-	}
-
-	log.Println("[ConfigManager] Default JWT config created successfully")
-	return nil
-}
-
-// UpdateJWTConfig 更新 JWT 配置
-func (m *Manager) UpdateJWTConfig(ctx context.Context, jwtConfig *JWTConfig) error {
-	config, err := m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryJWT)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return m.EnsureDefaultJWTConfig(ctx)
-		}
-		return fmt.Errorf("failed to get JWT config: %w", err)
-	}
-
-	req := &models.SystemConfigStoreRequest{
-		Category: config.Category,
-		Name:     config.Name,
-		Config: map[string]any{
-			"secret":            jwtConfig.Secret,
-			"access_token_ttl":  jwtConfig.AccessTokenTTL,
-			"refresh_token_ttl": jwtConfig.RefreshTokenTTL,
-		},
-		IsEnabled:   BoolPtr(true),
-		Description: config.Description,
-	}
-
-	_, err = m.UpdateConfig(ctx, config.ID, req)
-	return err
 }
 
 // GetStorageConfigs 获取存储配置
@@ -440,7 +322,7 @@ func (m *Manager) GetStorageConfigs(ctx context.Context) ([]storage.StorageConfi
 	for _, cfg := range configs {
 		configMap, err := m.crypto.Decrypt(cfg.ConfigJSON)
 		if err != nil {
-			log.Printf("[ConfigManager] Failed to decrypt storage config ID=%d: %v", cfg.ID, err)
+			utils.Errorf("[ConfigManager] Failed to decrypt storage config ID=%d: %v", cfg.ID, err)
 			continue
 		}
 
@@ -540,7 +422,7 @@ func (m *Manager) ensureDefaultLocalStorageConfig(ctx context.Context) error {
 		return fmt.Errorf("failed to create default local storage config: %w", err)
 	}
 
-	log.Println("[ConfigManager] Default local storage config created successfully")
+	utils.Infof("[ConfigManager] Default local storage config created successfully")
 	return nil
 }
 
@@ -579,7 +461,7 @@ func (m *Manager) GetGlobalTransferMode(ctx context.Context) storage.TransferMod
 
 	configMap, err := m.crypto.Decrypt(config.ConfigJSON)
 	if err != nil {
-		log.Printf("[ConfigManager] Failed to decrypt transfer mode: %v", err)
+		utils.Errorf("[ConfigManager] Failed to decrypt transfer mode: %v", err)
 		return storage.TransferModeAuto
 	}
 

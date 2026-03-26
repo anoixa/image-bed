@@ -5,11 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	config "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
-	"github.com/anoixa/image-bed/storage"
-	"github.com/anoixa/image-bed/utils/generator"
 	"gorm.io/gorm"
 )
 
@@ -18,6 +15,7 @@ type ThumbnailResult struct {
 	Format      string
 	Identifier  string
 	StoragePath string
+	FileHash    string
 	Width       int
 	Height      int
 	FileSize    int64
@@ -26,29 +24,13 @@ type ThumbnailResult struct {
 
 // ThumbnailService 缩略图服务
 type ThumbnailService struct {
-	variantRepo   *images.VariantRepository
-	imageRepo     *images.Repository
-	configManager *config.Manager
-	storage       storage.Provider
-	converter     *Converter
-	pathGenerator *generator.PathGenerator
+	variantRepo *images.VariantRepository
 }
 
 // NewThumbnailService 创建缩略图服务
-func NewThumbnailService(
-	variantRepo *images.VariantRepository,
-	imageRepo *images.Repository,
-	cm *config.Manager,
-	storage storage.Provider,
-	converter *Converter,
-) *ThumbnailService {
+func NewThumbnailService(variantRepo *images.VariantRepository) *ThumbnailService {
 	return &ThumbnailService{
-		variantRepo:   variantRepo,
-		imageRepo:     imageRepo,
-		configManager: cm,
-		storage:       storage,
-		converter:     converter,
-		pathGenerator: generator.NewPathGenerator(),
+		variantRepo: variantRepo,
 	}
 }
 
@@ -72,10 +54,11 @@ func (s *ThumbnailService) GetThumbnail(ctx context.Context, image *models.Image
 		Format:      format,
 		Identifier:  variant.Identifier,
 		StoragePath: variant.StoragePath,
+		FileHash:    variant.FileHash,
 		Width:       variant.Width,
 		Height:      variant.Height,
 		FileSize:    variant.FileSize,
-		MIMEType:    s.getMIMETypeFromFormat(format),
+		MIMEType:    "image/webp",
 	}, nil
 }
 
@@ -93,20 +76,30 @@ func (s *ThumbnailService) EnsureThumbnail(ctx context.Context, image *models.Im
 	return nil, false, nil
 }
 
-// GenerateThumbnailIdentifiers 生成缩略图的 identifier 和 storage_path
-func (s *ThumbnailService) GenerateThumbnailIdentifiers(originalStoragePath string, width int) generator.StorageIdentifiers {
-	return s.pathGenerator.GenerateThumbnailIdentifiers(originalStoragePath, width)
-}
+// GetWebPVariant 获取 WebP 格式变体（用于缩略图降级）
+func (s *ThumbnailService) GetWebPVariant(ctx context.Context, image *models.Image) (*ThumbnailResult, bool, error) {
+	variant, err := s.variantRepo.GetVariantByImageIDAndFormat(image.ID, "webp")
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
 
-// getMIMETypeFromFormat 根据格式获取 MIME 类型
-func (s *ThumbnailService) getMIMETypeFromFormat(_ string) string {
-	return "image/webp"
-}
+	if variant.Status != models.VariantStatusCompleted {
+		return nil, false, nil
+	}
 
-// GetThumbnailURL 获取缩略图 URL
-func (s *ThumbnailService) GetThumbnailURL(originalStoragePath string, width int) string {
-	ids := s.GenerateThumbnailIdentifiers(originalStoragePath, width)
-	return ids.StoragePath
+	return &ThumbnailResult{
+		Format:      "webp",
+		Identifier:  variant.Identifier,
+		StoragePath: variant.StoragePath,
+		FileHash:    variant.FileHash,
+		Width:       variant.Width,
+		Height:      variant.Height,
+		FileSize:    variant.FileSize,
+		MIMEType:    "image/webp",
+	}, true, nil
 }
 
 // formatThumbnailSize 生成缩略图格式标识

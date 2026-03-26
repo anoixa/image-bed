@@ -56,13 +56,30 @@ type RouterDependencies struct {
 
 // RegisterRoutes 注册所有路由
 func RegisterRoutes(router *gin.Engine, deps *RouterDependencies) {
+	imageHandler := newImageHandler(deps)
+
 	registerBasicRoutes(router, deps)
-	registerPublicRoutes(router, deps)
-	registerAPIRoutes(router, deps)
+	registerPublicRoutes(router, deps, imageHandler)
+	registerAPIRoutes(router, deps, imageHandler)
 
 	if deps.Config != nil && deps.Config.ServeFrontend {
 		registerStaticRoutes(router)
 	}
+}
+
+func newImageHandler(deps *RouterDependencies) *handlerImages.Handler {
+	cfg := deps.Config
+	baseURL := getBaseURL(cfg)
+	return handlerImages.NewHandler(
+		deps.CacheProvider,
+		deps.Repositories.ImagesRepo,
+		deps.DB,
+		deps.Converter,
+		deps.ConfigManager,
+		cfg,
+		baseURL,
+		deps.Repositories.AlbumsRepo,
+	)
 }
 
 // registerBasicRoutes 注册基础路由
@@ -95,16 +112,7 @@ func registerBasicRoutes(router *gin.Engine, deps *RouterDependencies) {
 }
 
 // registerPublicRoutes 注册公共接口路由
-func registerPublicRoutes(router *gin.Engine, deps *RouterDependencies) {
-	cfg := deps.Config
-	baseURL := getBaseURL(cfg)
-	uploadMaxBatchTotalMB := 500
-	if cfg != nil {
-		uploadMaxBatchTotalMB = cfg.UploadMaxBatchTotalMB
-	}
-
-	imageHandler := handlerImages.NewHandler(deps.CacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager, cfg, baseURL, uploadMaxBatchTotalMB, storage.GetDefault())
-
+func registerPublicRoutes(router *gin.Engine, deps *RouterDependencies, imageHandler *handlerImages.Handler) {
 	// 公共图片访问
 	publicGroup := router.Group("/images")
 	publicGroup.Use(deps.ImageRateLimiter.Middleware())
@@ -122,15 +130,9 @@ func registerPublicRoutes(router *gin.Engine, deps *RouterDependencies) {
 }
 
 // registerAPIRoutes 注册 API 路由
-func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
+func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies, imageHandler *handlerImages.Handler) {
 	cfg := deps.Config
 	baseURL := getBaseURL(cfg)
-	uploadMaxBatchTotalMB := 500
-	if cfg != nil {
-		uploadMaxBatchTotalMB = cfg.UploadMaxBatchTotalMB
-	}
-
-	imageHandler := handlerImages.NewHandler(deps.CacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager, cfg, baseURL, uploadMaxBatchTotalMB, storage.GetDefault())
 	albumService := svcAlbums.NewService(deps.Repositories.AlbumsRepo)
 	albumHandler := handlerAlbums.NewHandler(albumService, deps.CacheProvider, baseURL)
 	albumImageHandler := handlerAlbums.NewAlbumImageHandler(albumService, deps.Repositories.ImagesRepo, deps.CacheProvider, cfg)
@@ -168,7 +170,6 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
 			imagesGroup.Use(middleware.Authorize(middleware.AllowAllAuth...))
 			{
 				imagesGroup.POST("/upload", imageHandler.UploadImage)
-				imagesGroup.POST("/uploads", imageHandler.UploadImages)
 				imagesGroup.POST("", imageHandler.ListImages)
 				imagesGroup.POST("/delete", imageHandler.DeleteImages)
 				imagesGroup.DELETE("/:identifier", imageHandler.DeleteSingleImage)
@@ -216,22 +217,14 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies) {
 
 			// Admin
 			if deps.ConfigManager != nil {
-				registerAdminRoutes(v1, deps)
+				registerAdminRoutes(v1, deps, imageHandler)
 			}
 		}
 	}
 }
 
 // registerAdminRoutes 注册管理员路由
-func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies) {
-	cfg := deps.Config
-	baseURL := getBaseURL(cfg)
-	uploadMaxBatchTotalMB := 500
-	if cfg != nil {
-		uploadMaxBatchTotalMB = cfg.UploadMaxBatchTotalMB
-	}
-	imageHandler := handlerImages.NewHandler(deps.CacheProvider, deps.Repositories.ImagesRepo, deps.DB, deps.Converter, deps.ConfigManager, cfg, baseURL, uploadMaxBatchTotalMB, storage.GetDefault())
-
+func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies, imageHandler *handlerImages.Handler) {
 	configHandler := admin.NewConfigHandler(deps.ConfigManager, deps.Repositories.ImagesRepo)
 	adminGroup := v1.Group("/admin")
 	adminGroup.Use(middleware.Authorize(middleware.AllowJWTOnly...))
@@ -278,20 +271,16 @@ func registerStaticRoutes(router *gin.Engine) {
 			c.JSON(404, gin.H{"error": "Not found"})
 			return
 		}
-
-		// 尝试打开请求的文件
 		filePath := strings.TrimPrefix(path, "/")
 		if filePath == "" {
 			filePath = "index.html"
 		}
 
-		// 检查文件是否存在且不是目录（避免重定向问题）
 		if filePath != "index.html" && public.Exists(filePath) && !public.Exists(filePath+"/index.html") {
 			c.FileFromFS(filePath, public.DistFS)
 			return
 		}
 
-		// 对于明确的静态文件请求（如 favicon.ico, robots.txt 等），如果不存在则返回 404
 		if isStaticAssetFile(filePath) {
 			c.JSON(404, gin.H{"error": "Not found"})
 			return
@@ -357,7 +346,6 @@ func registerPprofRoutes(router *gin.Engine) {
 }
 
 // isStaticAssetFile 检查是否为明确的静态文件请求
-// 这些文件如果不存在应该返回 404，而不是返回 index.html
 func isStaticAssetFile(filePath string) bool {
 	staticExtensions := []string{
 		".ico", ".png", ".jpg", ".jpeg", ".gif", ".svg",

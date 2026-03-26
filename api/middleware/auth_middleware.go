@@ -67,31 +67,21 @@ func handleJwtAuth(c *gin.Context, token string) error {
 		return errors.New("invalid or expired token")
 	}
 
-	userIDValue, ok := claims["user_id"]
-	if !ok {
+	if claims.UserID == 0 {
 		return errors.New("user_id not found in token claims")
 	}
-	userID, ok := userIDValue.(float64)
-	if !ok {
-		return errors.New("user_id in token is not a valid number")
-	}
 
-	usernameValue, ok := claims["username"]
-	if !ok {
+	if claims.Username == "" {
 		return errors.New("username not found in token claims")
 	}
-	username, ok := usernameValue.(string)
-	if !ok {
-		return errors.New("username in token is not a valid string")
-	}
 
-	role, _ := claims["role"].(string)
+	role := claims.Role
 	if role == "" {
 		role = RoleUser
 	}
 
-	c.Set(ContextUserIDKey, uint(userID))
-	c.Set(ContextUsernameKey, username)
+	c.Set(ContextUserIDKey, claims.UserID)
+	c.Set(ContextUsernameKey, claims.Username)
 	c.Set(ContextRoleKey, role)
 	c.Set(AuthTypeKey, AuthTypeJWT)
 
@@ -103,7 +93,7 @@ func handleStaticTokenAuth(c *gin.Context, token string) error {
 	if jwtService == nil {
 		return errors.New("JWT service not initialized")
 	}
-	user, err := jwtService.ValidateStaticToken(token)
+	user, err := jwtService.ValidateStaticToken(c.Request.Context(), token)
 	if err != nil {
 		return fmt.Errorf("invalid token: %w", err)
 	}

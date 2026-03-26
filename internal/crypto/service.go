@@ -31,9 +31,9 @@ func (s *Service) Initialize(checkDataExists func() (bool, error)) error {
 }
 
 // EncryptString 加密字符串
-func (s *Service) EncryptString(plaintext string) string {
+func (s *Service) EncryptString(plaintext string) (string, error) {
 	if s.encryptor == nil {
-		return plaintext
+		return "", fmt.Errorf("encryptor not initialized")
 	}
 	return s.encryptor.Encrypt(plaintext)
 }
@@ -57,7 +57,7 @@ func (s *Service) EncryptJSON(data map[string]any) (string, error) {
 		return "", fmt.Errorf("failed to marshal data: %w", err)
 	}
 
-	return s.encryptor.Encrypt(string(jsonData)), nil
+	return s.encryptor.Encrypt(string(jsonData))
 }
 
 // DecryptJSON 解密 JSON 数据
