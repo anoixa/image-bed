@@ -128,8 +128,12 @@ func NewS3Storage(cfg S3Config) (*S3Storage, error) {
 
 func (s *S3Storage) SaveWithContext(ctx context.Context, storagePath string, file io.Reader) error {
 	contentType := getContentTypeFromPathS3(storagePath)
+	contentLength, err := getRemainingReaderSize(file)
+	if err != nil {
+		return fmt.Errorf("failed to determine content length for %q: %w", storagePath, err)
+	}
 
-	_, err := s.client.PutObject(ctx, s.bucketName, storagePath, file, -1, minio.PutObjectOptions{
+	_, err = s.client.PutObject(ctx, s.bucketName, storagePath, file, contentLength, minio.PutObjectOptions{
 		ContentType: contentType,
 	})
 
@@ -138,6 +142,27 @@ func (s *S3Storage) SaveWithContext(ctx context.Context, storagePath string, fil
 	}
 
 	return nil
+}
+
+func getRemainingReaderSize(file io.Reader) (int64, error) {
+	seeker, ok := file.(io.Seeker)
+	if !ok {
+		return -1, nil
+	}
+
+	currentPos, err := seeker.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return 0, err
+	}
+	endPos, err := seeker.Seek(0, io.SeekEnd)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := seeker.Seek(currentPos, io.SeekStart); err != nil {
+		return 0, err
+	}
+
+	return endPos - currentPos, nil
 }
 
 func (s *S3Storage) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeeker, error) {

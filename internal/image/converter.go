@@ -2,6 +2,7 @@ package image
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/anoixa/image-bed/cache"
 	config "github.com/anoixa/image-bed/config/db"
@@ -109,17 +110,9 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 		return
 	}
 
-	// 更新图片状态为处理中
-	if image.VariantStatus != models.ImageVariantStatusProcessing {
-		if err := c.imageRepo.UpdateVariantStatus(image.ID, models.ImageVariantStatusProcessing); err != nil {
-			utils.LogIfDevf("[Converter] Failed to update image status: %v", err)
-		} else {
-			image.VariantStatus = models.ImageVariantStatusProcessing
-		}
-	}
-
 	pool := worker.GetGlobalPool()
 	if pool == nil {
+		utils.LogIfDevf("[Converter] Worker pool not initialized for %s, skip conversion", image.Identifier)
 		return
 	}
 
@@ -152,6 +145,11 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 
 	if !ok {
 		utils.LogIfDevf("[Converter] Failed to submit pipeline task for %s", image.Identifier)
+		return
+	}
+
+	if err := c.markImageProcessing(image); err != nil {
+		utils.LogIfDevf("[Converter] Failed to update image status after submit: %v", err)
 	}
 }
 
@@ -167,6 +165,17 @@ func getVariantID(v *models.ImageVariant) uint {
 	return v.ID
 }
 
+func (c *Converter) markImageProcessing(image *models.Image) error {
+	if image.VariantStatus == models.ImageVariantStatusProcessing {
+		return nil
+	}
+	if err := c.imageRepo.UpdateVariantStatus(image.ID, models.ImageVariantStatusProcessing); err != nil {
+		return err
+	}
+	image.VariantStatus = models.ImageVariantStatusProcessing
+	return nil
+}
+
 // getStorageForImage 获取图片对应的存储提供者
 func (c *Converter) getStorageForImage(image *models.Image) storage.Provider {
 	// 如果图片指定了 StorageConfigID，尝试获取对应的 provider
@@ -175,9 +184,18 @@ func (c *Converter) getStorageForImage(image *models.Image) storage.Provider {
 		if err == nil {
 			return provider
 		}
-		utils.LogIfDevf("[Converter] Failed to get storage provider ID=%d: %v, fallback to default",
+		utils.LogIfDevf("[Converter] Failed to get storage provider ID=%d: %v",
 			image.StorageConfigID, err)
+		return nil
 	}
-	// Fallback 到默认 storage
-	return c.storage
+
+	if c.storage != nil {
+		return c.storage
+	}
+
+	provider := storage.GetDefault()
+	if provider == nil {
+		utils.LogIfDevf("[Converter] %v", fmt.Errorf("no default storage configured"))
+	}
+	return provider
 }

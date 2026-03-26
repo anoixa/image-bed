@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -203,53 +204,14 @@ func (c *Config) GetCorsOrigins() []string {
 		return []string{"http://localhost:5173", "http://127.0.0.1:5173"}
 	}
 
-	var origins []string
-	for _, origin := range splitAndTrim(c.CorsOrigins, ",") {
-		if origin != "" {
-			origins = append(origins, origin)
+	parts := strings.Split(c.CorsOrigins, ",")
+	origins := make([]string, 0, len(parts))
+	for _, origin := range parts {
+		if trimmed := strings.TrimSpace(origin); trimmed != "" {
+			origins = append(origins, trimmed)
 		}
 	}
 	return origins
-}
-
-// splitAndTrim 分割字符串并去除空白
-func splitAndTrim(s, sep string) []string {
-	var parts []string
-	for _, part := range splitString(s, sep) {
-		trimmed := trimSpace(part)
-		if trimmed != "" {
-			parts = append(parts, trimmed)
-		}
-	}
-	return parts
-}
-
-// splitString 简单字符串分割
-func splitString(s, sep string) []string {
-	var result []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if i+len(sep) <= len(s) && s[i:i+len(sep)] == sep {
-			result = append(result, s[start:i])
-			start = i + len(sep)
-			i += len(sep) - 1
-		}
-	}
-	result = append(result, s[start:])
-	return result
-}
-
-// trimSpace 去除首尾空白字符
-func trimSpace(s string) string {
-	start := 0
-	end := len(s)
-	for start < end && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r') {
-		start++
-	}
-	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\n' || s[end-1] == '\r') {
-		end--
-	}
-	return s[start:end]
 }
 
 // getCpus 获取默认线程数量

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"testing"
 
 	"github.com/anoixa/image-bed/api/common"
@@ -40,4 +41,5 @@ func TestGetStatusReturnsRuntimeAndVipsMemoryFields(t *testing.T) {
 	assert.GreaterOrEqual(t, payload.Memory.VipsMemHighMB, float64(0))
 	assert.GreaterOrEqual(t, payload.Memory.VipsAllocs, int64(0))
 	assert.GreaterOrEqual(t, payload.Memory.VipsOpenFiles, int64(0))
+	assert.Equal(t, runtime.Version(), payload.GoVersion)
 }

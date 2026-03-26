@@ -96,8 +96,8 @@ func (h *Handler) serveThumbnailImage(c *gin.Context, image *models.Image, resul
 		return
 	}
 
-	provider := h.getStorageProvider(image.StorageConfigID)
-	if provider == nil {
+	provider, err := h.getStorageProvider(image.StorageConfigID)
+	if err != nil {
 		h.serveOriginalImage(c, image)
 		return
 	}
@@ -124,15 +124,7 @@ func (h *Handler) serveThumbnailImage(c *gin.Context, image *models.Image, resul
 			_ = closer.Close()
 		}
 	}()
-
-	c.Header("Cache-Control", config.CacheControlPublic)
-	c.Header("Content-Type", result.MIMEType)
-	c.Header("X-Content-Type-Options", "nosniff")
-
-	if _, err := io.Copy(c.Writer, stream); err != nil && !utils.IsClientDisconnect(err) {
-		utils.Errorf("[serveThumbnailImage] Failed to copy thumbnail %s (path: %s): %v",
-			utils.SanitizeLogMessage(result.Identifier), result.StoragePath, err)
-	}
+	h.serveReadSeekerContent(c, result.Identifier, result.MIMEType, "", stream, true)
 }
 
 func (h *Handler) serveThumbnailByStreaming(c *gin.Context, result *image.ThumbnailResult, streamer storage.StreamProvider) bool {

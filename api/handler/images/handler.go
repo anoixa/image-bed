@@ -9,7 +9,6 @@ import (
 	"github.com/anoixa/image-bed/database/repo/albums"
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/internal/image"
-	"github.com/anoixa/image-bed/storage"
 	"gorm.io/gorm"
 )
 
@@ -24,12 +23,11 @@ type Handler struct {
 	baseURL          string
 }
 
-func NewHandler(cacheProvider cache.Provider, imagesRepo *images.Repository, db *gorm.DB, converter *image.Converter, configManager *configSvc.Manager, cfg *config.Config, baseURL string, storageProvider storage.Provider, albumsRepo *albums.Repository) *Handler {
+func NewHandler(cacheProvider cache.Provider, imagesRepo *images.Repository, db *gorm.DB, converter *image.Converter, configManager *configSvc.Manager, cfg *config.Config, baseURL string, albumsRepo *albums.Repository) *Handler {
 	variantRepo := images.NewVariantRepository(db)
 	variantService := image.NewVariantService(variantRepo, configManager)
 
-	imageRepo := images.NewRepository(db)
-	thumbnailService := image.NewThumbnailService(variantRepo, imageRepo, configManager, storageProvider, converter)
+	thumbnailService := image.NewThumbnailService(variantRepo)
 
 	helperCfg := cache.HelperConfig{
 		ImageCacheTTL:         cache.DefaultImageCacheExpiration,

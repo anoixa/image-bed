@@ -84,6 +84,7 @@ func (h *Handler) ListImages(c *gin.Context) {
 
 	result, err := h.imageService.ListImages(body.StorageType, body.Identifier, body.Search, body.AlbumID, body.StartTime, body.EndTime, body.Sort, page, limit, int(userID))
 	if err != nil {
+		utils.Errorf("[ListImages] Failed to get image list for user=%d: %v", userID, err)
 		common.RespondError(c, http.StatusInternalServerError, "Failed to get image list")
 		return
 	}

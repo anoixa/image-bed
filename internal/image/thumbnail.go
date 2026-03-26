@@ -5,11 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	config "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
-	"github.com/anoixa/image-bed/storage"
-	"github.com/anoixa/image-bed/utils/generator"
 	"gorm.io/gorm"
 )
 
@@ -26,29 +23,13 @@ type ThumbnailResult struct {
 
 // ThumbnailService 缩略图服务
 type ThumbnailService struct {
-	variantRepo   *images.VariantRepository
-	imageRepo     *images.Repository
-	configManager *config.Manager
-	storage       storage.Provider
-	converter     *Converter
-	pathGenerator *generator.PathGenerator
+	variantRepo *images.VariantRepository
 }
 
 // NewThumbnailService 创建缩略图服务
-func NewThumbnailService(
-	variantRepo *images.VariantRepository,
-	imageRepo *images.Repository,
-	cm *config.Manager,
-	storage storage.Provider,
-	converter *Converter,
-) *ThumbnailService {
+func NewThumbnailService(variantRepo *images.VariantRepository) *ThumbnailService {
 	return &ThumbnailService{
-		variantRepo:   variantRepo,
-		imageRepo:     imageRepo,
-		configManager: cm,
-		storage:       storage,
-		converter:     converter,
-		pathGenerator: generator.NewPathGenerator(),
+		variantRepo: variantRepo,
 	}
 }
 
@@ -75,7 +56,7 @@ func (s *ThumbnailService) GetThumbnail(ctx context.Context, image *models.Image
 		Width:       variant.Width,
 		Height:      variant.Height,
 		FileSize:    variant.FileSize,
-		MIMEType:    s.getMIMETypeFromFormat(format),
+		MIMEType:    "image/webp",
 	}, nil
 }
 
@@ -116,22 +97,6 @@ func (s *ThumbnailService) GetWebPVariant(ctx context.Context, image *models.Ima
 		FileSize:    variant.FileSize,
 		MIMEType:    "image/webp",
 	}, true, nil
-}
-
-// GenerateThumbnailIdentifiers 生成缩略图的 identifier 和 storage_path
-func (s *ThumbnailService) GenerateThumbnailIdentifiers(originalStoragePath string, width int) generator.StorageIdentifiers {
-	return s.pathGenerator.GenerateThumbnailIdentifiers(originalStoragePath, width)
-}
-
-// getMIMETypeFromFormat 根据格式获取 MIME 类型
-func (s *ThumbnailService) getMIMETypeFromFormat(_ string) string {
-	return "image/webp"
-}
-
-// GetThumbnailURL 获取缩略图 URL
-func (s *ThumbnailService) GetThumbnailURL(originalStoragePath string, width int) string {
-	ids := s.GenerateThumbnailIdentifiers(originalStoragePath, width)
-	return ids.StoragePath
 }
 
 // formatThumbnailSize 生成缩略图格式标识

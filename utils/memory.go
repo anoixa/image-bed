@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"os"
 	"runtime"
-	"runtime/debug"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/anoixa/image-bed/config"
@@ -59,13 +60,6 @@ func GetMemoryStats() MemoryStats {
 	}
 }
 
-// GetMemoryUsageMB 获取当前内存使用量（MB）
-func GetMemoryUsageMB() float64 {
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	return float64(m.HeapAlloc) / 1024 / 1024
-}
-
 // LogMemoryStats 记录内存统计（仅在 dev 环境输出）
 func LogMemoryStats(prefix string) {
 	if !config.IsDevelopment() {
@@ -81,41 +75,6 @@ func LogMemoryStats(prefix string) {
 		stats.Goroutines,
 		stats.NumGC,
 	)
-}
-
-// LogMemoryDiff 记录内存变化（仅在 dev 环境输出）
-func LogMemoryDiff(prefix string, before MemoryStats) {
-	if !config.IsDevelopment() {
-		return
-	}
-	after := GetMemoryStats()
-	deltaHeap := after.HeapAllocMB - before.HeapAllocMB
-	Debugf("[Memory][%s] Delta=%+.2fMB (Before=%.2fMB, After=%.2fMB), Goroutines=%d",
-		prefix,
-		deltaHeap,
-		before.HeapAllocMB,
-		after.HeapAllocMB,
-		after.Goroutines,
-	)
-}
-
-// ForceGC 强制垃圾回收
-func ForceGC() {
-	runtime.GC()
-	debug.FreeOSMemory()
-}
-
-// MonitorMemory 内存监控函数，用于在任务前后打印内存变化
-func MonitorMemory(operation string) func() {
-	if !config.IsDevelopment() {
-		return func() {}
-	}
-	before := GetMemoryStats()
-	LogMemoryStats(operation + "[BEFORE]")
-
-	return func() {
-		LogMemoryDiff(operation+"[AFTER]", before)
-	}
 }
 
 // GetNumCPU 获取 CPU 核心数
@@ -187,7 +146,47 @@ func ReadProcessRSS() (float64, error) {
 }
 
 func readProcessRSSBytes() (uint64, error) {
-	data, err := os.ReadFile("/proc/self/statm")
+	rssBytes, err := readProcStatusRSSBytes("/proc/self/status")
+	if err == nil {
+		return rssBytes, nil
+	}
+
+	return readStatmRSSBytes("/proc/self/statm")
+}
+
+func readProcStatusRSSBytes(path string) (uint64, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+
+	return parseProcStatusRSSBytes(string(data))
+}
+
+func parseProcStatusRSSBytes(data string) (uint64, error) {
+	for _, line := range strings.Split(data, "\n") {
+		if !strings.HasPrefix(line, "VmRSS:") {
+			continue
+		}
+
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			return 0, fmt.Errorf("invalid VmRSS line: %q", line)
+		}
+
+		valueKB, err := strconv.ParseUint(fields[1], 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("parse VmRSS value: %w", err)
+		}
+
+		return valueKB * 1024, nil
+	}
+
+	return 0, fmt.Errorf("VmRSS not found")
+}
+
+func readStatmRSSBytes(path string) (uint64, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return 0, err
 	}

@@ -22,9 +22,9 @@ func resetStorage(t *testing.T) {
 	t.Helper()
 	providersMu.Lock()
 	defer providersMu.Unlock()
-	providers = make(map[uint]Provider)
-	defaultProvider = nil
-	defaultID = 0
+	registryPtr.Store(&registryState{
+		providers: make(map[uint]Provider),
+	})
 }
 
 // TestConcurrentAccess 测试并发访问 providers map

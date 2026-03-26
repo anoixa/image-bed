@@ -3,6 +3,7 @@ package system
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
@@ -140,7 +141,7 @@ func (h *Handler) GetStatus(c *gin.Context) {
 }
 
 func getGoVersion() string {
-	return "go1.26"
+	return runtime.Version()
 }
 
 func getEnvironment() string {

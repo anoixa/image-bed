@@ -89,31 +89,6 @@ func TestParseThumbnailWidth(t *testing.T) {
 	}
 }
 
-func TestGetThumbnailURL(t *testing.T) {
-	service := &imageSvc.ThumbnailService{}
-
-	tests := []struct {
-		name       string
-		identifier string
-		width      int
-		want       string
-	}{
-		{
-			name:       "new_format",
-			identifier: "original/2024/01/15/image.jpg",
-			width:      150,
-			want:       "thumbnails/2024/01/15/image_150.webp",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := service.GetThumbnailURL(tt.identifier, tt.width)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
-
 func TestServeThumbnailByStreaming(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

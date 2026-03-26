@@ -210,6 +210,27 @@ func TestRepository_ListImagesByUser(t *testing.T) {
 	assert.Len(t, images, 2)
 }
 
+func TestRepository_GetImageListFiltersByStorageConfigIDs(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewRepository(db)
+
+	images := []*models.Image{
+		{Identifier: "local-1", OriginalName: "local.jpg", FileHash: "filter-h1", UserID: 1, StorageConfigID: 10},
+		{Identifier: "s3-1", OriginalName: "s3.jpg", FileHash: "filter-h2", UserID: 1, StorageConfigID: 20},
+		{Identifier: "other-user", OriginalName: "other.jpg", FileHash: "filter-h3", UserID: 2, StorageConfigID: 10},
+	}
+
+	for _, image := range images {
+		require.NoError(t, repo.SaveImage(image))
+	}
+
+	result, total, err := repo.GetImageList([]uint{10}, "", "", nil, 0, 0, "desc", 1, 10, 1)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, result, 1)
+	assert.Equal(t, "local-1", result[0].Identifier)
+}
+
 func TestRepository_DeleteImageByIdentifierAndUser(t *testing.T) {
 	db := setupTestDB(t)
 	repo := NewRepository(db)

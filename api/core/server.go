@@ -1,9 +1,10 @@
 package core
 
 import (
-	"github.com/anoixa/image-bed/utils"
 	"net/http"
 	"time"
+
+	"github.com/anoixa/image-bed/utils"
 
 	"github.com/anoixa/image-bed/api"
 	"github.com/anoixa/image-bed/api/middleware"
@@ -82,8 +83,6 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 		batchRequestLimitRatio = 2
 	)
 
-	// MaxMultipartMemory 使用静态默认值，避免动态配置变更导致的不一致
-	// 实际的文件大小限制在 upload handler 中按请求动态检查
 	router.MaxMultipartMemory = multipartMemoryMB << 20
 	concurrencyLimiter := middleware.NewConcurrencyLimiter(100)
 	router.Use(concurrencyLimiter.Middleware())

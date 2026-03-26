@@ -153,10 +153,10 @@ func TestTokenGeneration(t *testing.T) {
 	// 解析 Token
 	claims, err := jwtService.ParseToken(tokenPair.AccessToken)
 	assert.NoError(t, err)
-	assert.Equal(t, "testuser", claims["username"])
-	assert.Equal(t, float64(1), claims["user_id"])
-	assert.Equal(t, "user", claims["role"])
-	assert.Equal(t, "access", claims["type"])
+	assert.Equal(t, "testuser", claims.Username)
+	assert.Equal(t, uint(1), claims.UserID)
+	assert.Equal(t, "user", claims.Role)
+	assert.Equal(t, "access", claims.Type)
 }
 
 // TestTokenGeneration_InvalidSecret 测试无效密钥

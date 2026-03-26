@@ -218,14 +218,14 @@ func (r *Repository) UpdateImageByIdentifier(identifier string, updates map[stri
 }
 
 // GetImageList 获取图片列表
-func (r *Repository) GetImageList(storageType, identifier, search string, albumID *uint, startTime, endTime int64, sort string, page, pageSize, userID int) ([]*models.Image, int64, error) {
+func (r *Repository) GetImageList(storageConfigIDs []uint, identifier, search string, albumID *uint, startTime, endTime int64, sort string, page, pageSize, userID int) ([]*models.Image, int64, error) {
 	var imageList []*models.Image
 	var total int64
 
 	db := r.db.Model(&models.Image{}).Where("user_id = ?", userID)
 
-	if storageType != "" {
-		db = db.Where("storage_driver = ?", storageType)
+	if len(storageConfigIDs) > 0 {
+		db = db.Where("storage_config_id IN ?", storageConfigIDs)
 	}
 	if identifier != "" {
 		db = db.Where("identifier = ?", identifier)

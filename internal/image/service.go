@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -64,14 +65,6 @@ type UploadResult struct {
 type ImageResult struct {
 	Image    *models.Image
 	IsPublic bool
-}
-
-// ImageStreamResult 图片流结果
-type ImageStreamResult struct {
-	Data       []byte
-	MIMEType   string
-	FileSize   int64
-	Identifier string
 }
 
 // ListImagesResult 图片列表结果
@@ -556,32 +549,6 @@ func (s *Service) GetCachedImageData(ctx context.Context, identifier string) ([]
 	return s.cacheHelper.GetCachedImageData(ctx, identifier)
 }
 
-// GetImageStream 从存储获取图片流
-func (s *Service) GetImageStream(ctx context.Context, image *models.Image) (io.ReadSeeker, error) {
-	provider, err := s.getStorageProviderByID(image.StorageConfigID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get storage provider: %w", err)
-	}
-	return provider.GetWithContext(ctx, image.StoragePath)
-}
-
-// GetVariantStream 从存储获取变体流
-func (s *Service) GetVariantStream(ctx context.Context, storageConfigID uint, storagePath string) (io.ReadSeeker, error) {
-	provider, err := s.getStorageProviderByID(storageConfigID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get storage provider: %w", err)
-	}
-	return provider.GetWithContext(ctx, storagePath)
-}
-
-// CacheImageData 缓存图片数据
-func (s *Service) CacheImageData(ctx context.Context, identifier string, data []byte) error {
-	if s.cacheHelper == nil {
-		return nil
-	}
-	return s.cacheHelper.CacheImageData(ctx, identifier, data)
-}
-
 // ListImages 获取图片列表
 func (s *Service) ListImages(storageType string, identifier string, search string, albumID *uint, startTime, endTime int64, sort string, page int, limit int, userID int) (*ListImagesResult, error) {
 	if page <= 0 {
@@ -596,7 +563,21 @@ func (s *Service) ListImages(storageType string, identifier string, search strin
 		limit = config.MaxPerPage
 	}
 
-	list, total, err := s.repo.GetImageList(storageType, identifier, search, albumID, startTime, endTime, sort, page, limit, userID)
+	storageConfigIDs, err := s.resolveStorageConfigIDs(context.Background(), storageType)
+	if err != nil {
+		return nil, err
+	}
+	if storageType != "" && len(storageConfigIDs) == 0 {
+		return &ListImagesResult{
+			Images:     []*models.Image{},
+			Total:      0,
+			Page:       page,
+			Limit:      limit,
+			TotalPages: 0,
+		}, nil
+	}
+
+	list, total, err := s.repo.GetImageList(storageConfigIDs, identifier, search, albumID, startTime, endTime, sort, page, limit, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get image list: %w", err)
 	}
@@ -613,6 +594,30 @@ func (s *Service) ListImages(storageType string, identifier string, search strin
 		Limit:      limit,
 		TotalPages: totalPages,
 	}, nil
+}
+
+func (s *Service) resolveStorageConfigIDs(ctx context.Context, storageType string) ([]uint, error) {
+	if storageType == "" {
+		return nil, nil
+	}
+	if s.configManager == nil {
+		return nil, fmt.Errorf("failed to resolve storage filter: config manager not initialized")
+	}
+
+	configs, err := s.configManager.GetStorageConfigs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve storage filter: %w", err)
+	}
+
+	normalizedType := strings.TrimSpace(strings.ToLower(storageType))
+	ids := make([]uint, 0, len(configs))
+	for _, cfg := range configs {
+		if strings.EqualFold(cfg.Type, normalizedType) {
+			ids = append(ids, cfg.ID)
+		}
+	}
+
+	return ids, nil
 }
 
 // IsTransientError 暴露临时错误检查方法

@@ -25,12 +25,11 @@ type TokenPair struct {
 
 // TokenClaims JWT 令牌声明
 type TokenClaims struct {
-	Username string
-	UserID   uint
-	Role     string
-	Type     string
-	Exp      int64
-	Iat      int64
+	Username string `json:"username"`
+	UserID   uint   `json:"user_id"`
+	Role     string `json:"role"`
+	Type     string `json:"type"`
+	jwt.RegisteredClaims
 }
 
 // JWTService JWT Token 服务 - 合并 TokenManager 功能
@@ -177,13 +176,15 @@ func (s *JWTService) GenerateTokens(username string, userID uint, role string) (
 
 	// 生成 access token
 	accessTokenExpiry := time.Now().Add(config.ExpiresIn)
-	accessClaims := jwt.MapClaims{
-		"username": username,
-		"user_id":  userID,
-		"role":     role,
-		"type":     "access",
-		"exp":      accessTokenExpiry.Unix(),
-		"iat":      time.Now().Unix(),
+	accessClaims := &TokenClaims{
+		Username: username,
+		UserID:   userID,
+		Role:     role,
+		Type:     "access",
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(accessTokenExpiry),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
 	}
 
 	accessToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims).SignedString(config.Secret)
@@ -215,13 +216,15 @@ func (s *JWTService) GenerateAccessToken(username string, userID uint, role stri
 	}
 
 	accessTokenExpiry := time.Now().Add(config.ExpiresIn)
-	accessClaims := jwt.MapClaims{
-		"username": username,
-		"user_id":  userID,
-		"role":     role,
-		"type":     "access",
-		"exp":      accessTokenExpiry.Unix(),
-		"iat":      time.Now().Unix(),
+	accessClaims := &TokenClaims{
+		Username: username,
+		UserID:   userID,
+		Role:     role,
+		Type:     "access",
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(accessTokenExpiry),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
 	}
 
 	accessToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims).SignedString(config.Secret)
@@ -251,14 +254,15 @@ func (s *JWTService) GenerateStaticToken() (string, error) {
 }
 
 // ParseToken 解析和验证 JWT 令牌
-func (s *JWTService) ParseToken(tokenString string) (jwt.MapClaims, error) {
+func (s *JWTService) ParseToken(tokenString string) (*TokenClaims, error) {
 	config := s.GetConfig()
 
 	if len(config.Secret) == 0 {
 		return nil, errors.New("JWT secret is not initialized")
 	}
 
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
+	claims := &TokenClaims{}
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
@@ -269,8 +273,7 @@ func (s *JWTService) ParseToken(tokenString string) (jwt.MapClaims, error) {
 		return nil, fmt.Errorf("failed to parse token: %w", err)
 	}
 
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok || !token.Valid {
+	if !token.Valid {
 		return nil, errors.New("invalid token claims")
 	}
 
@@ -279,29 +282,7 @@ func (s *JWTService) ParseToken(tokenString string) (jwt.MapClaims, error) {
 
 // ExtractClaims 从令牌中提取声明
 func (s *JWTService) ExtractClaims(tokenString string) (*TokenClaims, error) {
-	claims, err := s.ParseToken(tokenString)
-	if err != nil {
-		return nil, err
-	}
-
-	username, _ := claims["username"].(string)
-	role, _ := claims["role"].(string)
-	tokenType, _ := claims["type"].(string)
-
-	userIDFloat, _ := claims["user_id"].(float64)
-	userID := uint(userIDFloat)
-
-	expFloat, _ := claims["exp"].(float64)
-	iatFloat, _ := claims["iat"].(float64)
-
-	return &TokenClaims{
-		Username: username,
-		UserID:   userID,
-		Role:     role,
-		Type:     tokenType,
-		Exp:      int64(expFloat),
-		Iat:      int64(iatFloat),
-	}, nil
+	return s.ParseToken(tokenString)
 }
 
 // ValidateToken 验证令牌是否有效
@@ -317,8 +298,7 @@ func (s *JWTService) IsAccessToken(tokenString string) (bool, error) {
 		return false, err
 	}
 
-	tokenType, _ := claims["type"].(string)
-	return tokenType == "access", nil
+	return claims.Type == "access", nil
 }
 
 // ValidateStaticToken 验证静态令牌

@@ -79,113 +79,6 @@ func (m *MockDirectURLProvider) ShouldProxy(imageIsPublic bool, globalMode stora
 	return m.Called(imageIsPublic, globalMode).Bool(0)
 }
 
-func TestGetDirectURLIfPossible(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	tests := []struct {
-		name           string
-		image          *models.Image
-		setupMock      func(*MockConfigManager, *MockDirectURLProvider)
-		expectedResult string
-	}{
-		{
-			name: "private_image_should_not_use_direct",
-			image: &models.Image{
-				IsPublic:        false,
-				StoragePath:     "2024/01/test.jpg",
-				StorageConfigID: 1,
-			},
-			setupMock: func(cm *MockConfigManager, dsp *MockDirectURLProvider) {
-				// 私有图片不应该调用任何存储方法
-			},
-			expectedResult: "",
-		},
-		{
-			name: "public_image_with_direct_link_support",
-			image: &models.Image{
-				IsPublic:        true,
-				StoragePath:     "2024/01/public.jpg",
-				StorageConfigID: 1,
-			},
-			setupMock: func(cm *MockConfigManager, dsp *MockDirectURLProvider) {
-				cm.On("GetGlobalTransferMode", mock.Anything).Return(storage.TransferModeAuto).Once()
-				dsp.On("ShouldProxy", true, storage.TransferModeAuto).Return(false).Once()
-				dsp.On("GetDirectURL", "2024/01/public.jpg").Return("https://cdn.example.com/2024/01/public.jpg").Once()
-			},
-			expectedResult: "https://cdn.example.com/2024/01/public.jpg",
-		},
-		{
-			name: "public_image_but_should_proxy",
-			image: &models.Image{
-				IsPublic:        true,
-				StoragePath:     "2024/01/proxy.jpg",
-				StorageConfigID: 1,
-			},
-			setupMock: func(cm *MockConfigManager, dsp *MockDirectURLProvider) {
-				cm.On("GetGlobalTransferMode", mock.Anything).Return(storage.TransferModeAlwaysProxy).Once()
-				dsp.On("ShouldProxy", true, storage.TransferModeAlwaysProxy).Return(true).Once()
-			},
-			expectedResult: "",
-		},
-		{
-			name: "always_direct_mode_returns_url",
-			image: &models.Image{
-				IsPublic:        true,
-				StoragePath:     "2024/01/direct.jpg",
-				StorageConfigID: 1,
-			},
-			setupMock: func(cm *MockConfigManager, dsp *MockDirectURLProvider) {
-				cm.On("GetGlobalTransferMode", mock.Anything).Return(storage.TransferModeAlwaysDirect).Once()
-				dsp.On("ShouldProxy", true, storage.TransferModeAlwaysDirect).Return(false).Once()
-				dsp.On("GetDirectURL", "2024/01/direct.jpg").Return("https://cdn.example.com/2024/01/direct.jpg").Once()
-			},
-			expectedResult: "https://cdn.example.com/2024/01/direct.jpg",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cm := &MockConfigManager{}
-			dsp := &MockDirectURLProvider{}
-
-			if tt.setupMock != nil {
-				tt.setupMock(cm, dsp)
-			}
-
-			// 由于 getDirectURLIfPossible 依赖 storage 包的全局状态
-			// 我们测试逻辑而不是完整集成
-			result := simulateGetDirectURLIfPossible(tt.image, cm, dsp)
-
-			assert.Equal(t, tt.expectedResult, result)
-			cm.AssertExpectations(t)
-			dsp.AssertExpectations(t)
-		})
-	}
-}
-
-// simulateGetDirectURLIfPossible 模拟 getDirectURLIfPossible 的逻辑
-func simulateGetDirectURLIfPossible(img *models.Image, cm *MockConfigManager, provider storage.DirectURLProvider) string {
-	// 私有图片不支持直链
-	if !img.IsPublic {
-		return ""
-	}
-
-	if provider == nil {
-		return ""
-	}
-
-	// 获取全局模式
-	globalMode := cm.GetGlobalTransferMode(context.Background())
-
-	// 判断是否应该走代理
-	if provider.ShouldProxy(img.IsPublic, globalMode) {
-		return ""
-	}
-
-	// 获取直链 URL
-	return provider.GetDirectURL(img.StoragePath)
-}
-
 func TestGetGlobalTransferMode(t *testing.T) {
 	cm := &MockConfigManager{}
 
@@ -318,48 +211,6 @@ func simulateShouldProxy(imageIsPublic bool, globalMode storage.TransferMode, en
 		// 未知模式，安全起见走代理
 		return true
 	}
-}
-
-func TestGetStorageProvider(t *testing.T) {
-	tests := []struct {
-		name            string
-		storageConfigID uint
-		expectedCall    bool
-	}{
-		{
-			name:            "zero_id_returns_default",
-			storageConfigID: 0,
-			expectedCall:    false,
-		},
-		{
-			name:            "non_zero_id_tries_to_get_provider",
-			storageConfigID: 5,
-			expectedCall:    true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// 这个测试主要验证逻辑分支
-			result := simulateGetStorageProvider(tt.storageConfigID)
-			if tt.expectedCall {
-				// 非零 ID 应该尝试获取特定 provider
-				assert.NotNil(t, result)
-			} else {
-				// 零 ID 应该返回默认 provider
-				assert.NotNil(t, result)
-			}
-		})
-	}
-}
-
-// simulateGetStorageProvider 模拟 getStorageProvider 逻辑
-func simulateGetStorageProvider(storageConfigID uint) interface{} {
-	if storageConfigID == 0 {
-		return "default"
-	}
-	// 实际会调用 storage.GetByID
-	return "specific"
 }
 
 func TestServeOriginalImage_WithDirectLink(t *testing.T) {
@@ -515,4 +366,8 @@ func TestSingleflightConcurrency(t *testing.T) {
 	// 验证 mock 被调用了10次（因为不是真正的 singleflight，只是测试 mock）
 	// 真正的 singleflight 会在 getGlobalTransferMode 方法中实现
 	assert.Equal(t, int32(10), callCount.Load())
+}
+
+func TestRemoteImageDataCacheKey(t *testing.T) {
+	assert.Equal(t, "7:original/2026/03/26/hash.jpg", remoteImageDataCacheKey(7, "original/2026/03/26/hash.jpg"))
 }
