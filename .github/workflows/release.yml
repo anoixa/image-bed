@@ -39,6 +39,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             libvips-dev \
+            libheif-dev \
+            libheif-plugin-aomenc \
+            libheif-plugin-aomdec \
             pkg-config \
             libsqlite3-dev
       - run: |
@@ -69,6 +72,17 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Install native deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libvips-dev \
+            libheif-dev \
+            libheif-plugin-aomenc \
+            libheif-plugin-aomdec \
+            pkg-config \
+            libsqlite3-dev
 
       - run: go mod download
       - run: go test -v -race -shuffle=on ./...
@@ -125,7 +139,12 @@ jobs:
       - name: Install libvips
         run: |
           sudo apt-get update
-          sudo apt-get install -y libvips-dev pkg-config
+          sudo apt-get install -y \
+            libvips-dev \
+            libheif-dev \
+            libheif-plugin-aomenc \
+            libheif-plugin-aomdec \
+            pkg-config
 
       - name: Build
         env:
@@ -169,7 +188,12 @@ jobs:
       - name: Install libvips
         run: |
           sudo apt-get update
-          sudo apt-get install -y libvips-dev pkg-config
+          sudo apt-get install -y \
+            libvips-dev \
+            libheif-dev \
+            libheif-plugin-aomenc \
+            libheif-plugin-aomdec \
+            pkg-config
 
       - name: Build
         env:
