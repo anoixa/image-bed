@@ -3,6 +3,7 @@ package vipsfile
 import (
 	"image"
 	"image/color"
+	"image/jpeg"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -127,6 +128,34 @@ func TestLoadImageFromFileAndSaveAVIF(t *testing.T) {
 	assert.Positive(t, stat.Size())
 }
 
+func TestLoadJPEGFromFileAndSaveAVIF(t *testing.T) {
+	ensureTestStartup(t)
+
+	src := writeTestJPEG(t, 848, 1200)
+	dst := filepath.Join(t.TempDir(), "out.avif")
+
+	img, info, err := LoadImageFromFile(src)
+	require.NoError(t, err)
+	defer img.Close()
+
+	assert.Equal(t, 848, info.Width)
+	assert.Equal(t, 1200, info.Height)
+
+	err = img.SaveAVIFToFile(dst, AVIFOptions{
+		Quality:       75,
+		Effort:        4,
+		StripMetadata: true,
+		Bitdepth:      10,
+	})
+	if err != nil {
+		t.Skipf("avif encoder unavailable in current libvips runtime: %v", err)
+	}
+
+	stat, err := os.Stat(dst)
+	require.NoError(t, err)
+	assert.Positive(t, stat.Size())
+}
+
 func writeTestPNG(t *testing.T, width, height int, alpha bool) string {
 	t.Helper()
 
@@ -147,5 +176,29 @@ func writeTestPNG(t *testing.T, width, height int, alpha bool) string {
 	defer func() { _ = f.Close() }()
 
 	require.NoError(t, png.Encode(f, img))
+	return path
+}
+
+func writeTestJPEG(t *testing.T, width, height int) string {
+	t.Helper()
+
+	img := image.NewNRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			img.SetNRGBA(x, y, color.NRGBA{
+				R: uint8((x * 255) / max(width-1, 1)),
+				G: uint8((y * 255) / max(height-1, 1)),
+				B: 120,
+				A: 255,
+			})
+		}
+	}
+
+	path := filepath.Join(t.TempDir(), "input.jpg")
+	f, err := os.Create(path)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	require.NoError(t, jpeg.Encode(f, img, &jpeg.Options{Quality: 90}))
 	return path
 }

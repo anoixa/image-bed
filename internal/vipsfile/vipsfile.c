@@ -73,8 +73,15 @@ int ib_save_avif_file(
     int effort,
     int bitdepth
 ) {
-    return vips_heifsave(
-        in,
+    VipsImage *copy = NULL;
+    int ret = 0;
+
+    if (vips_copy(in, &copy, NULL) != 0) {
+        return -1;
+    }
+
+    ret = vips_heifsave(
+        copy,
         filename,
         "compression", VIPS_FOREIGN_HEIF_COMPRESSION_AV1,
         "Q", quality,
@@ -84,6 +91,9 @@ int ib_save_avif_file(
         "keep", keep_metadata ? VIPS_FOREIGN_KEEP_ALL : VIPS_FOREIGN_KEEP_NONE,
         NULL
     );
+
+    g_object_unref(copy);
+    return ret;
 }
 
 void ib_unref_image(VipsImage *in) {
