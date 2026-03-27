@@ -77,7 +77,7 @@ func TestSaveVariantResults_UpdateCompletedError_CallsUpdateFailed(t *testing.T)
 	}
 	result := &pipelineResult{StoragePath: "webp/foo.webp", Width: 100, Height: 100, FileSize: 1000, FileHash: "abc"}
 
-	err := task.saveVariantResults(nil, result)
+	err := task.saveVariantResults(nil, result, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "db down")
@@ -112,22 +112,34 @@ func TestCreateVariantTempPath(t *testing.T) {
 
 func TestResolveImageVariantStatus(t *testing.T) {
 	t.Run("thumbnail completed and webp skipped", func(t *testing.T) {
-		status := resolveImageVariantStatus(true, true, true, false, false, true)
+		status := resolveImageVariantStatus(true, true, false, true, false, false, false, true, false)
 		assert.Equal(t, models.ImageVariantStatusThumbnailCompleted, status)
 	})
 
 	t.Run("both completed", func(t *testing.T) {
-		status := resolveImageVariantStatus(true, true, true, true, false, false)
+		status := resolveImageVariantStatus(true, true, false, true, true, false, false, false, false)
 		assert.Equal(t, models.ImageVariantStatusCompleted, status)
 	})
 
 	t.Run("webp only completed", func(t *testing.T) {
-		status := resolveImageVariantStatus(false, true, false, true, false, false)
+		status := resolveImageVariantStatus(false, true, false, false, true, false, false, false, false)
 		assert.Equal(t, models.ImageVariantStatusCompleted, status)
 	})
 
 	t.Run("all skipped", func(t *testing.T) {
-		status := resolveImageVariantStatus(true, true, false, false, true, true)
+		status := resolveImageVariantStatus(true, true, false, false, false, false, true, true, false)
 		assert.Equal(t, models.ImageVariantStatusNone, status)
 	})
+
+	t.Run("avif only completed", func(t *testing.T) {
+		status := resolveImageVariantStatus(false, false, true, false, false, true, false, false, false)
+		assert.Equal(t, models.ImageVariantStatusCompleted, status)
+	})
+}
+
+func TestShouldKeepAVIF(t *testing.T) {
+	assert.True(t, shouldKeepAVIF(94, 100))
+	assert.False(t, shouldKeepAVIF(95, 100))
+	assert.False(t, shouldKeepAVIF(110, 100))
+	assert.True(t, shouldKeepAVIF(90, 0))
 }

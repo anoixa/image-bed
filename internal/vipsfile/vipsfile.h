@@ -31,7 +31,18 @@ int ib_save_webp_file(
     int kmax
 );
 
+int ib_save_avif_file(
+    VipsImage *in,
+    const char *filename,
+    int keep_metadata,
+    int quality,
+    int lossless,
+    int effort,
+    int bitdepth
+);
+
 void ib_unref_image(VipsImage *in);
 void ib_get_image_info(VipsImage *in, int *width, int *height, int *has_alpha);
+int ib_supports_heifsave(void);
 
 #endif

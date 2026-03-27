@@ -64,6 +64,28 @@ int ib_save_webp_file(
     );
 }
 
+int ib_save_avif_file(
+    VipsImage *in,
+    const char *filename,
+    int keep_metadata,
+    int quality,
+    int lossless,
+    int effort,
+    int bitdepth
+) {
+    return vips_heifsave(
+        in,
+        filename,
+        "compression", VIPS_FOREIGN_HEIF_COMPRESSION_AV1,
+        "Q", quality,
+        "lossless", lossless,
+        "effort", effort,
+        "bitdepth", bitdepth,
+        "keep", keep_metadata ? VIPS_FOREIGN_KEEP_ALL : VIPS_FOREIGN_KEEP_NONE,
+        NULL
+    );
+}
+
 void ib_unref_image(VipsImage *in) {
     if (in != NULL) {
         g_object_unref(in);
@@ -80,4 +102,8 @@ void ib_get_image_info(VipsImage *in, int *width, int *height, int *has_alpha) {
     if (has_alpha != NULL) {
         *has_alpha = vips_image_hasalpha(in);
     }
+}
+
+int ib_supports_heifsave(void) {
+    return vips_type_find("VipsOperation", "heifsave") != 0;
 }

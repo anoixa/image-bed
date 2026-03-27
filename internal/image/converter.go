@@ -8,6 +8,7 @@ import (
 	config "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
+	"github.com/anoixa/image-bed/internal/vipsfile"
 	"github.com/anoixa/image-bed/internal/worker"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
@@ -34,7 +35,7 @@ func NewConverter(cm *config.Manager, variantRepo *images.VariantRepository, ima
 }
 
 // TriggerConversion 触发图片转换（统一流水线）
-// 使用 PipelineTask 同时生成缩略图和 WebP 原图
+// 使用 PipelineTask 顺序生成缩略图、WebP 和 AVIF。
 func (c *Converter) TriggerConversion(image *models.Image) {
 	ctx := context.Background()
 
@@ -54,7 +55,8 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 
 	thumbnailEnabled := settings.ThumbnailEnabled && len(settings.ThumbnailSizes) > 0
 	webpEnabled := settings.IsFormatEnabled(models.FormatWebP)
-	if !shouldStartVariantPipeline(thumbnailEnabled, webpEnabled) {
+	avifEnabled := settings.IsFormatEnabled(models.FormatAVIF) && vipsfile.SupportsAVIFEncoding()
+	if !shouldStartVariantPipeline(thumbnailEnabled, webpEnabled, avifEnabled) {
 		utils.LogIfDevf("[Converter] All variant generation disabled, skipping")
 		return
 	}
@@ -104,8 +106,21 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 		}
 	}
 
+	var avifVariant *models.ImageVariant
+	if avifEnabled {
+		avifVariant, err = c.variantRepo.UpsertPending(image.ID, models.FormatAVIF)
+		if err != nil {
+			utils.LogIfDevf("[Converter] Failed to upsert AVIF variant: %v", err)
+			return
+		}
+		if avifVariant.Status != models.VariantStatusPending {
+			utils.LogIfDevf("[Converter] AVIF variant %d status=%s, skip", avifVariant.ID, avifVariant.Status)
+			avifVariant = nil
+		}
+	}
+
 	// 如果没有需要处理的变体，直接返回
-	if thumbVariant == nil && webpVariant == nil {
+	if thumbVariant == nil && webpVariant == nil && avifVariant == nil {
 		utils.LogIfDevf("[Converter] No pending variants for %s, skip", image.Identifier)
 		return
 	}
@@ -129,6 +144,7 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 		task := &worker.ImagePipelineTask{
 			ThumbVariantID:  getVariantID(thumbVariant),
 			WebPVariantID:   getVariantID(webpVariant),
+			AVIFVariantID:   getVariantID(avifVariant),
 			ImageID:         image.ID,
 			StoragePath:     image.StoragePath,
 			ImageIdentifier: image.Identifier,
@@ -153,8 +169,8 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 	}
 }
 
-func shouldStartVariantPipeline(thumbnailEnabled, webpEnabled bool) bool {
-	return thumbnailEnabled || webpEnabled
+func shouldStartVariantPipeline(thumbnailEnabled, webpEnabled, avifEnabled bool) bool {
+	return thumbnailEnabled || webpEnabled || avifEnabled
 }
 
 // getVariantID 辅助函数：从变体指针获取ID

@@ -36,10 +36,14 @@ func (p *testStorageProvider) Name() string {
 }
 
 func TestShouldStartVariantPipeline(t *testing.T) {
-	assert.True(t, shouldStartVariantPipeline(true, false))
-	assert.True(t, shouldStartVariantPipeline(false, true))
-	assert.True(t, shouldStartVariantPipeline(true, true))
-	assert.False(t, shouldStartVariantPipeline(false, false))
+	assert.True(t, shouldStartVariantPipeline(true, false, false))
+	assert.True(t, shouldStartVariantPipeline(false, true, false))
+	assert.True(t, shouldStartVariantPipeline(false, false, true))
+	assert.True(t, shouldStartVariantPipeline(true, true, false))
+	assert.True(t, shouldStartVariantPipeline(true, false, true))
+	assert.True(t, shouldStartVariantPipeline(false, true, true))
+	assert.True(t, shouldStartVariantPipeline(true, true, true))
+	assert.False(t, shouldStartVariantPipeline(false, false, false))
 }
 
 func TestGetStorageForImageDoesNotFallbackForMissingSpecificProvider(t *testing.T) {

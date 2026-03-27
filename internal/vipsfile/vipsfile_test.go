@@ -99,6 +99,34 @@ func TestImageHandleSaveWebPToFile_NilHandle(t *testing.T) {
 	assert.Contains(t, err.Error(), "nil vips image")
 }
 
+func TestLoadImageFromFileAndSaveAVIF(t *testing.T) {
+	ensureTestStartup(t)
+
+	src := writeTestPNG(t, 4, 2, false)
+	dst := filepath.Join(t.TempDir(), "out.avif")
+
+	img, info, err := LoadImageFromFile(src)
+	require.NoError(t, err)
+	defer img.Close()
+
+	assert.Equal(t, 4, info.Width)
+	assert.Equal(t, 2, info.Height)
+
+	err = img.SaveAVIFToFile(dst, AVIFOptions{
+		Quality:       60,
+		Effort:        4,
+		StripMetadata: true,
+		Bitdepth:      8,
+	})
+	if err != nil {
+		t.Skipf("avif encoder unavailable in current libvips runtime: %v", err)
+	}
+
+	stat, err := os.Stat(dst)
+	require.NoError(t, err)
+	assert.Positive(t, stat.Size())
+}
+
 func writeTestPNG(t *testing.T, width, height int, alpha bool) string {
 	t.Helper()
 

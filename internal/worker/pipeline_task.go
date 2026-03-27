@@ -170,6 +170,7 @@ func adaptiveWebPQuality(complexity ImageComplexity, baseQuality int) int {
 type ImagePipelineTask struct {
 	ThumbVariantID  uint
 	WebPVariantID   uint
+	AVIFVariantID   uint
 	ImageID         uint
 	StoragePath     string
 	ImageIdentifier string
@@ -181,6 +182,8 @@ type ImagePipelineTask struct {
 	ImageRepo       ImageRepository
 	CacheHelper     *cache.Helper
 }
+
+const avifMinSavingsPercent int64 = 5
 
 // getProcessingFilePath returns an OS file path suitable for vips file-based APIs.
 // For local storage it returns the stored file path directly (no I/O).
@@ -293,6 +296,25 @@ func (t *ImagePipelineTask) Execute() {
 		utils.LogIfDevf("[Pipeline] CAS success: WebP variant %d is now processing", t.WebPVariantID)
 	}
 
+	if t.AVIFVariantID > 0 {
+		utils.LogIfDevf("[Pipeline] Attempting CAS: AVIF variant %d pending->processing", t.AVIFVariantID)
+		acquired, err := t.VariantRepo.UpdateStatusCAS(
+			t.AVIFVariantID,
+			models.VariantStatusPending,
+			models.VariantStatusProcessing,
+			"",
+		)
+		if err != nil {
+			utils.LogIfDevf("[Pipeline] CAS error for AVIF variant %d: %v", t.AVIFVariantID, err)
+			return
+		}
+		if !acquired {
+			utils.LogIfDevf("[Pipeline] CAS failed for AVIF variant %d (not in pending state)", t.AVIFVariantID)
+			return
+		}
+		utils.LogIfDevf("[Pipeline] CAS success: AVIF variant %d is now processing", t.AVIFVariantID)
+	}
+
 	semaphore := GetGlobalSemaphore()
 	if err := semaphore.Acquire(ctx); err != nil {
 		utils.LogIfDevf("[Pipeline] Failed to acquire semaphore: %v", err)
@@ -302,6 +324,9 @@ func (t *ImagePipelineTask) Execute() {
 		if t.WebPVariantID > 0 {
 			_ = t.VariantRepo.UpdateFailed(t.WebPVariantID, fmt.Sprintf("semaphore: %v", err))
 		}
+		if t.AVIFVariantID > 0 {
+			_ = t.VariantRepo.UpdateFailed(t.AVIFVariantID, fmt.Sprintf("semaphore: %v", err))
+		}
 		// 更新主图片状态为失败
 		_ = t.ImageRepo.UpdateVariantStatus(t.ImageID, models.ImageVariantStatusFailed)
 		t.deleteCacheOnTerminalState("failed")
@@ -309,8 +334,8 @@ func (t *ImagePipelineTask) Execute() {
 	}
 	defer semaphore.Release()
 
-	utils.LogIfDevf("[Pipeline] Starting processing for image=%s, thumbVariant=%d, webpVariant=%d",
-		t.StoragePath, t.ThumbVariantID, t.WebPVariantID)
+	utils.LogIfDevf("[Pipeline] Starting processing for image=%s, thumbVariant=%d, webpVariant=%d, avifVariant=%d",
+		t.StoragePath, t.ThumbVariantID, t.WebPVariantID, t.AVIFVariantID)
 	if err := t.runPipeline(ctx); err != nil {
 		utils.LogIfDevf("[Pipeline] Processing failed: %v", err)
 		_ = t.ImageRepo.UpdateVariantStatus(t.ImageID, models.ImageVariantStatusFailed)
@@ -331,13 +356,16 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
 		if t.WebPVariantID > 0 {
 			_ = t.VariantRepo.UpdateFailed(t.WebPVariantID, fmt.Sprintf("get file: %v", err))
 		}
+		if t.AVIFVariantID > 0 {
+			_ = t.VariantRepo.UpdateFailed(t.AVIFVariantID, fmt.Sprintf("get file: %v", err))
+		}
 		return fmt.Errorf("get processing file: %w", err)
 	}
 	defer cleanup()
 
-	var thumbResult, webpResult *pipelineResult
+	var thumbResult, webpResult, avifResult *pipelineResult
 	var hasSuccess, hasFailed bool
-	var thumbSkipped, webpSkipped bool
+	var thumbSkipped, webpSkipped, avifSkipped bool
 
 	if t.ThumbVariantID > 0 {
 		result, err := t.generateThumbnail(ctx, filePath)
@@ -373,8 +401,28 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
 		}
 	}
 
+	avifRequired := t.AVIFVariantID > 0 && t.WebPVariantID == 0
+	if t.AVIFVariantID > 0 {
+		result, err := t.generateAVIF(ctx, filePath, webpResult)
+		switch {
+		case err != nil:
+			utils.LogIfDevf("[Pipeline] AVIF failed: %v", err)
+			_ = t.VariantRepo.UpdateFailed(t.AVIFVariantID, err.Error())
+			if avifRequired {
+				hasFailed = true
+			}
+		case result == nil:
+			utils.LogIfDevf("[Pipeline] AVIF skipped, deleting variant %d", t.AVIFVariantID)
+			_ = t.VariantRepo.DeleteVariant(t.AVIFVariantID)
+			avifSkipped = true
+		default:
+			avifResult = result
+			hasSuccess = true
+		}
+	}
+
 	if hasSuccess {
-		if err := t.saveVariantResults(thumbResult, webpResult); err != nil {
+		if err := t.saveVariantResults(thumbResult, webpResult, avifResult); err != nil {
 			utils.LogIfDevf("[Pipeline] Failed to persist variant results: %v", err)
 			hasFailed = true
 		}
@@ -384,7 +432,17 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
 		return fmt.Errorf("some variants failed")
 	}
 
-	_ = t.ImageRepo.UpdateVariantStatus(t.ImageID, resolveImageVariantStatus(t.ThumbVariantID > 0, t.WebPVariantID > 0, thumbResult != nil, webpResult != nil, thumbSkipped, webpSkipped))
+	_ = t.ImageRepo.UpdateVariantStatus(t.ImageID, resolveImageVariantStatus(
+		t.ThumbVariantID > 0,
+		t.WebPVariantID > 0,
+		t.AVIFVariantID > 0,
+		thumbResult != nil,
+		webpResult != nil,
+		avifResult != nil,
+		thumbSkipped,
+		webpSkipped,
+		avifSkipped,
+	))
 	t.deleteCacheOnTerminalState("success")
 	return nil
 }
@@ -543,15 +601,119 @@ func (t *ImagePipelineTask) generateWebPWithSettings(ctx context.Context, filePa
 	}, nil
 }
 
-func resolveImageVariantStatus(hasThumbVariant, hasWebPVariant, thumbCompleted, webpCompleted, thumbSkipped, webpSkipped bool) models.ImageVariantStatus {
+func (t *ImagePipelineTask) generateAVIF(ctx context.Context, filePath string, webpResult *pipelineResult) (*pipelineResult, error) {
+	settings := t.Settings
+	if settings == nil {
+		return nil, fmt.Errorf("image processing settings not provided")
+	}
+	if !settings.IsFormatEnabled(models.FormatAVIF) {
+		utils.LogIfDevf("[Pipeline] AVIF format disabled")
+		return nil, nil
+	}
+	if !vipsfile.SupportsAVIFEncoding() {
+		utils.LogIfDevf("[Pipeline] AVIF encoder unavailable")
+		return nil, nil
+	}
+
+	utils.LogIfDevf("[Pipeline] Generating AVIF for variant %d", t.AVIFVariantID)
+
+	if settings.MaxDimension > 0 {
+		if w, h, ok := readImageDimensions(filePath); ok {
+			if w > settings.MaxDimension || h > settings.MaxDimension {
+				utils.LogIfDevf("[Pipeline] Skipping AVIF: image exceeds max dimension from header: %dx%d", w, h)
+				return nil, nil
+			}
+		}
+	}
+
+	originImg, info, err := vipsfile.LoadImageFromFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("load image from file: %w", err)
+	}
+	defer originImg.Close()
+
+	if settings.MaxDimension > 0 && (info.Width > settings.MaxDimension || info.Height > settings.MaxDimension) {
+		utils.LogIfDevf("[Pipeline] Skipping AVIF: image exceeds max dimension after load: %dx%d", info.Width, info.Height)
+		return nil, nil
+	}
+
+	pg := generator.NewPathGenerator()
+	avifIdentifiers := pg.GenerateConvertedIdentifiers(t.StoragePath, models.FormatAVIF)
+	avifPath := avifIdentifiers.StoragePath
+
+	tmpPath, cleanupTmpPath, err := createVariantTempPath()
+	if err != nil {
+		return nil, fmt.Errorf("create avif temp path: %w", err)
+	}
+	defer cleanupTmpPath()
+
+	bitdepth := 8
+	if settings.AVIFExperimental {
+		bitdepth = 10
+	}
+	if err := originImg.SaveAVIFToFile(tmpPath, vipsfile.AVIFOptions{
+		Quality:       settings.AVIFQuality,
+		Effort:        settings.AVIFSpeed,
+		StripMetadata: true,
+		Bitdepth:      bitdepth,
+	}); err != nil {
+		return nil, fmt.Errorf("export avif: %w", err)
+	}
+
+	tmpFile, fileSize, fileHash, cleanupTmp, err := stageVariantFileFromPath(tmpPath)
+	if err != nil {
+		return nil, fmt.Errorf("stage avif: %w", err)
+	}
+	defer cleanupTmp()
+
+	baselineSize := t.FileSize
+	if webpResult != nil && webpResult.FileSize > 0 && (baselineSize <= 0 || webpResult.FileSize < baselineSize) {
+		baselineSize = webpResult.FileSize
+	}
+	if !shouldKeepAVIF(fileSize, baselineSize) {
+		utils.LogIfDevf("[Pipeline] Skipping AVIF: candidate size=%d baseline=%d", fileSize, baselineSize)
+		return nil, nil
+	}
+
+	if err := t.Storage.SaveWithContext(ctx, avifPath, tmpFile); err != nil {
+		return nil, fmt.Errorf("save avif: %w", err)
+	}
+
+	utils.LogIfDevf("[Pipeline] AVIF saved: %s (%d bytes)", avifPath, fileSize)
+
+	return &pipelineResult{
+		StoragePath: avifPath,
+		Width:       info.Width,
+		Height:      info.Height,
+		FileSize:    fileSize,
+		FileHash:    fileHash,
+	}, nil
+}
+
+func shouldKeepAVIF(candidateSize, baselineSize int64) bool {
+	if candidateSize <= 0 {
+		return false
+	}
+	if baselineSize <= 0 {
+		return true
+	}
+	return candidateSize*100 < baselineSize*(100-avifMinSavingsPercent)
+}
+
+func resolveImageVariantStatus(hasThumbVariant, hasWebPVariant, hasAVIFVariant, thumbCompleted, webpCompleted, avifCompleted, thumbSkipped, webpSkipped, avifSkipped bool) models.ImageVariantStatus {
+	fullCompleted := webpCompleted || avifCompleted
+	allSkipped := (!hasThumbVariant || thumbSkipped) &&
+		(!hasWebPVariant || webpSkipped) &&
+		(!hasAVIFVariant || avifSkipped)
+
 	switch {
-	case thumbCompleted && webpCompleted:
+	case thumbCompleted && fullCompleted:
 		return models.ImageVariantStatusCompleted
 	case thumbCompleted:
 		return models.ImageVariantStatusThumbnailCompleted
-	case webpCompleted:
+	case fullCompleted:
 		return models.ImageVariantStatusCompleted
-	case (hasThumbVariant && thumbSkipped) || (hasWebPVariant && webpSkipped):
+	case allSkipped:
 		return models.ImageVariantStatusNone
 	default:
 		return models.ImageVariantStatusNone
@@ -559,7 +721,7 @@ func resolveImageVariantStatus(hasThumbVariant, hasWebPVariant, thumbCompleted, 
 }
 
 // saveVariantResults 保存变体结果，任一变体写库失败时返回 error
-func (t *ImagePipelineTask) saveVariantResults(thumbResult, webpResult *pipelineResult) error {
+func (t *ImagePipelineTask) saveVariantResults(thumbResult, webpResult, avifResult *pipelineResult) error {
 	var firstErr error
 
 	if t.ThumbVariantID > 0 && thumbResult != nil {
@@ -598,6 +760,24 @@ func (t *ImagePipelineTask) saveVariantResults(thumbResult, webpResult *pipeline
 		}
 	}
 
+	if t.AVIFVariantID > 0 && avifResult != nil {
+		if err := t.VariantRepo.UpdateCompleted(
+			t.AVIFVariantID,
+			filepath.Base(avifResult.StoragePath),
+			avifResult.StoragePath,
+			avifResult.FileSize,
+			avifResult.FileHash,
+			avifResult.Width,
+			avifResult.Height,
+		); err != nil {
+			utils.LogIfDevf("[Pipeline] Failed to mark avif variant %d completed: %v", t.AVIFVariantID, err)
+			_ = t.VariantRepo.UpdateFailed(t.AVIFVariantID, "failed to persist result: "+err.Error())
+			if firstErr == nil && t.WebPVariantID == 0 {
+				firstErr = err
+			}
+		}
+	}
+
 	return firstErr
 }
 
@@ -630,6 +810,15 @@ func (t *ImagePipelineTask) recovery() {
 		if t.WebPVariantID > 0 {
 			_, _ = t.VariantRepo.UpdateStatusCAS(
 				t.WebPVariantID,
+				models.VariantStatusProcessing,
+				models.VariantStatusFailed,
+				fmt.Sprintf("panic: %v", rec),
+			)
+		}
+
+		if t.AVIFVariantID > 0 {
+			_, _ = t.VariantRepo.UpdateStatusCAS(
+				t.AVIFVariantID,
 				models.VariantStatusProcessing,
 				models.VariantStatusFailed,
 				fmt.Sprintf("panic: %v", rec),

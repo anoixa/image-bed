@@ -35,6 +35,14 @@ type WebPOptions struct {
 	MaxKeyFrames    int
 }
 
+type AVIFOptions struct {
+	Quality       int
+	Effort        int
+	StripMetadata bool
+	Lossless      bool
+	Bitdepth      int
+}
+
 type ImportOptions struct {
 	Access      string
 	FailOnError bool
@@ -54,6 +62,8 @@ type ImageHandle struct {
 var startupOnce sync.Once
 var startupErr error
 var started bool
+var avifSupportOnce sync.Once
+var avifSupport bool
 
 var ErrNotInitialized = errors.New("vipsfile not initialized: call vipsfile.Startup before using file-based vips operations")
 
@@ -81,6 +91,18 @@ func ensureStarted() error {
 	return startupErr
 }
 
+func SupportsAVIFEncoding() bool {
+	if err := ensureStarted(); err != nil {
+		return false
+	}
+
+	avifSupportOnce.Do(func() {
+		avifSupport = C.ib_supports_heifsave() != 0
+	})
+
+	return avifSupport
+}
+
 func DefaultImportOptions() ImportOptions {
 	return ImportOptions{
 		Access:      "sequential",
@@ -92,6 +114,15 @@ func DefaultWebPOptions() WebPOptions {
 	return WebPOptions{
 		Quality:         75,
 		ReductionEffort: 4,
+	}
+}
+
+func DefaultAVIFOptions() AVIFOptions {
+	return AVIFOptions{
+		Quality:       80,
+		Effort:        4,
+		StripMetadata: true,
+		Bitdepth:      8,
 	}
 }
 
@@ -229,6 +260,33 @@ func (h *ImageHandle) SaveWebPToFile(dstPath string, opts WebPOptions) error {
 		C.int(opts.MaxKeyFrames),
 	) != 0 {
 		return lastError("save webp to file")
+	}
+
+	return nil
+}
+
+func (h *ImageHandle) SaveAVIFToFile(dstPath string, opts AVIFOptions) error {
+	if h == nil || h.ptr == nil {
+		return fmt.Errorf("nil vips image")
+	}
+
+	if opts.Bitdepth == 0 {
+		opts.Bitdepth = 8
+	}
+
+	cDst := C.CString(dstPath)
+	defer C.free(unsafe.Pointer(cDst))
+
+	if C.ib_save_avif_file(
+		h.ptr,
+		cDst,
+		boolToInt(!opts.StripMetadata),
+		C.int(opts.Quality),
+		boolToInt(opts.Lossless),
+		C.int(opts.Effort),
+		C.int(opts.Bitdepth),
+	) != 0 {
+		return lastError("save avif to file")
 	}
 
 	return nil
