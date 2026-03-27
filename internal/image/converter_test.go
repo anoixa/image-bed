@@ -6,7 +6,12 @@ import (
 	"testing"
 
 	"github.com/anoixa/image-bed/database/models"
+	repoimages "github.com/anoixa/image-bed/database/repo/images"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 type testStorageProvider struct{}
@@ -51,4 +56,61 @@ func TestGetStorageForImageDoesNotFallbackForMissingSpecificProvider(t *testing.
 	image := &models.Image{StorageConfigID: 999999}
 
 	assert.Nil(t, converter.getStorageForImage(image))
+}
+
+func TestFailPendingVariantsOnSubmitFailureMarksVariantsAndImageFailed(t *testing.T) {
+	db := setupConverterTestDB(t)
+	imageRepo := repoimages.NewRepository(db)
+	variantRepo := repoimages.NewVariantRepository(db)
+
+	image := &models.Image{
+		Identifier:      "img-1",
+		OriginalName:    "test.jpg",
+		FileHash:        "hash-1",
+		FileSize:        1024,
+		MimeType:        "image/jpeg",
+		StoragePath:     "original/test.jpg",
+		StorageConfigID: 1,
+		UserID:          1,
+		VariantStatus:   models.ImageVariantStatusNone,
+	}
+	require.NoError(t, imageRepo.SaveImage(image))
+
+	thumb := &models.ImageVariant{ImageID: image.ID, Format: models.FormatThumbnailSize(600), Status: models.VariantStatusPending}
+	webp := &models.ImageVariant{ImageID: image.ID, Format: models.FormatWebP, Status: models.VariantStatusPending}
+	require.NoError(t, db.Create(thumb).Error)
+	require.NoError(t, db.Create(webp).Error)
+
+	converter := &Converter{
+		imageRepo:   imageRepo,
+		variantRepo: variantRepo,
+	}
+
+	converter.failPendingVariantsOnSubmitFailure(image, "worker task submission rejected", thumb, webp)
+
+	updatedImage, err := imageRepo.GetImageByIdentifier(image.Identifier)
+	require.NoError(t, err)
+	assert.Equal(t, models.ImageVariantStatusFailed, updatedImage.VariantStatus)
+
+	updatedThumb, err := variantRepo.GetByID(thumb.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.VariantStatusFailed, updatedThumb.Status)
+	assert.Contains(t, updatedThumb.ErrorMessage, "worker task submission rejected")
+
+	updatedWebP, err := variantRepo.GetByID(webp.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.VariantStatusFailed, updatedWebP.Status)
+	assert.Contains(t, updatedWebP.ErrorMessage, "worker task submission rejected")
+}
+
+func setupConverterTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+
+	db, err := gorm.Open(sqlite.Open("file::memory:?cache=private"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, db.AutoMigrate(&models.Image{}, &models.ImageVariant{}))
+	return db
 }

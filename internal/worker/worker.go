@@ -27,10 +27,10 @@ var workerMemoryCheck = func() error {
 		return nil
 	}
 
-	checkOnce := func() (float64, float64) {
+	checkOnce := func() (float64, utils.MemoryStats) {
 		stats := utils.GetMemoryStats()
 		effectiveMB := effectiveWorkerMemoryMB(stats)
-		return effectiveMB, stats.VipsMemMB
+		return effectiveMB, stats
 	}
 
 	effectiveMB, _ := checkOnce()
@@ -40,18 +40,27 @@ var workerMemoryCheck = func() error {
 
 	runtime.GC()
 
-	effectiveMB, vipsMB := checkOnce()
+	effectiveMB, stats := checkOnce()
 	if effectiveMB >= float64(limit) {
-		return fmt.Errorf("%w: effective=%.2fMB rss/vips threshold=%dMB vips=%.2fMB", appconfig.ErrMemoryLimitExceeded, effectiveMB, limit, vipsMB)
+		return fmt.Errorf(
+			"%w: effective=%.2fMB active threshold=%dMB heap_in_use=%.2fMB heap_alloc=%.2fMB rss=%.2fMB vips=%.2fMB",
+			appconfig.ErrMemoryLimitExceeded,
+			effectiveMB,
+			limit,
+			stats.HeapInUseMB,
+			stats.HeapAllocMB,
+			stats.RSSMB,
+			stats.VipsMemMB,
+		)
 	}
 
 	return nil
 }
 
 func effectiveWorkerMemoryMB(stats utils.MemoryStats) float64 {
-	effectiveMB := stats.RSSMB
-	if combined := stats.HeapAllocMB + stats.VipsMemMB; combined > effectiveMB {
-		effectiveMB = combined
+	effectiveMB := stats.HeapInUseMB + stats.VipsMemMB
+	if effectiveMB < stats.HeapAllocMB+stats.VipsMemMB {
+		effectiveMB = stats.HeapAllocMB + stats.VipsMemMB
 	}
 	return effectiveMB
 }

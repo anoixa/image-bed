@@ -98,6 +98,7 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 		webpVariant, err = c.variantRepo.UpsertPending(image.ID, models.FormatWebP)
 		if err != nil {
 			utils.LogIfDevf("[Converter] Failed to upsert WebP variant: %v", err)
+			c.failPendingVariantsOnSubmitFailure(image, fmt.Sprintf("submit aborted during webp preparation: %v", err), thumbVariant)
 			return
 		}
 		if webpVariant.Status != models.VariantStatusPending {
@@ -111,6 +112,7 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 		avifVariant, err = c.variantRepo.UpsertPending(image.ID, models.FormatAVIF)
 		if err != nil {
 			utils.LogIfDevf("[Converter] Failed to upsert AVIF variant: %v", err)
+			c.failPendingVariantsOnSubmitFailure(image, fmt.Sprintf("submit aborted during avif preparation: %v", err), thumbVariant, webpVariant)
 			return
 		}
 		if avifVariant.Status != models.VariantStatusPending {
@@ -128,6 +130,7 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 	pool := worker.GetGlobalPool()
 	if pool == nil {
 		utils.LogIfDevf("[Converter] Worker pool not initialized for %s, skip conversion", image.Identifier)
+		c.failPendingVariantsOnSubmitFailure(image, "worker pool not initialized", thumbVariant, webpVariant, avifVariant)
 		return
 	}
 
@@ -136,6 +139,7 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 	if storageProvider == nil {
 		utils.LogIfDevf("[Converter] No storage provider available for image %s (StorageConfigID=%d), skip conversion",
 			image.Identifier, image.StorageConfigID)
+		c.failPendingVariantsOnSubmitFailure(image, "storage provider unavailable", thumbVariant, webpVariant, avifVariant)
 		return
 	}
 
@@ -161,12 +165,36 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 
 	if !ok {
 		utils.LogIfDevf("[Converter] Failed to submit pipeline task for %s", image.Identifier)
+		c.failPendingVariantsOnSubmitFailure(image, "worker task submission rejected", thumbVariant, webpVariant, avifVariant)
 		return
 	}
 
 	if err := c.markImageProcessing(image); err != nil {
 		utils.LogIfDevf("[Converter] Failed to update image status after submit: %v", err)
 	}
+}
+
+func (c *Converter) failPendingVariantsOnSubmitFailure(image *models.Image, reason string, variants ...*models.ImageVariant) {
+	hadPending := false
+	for _, variant := range variants {
+		if variant == nil || variant.Status != models.VariantStatusPending {
+			continue
+		}
+		hadPending = true
+		if err := c.variantRepo.UpdateFailed(variant.ID, reason); err != nil {
+			utils.LogIfDevf("[Converter] Failed to mark variant %d failed after submit failure: %v", variant.ID, err)
+		}
+	}
+
+	if !hadPending {
+		return
+	}
+
+	if err := c.imageRepo.UpdateVariantStatus(image.ID, models.ImageVariantStatusFailed); err != nil {
+		utils.LogIfDevf("[Converter] Failed to mark image %s failed after submit failure: %v", image.Identifier, err)
+		return
+	}
+	image.VariantStatus = models.ImageVariantStatusFailed
 }
 
 func shouldStartVariantPipeline(thumbnailEnabled, webpEnabled, avifEnabled bool) bool {

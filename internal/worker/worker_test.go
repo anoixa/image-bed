@@ -31,15 +31,24 @@ func TestSubmitRejectsTaskWhenMemoryLimitExceeded(t *testing.T) {
 }
 
 func TestEffectiveWorkerMemoryMB(t *testing.T) {
-	assert.Equal(t, 128.0, effectiveWorkerMemoryMB(utils.MemoryStats{
+	assert.Equal(t, 72.0, effectiveWorkerMemoryMB(utils.MemoryStats{
 		RSSMB:       128,
 		HeapAllocMB: 64,
+		HeapInUseMB: 60,
 		VipsMemMB:   8,
 	}))
 
 	assert.Equal(t, 180.0, effectiveWorkerMemoryMB(utils.MemoryStats{
 		RSSMB:       90,
 		HeapAllocMB: 140,
+		HeapInUseMB: 135,
 		VipsMemMB:   40,
+	}))
+
+	assert.Equal(t, 96.0, effectiveWorkerMemoryMB(utils.MemoryStats{
+		RSSMB:       620,
+		HeapAllocMB: 14,
+		HeapInUseMB: 17,
+		VipsMemMB:   79,
 	}))
 }
