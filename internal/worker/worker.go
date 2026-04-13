@@ -5,6 +5,7 @@ import (
 	"fmt"
 	appconfig "github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/utils"
+	"github.com/davidbyttow/govips/v2/vips"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -39,6 +40,7 @@ var workerMemoryCheck = func() error {
 	}
 
 	runtime.GC()
+	vips.ClearCache()
 
 	effectiveMB, stats := checkOnce()
 	if effectiveMB >= float64(limit) {

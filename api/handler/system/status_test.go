@@ -37,6 +37,10 @@ func TestGetStatusReturnsRuntimeAndVipsMemoryFields(t *testing.T) {
 
 	assert.GreaterOrEqual(t, payload.Memory.TotalAllocMB, payload.Memory.HeapAllocMB)
 	assert.GreaterOrEqual(t, payload.Memory.RSSMB, float64(0))
+	assert.GreaterOrEqual(t, payload.Memory.HeapIdleMB, float64(0))
+	assert.GreaterOrEqual(t, payload.Memory.HeapReleasedMB, float64(0))
+	assert.GreaterOrEqual(t, payload.Memory.RssAnonMB, float64(0))
+	assert.GreaterOrEqual(t, payload.Memory.RssFileMB, float64(0))
 	assert.GreaterOrEqual(t, payload.Memory.VipsMemMB, float64(0))
 	assert.GreaterOrEqual(t, payload.Memory.VipsMemHighMB, float64(0))
 	assert.GreaterOrEqual(t, payload.Memory.VipsAllocs, int64(0))

@@ -21,8 +21,8 @@ func ensureTestStartup(t *testing.T) {
 	t.Helper()
 	testStartupOnce.Do(func() {
 		err := Startup(&vips.Config{
-			MaxCacheMem:      0,
-			MaxCacheSize:     0,
+			MaxCacheMem:      1,
+			MaxCacheSize:     1,
 			MaxCacheFiles:    0,
 			ConcurrencyLevel: 1,
 		})

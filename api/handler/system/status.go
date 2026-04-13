@@ -25,29 +25,37 @@ type StatusResponse struct {
 }
 
 type MemoryStatus struct {
-	HeapAllocMB    float64 `json:"heap_alloc_mb"`
-	HeapAllocStr   string  `json:"heap_alloc_str"`
-	HeapSysMB      float64 `json:"heap_sys_mb"`
-	HeapSysStr     string  `json:"heap_sys_str"`
-	HeapInUseMB    float64 `json:"heap_in_use_mb"`
-	HeapInUseStr   string  `json:"heap_in_use_str"`
-	StackSysMB     float64 `json:"stack_sys_mb"`
-	StackSysStr    string  `json:"stack_sys_str"`
-	RSSMB          float64 `json:"rss_mb"`
-	RSSStr         string  `json:"rss_str"`
-	TotalAllocMB   float64 `json:"total_alloc_mb"`
-	TotalAllocStr  string  `json:"total_alloc_str"`
-	GCSysMB        float64 `json:"gc_sys_mb"`
-	GCSysStr       string  `json:"gc_sys_str"`
-	NumGC          uint32  `json:"num_gc"`
-	LastGCTime     int64   `json:"last_gc_time"`
-	Goroutines     int     `json:"goroutines"`
-	VipsMemMB      float64 `json:"vips_mem_mb"`
-	VipsMemStr     string  `json:"vips_mem_str"`
-	VipsMemHighMB  float64 `json:"vips_mem_high_mb"`
-	VipsMemHighStr string  `json:"vips_mem_high_str"`
-	VipsAllocs     int64   `json:"vips_allocs"`
-	VipsOpenFiles  int64   `json:"vips_open_files"`
+	HeapAllocMB     float64 `json:"heap_alloc_mb"`
+	HeapAllocStr    string  `json:"heap_alloc_str"`
+	HeapSysMB       float64 `json:"heap_sys_mb"`
+	HeapSysStr      string  `json:"heap_sys_str"`
+	HeapInUseMB     float64 `json:"heap_in_use_mb"`
+	HeapInUseStr    string  `json:"heap_in_use_str"`
+	HeapIdleMB      float64 `json:"heap_idle_mb"`
+	HeapIdleStr     string  `json:"heap_idle_str"`
+	HeapReleasedMB  float64 `json:"heap_released_mb"`
+	HeapReleasedStr string  `json:"heap_released_str"`
+	StackSysMB      float64 `json:"stack_sys_mb"`
+	StackSysStr     string  `json:"stack_sys_str"`
+	RSSMB           float64 `json:"rss_mb"`
+	RSSStr          string  `json:"rss_str"`
+	RssAnonMB       float64 `json:"rss_anon_mb"`
+	RssAnonStr      string  `json:"rss_anon_str"`
+	RssFileMB       float64 `json:"rss_file_mb"`
+	RssFileStr      string  `json:"rss_file_str"`
+	TotalAllocMB    float64 `json:"total_alloc_mb"`
+	TotalAllocStr   string  `json:"total_alloc_str"`
+	GCSysMB         float64 `json:"gc_sys_mb"`
+	GCSysStr        string  `json:"gc_sys_str"`
+	NumGC           uint32  `json:"num_gc"`
+	LastGCTime      int64   `json:"last_gc_time"`
+	Goroutines      int     `json:"goroutines"`
+	VipsMemMB       float64 `json:"vips_mem_mb"`
+	VipsMemStr      string  `json:"vips_mem_str"`
+	VipsMemHighMB   float64 `json:"vips_mem_high_mb"`
+	VipsMemHighStr  string  `json:"vips_mem_high_str"`
+	VipsAllocs      int64   `json:"vips_allocs"`
+	VipsOpenFiles   int64   `json:"vips_open_files"`
 }
 
 type RuntimeStatus struct {
@@ -103,29 +111,37 @@ func (h *Handler) GetStatus(c *gin.Context) {
 		GoVersion:   getGoVersion(),
 		Environment: getEnvironment(),
 		Memory: MemoryStatus{
-			HeapAllocMB:    memStats.HeapAllocMB,
-			HeapAllocStr:   formatBytes(uint64(memStats.HeapAllocMB * 1024 * 1024)),
-			HeapSysMB:      memStats.HeapSysMB,
-			HeapSysStr:     formatBytes(uint64(memStats.HeapSysMB * 1024 * 1024)),
-			HeapInUseMB:    memStats.HeapInUseMB,
-			HeapInUseStr:   formatBytes(uint64(memStats.HeapInUseMB * 1024 * 1024)),
-			StackSysMB:     memStats.StackSysMB,
-			StackSysStr:    formatBytes(uint64(memStats.StackSysMB * 1024 * 1024)),
-			RSSMB:          memStats.RSSMB,
-			RSSStr:         formatBytes(uint64(memStats.RSSMB * 1024 * 1024)),
-			TotalAllocMB:   memStats.TotalAllocMB,
-			TotalAllocStr:  formatBytes(uint64(memStats.TotalAllocMB * 1024 * 1024)),
-			GCSysMB:        memStats.GCSysMB,
-			GCSysStr:       formatBytes(uint64(memStats.GCSysMB * 1024 * 1024)),
-			NumGC:          memStats.NumGC,
-			LastGCTime:     memStats.LastGCTime.Unix(),
-			Goroutines:     memStats.Goroutines,
-			VipsMemMB:      memStats.VipsMemMB,
-			VipsMemStr:     formatBytes(uint64(memStats.VipsMemMB * 1024 * 1024)),
-			VipsMemHighMB:  memStats.VipsMemHighMB,
-			VipsMemHighStr: formatBytes(uint64(memStats.VipsMemHighMB * 1024 * 1024)),
-			VipsAllocs:     memStats.VipsAllocs,
-			VipsOpenFiles:  memStats.VipsOpenFiles,
+			HeapAllocMB:     memStats.HeapAllocMB,
+			HeapAllocStr:    formatBytes(uint64(memStats.HeapAllocMB * 1024 * 1024)),
+			HeapSysMB:       memStats.HeapSysMB,
+			HeapSysStr:      formatBytes(uint64(memStats.HeapSysMB * 1024 * 1024)),
+			HeapInUseMB:     memStats.HeapInUseMB,
+			HeapInUseStr:    formatBytes(uint64(memStats.HeapInUseMB * 1024 * 1024)),
+			HeapIdleMB:      memStats.HeapIdleMB,
+			HeapIdleStr:     formatBytes(uint64(memStats.HeapIdleMB * 1024 * 1024)),
+			HeapReleasedMB:  memStats.HeapReleasedMB,
+			HeapReleasedStr: formatBytes(uint64(memStats.HeapReleasedMB * 1024 * 1024)),
+			StackSysMB:      memStats.StackSysMB,
+			StackSysStr:     formatBytes(uint64(memStats.StackSysMB * 1024 * 1024)),
+			RSSMB:           memStats.RSSMB,
+			RSSStr:          formatBytes(uint64(memStats.RSSMB * 1024 * 1024)),
+			RssAnonMB:       memStats.RssAnonMB,
+			RssAnonStr:      formatBytes(uint64(memStats.RssAnonMB * 1024 * 1024)),
+			RssFileMB:       memStats.RssFileMB,
+			RssFileStr:      formatBytes(uint64(memStats.RssFileMB * 1024 * 1024)),
+			TotalAllocMB:    memStats.TotalAllocMB,
+			TotalAllocStr:   formatBytes(uint64(memStats.TotalAllocMB * 1024 * 1024)),
+			GCSysMB:         memStats.GCSysMB,
+			GCSysStr:        formatBytes(uint64(memStats.GCSysMB * 1024 * 1024)),
+			NumGC:           memStats.NumGC,
+			LastGCTime:      memStats.LastGCTime.Unix(),
+			Goroutines:      memStats.Goroutines,
+			VipsMemMB:       memStats.VipsMemMB,
+			VipsMemStr:      formatBytes(uint64(memStats.VipsMemMB * 1024 * 1024)),
+			VipsMemHighMB:   memStats.VipsMemHighMB,
+			VipsMemHighStr:  formatBytes(uint64(memStats.VipsMemHighMB * 1024 * 1024)),
+			VipsAllocs:      memStats.VipsAllocs,
+			VipsOpenFiles:   memStats.VipsOpenFiles,
 		},
 		Runtime: RuntimeStatus{
 			NumCPU: getNumCPU(),

@@ -384,8 +384,29 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
 		}
 	}
 
+	// Pre-load image once if both WebP and AVIF need it to avoid double decode.
+	var originImg *vipsfile.ImageHandle
+	var imgInfo vipsfile.ImageInfo
+	needLoad := t.WebPVariantID > 0 || t.AVIFVariantID > 0
+	if needLoad {
+		var err error
+		originImg, imgInfo, err = vipsfile.LoadImageFromFile(filePath)
+		if err != nil {
+			utils.LogIfDevf("[Pipeline] Failed to load image: %v", err)
+			if t.WebPVariantID > 0 {
+				_ = t.VariantRepo.UpdateFailed(t.WebPVariantID, fmt.Sprintf("load image: %v", err))
+			}
+			if t.AVIFVariantID > 0 {
+				_ = t.VariantRepo.UpdateFailed(t.AVIFVariantID, fmt.Sprintf("load image: %v", err))
+			}
+			hasFailed = true
+		} else {
+			defer originImg.Close()
+		}
+	}
+
 	if t.WebPVariantID > 0 {
-		result, err := t.generateWebP(ctx, filePath)
+		result, err := t.generateWebP(ctx, filePath, originImg, imgInfo)
 		switch {
 		case err != nil:
 			utils.LogIfDevf("[Pipeline] WebP failed: %v", err)
@@ -403,7 +424,7 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
 
 	avifRequired := t.AVIFVariantID > 0 && t.WebPVariantID == 0
 	if t.AVIFVariantID > 0 {
-		result, err := t.generateAVIF(ctx, filePath, webpResult)
+		result, err := t.generateAVIF(ctx, filePath, webpResult, originImg, imgInfo)
 		switch {
 		case err != nil:
 			utils.LogIfDevf("[Pipeline] AVIF failed: %v", err)
@@ -513,17 +534,17 @@ func (t *ImagePipelineTask) generateThumbnail(ctx context.Context, filePath stri
 }
 
 // generateWebP 生成 WebP 原图
-func (t *ImagePipelineTask) generateWebP(ctx context.Context, filePath string) (*pipelineResult, error) {
+func (t *ImagePipelineTask) generateWebP(ctx context.Context, filePath string, originImg *vipsfile.ImageHandle, info vipsfile.ImageInfo) (*pipelineResult, error) {
 	settings := t.Settings
 	if settings == nil {
 		return nil, fmt.Errorf("image processing settings not provided")
 	}
 
-	return t.generateWebPWithSettings(ctx, filePath, settings)
+	return t.generateWebPWithSettings(ctx, filePath, settings, originImg, info)
 }
 
 // generateWebPWithSettings 使用指定设置生成 WebP
-func (t *ImagePipelineTask) generateWebPWithSettings(ctx context.Context, filePath string, settings *dbconfig.ImageProcessingSettings) (*pipelineResult, error) {
+func (t *ImagePipelineTask) generateWebPWithSettings(ctx context.Context, filePath string, settings *dbconfig.ImageProcessingSettings, originImg *vipsfile.ImageHandle, info vipsfile.ImageInfo) (*pipelineResult, error) {
 	if !settings.IsFormatEnabled(models.FormatWebP) {
 		utils.LogIfDevf("[Pipeline] WebP format disabled")
 		return nil, nil
@@ -541,14 +562,17 @@ func (t *ImagePipelineTask) generateWebPWithSettings(ctx context.Context, filePa
 		}
 	}
 
-	originImg, info, err := vipsfile.LoadImageFromFile(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("load image from file: %w", err)
+	var width, height int
+	if originImg == nil {
+		var err error
+		originImg, info, err = vipsfile.LoadImageFromFile(filePath)
+		if err != nil {
+			return nil, fmt.Errorf("load image from file: %w", err)
+		}
+		defer originImg.Close()
 	}
-	defer originImg.Close()
-
-	width := info.Width
-	height := info.Height
+	width = info.Width
+	height = info.Height
 	if settings.MaxDimension > 0 {
 		if width > settings.MaxDimension || height > settings.MaxDimension {
 			utils.LogIfDevf("[Pipeline] Skipping WebP: image exceeds max dimension after load: %dx%d", width, height)
@@ -601,7 +625,7 @@ func (t *ImagePipelineTask) generateWebPWithSettings(ctx context.Context, filePa
 	}, nil
 }
 
-func (t *ImagePipelineTask) generateAVIF(ctx context.Context, filePath string, webpResult *pipelineResult) (*pipelineResult, error) {
+func (t *ImagePipelineTask) generateAVIF(ctx context.Context, filePath string, webpResult *pipelineResult, originImg *vipsfile.ImageHandle, info vipsfile.ImageInfo) (*pipelineResult, error) {
 	settings := t.Settings
 	if settings == nil {
 		return nil, fmt.Errorf("image processing settings not provided")
@@ -626,11 +650,14 @@ func (t *ImagePipelineTask) generateAVIF(ctx context.Context, filePath string, w
 		}
 	}
 
-	originImg, info, err := vipsfile.LoadImageFromFile(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("load image from file: %w", err)
+	if originImg == nil {
+		var err error
+		originImg, info, err = vipsfile.LoadImageFromFile(filePath)
+		if err != nil {
+			return nil, fmt.Errorf("load image from file: %w", err)
+		}
+		defer originImg.Close()
 	}
-	defer originImg.Close()
 
 	if settings.MaxDimension > 0 && (info.Width > settings.MaxDimension || info.Height > settings.MaxDimension) {
 		utils.LogIfDevf("[Pipeline] Skipping AVIF: image exceeds max dimension after load: %dx%d", info.Width, info.Height)

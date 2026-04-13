@@ -76,6 +76,8 @@ int ib_save_avif_file(
     VipsImage *copy = NULL;
     int ret = 0;
 
+    /* vips_heifsave may require random access. Materialize the image
+     * in memory to avoid failures when the input is a lazy pipeline. */
     if (vips_copy(in, &copy, NULL) != 0) {
         return -1;
     }

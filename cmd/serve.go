@@ -88,7 +88,6 @@ func InitDependencies(cfg *config.Config) (*Dependencies, error) {
 		return nil, err
 	}
 
-	// 缓存层已在 Manager 初始化时自动启用
 	log.Println("[Dependencies] Config cache enabled")
 
 	storageConfigs, err := configManager.GetStorageConfigs(context.Background())
@@ -146,8 +145,8 @@ func RunServer() {
 	}
 
 	if err := vipsfile.Startup(&vips.Config{
-		MaxCacheMem:      0,
-		MaxCacheSize:     0,
+		MaxCacheMem:      1,
+		MaxCacheSize:     1,
 		MaxCacheFiles:    0,
 		ConcurrencyLevel: 2,
 	}); err != nil {
@@ -155,7 +154,7 @@ func RunServer() {
 	}
 	defer vipsfile.Shutdown()
 
-	log.Println("[VIPS] Govips initialized with minimal cache (1 byte)")
+	log.Println("[VIPS] Govips initialized with cache limited to 1 byte / 1 entry")
 	if config.IsDevelopment() {
 		utils.LogMemoryStats("VIPS_INIT")
 	}

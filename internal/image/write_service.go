@@ -325,7 +325,6 @@ func getUploadSourceSize(src io.Seeker, hintedSize int64) (int64, error) {
 }
 
 // createDedupedImageRecord 为不同用户创建去重后的新图片记录
-// 物理文件复用，但逻辑上属于不同用户（物理去重 + 逻辑隔离）
 func (s *WriteService) createDedupedImageRecord(existing *models.Image, userID uint, originalName string, _ uint, isPublic bool) (*models.Image, error) {
 	ids := s.pathGenerator.GenerateOriginalIdentifiers(existing.FileHash+fmt.Sprintf("_%d", userID), filepath.Ext(originalName), time.Now())
 
