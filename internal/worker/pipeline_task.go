@@ -465,6 +465,7 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
 		avifSkipped,
 	))
 	t.deleteCacheOnTerminalState("success")
+	vipsfile.MallocTrim()
 	return nil
 }
 

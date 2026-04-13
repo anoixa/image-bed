@@ -3,6 +3,7 @@ package vipsfile
 /*
 #cgo pkg-config: vips
 #include <stdlib.h>
+#include <malloc.h>
 #include <vips/vips.h>
 #include "vipsfile.h"
 */
@@ -315,4 +316,9 @@ func webpProfileOrNone(profile string) string {
 		return "none"
 	}
 	return profile
+}
+
+// MallocTrim releases free memory from the heap back to the OS.
+func MallocTrim() {
+	C.malloc_trim(0)
 }
