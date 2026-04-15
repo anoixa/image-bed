@@ -19,6 +19,8 @@ import (
 	"github.com/anoixa/image-bed/utils"
 	"github.com/anoixa/image-bed/utils/generator"
 	"github.com/anoixa/image-bed/utils/pool"
+	"github.com/davidbyttow/govips/v2/vips"
+	"runtime"
 	_ "golang.org/x/image/webp"
 	_ "image/gif"
 	_ "image/jpeg"
@@ -254,6 +256,7 @@ func (t *ImagePipelineTask) getProcessingFilePath(ctx context.Context) (path str
 // Execute 执行任务
 func (t *ImagePipelineTask) Execute() {
 	defer t.recovery()
+	defer t.cleanupAfterPipeline()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
@@ -465,7 +468,6 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
 		avifSkipped,
 	))
 	t.deleteCacheOnTerminalState("success")
-	vipsfile.MallocTrim()
 	return nil
 }
 
@@ -819,6 +821,14 @@ func (t *ImagePipelineTask) deleteCacheOnTerminalState(state string) {
 			utils.LogIfDevf("[Pipeline] Deleted cache for %s after %s", t.ImageIdentifier, state)
 		}
 	}
+}
+
+// cleanupAfterPipeline releases vips cache and C heap back to the OS.
+// Called via defer from Execute() so it runs on success, error, and panic paths.
+func (t *ImagePipelineTask) cleanupAfterPipeline() {
+	runtime.GC()
+	vips.ClearCache()
+	vipsfile.MallocTrim()
 }
 
 // recovery 恢复 panic
