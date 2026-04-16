@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/storage"
@@ -41,6 +42,10 @@ func (m *mockVariantRepo) GetByID(id uint) (*models.ImageVariant, error) {
 
 func (m *mockVariantRepo) DeleteVariant(id uint) error {
 	return nil
+}
+
+func (m *mockVariantRepo) ResetStaleProcessing(olderThan time.Duration) (int64, error) {
+	return 0, nil
 }
 
 func TestGetProcessingFilePath_LocalStorage(t *testing.T) {

@@ -139,3 +139,18 @@ func (r *VariantRepository) DeleteByImageID(imageID uint) error {
 func (r *VariantRepository) DeleteVariant(id uint) error {
 	return r.db.Delete(&models.ImageVariant{}, id).Error
 }
+
+// ResetStaleProcessing resets processing variants older than the given
+// duration back to pending so they can be retried. Returns the number of
+// affected rows.
+func (r *VariantRepository) ResetStaleProcessing(olderThan time.Duration) (int64, error) {
+	cutoff := time.Now().Add(-olderThan)
+	result := r.db.Model(&models.ImageVariant{}).
+		Where("status = ? AND updated_at < ?", models.VariantStatusProcessing, cutoff).
+		Updates(map[string]any{
+			"status":        models.VariantStatusPending,
+			"error_message": "",
+			"updated_at":    time.Now(),
+		})
+	return result.RowsAffected, result.Error
+}

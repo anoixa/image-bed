@@ -34,6 +34,7 @@ type VariantRepository interface {
 	UpdateFailed(id uint, errMsg string) error
 	GetByID(id uint) (*models.ImageVariant, error)
 	DeleteVariant(id uint) error
+	ResetStaleProcessing(olderThan time.Duration) (int64, error)
 }
 
 // ImageRepository 图片仓库接口
@@ -255,7 +256,8 @@ func (t *ImagePipelineTask) getProcessingFilePath(ctx context.Context) (path str
 
 // Execute 执行任务
 func (t *ImagePipelineTask) Execute() {
-	defer t.recovery()
+	var acquiredVariants []uint
+	defer t.finalize(&acquiredVariants)
 	defer t.cleanupAfterPipeline()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -277,6 +279,7 @@ func (t *ImagePipelineTask) Execute() {
 			utils.LogIfDevf("[Pipeline] CAS failed for thumbnail variant %d (not in pending state)", t.ThumbVariantID)
 			return
 		}
+		acquiredVariants = append(acquiredVariants, t.ThumbVariantID)
 		utils.LogIfDevf("[Pipeline] CAS success: thumbnail variant %d is now processing", t.ThumbVariantID)
 	}
 
@@ -296,6 +299,7 @@ func (t *ImagePipelineTask) Execute() {
 			utils.LogIfDevf("[Pipeline] CAS failed for WebP variant %d (not in pending state)", t.WebPVariantID)
 			return
 		}
+		acquiredVariants = append(acquiredVariants, t.WebPVariantID)
 		utils.LogIfDevf("[Pipeline] CAS success: WebP variant %d is now processing", t.WebPVariantID)
 	}
 
@@ -315,6 +319,7 @@ func (t *ImagePipelineTask) Execute() {
 			utils.LogIfDevf("[Pipeline] CAS failed for AVIF variant %d (not in pending state)", t.AVIFVariantID)
 			return
 		}
+		acquiredVariants = append(acquiredVariants, t.AVIFVariantID)
 		utils.LogIfDevf("[Pipeline] CAS success: AVIF variant %d is now processing", t.AVIFVariantID)
 	}
 
@@ -330,7 +335,6 @@ func (t *ImagePipelineTask) Execute() {
 		if t.AVIFVariantID > 0 {
 			_ = t.VariantRepo.UpdateFailed(t.AVIFVariantID, fmt.Sprintf("semaphore: %v", err))
 		}
-		// 更新主图片状态为失败
 		_ = t.ImageRepo.UpdateVariantStatus(t.ImageID, models.ImageVariantStatusFailed)
 		t.deleteCacheOnTerminalState("failed")
 		return
@@ -831,40 +835,37 @@ func (t *ImagePipelineTask) cleanupAfterPipeline() {
 	vipsfile.MallocTrim()
 }
 
-// recovery 恢复 panic
-func (t *ImagePipelineTask) recovery() {
+// finalize ensures variant state consistency on all exit paths.
+// - On panic: rolls back processing variants to failed.
+// - On normal exit: rolls back any variant still stuck in processing back
+//   to pending (so the sweeper or a retry can pick it up).
+// - Completed/failed/skipped variants are left untouched.
+func (t *ImagePipelineTask) finalize(acquiredVariants *[]uint) {
 	if rec := recover(); rec != nil {
 		utils.LogIfDevf("[Pipeline] Panic recovered: %v", rec)
-
-		if t.ThumbVariantID > 0 {
+		for _, id := range *acquiredVariants {
 			_, _ = t.VariantRepo.UpdateStatusCAS(
-				t.ThumbVariantID,
+				id,
 				models.VariantStatusProcessing,
 				models.VariantStatusFailed,
 				fmt.Sprintf("panic: %v", rec),
 			)
 		}
-
-		if t.WebPVariantID > 0 {
-			_, _ = t.VariantRepo.UpdateStatusCAS(
-				t.WebPVariantID,
-				models.VariantStatusProcessing,
-				models.VariantStatusFailed,
-				fmt.Sprintf("panic: %v", rec),
-			)
-		}
-
-		if t.AVIFVariantID > 0 {
-			_, _ = t.VariantRepo.UpdateStatusCAS(
-				t.AVIFVariantID,
-				models.VariantStatusProcessing,
-				models.VariantStatusFailed,
-				fmt.Sprintf("panic: %v", rec),
-			)
-		}
-
 		_ = t.ImageRepo.UpdateVariantStatus(t.ImageID, models.ImageVariantStatusFailed)
-
 		utils.LogIfDevf("[Pipeline] Panic during processing for image %s; orphaned storage files (if any) can be cleaned with the 'clean' command", t.ImageIdentifier)
+		return
+	}
+
+	// Normal exit: roll back any variant still in processing to pending.
+	for _, id := range *acquiredVariants {
+		rolledBack, _ := t.VariantRepo.UpdateStatusCAS(
+			id,
+			models.VariantStatusProcessing,
+			models.VariantStatusPending,
+			"",
+		)
+		if rolledBack {
+			utils.LogIfDevf("[Pipeline] Rolled back variant %d processing->pending (pipeline did not reach terminal state)", id)
+		}
 	}
 }

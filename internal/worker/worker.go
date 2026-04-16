@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 var (
@@ -230,8 +231,8 @@ func (p *Pool) Submit(task func()) (ok bool) {
 	if p.isClosed.Load() {
 		return false
 	}
-	if err := workerMemoryCheck(); err != nil {
-		utils.Warnf("[WorkerPool] Rejecting task submission due to memory limit: %v", err)
+	if err := p.waitForMemory(); err != nil {
+		utils.Warnf("[WorkerPool] Rejecting task submission after backpressure wait: %v", err)
 		return false
 	}
 	defer func() {
@@ -246,6 +247,31 @@ func (p *Pool) Submit(task func()) (ok bool) {
 	default:
 		utils.Warnf("[WorkerPool] Task queue full, dropping task")
 		return false
+	}
+}
+
+var backpressureTimeout = 30 * time.Second
+var backpressureInterval = 2 * time.Second
+
+// waitForMemory waits up to 30s for memory to drop below the worker limit.
+func (p *Pool) waitForMemory() error {
+	// Fast path: memory is fine.
+	if err := workerMemoryCheck(); err == nil {
+		return nil
+	}
+
+	// Try to free memory immediately.
+	runtime.GC()
+
+	deadline := time.Now().Add(backpressureTimeout)
+	for {
+		if err := workerMemoryCheck(); err == nil {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("memory still over limit after %v backpressure wait", backpressureTimeout)
+		}
+		time.Sleep(backpressureInterval)
 	}
 }
 

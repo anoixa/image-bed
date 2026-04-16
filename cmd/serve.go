@@ -169,6 +169,10 @@ func RunServer() {
 
 	worker.InitGlobalPool(cfg.WorkerCount, 1000)
 
+	sweeperCtx, sweeperCancel := context.WithCancel(context.Background())
+	defer sweeperCancel()
+	worker.StartVariantSweeper(sweeperCtx, deps.DB)
+
 	// 初始化 JWT
 	api.SetAuthKeysRepo(deps.Repositories.KeysRepo)
 	if err := api.TokenInitFromConfig(cfg, deps.ConfigManager); err != nil {
@@ -213,6 +217,7 @@ func RunServer() {
 
 	// 停止全局 Worker 池
 	worker.StopGlobalPool()
+	sweeperCancel()
 
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.ServerWriteTimeout)
 	defer cancel()
