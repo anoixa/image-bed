@@ -197,6 +197,32 @@ func (c *Converter) failPendingVariantsOnSubmitFailure(image *models.Image, reas
 	image.VariantStatus = models.ImageVariantStatusFailed
 }
 
+func shouldTriggerVariantConversion(image *models.Image, settings *config.ImageProcessingSettings) bool {
+	if image == nil || settings == nil {
+		return false
+	}
+
+	thumbnailEnabled := settings.ThumbnailEnabled && len(settings.ThumbnailSizes) > 0
+	webpEnabled := settings.IsFormatEnabled(models.FormatWebP)
+	avifEnabled := settings.IsFormatEnabled(models.FormatAVIF) && vipsfile.SupportsAVIFEncoding()
+	if !shouldStartVariantPipeline(thumbnailEnabled, webpEnabled, avifEnabled) {
+		return false
+	}
+
+	if image.MimeType == "image/gif" {
+		return false
+	}
+
+	if settings.SkipSmallerThan > 0 {
+		minSize := int64(settings.SkipSmallerThan * 1024)
+		if image.FileSize < minSize {
+			return false
+		}
+	}
+
+	return true
+}
+
 func shouldStartVariantPipeline(thumbnailEnabled, webpEnabled, avifEnabled bool) bool {
 	return thumbnailEnabled || webpEnabled || avifEnabled
 }

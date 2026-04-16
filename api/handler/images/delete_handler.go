@@ -93,6 +93,10 @@ func (h *Handler) DeleteSingleImage(c *gin.Context) {
 
 	if !result.Success {
 		if result.Error != nil {
+			if result.Error.Error() == "permission denied" {
+				common.RespondError(c, http.StatusForbidden, result.Error.Error())
+				return
+			}
 			common.RespondError(c, http.StatusNotFound, result.Error.Error())
 			return
 		}

@@ -35,7 +35,7 @@ func (s *Service) GetUserAlbums(userID uint, page, limit int) ([]*AlbumInfo, int
 	return s.repo.GetUserAlbums(userID, page, limit)
 }
 
-func (s *Service) AddImagesToAlbum(albumID, userID uint, imageIDs []uint) error {
+func (s *Service) AddImagesToAlbum(albumID, userID uint, imageIDs []uint) (int64, error) {
 	return s.repo.AddImagesToAlbum(albumID, userID, imageIDs)
 }
 

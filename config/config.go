@@ -124,7 +124,7 @@ func setDefaults() {
 	// 服务器配置默认值
 	viper.SetDefault("server_host", "127.0.0.1")
 	viper.SetDefault("server_port", 8080)
-	viper.SetDefault("server_domain", "http://localhost:8080")
+	viper.SetDefault("server_domain", "")
 	viper.SetDefault("server_read_timeout", "15s")
 	viper.SetDefault("server_write_timeout", "30s")
 	viper.SetDefault("server_idle_timeout", "120s")
@@ -195,12 +195,17 @@ func (c *Config) BaseURL() string {
 	if c.ServerDomain != "" {
 		return c.ServerDomain
 	}
-	// 默认使用 localhost
+
 	host := c.ServerHost
-	if host == "0.0.0.0" {
+	if host == "" || host == "0.0.0.0" {
 		host = "localhost"
 	}
-	return fmt.Sprintf("http://%s:%d", host, c.ServerPort)
+	port := c.ServerPort
+	if port == 0 {
+		port = 8080
+	}
+
+	return fmt.Sprintf("http://%s:%d", host, port)
 }
 
 // GetWorkerCount 返回 worker 数量

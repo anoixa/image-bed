@@ -21,6 +21,7 @@ import (
 type mockVariantRepo struct {
 	updateCompletedErr error
 	updateFailedCalls  []uint
+	touchCalls         [][]uint
 }
 
 func (m *mockVariantRepo) UpdateStatusCAS(id uint, expected, newStatus, errMsg string) (bool, error) {
@@ -36,6 +37,12 @@ func (m *mockVariantRepo) UpdateFailed(id uint, errMsg string) error {
 	return nil
 }
 
+func (m *mockVariantRepo) TouchProcessing(ids []uint) error {
+	copied := append([]uint(nil), ids...)
+	m.touchCalls = append(m.touchCalls, copied)
+	return nil
+}
+
 func (m *mockVariantRepo) GetByID(id uint) (*models.ImageVariant, error) {
 	return nil, nil
 }
@@ -46,6 +53,23 @@ func (m *mockVariantRepo) DeleteVariant(id uint) error {
 
 func (m *mockVariantRepo) ResetStaleProcessing(olderThan time.Duration) (int64, error) {
 	return 0, nil
+}
+
+type mockImageRepo struct {
+	touchedImageIDs []uint
+}
+
+func (m *mockImageRepo) UpdateVariantStatus(imageID uint, status models.ImageVariantStatus) error {
+	return nil
+}
+
+func (m *mockImageRepo) TouchVariantProcessingStatus(imageID uint) error {
+	m.touchedImageIDs = append(m.touchedImageIDs, imageID)
+	return nil
+}
+
+func (m *mockImageRepo) GetImageByID(id uint) (*models.Image, error) {
+	return nil, nil
 }
 
 func TestGetProcessingFilePath_LocalStorage(t *testing.T) {
@@ -87,6 +111,22 @@ func TestSaveVariantResults_UpdateCompletedError_CallsUpdateFailed(t *testing.T)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "db down")
 	assert.Contains(t, repo.updateFailedCalls, uint(7), "UpdateFailed must be called for the variant")
+}
+
+func TestTouchProcessingStateRefreshesImageAndVariants(t *testing.T) {
+	variantRepo := &mockVariantRepo{}
+	imageRepo := &mockImageRepo{}
+	task := &ImagePipelineTask{
+		ImageID:     42,
+		VariantRepo: variantRepo,
+		ImageRepo:   imageRepo,
+	}
+
+	task.touchProcessingState([]uint{3, 5})
+
+	require.Len(t, variantRepo.touchCalls, 1)
+	assert.Equal(t, []uint{3, 5}, variantRepo.touchCalls[0])
+	assert.Equal(t, []uint{42}, imageRepo.touchedImageIDs)
 }
 
 func TestStageVariantFileFromPath(t *testing.T) {

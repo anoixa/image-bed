@@ -125,9 +125,10 @@ func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 	}
 
 	// 批量添加到相册
-	addedCount := 0
+	var addedCount int64
 	if len(imageIDsToAdd) > 0 {
-		if err := h.svc.AddImagesToAlbum(uint(albumID), userID, imageIDsToAdd); err != nil {
+		inserted, err := h.svc.AddImagesToAlbum(uint(albumID), userID, imageIDsToAdd)
+		if err != nil {
 			if err.Error() == "album not found or access denied" {
 				common.RespondError(c, http.StatusNotFound, "Album not found or access denied")
 				return
@@ -135,7 +136,7 @@ func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 			common.RespondError(c, http.StatusInternalServerError, "Failed to add imgs to album")
 			return
 		}
-		addedCount = len(imageIDsToAdd)
+		addedCount = inserted
 	}
 
 	common.RespondSuccess(c, gin.H{

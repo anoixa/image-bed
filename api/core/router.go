@@ -144,7 +144,7 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies, imageHandle
 	dashboardService := svcDashboard.NewService(dashboardRepository, deps.CacheProvider)
 	dashboardHandler := handlerDashboard.NewHandler(dashboardService)
 
-	userService := svcUser.NewService(deps.Repositories.AccountsRepo)
+	userService := svcUser.NewService(deps.Repositories.AccountsRepo, deps.Repositories.DevicesRepo)
 	userHandler := handlerUser.NewHandler(userService)
 
 	apiGroup := router.Group("/api")

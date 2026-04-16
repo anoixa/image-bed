@@ -309,6 +309,15 @@ func (r *Repository) UpdateVariantStatus(imageID uint, status models.ImageVarian
 	return r.db.Model(&models.Image{}).Where("id = ?", imageID).Update("variant_status", status).Error
 }
 
+// TouchVariantProcessingStatus refreshes updated_at while an image remains in
+// processing so stale detection does not race with active work.
+func (r *Repository) TouchVariantProcessingStatus(imageID uint) error {
+	return r.db.Model(&models.Image{}).
+		Where("id = ? AND variant_status = ?", imageID, models.ImageVariantStatusProcessing).
+		Update("updated_at", time.Now()).
+		Error
+}
+
 // GetImagesByVariantStatus 根据变体状态获取图片列表
 func (r *Repository) GetImagesByVariantStatus(statuses []models.ImageVariantStatus, limit int) ([]*models.Image, error) {
 	var images []*models.Image

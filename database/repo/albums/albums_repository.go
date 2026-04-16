@@ -126,11 +126,12 @@ func (r *Repository) RemoveImageFromAlbum(albumID, userID uint, image *models.Im
 }
 
 // AddImagesToAlbum 批量添加图片到相册
-func (r *Repository) AddImagesToAlbum(albumID, userID uint, imageIDs []uint) error {
+func (r *Repository) AddImagesToAlbum(albumID, userID uint, imageIDs []uint) (int64, error) {
 	if len(imageIDs) == 0 {
-		return nil
+		return 0, nil
 	}
-	return r.db.Transaction(func(tx *gorm.DB) error {
+	var insertedCount int64
+	err := r.db.Transaction(func(tx *gorm.DB) error {
 		var album models.Album
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&album, "id = ? AND user_id = ?", albumID, userID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -139,16 +140,50 @@ func (r *Repository) AddImagesToAlbum(albumID, userID uint, imageIDs []uint) err
 			return err
 		}
 
-		// 批量插入关联记录
-		associations := make([]map[string]any, len(imageIDs))
-		for i, id := range imageIDs {
-			associations[i] = map[string]any{
+		uniqueIDs := make([]uint, 0, len(imageIDs))
+		seen := make(map[uint]struct{}, len(imageIDs))
+		for _, id := range imageIDs {
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			uniqueIDs = append(uniqueIDs, id)
+		}
+
+		var existingIDs []uint
+		if err := tx.Table("album_images").
+			Where("album_id = ? AND image_id IN ?", albumID, uniqueIDs).
+			Pluck("image_id", &existingIDs).Error; err != nil {
+			return err
+		}
+
+		existing := make(map[uint]struct{}, len(existingIDs))
+		for _, id := range existingIDs {
+			existing[id] = struct{}{}
+		}
+
+		associations := make([]map[string]any, 0, len(uniqueIDs))
+		for _, id := range uniqueIDs {
+			if _, ok := existing[id]; ok {
+				continue
+			}
+			associations = append(associations, map[string]any{
 				"album_id": albumID,
 				"image_id": id,
-			}
+			})
 		}
-		return tx.Table("album_images").Create(associations).Error
+
+		if len(associations) == 0 {
+			return nil
+		}
+
+		if err := tx.Table("album_images").Create(associations).Error; err != nil {
+			return err
+		}
+		insertedCount = int64(len(associations))
+		return nil
 	})
+	return insertedCount, err
 }
 
 // CreateAlbum 创建相册

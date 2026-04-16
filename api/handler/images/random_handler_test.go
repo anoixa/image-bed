@@ -136,3 +136,53 @@ func TestRandomImageRejectsInvalidFormat(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
+
+func TestRespondRandomJSONUsesSelectedURLForVariantResponses(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	handler := &Handler{
+		baseURL: "http://localhost:8080",
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	selectedURL := "https://cdn.example.com/selected.webp"
+	result := &imageSvc.ImageResultDTO{
+		Image: &models.Image{
+			ID:         1,
+			Identifier: "original-id",
+			FileSize:   2048,
+			MimeType:   "image/jpeg",
+			IsPublic:   true,
+		},
+		IsOriginal: false,
+		MIMEType:   "image/webp",
+		URL:        selectedURL,
+		Variant: &models.ImageVariant{
+			Identifier: "variant-id",
+			Format:     models.FormatWebP,
+		},
+	}
+
+	handler.respondRandomJSON(c, result)
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var response common.Response
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	dataBytes, err := json.Marshal(response.Data)
+	require.NoError(t, err)
+
+	var payload struct {
+		URL         string `json:"url"`
+		OriginalURL string `json:"original_url"`
+		Variant     struct {
+			URL string `json:"url"`
+		} `json:"variant"`
+	}
+	require.NoError(t, json.Unmarshal(dataBytes, &payload))
+
+	assert.Equal(t, selectedURL, payload.URL)
+	assert.Equal(t, "http://localhost:8080/images/original-id", payload.OriginalURL)
+	assert.Equal(t, selectedURL, payload.Variant.URL)
+}

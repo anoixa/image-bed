@@ -11,12 +11,14 @@ import (
 // Service 用户服务
 type Service struct {
 	accountsRepo *accounts.Repository
+	devicesRepo  *accounts.DeviceRepository
 }
 
 // NewService 创建新的用户服务
-func NewService(accountsRepo *accounts.Repository) *Service {
+func NewService(accountsRepo *accounts.Repository, devicesRepo *accounts.DeviceRepository) *Service {
 	return &Service{
 		accountsRepo: accountsRepo,
+		devicesRepo:  devicesRepo,
 	}
 }
 
@@ -60,6 +62,12 @@ func (s *Service) ChangePassword(req ChangePasswordRequest) error {
 	// 更新密码
 	if err := s.accountsRepo.UpdatePassword(req.UserID, hashedPassword); err != nil {
 		return fmt.Errorf("failed to update password: %w", err)
+	}
+
+	if s.devicesRepo != nil {
+		if err := s.devicesRepo.DeleteDevicesByUser(req.UserID); err != nil {
+			return fmt.Errorf("failed to revoke user sessions: %w", err)
+		}
 	}
 
 	return nil

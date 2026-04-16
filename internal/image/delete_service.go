@@ -55,7 +55,7 @@ func (s *DeleteService) DeleteSingle(ctx context.Context, identifier string, use
 		refCount, err := s.repo.CountImagesByStoragePath(img.StoragePath)
 		if err != nil {
 			utils.Errorf("Failed to count references for storage path %s: %v", img.StoragePath, err)
-		} else if refCount <= 1 {
+		} else if refCount == 0 {
 			provider, err := getStorageProviderByID(img.StorageConfigID)
 			if err != nil {
 				utils.Errorf("Failed to get storage provider for image %s: %v", utils.SanitizeLogMessage(img.Identifier), err)
@@ -63,7 +63,7 @@ func (s *DeleteService) DeleteSingle(ctx context.Context, identifier string, use
 				utils.Errorf("Failed to delete original image file %s: %v", img.StoragePath, err)
 			}
 		} else {
-			utils.LogIfDevf("[Delete] Skipping physical file deletion for %s, still referenced by %d images", img.StoragePath, refCount-1)
+			utils.LogIfDevf("[Delete] Skipping physical file deletion for %s, still referenced by %d images", img.StoragePath, refCount)
 		}
 	}
 

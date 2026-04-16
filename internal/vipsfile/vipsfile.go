@@ -3,9 +3,21 @@ package vipsfile
 /*
 #cgo pkg-config: vips
 #include <stdlib.h>
-#include <malloc.h>
 #include <vips/vips.h>
 #include "vipsfile.h"
+
+#if defined(__GLIBC__)
+#include <malloc.h>
+
+static int ib_malloc_trim(size_t pad) {
+	return malloc_trim(pad);
+}
+#else
+static int ib_malloc_trim(size_t pad) {
+	(void)pad;
+	return 0;
+}
+#endif
 */
 import "C"
 
@@ -320,5 +332,5 @@ func webpProfileOrNone(profile string) string {
 
 // MallocTrim releases free memory from the heap back to the OS.
 func MallocTrim() {
-	C.malloc_trim(0)
+	C.ib_malloc_trim(0)
 }

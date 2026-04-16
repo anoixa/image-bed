@@ -126,11 +126,13 @@ func (s *ReadService) GetRandomImageWithVariant(ctx context.Context, filter *ima
 }
 
 func (s *ReadService) buildImageResult(ctx context.Context, image *models.Image, acceptHeader string) *ImageResultDTO {
+	accessURL := utils.BuildImageURL(s.baseURL, image.Identifier)
+
 	if s.variantService == nil {
 		return &ImageResultDTO{
 			Image:      image,
 			IsOriginal: true,
-			URL:        utils.BuildImageURL(s.baseURL, image.Identifier),
+			URL:        accessURL,
 			MIMEType:   image.MimeType,
 		}
 	}
@@ -140,7 +142,7 @@ func (s *ReadService) buildImageResult(ctx context.Context, image *models.Image,
 		return &ImageResultDTO{
 			Image:      image,
 			IsOriginal: true,
-			URL:        utils.BuildImageURL(s.baseURL, image.Identifier),
+			URL:        accessURL,
 			MIMEType:   image.MimeType,
 		}
 	}
@@ -158,19 +160,19 @@ func (s *ReadService) buildImageResult(ctx context.Context, image *models.Image,
 	}
 
 	if variantResult.IsOriginal {
-		result.URL = utils.BuildImageURL(s.baseURL, image.Identifier)
+		result.URL = accessURL
 		result.MIMEType = image.MimeType
 		return result
 	}
 
 	result.Variant = variantResult.Variant
 	if variantResult.Variant != nil {
-		result.URL = utils.BuildImageURL(s.baseURL, variantResult.Variant.Identifier)
+		result.URL = accessURL
 		return result
 	}
 
 	result.IsOriginal = true
-	result.URL = utils.BuildImageURL(s.baseURL, image.Identifier)
+	result.URL = accessURL
 	result.MIMEType = image.MimeType
 	return result
 }

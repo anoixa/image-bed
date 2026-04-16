@@ -60,11 +60,11 @@ func (s *VariantService) SelectBestVariant(ctx context.Context, image *models.Im
 
 	switch image.VariantStatus {
 	case models.ImageVariantStatusNone:
-		return s.handleOriginalWithConversion(image, true)
+		return s.handleOriginalWithConversion(image, shouldTriggerVariantConversion(image, settings))
 	case models.ImageVariantStatusProcessing:
 		return s.handleOriginalWithConversion(image, false)
 	case models.ImageVariantStatusFailed:
-		return s.handleOriginalWithConversion(image, true)
+		return s.handleOriginalWithConversion(image, shouldTriggerVariantConversion(image, settings))
 	case models.ImageVariantStatusThumbnailCompleted, models.ImageVariantStatusCompleted:
 
 		return s.handleCompletedVariants(ctx, image, acceptHeader, settings)

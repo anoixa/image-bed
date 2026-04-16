@@ -5,6 +5,7 @@ import (
 	"io"
 	"testing"
 
+	configdb "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
 	repoimages "github.com/anoixa/image-bed/database/repo/images"
 	"github.com/stretchr/testify/assert"
@@ -49,6 +50,36 @@ func TestShouldStartVariantPipeline(t *testing.T) {
 	assert.True(t, shouldStartVariantPipeline(false, true, true))
 	assert.True(t, shouldStartVariantPipeline(true, true, true))
 	assert.False(t, shouldStartVariantPipeline(false, false, false))
+}
+
+func TestShouldTriggerVariantConversion(t *testing.T) {
+	settings := &configdb.ImageProcessingSettings{
+		ThumbnailEnabled:         true,
+		ThumbnailSizes:           models.DefaultThumbnailSizes,
+		ConversionEnabledFormats: []string{models.FormatWebP},
+		SkipSmallerThan:          10,
+	}
+
+	t.Run("eligible image triggers conversion", func(t *testing.T) {
+		image := &models.Image{MimeType: "image/jpeg", FileSize: 32 * 1024}
+		assert.True(t, shouldTriggerVariantConversion(image, settings))
+	})
+
+	t.Run("gif does not trigger conversion", func(t *testing.T) {
+		image := &models.Image{MimeType: "image/gif", FileSize: 32 * 1024}
+		assert.False(t, shouldTriggerVariantConversion(image, settings))
+	})
+
+	t.Run("small image does not trigger conversion", func(t *testing.T) {
+		image := &models.Image{MimeType: "image/jpeg", FileSize: 5 * 1024}
+		assert.False(t, shouldTriggerVariantConversion(image, settings))
+	})
+
+	t.Run("all formats disabled does not trigger conversion", func(t *testing.T) {
+		image := &models.Image{MimeType: "image/jpeg", FileSize: 32 * 1024}
+		disabled := &configdb.ImageProcessingSettings{}
+		assert.False(t, shouldTriggerVariantConversion(image, disabled))
+	})
 }
 
 func TestGetStorageForImageDoesNotFallbackForMissingSpecificProvider(t *testing.T) {

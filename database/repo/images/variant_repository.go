@@ -123,6 +123,19 @@ func (r *VariantRepository) UpdateFailed(id uint, errMsg string) error {
 	}).Error
 }
 
+// TouchProcessing refreshes updated_at for processing variants so the sweeper
+// does not mistake long-running tasks for stale work.
+func (r *VariantRepository) TouchProcessing(ids []uint) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	return r.db.Model(&models.ImageVariant{}).
+		Where("id IN ? AND status = ?", ids, models.VariantStatusProcessing).
+		Update("updated_at", time.Now()).
+		Error
+}
+
 // GetImageByID 获取图片信息
 func (r *VariantRepository) GetImageByID(imageID uint) (*models.Image, error) {
 	var image models.Image

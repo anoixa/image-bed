@@ -32,6 +32,7 @@ type VariantRepository interface {
 	UpdateStatusCAS(id uint, expected, newStatus, errMsg string) (bool, error)
 	UpdateCompleted(id uint, identifier, storagePath string, fileSize int64, fileHash string, width, height int) error
 	UpdateFailed(id uint, errMsg string) error
+	TouchProcessing(ids []uint) error
 	GetByID(id uint) (*models.ImageVariant, error)
 	DeleteVariant(id uint) error
 	ResetStaleProcessing(olderThan time.Duration) (int64, error)
@@ -40,6 +41,7 @@ type VariantRepository interface {
 // ImageRepository 图片仓库接口
 type ImageRepository interface {
 	UpdateVariantStatus(imageID uint, status models.ImageVariantStatus) error
+	TouchVariantProcessingStatus(imageID uint) error
 	GetImageByID(id uint) (*models.Image, error)
 }
 
@@ -187,6 +189,8 @@ type ImagePipelineTask struct {
 }
 
 const avifMinSavingsPercent int64 = 5
+
+var processingHeartbeatInterval = 4 * time.Minute
 
 // getProcessingFilePath returns an OS file path suitable for vips file-based APIs.
 // For local storage it returns the stored file path directly (no I/O).
@@ -340,6 +344,8 @@ func (t *ImagePipelineTask) Execute() {
 		return
 	}
 	defer semaphore.Release()
+	stopHeartbeat := t.startProcessingHeartbeat(ctx, acquiredVariants)
+	defer stopHeartbeat()
 
 	utils.LogIfDevf("[Pipeline] Starting processing for image=%s, thumbVariant=%d, webpVariant=%d, avifVariant=%d",
 		t.StoragePath, t.ThumbVariantID, t.WebPVariantID, t.AVIFVariantID)
@@ -833,6 +839,44 @@ func (t *ImagePipelineTask) cleanupAfterPipeline() {
 	runtime.GC()
 	vips.ClearCache()
 	vipsfile.MallocTrim()
+}
+
+func (t *ImagePipelineTask) startProcessingHeartbeat(parent context.Context, acquiredVariants []uint) func() {
+	if len(acquiredVariants) == 0 && t.ImageID == 0 {
+		return func() {}
+	}
+
+	t.touchProcessingState(acquiredVariants)
+
+	ctx, cancel := context.WithCancel(parent)
+	ticker := time.NewTicker(processingHeartbeatInterval)
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				t.touchProcessingState(acquiredVariants)
+			}
+		}
+	}()
+
+	return cancel
+}
+
+func (t *ImagePipelineTask) touchProcessingState(acquiredVariants []uint) {
+	if t.VariantRepo != nil {
+		if err := t.VariantRepo.TouchProcessing(acquiredVariants); err != nil {
+			utils.LogIfDevf("[Pipeline] Failed to heartbeat variants %v: %v", acquiredVariants, err)
+		}
+	}
+
+	if t.ImageRepo != nil && t.ImageID > 0 {
+		if err := t.ImageRepo.TouchVariantProcessingStatus(t.ImageID); err != nil {
+			utils.LogIfDevf("[Pipeline] Failed to heartbeat image %d: %v", t.ImageID, err)
+		}
+	}
 }
 
 // finalize ensures variant state consistency on all exit paths.
