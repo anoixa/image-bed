@@ -20,11 +20,11 @@ import (
 	"github.com/anoixa/image-bed/utils/generator"
 	"github.com/anoixa/image-bed/utils/pool"
 	"github.com/davidbyttow/govips/v2/vips"
-	"runtime"
 	_ "golang.org/x/image/webp"
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
+	"runtime"
 )
 
 // VariantRepository 变体仓库接口
@@ -836,10 +836,10 @@ func (t *ImagePipelineTask) cleanupAfterPipeline() {
 }
 
 // finalize ensures variant state consistency on all exit paths.
-// - On panic: rolls back processing variants to failed.
-// - On normal exit: rolls back any variant still stuck in processing back
-//   to pending (so the sweeper or a retry can pick it up).
-// - Completed/failed/skipped variants are left untouched.
+//   - On panic: rolls back processing variants to failed.
+//   - On normal exit: rolls back any variant still stuck in processing back
+//     to pending (so the sweeper or a retry can pick it up).
+//   - Completed/failed/skipped variants are left untouched.
 func (t *ImagePipelineTask) finalize(acquiredVariants *[]uint) {
 	if rec := recover(); rec != nil {
 		utils.LogIfDevf("[Pipeline] Panic recovered: %v", rec)

@@ -263,8 +263,8 @@ func buildCacheConfig(cfg *config.Config) cache.Config {
 	case "memory", "":
 		return cache.Config{
 			Type:        "memory",
-			NumCounters: 1000000,
-			MaxCost:     268435456,
+			NumCounters: cfg.CacheNumCounters,
+			MaxCost:     cfg.CacheMaxCost,
 			BufferItems: 64,
 			Metrics:     true,
 		}
@@ -273,8 +273,8 @@ func buildCacheConfig(cfg *config.Config) cache.Config {
 		log.Printf("[Dependencies] Unknown cache type '%s', using memory cache", cfg.CacheType)
 		return cache.Config{
 			Type:        "memory",
-			NumCounters: 1000000,
-			MaxCost:     268435456,
+			NumCounters: cfg.CacheNumCounters,
+			MaxCost:     cfg.CacheMaxCost,
 			BufferItems: 64,
 			Metrics:     true,
 		}

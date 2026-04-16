@@ -32,8 +32,8 @@ import (
 
 // getBaseURL 从配置获取基础 URL
 func getBaseURL(cfg *config.Config) string {
-	if cfg != nil && cfg.ServerDomain != "" {
-		return cfg.ServerDomain
+	if cfg != nil {
+		return cfg.BaseURL()
 	}
 	return ""
 }

@@ -53,8 +53,8 @@ func Init(cfg Config) error {
 func InitDefault() error {
 	return Init(Config{
 		Type:        "memory",
-		NumCounters: 1000000,
-		MaxCost:     268435456, // 256MB（原 1GB 占用过高）
+		NumCounters: 100000,
+		MaxCost:     67108864, // 64MB
 		BufferItems: 64,
 		Metrics:     true,
 	})

@@ -49,6 +49,8 @@ type Config struct {
 	CacheRedisAddr     string `mapstructure:"cache_redis_addr"`
 	CacheRedisPassword string `mapstructure:"cache_redis_password"`
 	CacheRedisDB       int    `mapstructure:"cache_redis_db"`
+	CacheNumCounters   int64  `mapstructure:"cache_num_counters"`
+	CacheMaxCost       int64  `mapstructure:"cache_max_cost"`
 
 	// 限流配置
 	RateLimitApiRPS     float64       `mapstructure:"rate_limit_api_rps"`
@@ -149,6 +151,8 @@ func setDefaults() {
 	viper.SetDefault("cache_redis_addr", "localhost:6379")
 	viper.SetDefault("cache_redis_password", "")
 	viper.SetDefault("cache_redis_db", 0)
+	viper.SetDefault("cache_num_counters", 100000)
+	viper.SetDefault("cache_max_cost", 67108864) // 64MB
 
 	// 限流配置默认值
 	viper.SetDefault("rate_limit_api_rps", 30.0)
