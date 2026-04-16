@@ -14,7 +14,6 @@ import (
 	"github.com/anoixa/image-bed/database/models"
 	imagesRepo "github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/storage"
-	"github.com/anoixa/image-bed/utils"
 	"github.com/gin-gonic/gin"
 )
 
@@ -183,7 +182,7 @@ func (h *ConfigHandler) CreateConfig(c *gin.Context) {
 	if req.Category == models.ConfigCategoryStorage {
 		if err := h.reloadStorageConfig(config.ID, req.Config, config.IsDefault); err != nil {
 			if rollbackErr := h.manager.DeleteConfig(c.Request.Context(), config.ID); rollbackErr != nil {
-				utils.Errorf("Failed to rollback storage config creation: %v", rollbackErr)
+				adminConfigLog.Errorf("Failed to rollback storage config creation: %v", rollbackErr)
 			}
 			common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to load storage configuration: %v", err))
 			return
@@ -297,7 +296,7 @@ func (h *ConfigHandler) DeleteConfig(c *gin.Context) {
 
 		if err := storage.RemoveProvider(uint(id)); err != nil {
 			if !strings.Contains(err.Error(), "not found") {
-				utils.Warnf("Warning: failed to remove storage provider: %v", err)
+				adminConfigLog.Warnf("Failed to remove storage provider: %v", err)
 			}
 		}
 	}
@@ -411,7 +410,7 @@ func (h *ConfigHandler) EnableConfig(c *gin.Context) {
 	if config.Category == models.ConfigCategoryStorage {
 		if err := h.reloadStorageConfig(config.ID, config.Config, config.IsDefault); err != nil {
 			// 热重载失败但不回滚启用操作，只是记录日志
-			utils.LogIfDevf("Failed to hot reload storage config %d after enable: %v", config.ID, err)
+			adminConfigLog.Debugf("Failed to hot reload storage config %d after enable: %v", config.ID, err)
 		}
 	}
 

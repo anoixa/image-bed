@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,10 +15,13 @@ import (
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database"
 	"github.com/anoixa/image-bed/database/models"
+	"github.com/anoixa/image-bed/utils"
 	"github.com/spf13/cobra"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+var restoreLog = utils.ForModule("Restore")
 
 // restoreCmd 数据库还原命令
 var restoreCmd = &cobra.Command{
@@ -40,13 +42,15 @@ Example:
   # Clear existing data before restore
   image-bed restore --input ./backup.tar.gz --truncate`,
 	Run: func(cmd *cobra.Command, args []string) {
+		initCommandLogger()
+
 		inputFile, _ := cmd.Flags().GetString("input")
 		tables, _ := cmd.Flags().GetStringSlice("tables")
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		truncate, _ := cmd.Flags().GetBool("truncate")
 
 		if err := runRestore(inputFile, tables, dryRun, truncate); err != nil {
-			log.Fatalf("Restore failed: %v", err)
+			exitWithErrorf("Restore failed: %v", err)
 		}
 	},
 }
@@ -83,7 +87,6 @@ func runRestore(inputFile string, tables []string, dryRun, truncate bool) error 
 		return fmt.Errorf("backup file not found: %w", err)
 	}
 
-	config.InitConfig()
 	cfg := config.Get()
 
 	db, err := initDB()
@@ -98,7 +101,7 @@ func runRestore(inputFile string, tables []string, dryRun, truncate bool) error 
 	}
 	defer func() { _ = os.RemoveAll(tempDir) }()
 
-	log.Printf("Extracting backup: %s", inputFile)
+	restoreLog.Infof("Extracting backup: %s", inputFile)
 
 	// 解压 tar.gz
 	if err := extractTarGz(inputFile, tempDir); err != nil {
@@ -111,7 +114,7 @@ func runRestore(inputFile string, tables []string, dryRun, truncate bool) error 
 		return fmt.Errorf("failed to read metadata: %w", err)
 	}
 
-	log.Printf("Backup version: %s, Database: %s, Timestamp: %s",
+	restoreLog.Infof("Backup version: %s, Database: %s, Timestamp: %s",
 		metadata.Version, metadata.Database, metadata.Timestamp.Format("2006-01-02 15:04:05"))
 
 	// 确定要还原的表
@@ -138,7 +141,7 @@ func runRestore(inputFile string, tables []string, dryRun, truncate bool) error 
 
 	// 如果需要，清空现有数据（按依赖顺序逆序）
 	if truncate && !dryRun {
-		log.Println("Truncating existing data...")
+		restoreLog.Infof("Truncating existing data")
 		if err := truncateTables(db, tables); err != nil {
 			return fmt.Errorf("failed to truncate tables: %w", err)
 		}
@@ -155,21 +158,21 @@ func runRestore(inputFile string, tables []string, dryRun, truncate bool) error 
 
 		jsonlPath := filepath.Join(tempDir, table+".jsonl")
 		if _, err := os.Stat(jsonlPath); os.IsNotExist(err) {
-			log.Printf("Skipping %s: file not found in backup", table)
+			restoreLog.Warnf("Skipping %s: file not found in backup", table)
 			continue
 		}
 
-		log.Printf("Restoring table: %s", table)
+		restoreLog.Infof("Restoring table: %s", table)
 		if err := restoreTable(db, table, jsonlPath, stats, dryRun); err != nil {
-			log.Printf("Error restoring table %s: %v", table, err)
+			restoreLog.Errorf("Error restoring table %s: %v", table, err)
 			stats.Errors[table] = 1
 		}
 	}
 
 	if !dryRun {
-		log.Println("Updating auto-increment sequences...")
+		restoreLog.Infof("Updating auto-increment sequences")
 		if err := updateAutoIncrementSequences(db, cfg.DBType, stats); err != nil {
-			log.Printf("Warning: failed to update auto-increment sequences: %v", err)
+			restoreLog.Warnf("Failed to update auto-increment sequences: %v", err)
 		}
 	}
 
@@ -299,7 +302,7 @@ func restoreTable(db *gorm.DB, tableName, jsonlPath string, stats *restoreStats,
 		return fmt.Errorf("error reading JSONL: %w", err)
 	}
 
-	log.Printf("Restored %d records to %s", stats.Restored[tableName], tableName)
+	restoreLog.Infof("Restored %d records to %s", stats.Restored[tableName], tableName)
 	return nil
 }
 
@@ -316,7 +319,7 @@ func restoreBatch(db *gorm.DB, scanner *bufio.Scanner, lineNum *int, batchSize i
 
 		record := newRecord()
 		if err := json.Unmarshal([]byte(line), record); err != nil {
-			log.Printf("Warning: failed to unmarshal %s record at line %d: %v", tableName, *lineNum, err)
+			restoreLog.Warnf("Failed to unmarshal %s record at line %d: %v", tableName, *lineNum, err)
 			stats.Errors[tableName]++
 			continue
 		}
@@ -346,7 +349,7 @@ func restoreBatchWithCleanup[T any](db *gorm.DB, scanner *bufio.Scanner, lineNum
 
 		record := newRecord()
 		if err := json.Unmarshal([]byte(line), record); err != nil {
-			log.Printf("Warning: failed to unmarshal %s record at line %d: %v", tableName, *lineNum, err)
+			restoreLog.Warnf("Failed to unmarshal %s record at line %d: %v", tableName, *lineNum, err)
 			stats.Errors[tableName]++
 			continue
 		}
@@ -356,7 +359,7 @@ func restoreBatchWithCleanup[T any](db *gorm.DB, scanner *bufio.Scanner, lineNum
 		if len(batch) >= batchSize {
 			if !dryRun {
 				if err := db.CreateInBatches(batch, batchSize).Error; err != nil {
-					log.Printf("Warning: failed to insert batch: %v", err)
+					restoreLog.Warnf("Failed to insert batch: %v", err)
 					stats.Errors[tableName] += int64(len(batch))
 				} else {
 					stats.Restored[tableName] += int64(len(batch))
@@ -370,7 +373,7 @@ func restoreBatchWithCleanup[T any](db *gorm.DB, scanner *bufio.Scanner, lineNum
 
 	if len(batch) > 0 && !dryRun {
 		if err := db.CreateInBatches(batch, len(batch)).Error; err != nil {
-			log.Printf("Warning: failed to insert final batch: %v", err)
+			restoreLog.Warnf("Failed to insert final batch: %v", err)
 			stats.Errors[tableName] += int64(len(batch))
 		} else {
 			stats.Restored[tableName] += int64(len(batch))
@@ -393,7 +396,7 @@ func restoreAlbumImagesBatch(db *gorm.DB, scanner *bufio.Scanner, lineNum *int, 
 
 		var record albumImageRecord
 		if err := json.Unmarshal([]byte(line), &record); err != nil {
-			log.Printf("Warning: failed to unmarshal album_images record at line %d: %v", *lineNum, err)
+			restoreLog.Warnf("Failed to unmarshal album_images record at line %d: %v", *lineNum, err)
 			stats.Errors["album_images"]++
 			continue
 		}
@@ -422,7 +425,7 @@ func insertBatch(db *gorm.DB, batch []any, dryRun bool, stats *restoreStats, tab
 	}
 
 	if err := db.CreateInBatches(batch, len(batch)).Error; err != nil {
-		log.Printf("Warning: failed to insert batch for %s: %v", tableName, err)
+		restoreLog.Warnf("Failed to insert batch for %s: %v", tableName, err)
 		stats.Errors[tableName] += int64(len(batch))
 	} else {
 		stats.Restored[tableName] += int64(len(batch))
@@ -449,7 +452,7 @@ func insertAlbumImagesBatch(db *gorm.DB, batch []albumImageRecord, dryRun bool, 
 		CreateInBatches(&batch, len(batch)).Error
 
 	if err != nil {
-		log.Printf("Warning: failed to insert album_images batch: %v", err)
+		restoreLog.Warnf("Failed to insert album_images batch: %v", err)
 		stats.Errors["album_images"] += int64(len(batch))
 	} else {
 		stats.Restored["album_images"] += int64(len(batch))
@@ -468,7 +471,7 @@ func truncateTables(db *gorm.DB, tablesToClear []string) error {
 			continue
 		}
 
-		log.Printf("Truncating table: %s", safeTable)
+		restoreLog.Infof("Truncating table: %s", safeTable)
 
 		if err := db.Table(safeTable).Where("1 = 1").Delete(nil).Error; err != nil {
 			return fmt.Errorf("failed to truncate %s: %w", safeTable, err)
@@ -496,7 +499,7 @@ func updateAutoIncrementSequences(db *gorm.DB, dbType string, stats *restoreStat
 	for _, info := range tables {
 		var maxID uint
 		if err := db.Table(info.TableName).Select("COALESCE(MAX(id), 0)").Scan(&maxID).Error; err != nil {
-			log.Printf("Warning: failed to get max ID for %s: %v", info.TableName, err)
+			restoreLog.Warnf("Failed to get max ID for %s: %v", info.TableName, err)
 			continue
 		}
 
@@ -521,7 +524,7 @@ func updateAutoIncrementSequences(db *gorm.DB, dbType string, stats *restoreStat
 			if err := db.Exec(
 				fmt.Sprintf("ALTER SEQUENCE IF EXISTS %s RESTART WITH %d", sequenceName, nextID),
 			).Error; err != nil {
-				log.Printf("Warning: failed to update sequence for %s: %v", info.TableName, err)
+				restoreLog.Warnf("Failed to update sequence for %s: %v", info.TableName, err)
 			}
 		}
 

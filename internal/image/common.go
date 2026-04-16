@@ -17,6 +17,7 @@ import (
 var (
 	imageGroup       singleflight.Group
 	metaFetchTimeout = 30 * time.Second
+	imageCommonLog   = utils.ForModule("Image")
 )
 
 var (
@@ -70,11 +71,11 @@ type DeleteResult struct {
 func submitBackgroundTask(task func()) {
 	pool := worker.GetGlobalPool()
 	if pool == nil {
-		utils.Infof("[Image] Worker pool not initialized, dropping background task")
+		imageCommonLog.Infof("Worker pool not initialized, dropping background task")
 		return
 	}
 	if ok := pool.Submit(task); !ok {
-		utils.Warnf("[Image] Worker pool queue full, dropping background task")
+		imageCommonLog.Warnf("Worker pool queue full, dropping background task")
 	}
 }
 

@@ -1,7 +1,6 @@
 package key
 
 import (
-	"github.com/anoixa/image-bed/utils"
 	"net/http"
 	"sort"
 	"time"
@@ -40,7 +39,7 @@ func (h *Handler) GetToken(context *gin.Context) {
 
 	apiTokens, err := h.svc.GetAllApiTokensByUser(userID)
 	if err != nil {
-		utils.Errorf("Failed to get API tokens for user %d: %v", userID, err)
+		keyLog.Errorf("Failed to get API tokens for user %d: %v", userID, err)
 
 		common.RespondError(context, http.StatusInternalServerError, "Failed to retrieve API tokens due to an internal error.")
 		return

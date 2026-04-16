@@ -14,6 +14,8 @@ import (
 	"github.com/anoixa/image-bed/utils"
 )
 
+var converterLog = utils.ForModule("Converter")
+
 // Converter 图片转换器
 type Converter struct {
 	configManager *config.Manager
@@ -39,16 +41,16 @@ func NewConverter(cm *config.Manager, variantRepo *images.VariantRepository, ima
 func (c *Converter) TriggerConversion(image *models.Image) {
 	ctx := context.Background()
 
-	utils.LogIfDevf("[Converter] TriggerConversion called for image %s (mime=%s, size=%d)",
+	converterLog.Debugf("TriggerConversion called for image %s (mime=%s, size=%d)",
 		image.Identifier, image.MimeType, image.FileSize)
 
 	settings, err := c.configManager.GetImageProcessingSettings(ctx)
 	if err != nil {
-		utils.LogIfDevf("[Converter] Failed to get settings: %v", err)
+		converterLog.Debugf("Failed to get settings: %v", err)
 		return
 	}
 
-	utils.LogIfDevf("[Converter] Settings: WebP enabled=%v, Thumbnail enabled=%v, SkipSmallerThan=%d",
+	converterLog.Debugf("Settings: WebP enabled=%v, Thumbnail enabled=%v, SkipSmallerThan=%d",
 		settings.IsFormatEnabled(models.FormatWebP),
 		settings.ThumbnailEnabled,
 		settings.SkipSmallerThan)
@@ -57,13 +59,13 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 	webpEnabled := settings.IsFormatEnabled(models.FormatWebP)
 	avifEnabled := settings.IsFormatEnabled(models.FormatAVIF) && vipsfile.SupportsAVIFEncoding()
 	if !shouldStartVariantPipeline(thumbnailEnabled, webpEnabled, avifEnabled) {
-		utils.LogIfDevf("[Converter] All variant generation disabled, skipping")
+		converterLog.Debugf("All variant generation disabled, skipping")
 		return
 	}
 
 	// 跳过 GIF 格式
 	if image.MimeType == "image/gif" {
-		utils.LogIfDevf("[Converter] Skipping GIF format")
+		converterLog.Debugf("Skipping GIF format")
 		return
 	}
 
@@ -71,7 +73,7 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 	if settings.SkipSmallerThan > 0 {
 		minSize := int64(settings.SkipSmallerThan * 1024)
 		if image.FileSize < minSize {
-			utils.LogIfDevf("[Converter] Skipping image smaller than threshold: %d < %d (threshold from config)", image.FileSize, minSize)
+			converterLog.Debugf("Skipping image smaller than threshold: %d < %d (threshold from config)", image.FileSize, minSize)
 			return
 		}
 	}
@@ -83,11 +85,11 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 		thumbFormat := models.FormatThumbnailSize(size.Width)
 		thumbVariant, err = c.variantRepo.UpsertPending(image.ID, thumbFormat)
 		if err != nil {
-			utils.LogIfDevf("[Converter] Failed to upsert thumbnail variant: %v", err)
+			converterLog.Debugf("Failed to upsert thumbnail variant: %v", err)
 			return
 		}
 		if thumbVariant.Status != models.VariantStatusPending {
-			utils.LogIfDevf("[Converter] Thumbnail variant %d status=%s, skip", thumbVariant.ID, thumbVariant.Status)
+			converterLog.Debugf("Thumbnail variant %d status=%s, skip", thumbVariant.ID, thumbVariant.Status)
 			thumbVariant = nil
 		}
 	}
@@ -97,12 +99,12 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 	if webpEnabled {
 		webpVariant, err = c.variantRepo.UpsertPending(image.ID, models.FormatWebP)
 		if err != nil {
-			utils.LogIfDevf("[Converter] Failed to upsert WebP variant: %v", err)
+			converterLog.Debugf("Failed to upsert WebP variant: %v", err)
 			c.failPendingVariantsOnSubmitFailure(image, fmt.Sprintf("submit aborted during webp preparation: %v", err), thumbVariant)
 			return
 		}
 		if webpVariant.Status != models.VariantStatusPending {
-			utils.LogIfDevf("[Converter] WebP variant %d status=%s, skip", webpVariant.ID, webpVariant.Status)
+			converterLog.Debugf("WebP variant %d status=%s, skip", webpVariant.ID, webpVariant.Status)
 			webpVariant = nil
 		}
 	}
@@ -111,25 +113,25 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 	if avifEnabled {
 		avifVariant, err = c.variantRepo.UpsertPending(image.ID, models.FormatAVIF)
 		if err != nil {
-			utils.LogIfDevf("[Converter] Failed to upsert AVIF variant: %v", err)
+			converterLog.Debugf("Failed to upsert AVIF variant: %v", err)
 			c.failPendingVariantsOnSubmitFailure(image, fmt.Sprintf("submit aborted during avif preparation: %v", err), thumbVariant, webpVariant)
 			return
 		}
 		if avifVariant.Status != models.VariantStatusPending {
-			utils.LogIfDevf("[Converter] AVIF variant %d status=%s, skip", avifVariant.ID, avifVariant.Status)
+			converterLog.Debugf("AVIF variant %d status=%s, skip", avifVariant.ID, avifVariant.Status)
 			avifVariant = nil
 		}
 	}
 
 	// 如果没有需要处理的变体，直接返回
 	if thumbVariant == nil && webpVariant == nil && avifVariant == nil {
-		utils.LogIfDevf("[Converter] No pending variants for %s, skip", image.Identifier)
+		converterLog.Debugf("No pending variants for %s, skip", image.Identifier)
 		return
 	}
 
 	pool := worker.GetGlobalPool()
 	if pool == nil {
-		utils.LogIfDevf("[Converter] Worker pool not initialized for %s, skip conversion", image.Identifier)
+		converterLog.Debugf("Worker pool not initialized for %s, skip conversion", image.Identifier)
 		c.failPendingVariantsOnSubmitFailure(image, "worker pool not initialized", thumbVariant, webpVariant, avifVariant)
 		return
 	}
@@ -137,7 +139,7 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 	// 获取图片对应的存储提供者
 	storageProvider := c.getStorageForImage(image)
 	if storageProvider == nil {
-		utils.LogIfDevf("[Converter] No storage provider available for image %s (StorageConfigID=%d), skip conversion",
+		converterLog.Debugf("No storage provider available for image %s (StorageConfigID=%d), skip conversion",
 			image.Identifier, image.StorageConfigID)
 		c.failPendingVariantsOnSubmitFailure(image, "storage provider unavailable", thumbVariant, webpVariant, avifVariant)
 		return
@@ -164,13 +166,13 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 	})
 
 	if !ok {
-		utils.LogIfDevf("[Converter] Failed to submit pipeline task for %s", image.Identifier)
+		converterLog.Debugf("Failed to submit pipeline task for %s", image.Identifier)
 		c.failPendingVariantsOnSubmitFailure(image, "worker task submission rejected", thumbVariant, webpVariant, avifVariant)
 		return
 	}
 
 	if err := c.markImageProcessing(image); err != nil {
-		utils.LogIfDevf("[Converter] Failed to update image status after submit: %v", err)
+		converterLog.Debugf("Failed to update image status after submit: %v", err)
 	}
 }
 
@@ -182,7 +184,7 @@ func (c *Converter) failPendingVariantsOnSubmitFailure(image *models.Image, reas
 		}
 		hadPending = true
 		if err := c.variantRepo.UpdateFailed(variant.ID, reason); err != nil {
-			utils.LogIfDevf("[Converter] Failed to mark variant %d failed after submit failure: %v", variant.ID, err)
+			converterLog.Debugf("Failed to mark variant %d failed after submit failure: %v", variant.ID, err)
 		}
 	}
 
@@ -191,7 +193,7 @@ func (c *Converter) failPendingVariantsOnSubmitFailure(image *models.Image, reas
 	}
 
 	if err := c.imageRepo.UpdateVariantStatus(image.ID, models.ImageVariantStatusFailed); err != nil {
-		utils.LogIfDevf("[Converter] Failed to mark image %s failed after submit failure: %v", image.Identifier, err)
+		converterLog.Debugf("Failed to mark image %s failed after submit failure: %v", image.Identifier, err)
 		return
 	}
 	image.VariantStatus = models.ImageVariantStatusFailed
@@ -254,7 +256,7 @@ func (c *Converter) getStorageForImage(image *models.Image) storage.Provider {
 		if err == nil {
 			return provider
 		}
-		utils.LogIfDevf("[Converter] Failed to get storage provider ID=%d: %v",
+		converterLog.Debugf("Failed to get storage provider ID=%d: %v",
 			image.StorageConfigID, err)
 		return nil
 	}
@@ -265,7 +267,7 @@ func (c *Converter) getStorageForImage(image *models.Image) storage.Provider {
 
 	provider := storage.GetDefault()
 	if provider == nil {
-		utils.LogIfDevf("[Converter] %v", fmt.Errorf("no default storage configured"))
+		converterLog.Debugf("%v", fmt.Errorf("no default storage configured"))
 	}
 	return provider
 }

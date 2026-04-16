@@ -8,6 +8,8 @@ import (
 	"gorm.io/gorm"
 )
 
+var statsRepoLog = utils.ForModule("StatsRepository")
+
 // Repository Dashboard 统计仓库
 type Repository struct {
 	db *gorm.DB
@@ -146,7 +148,7 @@ func (r *Repository) GetDailyStats(days int) ([]DailyStat, error) {
 	startDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).
 		AddDate(0, 0, -days)
 
-	utils.LogIfDevf("[DEBUG][GetDailyStats] Querying from %s, days=%d", startDate.Format("2006-01-02"), days)
+	statsRepoLog.Debugf("Querying from %s, days=%d", startDate.Format("2006-01-02"), days)
 
 	err := r.db.Table("images").
 		Select("DATE(created_at) as date, COUNT(*) as count").
@@ -156,11 +158,11 @@ func (r *Repository) GetDailyStats(days int) ([]DailyStat, error) {
 		Scan(&stats).Error
 
 	if err != nil {
-		utils.LogIfDevf("[DEBUG][GetDailyStats] Error: %v", err)
+		statsRepoLog.Debugf("Error: %v", err)
 	} else {
-		utils.LogIfDevf("[DEBUG][GetDailyStats] Found %d records", len(stats))
+		statsRepoLog.Debugf("Found %d records", len(stats))
 		for _, s := range stats {
-			utils.LogIfDevf("[DEBUG][GetDailyStats] Result: date=%s, count=%d", s.Date.Format("2006-01-02"), s.Count)
+			statsRepoLog.Debugf("Result: date=%s, count=%d", s.Date.Format("2006-01-02"), s.Count)
 		}
 	}
 

@@ -149,10 +149,10 @@ func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 		utils.SafeGo(func() {
 			ctx := context.Background()
 			if err := h.cacheHelper.DeleteCachedAlbum(ctx, uint(albumID)); err != nil {
-				utils.LogIfDevf("Failed to delete album cache for %d: %v", albumID, err)
+				albumLog.Debugf("Failed to delete album cache for %d: %v", albumID, err)
 			}
 			if err := h.cacheHelper.DeleteCachedAlbumList(ctx, userID); err != nil {
-				utils.LogIfDevf("Failed to delete album list cache for user %d: %v", userID, err)
+				albumLog.Debugf("Failed to delete album list cache for user %d: %v", userID, err)
 			}
 		})
 	}
@@ -222,10 +222,10 @@ func (h *AlbumImageHandler) RemoveImageFromAlbumHandler(c *gin.Context) {
 	utils.SafeGo(func() {
 		ctx := context.Background()
 		if err := h.cacheHelper.DeleteCachedAlbum(ctx, uint(albumID)); err != nil {
-			utils.LogIfDevf("Failed to delete album cache for %d: %v", albumID, err)
+			albumLog.Debugf("Failed to delete album cache for %d: %v", albumID, err)
 		}
 		if err := h.cacheHelper.DeleteCachedAlbumList(ctx, userID); err != nil {
-			utils.LogIfDevf("Failed to delete album list cache for user %d: %v", userID, err)
+			albumLog.Debugf("Failed to delete album list cache for user %d: %v", userID, err)
 		}
 	})
 }
@@ -328,10 +328,10 @@ func (h *AlbumImageHandler) RemoveImagesFromAlbumHandler(c *gin.Context) {
 		utils.SafeGo(func() {
 			ctx := context.Background()
 			if err := h.cacheHelper.DeleteCachedAlbum(ctx, uint(albumID)); err != nil {
-				utils.LogIfDevf("Failed to delete album cache for %d: %v", albumID, err)
+				albumLog.Debugf("Failed to delete album cache for %d: %v", albumID, err)
 			}
 			if err := h.cacheHelper.DeleteCachedAlbumList(ctx, userID); err != nil {
-				utils.LogIfDevf("Failed to delete album list cache for user %d: %v", userID, err)
+				albumLog.Debugf("Failed to delete album list cache for user %d: %v", userID, err)
 			}
 		})
 	}

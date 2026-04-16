@@ -15,6 +15,8 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+var jwtLog = utils.ForModule("JWT")
+
 // TokenPair 包含访问令牌和刷新令牌
 type TokenPair struct {
 	AccessToken        string
@@ -107,7 +109,7 @@ func (s *JWTService) applyConfig(input TokenConfigInput) error {
 		RefreshExpiresIn: refreshDuration,
 	}
 
-	utils.Infof("[JWT] Config loaded from environment - Access: %v, Refresh: %v", duration, refreshDuration)
+	jwtLog.Infof("Config loaded from environment - Access: %v, Refresh: %v", duration, refreshDuration)
 	return nil
 }
 

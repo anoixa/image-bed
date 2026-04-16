@@ -22,6 +22,8 @@ import (
 	"gorm.io/gorm"
 )
 
+var serverLog = utils.ForModule("Server")
+
 // Repositories 所有数据库仓库
 type Repositories struct {
 	AccountsRepo *accounts.Repository
@@ -72,7 +74,7 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	}))
 
 	if err := router.SetTrustedProxies(nil); err != nil {
-		utils.Warnf("Warning: Failed to set trusted proxies: %v", err)
+		serverLog.Warnf("Failed to set trusted proxies: %v", err)
 	}
 
 	const (
@@ -113,7 +115,7 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 		var err error
 		jwtService, err = auth.NewJWTService(deps.Config, deps.ConfigManager, deps.Repositories.KeysRepo)
 		if err != nil {
-			utils.Errorf("[Server] Failed to initialize JWT service from app config: %v, using defaults", err)
+			serverLog.Errorf("Failed to initialize JWT service from app config: %v, using defaults", err)
 		}
 	}
 

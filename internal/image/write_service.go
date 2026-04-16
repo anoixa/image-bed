@@ -25,6 +25,8 @@ import (
 	"gorm.io/gorm"
 )
 
+var writeServiceLog = utils.ForModule("WriteService")
+
 // WriteService 负责图片上传与写入相关用例
 type WriteService struct {
 	repo          *images.Repository
@@ -293,7 +295,7 @@ func (s *WriteService) processAndSaveImage(ctx context.Context, userID uint, sou
 
 	if defaultAlbumID > 0 && s.albumsRepo != nil {
 		if err := s.albumsRepo.AddImageToAlbum(defaultAlbumID, userID, newImg); err != nil {
-			utils.Warnf("[WriteService] Failed to add image to default album %d: %v", defaultAlbumID, err)
+			writeServiceLog.Warnf("Failed to add image to default album %d: %v", defaultAlbumID, err)
 		}
 	}
 

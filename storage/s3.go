@@ -21,11 +21,13 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
+var s3Log = utils.ForModule("S3")
+
 // mustGetSystemCertPool 获取系统证书池
 func mustGetSystemCertPool() *x509.CertPool {
 	pool, err := x509.SystemCertPool()
 	if err != nil {
-		utils.Errorf("Failed to load system cert pool: %v", err)
+		s3Log.Errorf("Failed to load system cert pool: %v", err)
 		return x509.NewCertPool()
 	}
 	return pool
@@ -113,7 +115,7 @@ func NewS3Storage(cfg S3Config) (*S3Storage, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to create bucket '%s': %w", cfg.BucketName, err)
 		}
-		utils.Infof("Successfully created bucket: %s", cfg.BucketName)
+		s3Log.Infof("Successfully created bucket: %s", cfg.BucketName)
 	}
 
 	return &S3Storage{
@@ -230,7 +232,7 @@ func (s *S3Storage) StreamTo(ctx context.Context, storagePath string, w http.Res
 		}
 
 		if !utils.IsClientDisconnect(err) {
-			utils.Errorf("[S3] Stat failed for %s: %v, continuing without Content-Length", storagePath, err)
+			s3Log.Errorf("Stat failed for %s: %v, continuing without Content-Length", storagePath, err)
 		}
 	} else {
 		if w.Header().Get("Content-Type") == "" {
@@ -239,7 +241,7 @@ func (s *S3Storage) StreamTo(ctx context.Context, storagePath string, w http.Res
 		w.Header().Set("Content-Length", strconv.FormatInt(stat.Size, 10))
 
 		if stat.Size > 10*1024*1024 {
-			utils.LogIfDevf("[S3] Large file detected: %s (%.2f MB), using optimized streaming", storagePath, float64(stat.Size)/(1024*1024))
+			s3Log.Debugf("Large file detected: %s (%.2f MB), using optimized streaming", storagePath, float64(stat.Size)/(1024*1024))
 		}
 	}
 	w.WriteHeader(http.StatusOK)

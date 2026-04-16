@@ -11,6 +11,8 @@ import (
 	"github.com/anoixa/image-bed/utils"
 )
 
+var readLog = utils.ForModule("ReadService")
+
 // ReadService 负责图片读取相关用例
 type ReadService struct {
 	repo           *images.Repository
@@ -61,7 +63,7 @@ func (s *ReadService) GetImageMetadata(ctx context.Context, identifier string) (
 		go func(img *models.Image) {
 			defer func() {
 				if r := recover(); r != nil {
-					utils.LogIfDevf("Panic in async cache goroutine for '%s': %v", img.Identifier, r)
+					readLog.Debugf("Panic in async cache goroutine for '%s': %v", img.Identifier, r)
 				}
 			}()
 			if s.cacheHelper == nil {
@@ -71,7 +73,7 @@ func (s *ReadService) GetImageMetadata(ctx context.Context, identifier string) (
 			cacheCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			if cacheErr := s.cacheHelper.CacheImage(cacheCtx, img); cacheErr != nil {
-				utils.LogIfDevf("Failed to cache image metadata for '%s': %v", img.Identifier, cacheErr)
+				readLog.Debugf("Failed to cache image metadata for '%s': %v", img.Identifier, cacheErr)
 			}
 		}(imagePtr)
 

@@ -9,8 +9,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/anoixa/image-bed/utils"
 	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -18,6 +18,8 @@ import (
 	"sync"
 	"time"
 )
+
+var configLog = utils.ForModule("Config")
 
 const (
 	// EncPrefixV1 AES-256-GCM
@@ -133,8 +135,8 @@ func (m *MasterKeyManager) Initialize(checkDataExists func() (bool, error)) erro
 func (m *MasterKeyManager) printFingerprint() {
 	hash := sha256.Sum256(m.key.Get())
 	fingerprint := hex.EncodeToString(hash[:8])
-	slog.Info("[Config] Master key source: " + m.source)
-	slog.Info("[Config] Master key fingerprint: " + fingerprint)
+	configLog.Infof("Master key source: %s", m.source)
+	configLog.Infof("Master key fingerprint: %s", fingerprint)
 }
 
 // GetKey 获取主密钥

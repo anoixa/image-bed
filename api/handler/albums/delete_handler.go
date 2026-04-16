@@ -47,7 +47,7 @@ func (h *Handler) DeleteAlbumHandler(c *gin.Context) {
 		if strings.Contains(err.Error(), "not found or access denied") {
 			common.RespondError(c, http.StatusNotFound, err.Error())
 		} else {
-			utils.Errorf("Error deleting album %d for user %d: %v", albumID, userID, err)
+			albumLog.Errorf("Error deleting album %d for user %d: %v", albumID, userID, err)
 			common.RespondError(c, http.StatusInternalServerError, "Failed to delete album due to an internal error")
 		}
 		return
@@ -57,10 +57,10 @@ func (h *Handler) DeleteAlbumHandler(c *gin.Context) {
 	utils.SafeGo(func() {
 		ctx := context.Background()
 		if err := h.cacheHelper.DeleteCachedAlbum(ctx, uint(albumID)); err != nil {
-			utils.LogIfDevf("Failed to delete album cache for %d: %v", albumID, err)
+			albumLog.Debugf("Failed to delete album cache for %d: %v", albumID, err)
 		}
 		if err := h.cacheHelper.DeleteCachedAlbumList(ctx, userID); err != nil {
-			utils.LogIfDevf("Failed to delete album list cache for user %d: %v", userID, err)
+			albumLog.Debugf("Failed to delete album list cache for user %d: %v", userID, err)
 		}
 	})
 

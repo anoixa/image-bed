@@ -141,12 +141,12 @@ func (h *Handler) GetImage(c *gin.Context) {
 // serveOriginalImage 提供原图
 func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 	if h.cacheHelper == nil {
-		utils.LogIfDevf("[DEBUG][serveOriginalImage] h.cacheHelper is nil!")
+		imageHandlerLog.Debugf("serveOriginalImage cache helper is nil")
 		common.RespondError(c, http.StatusInternalServerError, "Cache not initialized")
 		return
 	}
 
-	utils.LogIfDevf("[DEBUG][serveOriginalImage] image.ID=%d, StorageConfigID=%d, Identifier=%s",
+	imageHandlerLog.Debugf("serveOriginalImage image.ID=%d, StorageConfigID=%d, Identifier=%s",
 		image.ID, image.StorageConfigID, image.Identifier)
 
 	// 检查是否可以使用直链
@@ -161,7 +161,7 @@ func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 	// 使用图片指定的 StorageConfigID 获取正确的存储 provider
 	provider, err := h.getStorageProvider(image.StorageConfigID)
 	if err != nil {
-		utils.Errorf("[serveOriginalImage] Failed to get storage provider for image %s (StorageConfigID=%d)",
+		imageHandlerLog.Errorf("serveOriginalImage failed to get storage provider for image %s (StorageConfigID=%d)",
 			image.Identifier, image.StorageConfigID)
 		common.RespondError(c, http.StatusInternalServerError, "Storage provider not available")
 		return
@@ -186,7 +186,7 @@ func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 
 	stream, err := provider.GetWithContext(c.Request.Context(), storagePath)
 	if err != nil {
-		utils.Errorf("[serveOriginal] Failed to get image %s (path: %s): %v", utils.SanitizeLogMessage(image.Identifier), storagePath, err)
+		imageHandlerLog.Errorf("serveOriginal failed to get image %s (path: %s): %v", utils.SanitizeLogMessage(image.Identifier), storagePath, err)
 		common.RespondError(c, http.StatusNotFound, "Image file not found")
 		return
 	}
@@ -208,37 +208,37 @@ func (h *Handler) getDirectURLIfPossible(c *gin.Context, img *models.Image) stri
 func (h *Handler) getVariantDirectURLIfPossible(c *gin.Context, img *models.Image, storagePath string) string {
 	// 私有图片不支持直链
 	if !img.IsPublic {
-		utils.LogIfDevf("[getVariantDirectURLIfPossible] Image %s is not public, skip direct link", img.Identifier)
+		imageHandlerLog.Debugf("getVariantDirectURLIfPossible image %s is not public, skip direct link", img.Identifier)
 		return ""
 	}
 
 	// 获取存储提供者
 	provider, err := h.getStorageProvider(img.StorageConfigID)
 	if err != nil {
-		utils.LogIfDevf("[getVariantDirectURLIfPossible] Failed to get storage provider for image %s (StorageConfigID=%d)",
+		imageHandlerLog.Debugf("getVariantDirectURLIfPossible failed to get storage provider for image %s (StorageConfigID=%d)",
 			img.Identifier, img.StorageConfigID)
 		return ""
 	}
 
 	directProvider, ok := provider.(storage.DirectURLProvider)
 	if !ok {
-		utils.LogIfDevf("[getVariantDirectURLIfPossible] Provider does not support direct URL for image %s", img.Identifier)
+		imageHandlerLog.Debugf("getVariantDirectURLIfPossible provider does not support direct URL for image %s", img.Identifier)
 		return ""
 	}
 
 	globalMode := h.getGlobalTransferMode(c.Request.Context())
 
-	utils.LogIfDevf("[getVariantDirectURLIfPossible] Image %s (path=%s): SupportsDirectLink=%v, globalMode=%s, isPublic=%v",
+	imageHandlerLog.Debugf("getVariantDirectURLIfPossible image %s (path=%s): SupportsDirectLink=%v, globalMode=%s, isPublic=%v",
 		img.Identifier, storagePath, directProvider.SupportsDirectLink(), globalMode, img.IsPublic)
 
 	if directProvider.ShouldProxy(img.IsPublic, globalMode) {
-		utils.LogIfDevf("[getVariantDirectURLIfPossible] Image %s: ShouldProxy returned true, using proxy", img.Identifier)
+		imageHandlerLog.Debugf("getVariantDirectURLIfPossible image %s: ShouldProxy returned true, using proxy", img.Identifier)
 		return ""
 	}
 
 	// 获取直链 URL
 	directURL := directProvider.GetDirectURL(storagePath)
-	utils.LogIfDevf("[getVariantDirectURLIfPossible] Image %s: Using direct URL %s", img.Identifier, directURL)
+	imageHandlerLog.Debugf("getVariantDirectURLIfPossible image %s: Using direct URL %s", img.Identifier, directURL)
 	return directURL
 }
 
@@ -268,7 +268,7 @@ func (h *Handler) serveByStreaming(c *gin.Context, img *models.Image, streamer s
 		if utils.IsClientDisconnect(err) {
 			return true
 		}
-		utils.Errorf("[serveByStreaming] Failed to stream image %s (path: %s): %v", utils.SanitizeLogMessage(img.Identifier), img.StoragePath, err)
+		imageHandlerLog.Errorf("serveByStreaming failed to stream image %s (path: %s): %v", utils.SanitizeLogMessage(img.Identifier), img.StoragePath, err)
 		return false
 	}
 	return true
@@ -328,8 +328,7 @@ func (h *Handler) serveImageData(c *gin.Context, img *models.Image, data []byte)
 
 // serveVariantImage 提供格式变体（支持直链模式）
 func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *image.VariantResult) {
-	// [DEBUG] 记录变体信息
-	utils.LogIfDevf("[DEBUG][serveVariantImage] img.ID=%d, img.StorageConfigID=%d, variant.Identifier=%s, variant.StoragePath=%s",
+	imageHandlerLog.Debugf("serveVariantImage img.ID=%d, img.StorageConfigID=%d, variant.Identifier=%s, variant.StoragePath=%s",
 		img.ID, img.StorageConfigID, result.Identifier, result.StoragePath)
 
 	// 检查变体是否可以使用直链（使用变体自己的路径）
@@ -342,7 +341,7 @@ func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *i
 	// 使用原图指定的 StorageConfigID 获取正确的存储 provider
 	provider, err := h.getStorageProvider(img.StorageConfigID)
 	if err != nil {
-		utils.Errorf("[serveVariantImage] Failed to get storage provider for image %s (StorageConfigID=%d)",
+		imageHandlerLog.Errorf("serveVariantImage failed to get storage provider for image %s (StorageConfigID=%d)",
 			img.Identifier, img.StorageConfigID)
 		// 降级到原图
 		h.serveOriginalImage(c, img)
@@ -368,7 +367,7 @@ func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *i
 
 	stream, err := provider.GetWithContext(c.Request.Context(), result.StoragePath)
 	if err != nil {
-		utils.Errorf("[serveVariant] Failed to get variant %s (path: %s): %v", utils.SanitizeLogMessage(result.Identifier), result.StoragePath, err)
+		imageHandlerLog.Errorf("serveVariant failed to get variant %s (path: %s): %v", utils.SanitizeLogMessage(result.Identifier), result.StoragePath, err)
 		// 降级到原图
 		h.serveOriginalImage(c, img)
 		return
@@ -473,7 +472,7 @@ func (h *Handler) getOrPopulateImageDataCache(ctx context.Context, provider stor
 
 	imageData, ok, err := h.loadCacheableImageData(ctx, provider, storagePath)
 	if err != nil {
-		utils.LogIfDevf("[imageDataCache] Failed to load cacheable image data for %s: %v", storagePath, err)
+		imageHandlerLog.Debugf("imageDataCache failed to load cacheable image data for %s: %v", storagePath, err)
 		return nil, false
 	}
 	if !ok {
@@ -481,7 +480,7 @@ func (h *Handler) getOrPopulateImageDataCache(ctx context.Context, provider stor
 	}
 
 	if err := h.cacheHelper.CacheImageData(ctx, cacheKey, imageData); err != nil {
-		utils.LogIfDevf("[imageDataCache] Failed to cache image data for %s: %v", storagePath, err)
+		imageHandlerLog.Debugf("imageDataCache failed to cache image data for %s: %v", storagePath, err)
 	}
 
 	return imageData, true
@@ -555,7 +554,7 @@ func (h *Handler) serveReadSeekerContent(c *gin.Context, identifier, mimeType, e
 // handleMetadataError 处理元数据查询错误
 func (h *Handler) handleMetadataError(c *gin.Context, identifier string, err error) {
 	if errors.Is(err, context.DeadlineExceeded) {
-		utils.Errorf("Timeout fetching image metadata for '%s'", utils.SanitizeLogMessage(identifier))
+		imageHandlerLog.Errorf("Timeout fetching image metadata for '%s'", utils.SanitizeLogMessage(identifier))
 		common.RespondError(c, http.StatusGatewayTimeout, "Request timeout")
 		return
 	}
@@ -567,11 +566,11 @@ func (h *Handler) handleMetadataError(c *gin.Context, identifier string, err err
 
 	// 临时错误返回 503
 	if errors.Is(err, image.ErrTemporaryFailure) {
-		utils.Errorf("Temporary failure fetching metadata for '%s': %v", utils.SanitizeLogMessage(identifier), err)
+		imageHandlerLog.Errorf("Temporary failure fetching metadata for '%s': %v", utils.SanitizeLogMessage(identifier), err)
 		common.RespondError(c, http.StatusServiceUnavailable, "Service temporarily unavailable")
 		return
 	}
 
-	utils.Errorf("Failed to fetch image metadata for '%s': %v", utils.SanitizeLogMessage(identifier), err)
+	imageHandlerLog.Errorf("Failed to fetch image metadata for '%s': %v", utils.SanitizeLogMessage(identifier), err)
 	common.RespondError(c, http.StatusNotFound, "Image not found")
 }

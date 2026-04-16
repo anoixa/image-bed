@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -14,9 +13,12 @@ import (
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database"
 	"github.com/anoixa/image-bed/database/models"
+	"github.com/anoixa/image-bed/utils"
 	"github.com/spf13/cobra"
 	"gorm.io/gorm"
 )
+
+var backupLog = utils.ForModule("Backup")
 
 // backupCmd 数据库备份命令
 var backupCmd = &cobra.Command{
@@ -34,12 +36,14 @@ Example:
   # Backup specific tables only
   image-bed backup --tables users,images`,
 	Run: func(cmd *cobra.Command, args []string) {
+		initCommandLogger()
+
 		outputFile, _ := cmd.Flags().GetString("output")
 		tables, _ := cmd.Flags().GetStringSlice("tables")
 		keepDir, _ := cmd.Flags().GetBool("keep-dir")
 
 		if err := runBackup(outputFile, tables, keepDir); err != nil {
-			log.Fatalf("Backup failed: %v", err)
+			exitWithErrorf("Backup failed: %v", err)
 		}
 	},
 }
@@ -80,7 +84,6 @@ func initDB() (*gorm.DB, error) {
 
 // runBackup 执行备份
 func runBackup(outputFile string, tables []string, keepDir bool) error {
-	config.InitConfig()
 	cfg := config.Get()
 
 	db, err := initDB()
@@ -108,7 +111,7 @@ func runBackup(outputFile string, tables []string, keepDir bool) error {
 		defer func() { _ = os.RemoveAll(tempDir) }()
 	}
 
-	log.Printf("Starting backup to: %s", outputFile)
+	backupLog.Infof("Starting backup to: %s", outputFile)
 
 	metadata := &backupMetadata{
 		Version:     "1.0",
@@ -126,11 +129,11 @@ func runBackup(outputFile string, tables []string, keepDir bool) error {
 	for _, table := range tables {
 		count, err := backupTable(db, table, tempDir)
 		if err != nil {
-			log.Printf("Warning: failed to backup table %s: %v", table, err)
+			backupLog.Warnf("Failed to backup table %s: %v", table, err)
 			continue
 		}
 		metadata.RecordCount[table] = count
-		log.Printf("Backed up %d records from table: %s", count, table)
+		backupLog.Infof("Backed up %d records from table: %s", count, table)
 	}
 
 	metadataPath := filepath.Join(tempDir, "metadata.json")
@@ -143,7 +146,7 @@ func runBackup(outputFile string, tables []string, keepDir bool) error {
 		return fmt.Errorf("failed to create archive: %w", err)
 	}
 
-	log.Printf("Backup completed successfully: %s", outputFile)
+	backupLog.Infof("Backup completed successfully: %s", outputFile)
 	printBackupSummary(metadata, outputFile)
 
 	return nil

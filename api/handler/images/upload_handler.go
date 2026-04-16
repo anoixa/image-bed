@@ -13,7 +13,6 @@ import (
 	"github.com/anoixa/image-bed/config"
 	dbconfig "github.com/anoixa/image-bed/config/db"
 	imagesvc "github.com/anoixa/image-bed/internal/image"
-	"github.com/anoixa/image-bed/utils"
 	"github.com/anoixa/image-bed/utils/pool"
 	"github.com/gin-gonic/gin"
 )
@@ -43,7 +42,7 @@ func (h *Handler) UploadImage(c *gin.Context) {
 	ctx := c.Request.Context()
 	settings, err := h.configManager.GetImageProcessingSettings(ctx)
 	if err != nil {
-		utils.Errorf("[UploadImage] Failed to get processing settings: %v", err)
+		imageHandlerLog.Errorf("Failed to get processing settings: %v", err)
 		common.RespondError(c, http.StatusInternalServerError, "Failed to get processing settings")
 		return
 	}
@@ -54,7 +53,7 @@ func (h *Handler) UploadImage(c *gin.Context) {
 			common.RespondError(c, uploadErr.status, uploadErr.message)
 			return
 		}
-		utils.Errorf("[UploadImage] Failed to parse multipart request: %v", err)
+		imageHandlerLog.Errorf("Failed to parse multipart request: %v", err)
 		common.RespondError(c, http.StatusBadRequest, "Invalid form data")
 		return
 	}
@@ -67,7 +66,7 @@ func (h *Handler) UploadImage(c *gin.Context) {
 
 	storageConfigID, err := h.resolveStorageConfigIDValue(c, request.strategyID)
 	if err != nil {
-		utils.Errorf("[UploadImage] Failed to resolve storage config: %v", err)
+		imageHandlerLog.Errorf("Failed to resolve storage config: %v", err)
 		common.RespondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -102,7 +101,7 @@ func (h *Handler) UploadImage(c *gin.Context) {
 	// 多文件：返回批量格式
 	results, err := h.writeService.UploadBatchSources(ctx, userID, request.files, storageConfigID, isPublic, settings.DefaultAlbumID, settings.ConcurrentUploadLimit)
 	if err != nil {
-		utils.Errorf("[UploadImage] Failed to process batch upload for user=%d: %v", userID, err)
+		imageHandlerLog.Errorf("Failed to process batch upload for user=%d: %v", userID, err)
 		if !c.IsAborted() {
 			common.RespondError(c, http.StatusInternalServerError, "Failed to process uploads")
 		}

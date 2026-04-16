@@ -3,13 +3,14 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/anoixa/image-bed/cache"
-	"github.com/anoixa/image-bed/config"
+	"github.com/anoixa/image-bed/utils"
 	"github.com/spf13/cobra"
 )
+
+var cacheLog = utils.ForModule("Cache")
 
 // cacheCmd 缓存管理命令
 var cacheCmd = &cobra.Command{
@@ -24,12 +25,14 @@ var cacheClearCmd = &cobra.Command{
 	Short: "Clear cache",
 	Long:  `Clear application cache. By default clears all image cache.`,
 	Run: func(cmd *cobra.Command, args []string) {
+		initCommandLogger()
+
 		imageOnly, _ := cmd.Flags().GetBool("image-only")
 		all, _ := cmd.Flags().GetBool("all")
 		pattern, _ := cmd.Flags().GetString("pattern")
 
 		if err := runCacheClear(imageOnly, all, pattern); err != nil {
-			log.Fatalf("Cache clear failed: %v", err)
+			exitWithErrorf("Cache clear failed: %v", err)
 		}
 	},
 }
@@ -45,8 +48,6 @@ func init() {
 
 // runCacheClear 执行缓存清理
 func runCacheClear(imageOnly, all bool, pattern string) error {
-	config.InitConfig()
-
 	if err := cache.InitDefault(); err != nil {
 		return fmt.Errorf("failed to initialize cache: %w", err)
 	}
@@ -62,27 +63,26 @@ func runCacheClear(imageOnly, all bool, pattern string) error {
 		imageOnly = true
 	}
 
-	log.Printf("Cache provider: %s", provider.Name())
+	cacheLog.Infof("Cache provider: %s", provider.Name())
 
 	if all {
-		log.Println("Clearing all cache...")
+		cacheLog.Infof("Clearing all cache")
 		if err := clearAllCache(ctx, provider); err != nil {
 			return fmt.Errorf("failed to clear all cache: %w", err)
 		}
-		log.Println("All cache cleared successfully")
+		cacheLog.Infof("All cache cleared successfully")
 	} else if pattern != "" {
-		// 按模式清理
-		log.Printf("Clearing cache matching pattern: %s", pattern)
+		cacheLog.Infof("Clearing cache matching pattern: %s", pattern)
 		if err := clearCacheByPattern(ctx, provider, pattern); err != nil {
 			return fmt.Errorf("failed to clear cache by pattern: %w", err)
 		}
-		log.Printf("Cache matching pattern '%s' cleared successfully", pattern)
+		cacheLog.Infof("Cache matching pattern '%s' cleared successfully", pattern)
 	} else if imageOnly {
-		log.Println("Clearing image cache...")
+		cacheLog.Infof("Clearing image cache")
 		if err := clearImageCacheKeys(ctx, provider); err != nil {
 			return fmt.Errorf("failed to clear image cache: %w", err)
 		}
-		log.Println("Image cache cleared successfully")
+		cacheLog.Infof("Image cache cleared successfully")
 	}
 
 	return nil
@@ -98,7 +98,7 @@ func clearAllCache(ctx context.Context, provider any) error {
 		return p.ClearAll(ctx)
 	}
 
-	log.Println("Cache provider does not support bulk clear, attempting to clear known keys...")
+	cacheLog.Warnf("Cache provider does not support bulk clear, attempting to clear known keys")
 	return clearImageCacheKeys(ctx, provider)
 }
 
@@ -112,7 +112,7 @@ func clearCacheByPattern(ctx context.Context, provider any, pattern string) erro
 		return p.ClearByPattern(ctx, pattern)
 	}
 
-	log.Printf("Cache provider does not support pattern matching, falling back to image cache clear...")
+	cacheLog.Warnf("Cache provider does not support pattern matching, falling back to image cache clear")
 	return clearImageCacheKeys(ctx, provider)
 }
 
@@ -139,7 +139,7 @@ func clearImageCacheKeys(ctx context.Context, provider any) error {
 		for _, key := range keys {
 			if err := deleter.Delete(ctx, key); err != nil {
 				if !isKeyNotFoundError(err) {
-					log.Printf("Warning: failed to delete cache key %s: %v", key, err)
+					cacheLog.Warnf("Failed to delete cache key %s: %v", key, err)
 				}
 			}
 		}

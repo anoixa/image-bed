@@ -104,7 +104,7 @@ func (h *Handler) RandomImage(c *gin.Context) {
 			c.Status(http.StatusNoContent)
 			return
 		}
-		utils.Errorf("[RandomImage] Failed to fetch random image: %v", err)
+		imageHandlerLog.Errorf("Failed to fetch random image: %v", err)
 		common.RespondError(c, http.StatusInternalServerError, "Failed to fetch random image")
 		return
 	}

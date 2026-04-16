@@ -12,6 +12,8 @@ import (
 	"gorm.io/gorm"
 )
 
+var deleteLog = utils.ForModule("Delete")
+
 // DeleteService 负责图片删除与清理相关用例
 type DeleteService struct {
 	repo        *images.Repository
@@ -54,16 +56,16 @@ func (s *DeleteService) DeleteSingle(ctx context.Context, identifier string, use
 	if img.StoragePath != "" {
 		refCount, err := s.repo.CountImagesByStoragePath(img.StoragePath)
 		if err != nil {
-			utils.Errorf("Failed to count references for storage path %s: %v", img.StoragePath, err)
+			deleteLog.Errorf("Failed to count references for storage path %s: %v", img.StoragePath, err)
 		} else if refCount == 0 {
 			provider, err := getStorageProviderByID(img.StorageConfigID)
 			if err != nil {
-				utils.Errorf("Failed to get storage provider for image %s: %v", utils.SanitizeLogMessage(img.Identifier), err)
+				deleteLog.Errorf("Failed to get storage provider for image %s: %v", utils.SanitizeLogMessage(img.Identifier), err)
 			} else if err := provider.DeleteWithContext(ctx, img.StoragePath); err != nil {
-				utils.Errorf("Failed to delete original image file %s: %v", img.StoragePath, err)
+				deleteLog.Errorf("Failed to delete original image file %s: %v", img.StoragePath, err)
 			}
 		} else {
-			utils.LogIfDevf("[Delete] Skipping physical file deletion for %s, still referenced by %d images", img.StoragePath, refCount)
+			deleteLog.Debugf("Skipping physical file deletion for %s, still referenced by %d images", img.StoragePath, refCount)
 		}
 	}
 
@@ -92,19 +94,19 @@ func (s *DeleteService) DeleteBatch(ctx context.Context, identifiers []string, u
 
 		refCount, err := s.repo.CountImagesByStoragePath(img.StoragePath)
 		if err != nil {
-			utils.Errorf("Failed to count references for storage path %s: %v", img.StoragePath, err)
+			deleteLog.Errorf("Failed to count references for storage path %s: %v", img.StoragePath, err)
 			continue
 		}
 
 		if refCount == 0 {
 			provider, err := getStorageProviderByID(img.StorageConfigID)
 			if err != nil {
-				utils.Errorf("Failed to get storage provider for image %s: %v", utils.SanitizeLogMessage(img.Identifier), err)
+				deleteLog.Errorf("Failed to get storage provider for image %s: %v", utils.SanitizeLogMessage(img.Identifier), err)
 			} else if err := provider.DeleteWithContext(ctx, img.StoragePath); err != nil {
-				utils.Errorf("Failed to delete original image file %s: %v", img.StoragePath, err)
+				deleteLog.Errorf("Failed to delete original image file %s: %v", img.StoragePath, err)
 			}
 		} else {
-			utils.LogIfDevf("[DeleteBatch] Skipping physical file deletion for %s, still referenced by %d images", img.StoragePath, refCount)
+			deleteLog.Debugf("Skipping physical file deletion for %s, still referenced by %d images", img.StoragePath, refCount)
 		}
 	}
 
@@ -128,13 +130,13 @@ func (s *DeleteService) ClearImageCache(ctx context.Context, identifier string) 
 func (s *DeleteService) deleteVariantsForImage(ctx context.Context, img *models.Image) {
 	variants, err := s.variantRepo.GetVariantsByImageID(img.ID)
 	if err != nil {
-		utils.Errorf("Failed to get variants for image %d: %v", img.ID, err)
+		deleteLog.Errorf("Failed to get variants for image %d: %v", img.ID, err)
 		return
 	}
 
 	provider, err := getStorageProviderByID(img.StorageConfigID)
 	if err != nil {
-		utils.Errorf("Failed to get storage provider for image %d: %v", img.ID, err)
+		deleteLog.Errorf("Failed to get storage provider for image %d: %v", img.ID, err)
 		return
 	}
 
@@ -144,18 +146,18 @@ func (s *DeleteService) deleteVariantsForImage(ctx context.Context, img *models.
 		}
 
 		if err := provider.DeleteWithContext(ctx, variant.StoragePath); err != nil {
-			utils.Errorf("Failed to delete variant file %s: %v", variant.StoragePath, err)
+			deleteLog.Errorf("Failed to delete variant file %s: %v", variant.StoragePath, err)
 		}
 
 		if s.cacheHelper != nil {
 			if err := s.cacheHelper.DeleteCachedImageData(ctx, variant.Identifier); err != nil {
-				utils.Warnf("Failed to delete cache for variant %s: %v", utils.SanitizeLogMessage(variant.Identifier), err)
+				deleteLog.Warnf("Failed to delete cache for variant %s: %v", utils.SanitizeLogMessage(variant.Identifier), err)
 			}
 		}
 	}
 
 	if err := s.variantRepo.DeleteByImageID(img.ID); err != nil {
-		utils.Errorf("Failed to delete variant records for image %d: %v", img.ID, err)
+		deleteLog.Errorf("Failed to delete variant records for image %d: %v", img.ID, err)
 	}
 }
 
@@ -164,9 +166,9 @@ func (s *DeleteService) clearImageCache(ctx context.Context, identifier string) 
 		return
 	}
 	if err := s.cacheHelper.DeleteCachedImage(ctx, identifier); err != nil {
-		utils.Warnf("Failed to delete cache for image %s: %v", utils.SanitizeLogMessage(identifier), err)
+		deleteLog.Warnf("Failed to delete cache for image %s: %v", utils.SanitizeLogMessage(identifier), err)
 	}
 	if err := s.cacheHelper.DeleteCachedImageData(ctx, identifier); err != nil {
-		utils.Errorf("Failed to delete image data cache for image %s: %v", utils.SanitizeLogMessage(identifier), err)
+		deleteLog.Errorf("Failed to delete image data cache for image %s: %v", utils.SanitizeLogMessage(identifier), err)
 	}
 }

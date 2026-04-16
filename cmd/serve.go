@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -31,11 +30,18 @@ import (
 	"gorm.io/gorm"
 )
 
+var (
+	serveLog        = utils.ForModule("Serve")
+	dependenciesLog = utils.ForModule("Dependencies")
+	vipsLog         = utils.ForModule("VIPS")
+)
+
 // serveCmd represents the serve command
 var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start API server",
 	Run: func(cmd *cobra.Command, args []string) {
+		initCommandLogger()
 		RunServer()
 	},
 }
@@ -64,7 +70,7 @@ func InitDependencies(cfg *config.Config) (*Dependencies, error) {
 		_ = database.Close(db)
 		return nil, fmt.Errorf("failed to auto migrate database: %w", err)
 	}
-	log.Println("[Dependencies] Database migration completed")
+	dependenciesLog.Infof("Database migration completed")
 
 	repos := &core.Repositories{
 		AccountsRepo: accounts.NewRepository(db),
@@ -80,7 +86,7 @@ func InitDependencies(cfg *config.Config) (*Dependencies, error) {
 		_ = database.Close(db)
 		return nil, fmt.Errorf("failed to initialize cache: %w", err)
 	}
-	log.Println("[Dependencies] Cache initialized from config")
+	dependenciesLog.Infof("Cache initialized from config")
 
 	configManager := configSvc.NewManager(db, "./data")
 	if err := configManager.Initialize(); err != nil {
@@ -88,23 +94,23 @@ func InitDependencies(cfg *config.Config) (*Dependencies, error) {
 		return nil, err
 	}
 
-	log.Println("[Dependencies] Config cache enabled")
+	dependenciesLog.Infof("Config cache enabled")
 
 	storageConfigs, err := configManager.GetStorageConfigs(context.Background())
 	if err == nil && len(storageConfigs) > 0 {
 		if err := storage.InitStorage(storageConfigs); err != nil {
-			log.Printf("[Dependencies] Warning: Failed to init storage: %v", err)
+			dependenciesLog.Warnf("Failed to init storage: %v", err)
 		} else {
-			log.Println("[Dependencies] Storage initialized from database configs")
+			dependenciesLog.Infof("Storage initialized from database configs")
 		}
 	} else {
 		if err != nil {
-			log.Printf("[Dependencies] Warning: Failed to get storage configs: %v", err)
+			dependenciesLog.Warnf("Failed to get storage configs: %v", err)
 		}
 		if err := storage.InitStorage([]storage.StorageConfig{}); err != nil {
-			log.Printf("[Dependencies] Warning: Failed to init default storage: %v", err)
+			dependenciesLog.Warnf("Failed to init default storage: %v", err)
 		} else {
-			log.Println("[Dependencies] Default storage initialized")
+			dependenciesLog.Infof("Default storage initialized")
 		}
 	}
 
@@ -138,10 +144,10 @@ func RunServer() {
 	dataDir := utils.GetDataDir()
 
 	if err := os.MkdirAll(dataDir, os.ModePerm); err != nil {
-		log.Fatalf("Failed to create data directory: %v", err)
+		exitWithErrorf("Failed to create data directory: %v", err)
 	}
 	if err := os.MkdirAll(filepath.Join(dataDir, "temp"), os.ModePerm); err != nil {
-		log.Fatalf("Failed to create temp directory: %v", err)
+		exitWithErrorf("Failed to create temp directory: %v", err)
 	}
 
 	if err := vipsfile.Startup(&vips.Config{
@@ -150,22 +156,24 @@ func RunServer() {
 		MaxCacheFiles:    0,
 		ConcurrencyLevel: 2,
 	}); err != nil {
-		log.Fatalf("Failed to initialize govips: %v", err)
+		exitWithErrorf("Failed to initialize govips: %v", err)
 	}
 	defer vipsfile.Shutdown()
 
-	log.Println("[VIPS] Govips initialized with cache limited to 1 byte / 1 entry")
+	vipsLog.Infof("Govips initialized with cache limited to 1 byte / 1 entry")
 	if config.IsDevelopment() {
 		utils.LogMemoryStats("VIPS_INIT")
 	}
 
 	deps, err := InitDependencies(cfg)
 	if err != nil {
-		log.Fatalf("Failed to initialize dependencies: %v", err)
+		exitWithErrorf("Failed to initialize dependencies: %v", err)
 	}
 	defer func() { _ = deps.Close() }()
 
-	InitDatabase(deps)
+	if err := InitDatabase(deps); err != nil {
+		exitWithErrorf("Failed to initialize database: %v", err)
+	}
 
 	worker.InitGlobalPool(cfg.WorkerCount, 1000)
 
@@ -176,7 +184,7 @@ func RunServer() {
 	// 初始化 JWT
 	api.SetAuthKeysRepo(deps.Repositories.KeysRepo)
 	if err := api.TokenInitFromConfig(cfg, deps.ConfigManager); err != nil {
-		log.Fatalf("Failed to initialize JWT: %s", err)
+		exitWithErrorf("Failed to initialize JWT: %v", err)
 	}
 
 	serverDeps := &core.ServerDependencies{
@@ -198,7 +206,7 @@ func RunServer() {
 	serverErrCh := make(chan error, 1)
 
 	go func() {
-		log.Printf("Server started on %s", cfg.Addr())
+		serveLog.Infof("Server started on %s", cfg.Addr())
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverErrCh <- err
 		}
@@ -209,11 +217,11 @@ func RunServer() {
 
 	select {
 	case err := <-serverErrCh:
-		log.Printf("Server unexpectedly stopped: %v", err)
+		serveLog.Errorf("Server unexpectedly stopped: %v", err)
 	case sig := <-quit:
-		log.Printf("Received signal: %v, shutting down...", sig)
+		serveLog.Infof("Received signal: %v, shutting down", sig)
 	}
-	log.Println("Shutting down server...")
+	serveLog.Infof("Shutting down server")
 
 	// 停止全局 Worker 池
 	worker.StopGlobalPool()
@@ -223,31 +231,32 @@ func RunServer() {
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
-		log.Printf("Server forced to shutdown: %v", err)
+		serveLog.Warnf("Server forced to shutdown: %v", err)
 	}
 
 	cleanup()
-	log.Println("Server exited")
+	serveLog.Infof("Server exited")
 }
 
 // InitDatabase 初始化数据库
-func InitDatabase(deps *Dependencies) {
-	log.Println("Initializing database...")
+func InitDatabase(deps *Dependencies) error {
+	serveLog.Infof("Initializing database")
 
 	password, err := deps.Repositories.AccountsRepo.CreateDefaultAdminUser()
 	if err != nil {
-		log.Fatalf("Failed to create default admin user: %v", err)
+		return err
 	}
 	if password != "" {
-		log.Println("========================================")
-		log.Println("🎉 默认管理员用户创建成功")
-		log.Printf("   用户名: admin")
-		log.Printf("   密码: %s", password)
-		log.Println("========================================")
-		log.Println("⚠️  请登录后立即修改默认密码！")
+		serveLog.Warnf("========================================")
+		serveLog.Warnf("默认管理员用户创建成功")
+		serveLog.Warnf("用户名: admin")
+		serveLog.Warnf("密码: %s", password)
+		serveLog.Warnf("请登录后立即修改默认密码")
+		serveLog.Warnf("========================================")
 	} else {
-		log.Println("Admin user already exists, skipping creation")
+		serveLog.Infof("Admin user already exists, skipping creation")
 	}
+	return nil
 }
 
 // buildCacheConfig 从应用配置构建缓存配置
@@ -270,7 +279,7 @@ func buildCacheConfig(cfg *config.Config) cache.Config {
 		}
 	default:
 		// 未知类型时使用内存缓存
-		log.Printf("[Dependencies] Unknown cache type '%s', using memory cache", cfg.CacheType)
+		dependenciesLog.Warnf("Unknown cache type '%s', using memory cache", cfg.CacheType)
 		return cache.Config{
 			Type:        "memory",
 			NumCounters: cfg.CacheNumCounters,

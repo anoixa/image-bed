@@ -3,18 +3,20 @@ package worker
 import (
 	"context"
 	"fmt"
-	appconfig "github.com/anoixa/image-bed/config"
-	"github.com/anoixa/image-bed/utils"
 	"github.com/davidbyttow/govips/v2/vips"
 	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	appconfig "github.com/anoixa/image-bed/config"
+	"github.com/anoixa/image-bed/utils"
 )
 
 var (
 	globalSemaphore     *ImageProcessingSemaphore
 	globalSemaphoreOnce sync.Once
+	workerPoolLog       = utils.ForModule("WorkerPool")
 )
 
 var (
@@ -120,7 +122,7 @@ func InitGlobalSemaphore(config *ImageProcessingConfig) {
 			semaphore: make(chan struct{}, config.MaxConcurrentImages),
 			config:    config,
 		}
-		utils.Infof("[WorkerPool] Image processing semaphore initialized, max concurrent: %d", config.MaxConcurrentImages)
+		workerPoolLog.Infof("Image processing semaphore initialized, max concurrent: %d", config.MaxConcurrentImages)
 	})
 }
 
@@ -147,7 +149,7 @@ func (s *ImageProcessingSemaphore) Release() {
 	select {
 	case <-s.semaphore:
 	default:
-		utils.Warnf("[WorkerPool] Warning: releasing unacquired semaphore")
+		workerPoolLog.Warnf("Releasing unacquired semaphore")
 	}
 }
 
@@ -200,7 +202,7 @@ func NewPool(workers, queueSize int) *Pool {
 	}
 
 	p.workerCount = workers
-	utils.Infof("[WorkerPool] Started with %d workers, queue size %d", workers, queueSize)
+	workerPoolLog.Infof("Started with %d workers, queue size %d", workers, queueSize)
 	return p
 }
 
@@ -220,7 +222,7 @@ func (p *Pool) executeTaskWithRecovery(task func()) {
 	defer func() {
 		if r := recover(); r != nil {
 			p.failedCount.Add(1)
-			utils.Errorf("[WorkerPool] Task panicked: %v", r)
+			workerPoolLog.Errorf("Task panicked: %v", r)
 		}
 	}()
 	task()
@@ -232,7 +234,7 @@ func (p *Pool) Submit(task func()) (ok bool) {
 		return false
 	}
 	if err := p.waitForMemory(); err != nil {
-		utils.Warnf("[WorkerPool] Rejecting task submission after backpressure wait: %v", err)
+		workerPoolLog.Warnf("Rejecting task submission after backpressure wait: %v", err)
 		return false
 	}
 	defer func() {
@@ -245,7 +247,7 @@ func (p *Pool) Submit(task func()) (ok bool) {
 		p.submittedCount.Add(1)
 		return true
 	default:
-		utils.Warnf("[WorkerPool] Task queue full, dropping task")
+		workerPoolLog.Warnf("Task queue full, dropping task")
 		return false
 	}
 }
@@ -278,10 +280,10 @@ func (p *Pool) waitForMemory() error {
 // Stop 关闭池
 func (p *Pool) Stop() {
 	if p.isClosed.CompareAndSwap(false, true) {
-		utils.Infof("[WorkerPool] Stopping...")
+		workerPoolLog.Infof("Stopping")
 		close(p.taskCh)
 		p.wg.Wait()
-		utils.Infof("[WorkerPool] Stopped gracefully.")
+		workerPoolLog.Infof("Stopped gracefully")
 	}
 }
 

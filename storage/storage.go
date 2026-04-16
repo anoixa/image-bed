@@ -3,18 +3,20 @@ package storage
 import (
 	"context"
 	"fmt"
-	"github.com/anoixa/image-bed/utils"
 	"io"
 	"net/http"
 	"os"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/anoixa/image-bed/utils"
 )
 
 var (
 	providersMu sync.Mutex
 	registryPtr atomic.Pointer[registryState]
+	storageLog  = utils.ForModule("Storage")
 )
 
 type registryState struct {
@@ -110,10 +112,10 @@ type DirectURLProvider interface {
 
 // InitStorage 初始化存储层
 func InitStorage(configs []StorageConfig) error {
-	utils.Errorf("[Storage] ============================================")
-	utils.Infof("[Storage] Starting storage initialization...")
-	utils.Errorf("[Storage] Total configs to initialize: %d", len(configs))
-	utils.Errorf("[Storage] --------------------------------------------")
+	storageLog.Infof("============================================")
+	storageLog.Infof("Starting storage initialization")
+	storageLog.Infof("Total configs to initialize: %d", len(configs))
+	storageLog.Infof("--------------------------------------------")
 
 	nextProviders := make(map[uint]Provider, len(configs))
 	var initErrors []error
@@ -128,39 +130,39 @@ func InitStorage(configs []StorageConfig) error {
 		// 记录默认配置信息
 		if cfg.IsDefault {
 			defaultCfg = cfg
-			utils.Errorf("[Storage] [DEFAULT] ID=%d, Name=%s, Type=%s", cfg.ID, cfg.Name, cfg.Type)
+			storageLog.Infof("[DEFAULT] ID=%d, Name=%s, Type=%s", cfg.ID, cfg.Name, cfg.Type)
 		}
 
-		utils.Errorf("[Storage] Initializing: ID=%d, Name=%s, Type=%s, IsDefault=%v",
+		storageLog.Infof("Initializing: ID=%d, Name=%s, Type=%s, IsDefault=%v",
 			cfg.ID, cfg.Name, cfg.Type, cfg.IsDefault)
 
 		provider, err := createProvider(*cfg)
 		if err != nil {
-			utils.Errorf("[Storage] [FAILED] ID=%d, Name=%s, Error: %v", cfg.ID, cfg.Name, err)
+			storageLog.Errorf("[FAILED] ID=%d, Name=%s, Error: %v", cfg.ID, cfg.Name, err)
 			initErrors = append(initErrors, fmt.Errorf("ID=%d, Name=%s: %w", cfg.ID, cfg.Name, err))
 			continue
 		}
 
 		nextProviders[cfg.ID] = provider
 		successCount++
-		utils.Infof("[Storage] [SUCCESS] ID=%d, Name=%s, Type=%s", cfg.ID, cfg.Name, cfg.Type)
+		storageLog.Infof("[SUCCESS] ID=%d, Name=%s, Type=%s", cfg.ID, cfg.Name, cfg.Type)
 
 		if cfg.IsDefault {
 			nextDefaultProvider = provider
 			nextDefaultID = cfg.ID
-			utils.Errorf("[Storage] [SET DEFAULT] ID=%d (%s)", cfg.ID, cfg.Name)
+			storageLog.Infof("[SET DEFAULT] ID=%d (%s)", cfg.ID, cfg.Name)
 		}
 	}
 
-	utils.Errorf("[Storage] --------------------------------------------")
-	utils.Errorf("[Storage] Initialization Summary:")
-	utils.Infof("[Storage]   Total: %d, Success: %d, Failed: %d", len(configs), successCount, len(initErrors))
+	storageLog.Infof("--------------------------------------------")
+	storageLog.Infof("Initialization Summary")
+	storageLog.Infof("Total: %d, Success: %d, Failed: %d", len(configs), successCount, len(initErrors))
 
 	if nextDefaultProvider == nil {
 		if defaultCfg != nil {
-			utils.Errorf("[Storage] [ERROR] Default config (ID=%d, Name=%s) failed to initialize", defaultCfg.ID, defaultCfg.Name)
+			storageLog.Errorf("[ERROR] Default config (ID=%d, Name=%s) failed to initialize", defaultCfg.ID, defaultCfg.Name)
 		}
-		utils.Errorf("[Storage] ============================================")
+		storageLog.Infof("============================================")
 		return fmt.Errorf("no default storage available (checked %d configs, %d failed)", len(configs), len(initErrors))
 	}
 
@@ -172,8 +174,8 @@ func InitStorage(configs []StorageConfig) error {
 	})
 	providersMu.Unlock()
 
-	utils.Errorf("[Storage] [DEFAULT STORAGE] ID=%d, Name=%s", nextDefaultID, nextDefaultProvider.Name())
-	utils.Errorf("[Storage] ============================================")
+	storageLog.Infof("[DEFAULT STORAGE] ID=%d, Name=%s", nextDefaultID, nextDefaultProvider.Name())
+	storageLog.Infof("============================================")
 
 	return nil
 }

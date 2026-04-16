@@ -14,6 +14,8 @@ import (
 	"gorm.io/gorm"
 )
 
+var configManagerLog = utils.ForModule("ConfigManager")
+
 // Manager 配置管理器
 type Manager struct {
 	db       *gorm.DB
@@ -55,7 +57,7 @@ func (m *Manager) Initialize() error {
 		return fmt.Errorf("failed to ensure local storage config: %w", err)
 	}
 
-	utils.Infof("[ConfigManager] Initialized successfully")
+	configManagerLog.Infof("Initialized successfully")
 	return nil
 }
 
@@ -213,7 +215,7 @@ func (m *Manager) ListConfigs(ctx context.Context, category models.ConfigCategor
 	for _, config := range configs {
 		resp, err := m.ToResponseWithMask(ctx, &config, maskSensitive)
 		if err != nil {
-			utils.Errorf("[ConfigManager] Failed to decrypt config ID=%d, Key=%s: %v", config.ID, config.Key, err)
+			configManagerLog.Errorf("Failed to decrypt config ID=%d, Key=%s: %v", config.ID, config.Key, err)
 			continue
 		}
 		responses = append(responses, resp)
@@ -279,7 +281,7 @@ func (m *Manager) Enable(ctx context.Context, id uint) error {
 
 	config, err := m.repo.GetByID(ctx, id)
 	if err != nil {
-		utils.Errorf("[ConfigManager] Enable: failed to fetch config %d after update: %v", id, err)
+		configManagerLog.Errorf("Enable: failed to fetch config %d after update: %v", id, err)
 		return nil
 	}
 	m.cache.Invalidate(config.Category)
@@ -296,7 +298,7 @@ func (m *Manager) Disable(ctx context.Context, id uint) error {
 
 	config, err := m.repo.GetByID(ctx, id)
 	if err != nil {
-		utils.Errorf("[ConfigManager] Disable: failed to fetch config %d after update: %v", id, err)
+		configManagerLog.Errorf("Disable: failed to fetch config %d after update: %v", id, err)
 		return nil
 	}
 	m.cache.Invalidate(config.Category)
@@ -322,7 +324,7 @@ func (m *Manager) GetStorageConfigs(ctx context.Context) ([]storage.StorageConfi
 	for _, cfg := range configs {
 		configMap, err := m.crypto.Decrypt(cfg.ConfigJSON)
 		if err != nil {
-			utils.Errorf("[ConfigManager] Failed to decrypt storage config ID=%d: %v", cfg.ID, err)
+			configManagerLog.Errorf("Failed to decrypt storage config ID=%d: %v", cfg.ID, err)
 			continue
 		}
 
@@ -422,7 +424,7 @@ func (m *Manager) ensureDefaultLocalStorageConfig(ctx context.Context) error {
 		return fmt.Errorf("failed to create default local storage config: %w", err)
 	}
 
-	utils.Infof("[ConfigManager] Default local storage config created successfully")
+	configManagerLog.Infof("Default local storage config created successfully")
 	return nil
 }
 
@@ -461,7 +463,7 @@ func (m *Manager) GetGlobalTransferMode(ctx context.Context) storage.TransferMod
 
 	configMap, err := m.crypto.Decrypt(config.ConfigJSON)
 	if err != nil {
-		utils.Errorf("[ConfigManager] Failed to decrypt transfer mode: %v", err)
+		configManagerLog.Errorf("Failed to decrypt transfer mode: %v", err)
 		return storage.TransferModeAuto
 	}
 
