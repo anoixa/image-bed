@@ -97,6 +97,13 @@ func Shutdown() {
 	}
 }
 
+func ShutdownThread() {
+	if err := ensureStarted(); err != nil {
+		return
+	}
+	vips.ShutdownThread()
+}
+
 func ensureStarted() error {
 	if !started {
 		return ErrNotInitialized

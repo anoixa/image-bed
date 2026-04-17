@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
+	"github.com/anoixa/image-bed/internal/vipsfile"
 	"github.com/davidbyttow/govips/v2/vips"
 	"runtime"
 	"sync"
@@ -209,9 +210,17 @@ func NewPool(workers, queueSize int) *Pool {
 // worker 实际执行任务的 Goroutine
 func (p *Pool) worker() {
 	defer p.wg.Done()
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	defer vipsfile.ShutdownThread()
+
 	for task := range p.taskCh {
 		if task != nil {
 			p.executeTaskWithRecovery(task)
+			// Release libvips thread-local state between independent jobs.
+			// This keeps long-lived worker threads from accumulating stale
+			// per-thread state and avoids reusing corrupted state after cgo faults.
+			vipsfile.ShutdownThread()
 		}
 	}
 }
