@@ -35,6 +35,36 @@ int ib_thumbnail_from_file(
     );
 }
 
+int ib_thumbnail_image(
+    VipsImage *in,
+    int width,
+    int height,
+    int crop,
+    int size,
+    VipsImage **out
+) {
+    if (height <= 0) {
+        return vips_thumbnail_image(
+            in,
+            out,
+            width,
+            "crop", crop,
+            "size", size,
+            NULL
+        );
+    }
+
+    return vips_thumbnail_image(
+        in,
+        out,
+        width,
+        "height", height,
+        "crop", crop,
+        "size", size,
+        NULL
+    );
+}
+
 int ib_save_webp_file(
     VipsImage *in,
     const char *filename,

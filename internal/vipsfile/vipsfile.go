@@ -224,16 +224,20 @@ func ThumbnailFileToWebPWithOptions(srcPath, dstPath string, thumb ThumbnailOpti
 		return ImageInfo{}, err
 	}
 
-	cSrc := C.CString(buildFileOption(srcPath, importOpts))
-	defer C.free(unsafe.Pointer(cSrc))
 	cDst := C.CString(dstPath)
 	defer C.free(unsafe.Pointer(cDst))
 	cProfile := C.CString(webpProfileOrNone(webpOpts.IccProfile))
 	defer C.free(unsafe.Pointer(cProfile))
 
+	origin, _, err := LoadImageFromFileWithOptions(srcPath, importOpts)
+	if err != nil {
+		return ImageInfo{}, err
+	}
+	defer origin.Close()
+
 	var img *C.VipsImage
-	if C.ib_thumbnail_from_file(cSrc, C.int(thumb.Width), C.int(thumb.Height), C.int(thumb.Crop), C.int(thumb.Size), &img) != 0 {
-		return ImageInfo{}, lastError("thumbnail from file")
+	if C.ib_thumbnail_image(origin.ptr, C.int(thumb.Width), C.int(thumb.Height), C.int(thumb.Crop), C.int(thumb.Size), &img) != 0 {
+		return ImageInfo{}, lastError("thumbnail from image")
 	}
 	defer C.ib_unref_image(img)
 

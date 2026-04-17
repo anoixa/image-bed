@@ -19,7 +19,6 @@ import (
 	"github.com/anoixa/image-bed/utils"
 	"github.com/anoixa/image-bed/utils/generator"
 	"github.com/anoixa/image-bed/utils/pool"
-	"github.com/davidbyttow/govips/v2/vips"
 	_ "golang.org/x/image/webp"
 	_ "image/gif"
 	_ "image/jpeg"
@@ -835,11 +834,10 @@ func (t *ImagePipelineTask) deleteCacheOnTerminalState(state string) {
 	}
 }
 
-// cleanupAfterPipeline releases vips cache and C heap back to the OS.
+// cleanupAfterPipeline releases Go/C allocator state back to the OS.
 // Called via defer from Execute() so it runs on success, error, and panic paths.
 func (t *ImagePipelineTask) cleanupAfterPipeline() {
 	runtime.GC()
-	vips.ClearCache()
 	vipsfile.MallocTrim()
 }
 

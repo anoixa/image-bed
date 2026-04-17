@@ -17,6 +17,15 @@ int ib_thumbnail_from_file(
     VipsImage **out
 );
 
+int ib_thumbnail_image(
+    VipsImage *in,
+    int width,
+    int height,
+    int crop,
+    int size,
+    VipsImage **out
+);
+
 int ib_save_webp_file(
     VipsImage *in,
     const char *filename,
