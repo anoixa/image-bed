@@ -477,12 +477,14 @@ func (t *ImagePipelineTask) generateThumbnail(ctx context.Context, filePath stri
 		return nil, fmt.Errorf("image processing settings not provided")
 	}
 	if !settings.ThumbnailEnabled {
+		pipelineLog.Debugf("Skipping thumbnail for %s: thumbnail disabled", t.ImageIdentifier)
 		return nil, nil
 	}
 
 	// GIF guard: converter.go already blocks GIFs before task creation;
 	// this is defense-in-depth using the stored MIME type.
 	if t.MimeType == "image/gif" {
+		pipelineLog.Debugf("Skipping thumbnail for %s: GIF format", t.ImageIdentifier)
 		return nil, nil
 	}
 
@@ -542,6 +544,7 @@ func (t *ImagePipelineTask) generateWebP(ctx context.Context, filePath string, o
 // generateWebPWithSettings 使用指定设置生成 WebP
 func (t *ImagePipelineTask) generateWebPWithSettings(ctx context.Context, filePath string, settings *dbconfig.ImageProcessingSettings, originImg *vipsfile.ImageHandle, info vipsfile.ImageInfo) (*pipelineResult, error) {
 	if !settings.IsFormatEnabled(models.FormatWebP) {
+		pipelineLog.Debugf("Skipping WebP for %s: format disabled", t.ImageIdentifier)
 		return nil, nil
 	}
 
@@ -549,6 +552,7 @@ func (t *ImagePipelineTask) generateWebPWithSettings(ctx context.Context, filePa
 	if settings.MaxDimension > 0 {
 		if w, h, ok := readImageDimensions(filePath); ok {
 			if w > settings.MaxDimension || h > settings.MaxDimension {
+				pipelineLog.Debugf("Skipping WebP for %s: dimensions %dx%d exceed max_dimension %d", t.ImageIdentifier, w, h, settings.MaxDimension)
 				return nil, nil
 			}
 		}
@@ -617,15 +621,18 @@ func (t *ImagePipelineTask) generateAVIF(ctx context.Context, filePath string, w
 		return nil, fmt.Errorf("image processing settings not provided")
 	}
 	if !settings.IsFormatEnabled(models.FormatAVIF) {
+		pipelineLog.Debugf("Skipping AVIF for %s: format disabled", t.ImageIdentifier)
 		return nil, nil
 	}
 	if !vipsfile.SupportsAVIFEncoding() {
+		pipelineLog.Debugf("Skipping AVIF for %s: AVIF encoding not supported", t.ImageIdentifier)
 		return nil, nil
 	}
 
 	if settings.MaxDimension > 0 {
 		if w, h, ok := readImageDimensions(filePath); ok {
 			if w > settings.MaxDimension || h > settings.MaxDimension {
+				pipelineLog.Debugf("Skipping AVIF for %s: dimensions %dx%d exceed max_dimension %d", t.ImageIdentifier, w, h, settings.MaxDimension)
 				return nil, nil
 			}
 		}
@@ -641,6 +648,7 @@ func (t *ImagePipelineTask) generateAVIF(ctx context.Context, filePath string, w
 	}
 
 	if settings.MaxDimension > 0 && (info.Width > settings.MaxDimension || info.Height > settings.MaxDimension) {
+		pipelineLog.Debugf("Skipping AVIF for %s: dimensions %dx%d exceed max_dimension %d", t.ImageIdentifier, info.Width, info.Height, settings.MaxDimension)
 		return nil, nil
 	}
 

@@ -96,7 +96,7 @@ func loadConfig() {
 	viper.SetConfigType("env")
 
 	if err := viper.ReadInConfig(); err != nil {
-		fmt.Fprintln(os.Stderr, "Info: .env file not found, using defaults and environment variables")
+		fmt.Fprintln(os.Stderr, "Info: .env file not found, falling back to environment variables")
 	} else {
 		fmt.Fprintln(os.Stderr, "Info: Loaded configuration from .env file")
 	}
