@@ -215,10 +215,17 @@ func (s *WriteService) processAndSaveImage(ctx context.Context, userID uint, sou
 	}
 
 	if err == nil && img.DeletedAt.Valid {
+		if img.UserID != userID {
+			newImg, err := s.createDedupedImageRecord(img, userID, source.FileName, storageConfigID, isPublic)
+			if err != nil {
+				return nil, false, fmt.Errorf("failed to create deduped image record: %w", err)
+			}
+			submitBackgroundTask(func() { s.warmCache(newImg) })
+			return newImg, true, nil
+		}
 		updates := map[string]any{
 			"deleted_at":    nil,
 			"original_name": source.FileName,
-			"user_id":       userID,
 			"is_public":     isPublic,
 		}
 		restored, err := s.repo.UpdateImageByIdentifier(img.Identifier, updates)

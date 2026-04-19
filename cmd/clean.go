@@ -172,14 +172,20 @@ func cleanOrphanStorageFiles(db *gorm.DB, stats *cleanStats, dryRun bool) error 
 		return nil
 	}
 
-	var identifiers []string
-	if err := db.Model(&models.Image{}).Pluck("identifier", &identifiers).Error; err != nil {
-		return fmt.Errorf("failed to fetch image identifiers: %w", err)
+	var storagePaths []string
+	if err := db.Model(&models.Image{}).Where("deleted_at IS NULL").Pluck("storage_path", &storagePaths).Error; err != nil {
+		return fmt.Errorf("failed to fetch image storage paths: %w", err)
 	}
 
+	var variantPaths []string
+	if err := db.Table("image_variants").Pluck("storage_path", &variantPaths).Error; err != nil {
+		cleanLog.Warnf("Could not fetch variant paths: %v", err)
+	}
+	storagePaths = append(storagePaths, variantPaths...)
+
 	identifierMap := make(map[string]bool)
-	for _, id := range identifiers {
-		identifierMap[id] = true
+	for _, p := range storagePaths {
+		identifierMap[filepath.ToSlash(p)] = true
 	}
 
 	basePath := localStorage.BasePath()

@@ -136,8 +136,12 @@ func (m *Manager) UpdateConfig(ctx context.Context, id uint, req *models.SystemC
 		return nil, err
 	}
 
-	config.Name = req.Name
-	config.Description = req.Description
+	if req.Name != "" {
+		config.Name = req.Name
+	}
+	if req.Description != "" {
+		config.Description = req.Description
+	}
 	if req.IsEnabled != nil {
 		config.IsEnabled = *req.IsEnabled
 	}
@@ -521,6 +525,8 @@ func (m *Manager) SetGlobalTransferMode(ctx context.Context, mode storage.Transf
 			return err
 		}
 		m.cache.SetTransferMode(mode)
+		m.cache.Invalidate(models.ConfigCategorySystem)
+		m.eventBus.Publish(EventConfigCreated, nil)
 		return nil
 	}
 
@@ -530,5 +536,7 @@ func (m *Manager) SetGlobalTransferMode(ctx context.Context, mode storage.Transf
 		return err
 	}
 	m.cache.SetTransferMode(mode)
+	m.cache.Invalidate(models.ConfigCategorySystem)
+	m.eventBus.Publish(EventConfigUpdated, existing)
 	return nil
 }

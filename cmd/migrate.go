@@ -503,10 +503,13 @@ func migrateAlbumImages(ctx context.Context, sourceDB, targetDB *gorm.DB, stats 
 
 	for _, rel := range relations {
 		var count int64
-		targetDB.WithContext(ctx).Raw(
+		if err := targetDB.WithContext(ctx).Raw(
 			"SELECT COUNT(*) FROM album_images WHERE album_id = ? AND image_id = ?",
 			rel.AlbumID, rel.ImageID,
-		).Scan(&count)
+		).Scan(&count).Error; err != nil {
+			migrateLog.Warnf("Failed to check existing relation (album=%d, image=%d): %v", rel.AlbumID, rel.ImageID, err)
+			continue
+		}
 
 		if count > 0 {
 			if onConflict == "error" {
@@ -517,8 +520,14 @@ func migrateAlbumImages(ctx context.Context, sourceDB, targetDB *gorm.DB, stats 
 		}
 
 		var albumCount, imageCount int64
-		targetDB.WithContext(ctx).Model(&models.Album{}).Where("id = ?", rel.AlbumID).Count(&albumCount)
-		targetDB.WithContext(ctx).Model(&models.Image{}).Where("id = ?", rel.ImageID).Count(&imageCount)
+		if err := targetDB.WithContext(ctx).Model(&models.Album{}).Where("id = ?", rel.AlbumID).Count(&albumCount).Error; err != nil {
+			migrateLog.Warnf("Failed to check album existence (id=%d): %v", rel.AlbumID, err)
+			continue
+		}
+		if err := targetDB.WithContext(ctx).Model(&models.Image{}).Where("id = ?", rel.ImageID).Count(&imageCount).Error; err != nil {
+			migrateLog.Warnf("Failed to check image existence (id=%d): %v", rel.ImageID, err)
+			continue
+		}
 
 		if albumCount == 0 || imageCount == 0 {
 			migrateLog.Warnf("Skipping album_image relation: album_id=%d, image_id=%d (referenced record not found)",

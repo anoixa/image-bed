@@ -15,6 +15,9 @@ func NewService(repo *albums.Repository) *Service {
 	return &Service{repo: repo}
 }
 
+// ErrAlbumNotFound 相册未找到或无权限
+var ErrAlbumNotFound = albums.ErrAlbumNotFound
+
 func (s *Service) GetAlbumWithImagesByID(albumID, userID uint) (*models.Album, error) {
 	return s.repo.GetAlbumWithImagesByID(albumID, userID)
 }

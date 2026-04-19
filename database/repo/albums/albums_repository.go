@@ -9,6 +9,9 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+// ErrAlbumNotFound 相册未找到或无权限
+var ErrAlbumNotFound = errors.New("album not found or access denied")
+
 // Repository 相册仓库
 type Repository struct {
 	db *gorm.DB
@@ -103,7 +106,7 @@ func (r *Repository) AddImageToAlbum(albumID, userID uint, image *models.Image) 
 		var album models.Album
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&album, "id = ? AND user_id = ?", albumID, userID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return errors.New("album not found or access denied")
+				return ErrAlbumNotFound
 			}
 			return err
 		}
@@ -117,7 +120,7 @@ func (r *Repository) RemoveImageFromAlbum(albumID, userID uint, image *models.Im
 		var album models.Album
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&album, "id = ? AND user_id = ?", albumID, userID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return errors.New("album not found or access denied")
+				return ErrAlbumNotFound
 			}
 			return err
 		}
@@ -135,7 +138,7 @@ func (r *Repository) AddImagesToAlbum(albumID, userID uint, imageIDs []uint) (in
 		var album models.Album
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&album, "id = ? AND user_id = ?", albumID, userID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return errors.New("album not found or access denied")
+				return ErrAlbumNotFound
 			}
 			return err
 		}
@@ -197,7 +200,7 @@ func (r *Repository) DeleteAlbum(albumID, userID uint) error {
 		var album models.Album
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&album, "id = ? AND user_id = ?", albumID, userID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return errors.New("album not found or access denied")
+				return ErrAlbumNotFound
 			}
 			return err
 		}
@@ -240,7 +243,7 @@ func (r *Repository) RemoveImagesFromAlbum(albumID, userID uint, imageIDs []uint
 		var album models.Album
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&album, "id = ? AND user_id = ?", albumID, userID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return errors.New("album not found or access denied")
+				return ErrAlbumNotFound
 			}
 			return err
 		}

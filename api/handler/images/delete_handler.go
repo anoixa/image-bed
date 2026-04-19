@@ -9,7 +9,7 @@ import (
 )
 
 type DeleteRequestBody struct {
-	Identifiers []string `json:"identifiers" binding:"required"`
+	Identifiers []string `json:"identifiers" binding:"required,max=100"`
 }
 
 // DeleteImages 批量删除图片

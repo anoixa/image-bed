@@ -20,7 +20,7 @@ import (
 
 // AddImagesToAlbumRequest 添加图片到相册请求
 type AddImagesToAlbumRequest struct {
-	Identifiers []string `json:"identifiers" binding:"required,min=1"`
+	Identifiers []string `json:"identifiers" binding:"required,min=1,max=100"`
 }
 
 // AlbumImageHandler 相册图片处理器
@@ -129,7 +129,7 @@ func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 	if len(imageIDsToAdd) > 0 {
 		inserted, err := h.svc.AddImagesToAlbum(uint(albumID), userID, imageIDsToAdd)
 		if err != nil {
-			if err.Error() == "album not found or access denied" {
+			if errors.Is(err, svcAlbums.ErrAlbumNotFound) {
 				common.RespondError(c, http.StatusNotFound, "Album not found or access denied")
 				return
 			}
@@ -208,7 +208,7 @@ func (h *AlbumImageHandler) RemoveImageFromAlbumHandler(c *gin.Context) {
 
 	// 从相册移除图片
 	if err := h.svc.RemoveImageFromAlbum(uint(albumID), userID, image); err != nil {
-		if err.Error() == "album not found or access denied" {
+		if errors.Is(err, svcAlbums.ErrAlbumNotFound) {
 			common.RespondError(c, http.StatusNotFound, "Album not found or access denied")
 			return
 		}
@@ -232,7 +232,7 @@ func (h *AlbumImageHandler) RemoveImageFromAlbumHandler(c *gin.Context) {
 
 // RemoveImagesFromAlbumRequest 批量从相册移除图片请求
 type RemoveImagesFromAlbumRequest struct {
-	Identifiers []string `json:"identifiers" binding:"required,min=1"`
+	Identifiers []string `json:"identifiers" binding:"required,min=1,max=100"`
 }
 
 // RemoveImagesFromAlbumHandler 批量从相册移除图片
@@ -309,7 +309,7 @@ func (h *AlbumImageHandler) RemoveImagesFromAlbumHandler(c *gin.Context) {
 	if len(imageIDsToRemove) > 0 {
 		removedCount, err = h.svc.RemoveImagesFromAlbum(uint(albumID), userID, imageIDsToRemove)
 		if err != nil {
-			if err.Error() == "album not found or access denied" {
+			if errors.Is(err, svcAlbums.ErrAlbumNotFound) {
 				common.RespondError(c, http.StatusNotFound, "Album not found or access denied")
 				return
 			}
