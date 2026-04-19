@@ -104,7 +104,7 @@ func newGormLogger() logger.Interface {
 	colorful := false
 
 	if config.IsDevelopment() {
-		logLevel = logger.Info
+		logLevel = logger.Warn
 		colorful = true
 	}
 

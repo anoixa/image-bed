@@ -141,13 +141,9 @@ func (h *Handler) GetImage(c *gin.Context) {
 // serveOriginalImage 提供原图
 func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 	if h.cacheHelper == nil {
-		imageHandlerLog.Debugf("serveOriginalImage cache helper is nil")
 		common.RespondError(c, http.StatusInternalServerError, "Cache not initialized")
 		return
 	}
-
-	imageHandlerLog.Debugf("serveOriginalImage image.ID=%d, StorageConfigID=%d, Identifier=%s",
-		image.ID, image.StorageConfigID, image.Identifier)
 
 	// 检查是否可以使用直链
 	if directURL := h.getDirectURLIfPossible(c, image); directURL != "" {
@@ -208,38 +204,28 @@ func (h *Handler) getDirectURLIfPossible(c *gin.Context, img *models.Image) stri
 func (h *Handler) getVariantDirectURLIfPossible(c *gin.Context, img *models.Image, storagePath string) string {
 	// 私有图片不支持直链
 	if !img.IsPublic {
-		imageHandlerLog.Debugf("getVariantDirectURLIfPossible image %s is not public, skip direct link", img.Identifier)
 		return ""
 	}
 
 	// 获取存储提供者
 	provider, err := h.getStorageProvider(img.StorageConfigID)
 	if err != nil {
-		imageHandlerLog.Debugf("getVariantDirectURLIfPossible failed to get storage provider for image %s (StorageConfigID=%d)",
-			img.Identifier, img.StorageConfigID)
 		return ""
 	}
 
 	directProvider, ok := provider.(storage.DirectURLProvider)
 	if !ok {
-		imageHandlerLog.Debugf("getVariantDirectURLIfPossible provider does not support direct URL for image %s", img.Identifier)
 		return ""
 	}
 
 	globalMode := h.getGlobalTransferMode(c.Request.Context())
 
-	imageHandlerLog.Debugf("getVariantDirectURLIfPossible image %s (path=%s): SupportsDirectLink=%v, globalMode=%s, isPublic=%v",
-		img.Identifier, storagePath, directProvider.SupportsDirectLink(), globalMode, img.IsPublic)
-
 	if directProvider.ShouldProxy(img.IsPublic, globalMode) {
-		imageHandlerLog.Debugf("getVariantDirectURLIfPossible image %s: ShouldProxy returned true, using proxy", img.Identifier)
 		return ""
 	}
 
 	// 获取直链 URL
-	directURL := directProvider.GetDirectURL(storagePath)
-	imageHandlerLog.Debugf("getVariantDirectURLIfPossible image %s: Using direct URL %s", img.Identifier, directURL)
-	return directURL
+	return directProvider.GetDirectURL(storagePath)
 }
 
 // getGlobalTransferMode 获取全局转发模式
@@ -328,9 +314,6 @@ func (h *Handler) serveImageData(c *gin.Context, img *models.Image, data []byte)
 
 // serveVariantImage 提供格式变体（支持直链模式）
 func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *image.VariantResult) {
-	imageHandlerLog.Debugf("serveVariantImage img.ID=%d, img.StorageConfigID=%d, variant.Identifier=%s, variant.StoragePath=%s",
-		img.ID, img.StorageConfigID, result.Identifier, result.StoragePath)
-
 	// 检查变体是否可以使用直链（使用变体自己的路径）
 	if directURL := h.getVariantDirectURLIfPossible(c, img, result.StoragePath); directURL != "" {
 		c.Header("Cache-Control", config.CacheControlPublic)
@@ -472,16 +455,13 @@ func (h *Handler) getOrPopulateImageDataCache(ctx context.Context, provider stor
 
 	imageData, ok, err := h.loadCacheableImageData(ctx, provider, storagePath)
 	if err != nil {
-		imageHandlerLog.Debugf("imageDataCache failed to load cacheable image data for %s: %v", storagePath, err)
 		return nil, false
 	}
 	if !ok {
 		return nil, false
 	}
 
-	if err := h.cacheHelper.CacheImageData(ctx, cacheKey, imageData); err != nil {
-		imageHandlerLog.Debugf("imageDataCache failed to cache image data for %s: %v", storagePath, err)
-	}
+	_ = h.cacheHelper.CacheImageData(ctx, cacheKey, imageData)
 
 	return imageData, true
 }
