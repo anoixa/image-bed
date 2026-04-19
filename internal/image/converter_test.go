@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"testing"
+	"time"
 
 	configdb "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
@@ -79,6 +80,29 @@ func TestShouldTriggerVariantConversion(t *testing.T) {
 		image := &models.Image{MimeType: "image/jpeg", FileSize: 32 * 1024}
 		disabled := &configdb.ImageProcessingSettings{}
 		assert.False(t, shouldTriggerVariantConversion(image, disabled))
+	})
+}
+
+func TestVariantReadyForSubmit(t *testing.T) {
+	now := time.Now()
+
+	t.Run("pending variant without retry window is ready", func(t *testing.T) {
+		variant := &models.ImageVariant{Status: models.VariantStatusPending}
+		assert.True(t, variantReadyForSubmit(variant, now))
+	})
+
+	t.Run("pending variant with future retry window is not ready", func(t *testing.T) {
+		retryAt := now.Add(5 * time.Minute)
+		variant := &models.ImageVariant{
+			Status:      models.VariantStatusPending,
+			NextRetryAt: &retryAt,
+		}
+		assert.False(t, variantReadyForSubmit(variant, now))
+	})
+
+	t.Run("failed variant is never ready", func(t *testing.T) {
+		variant := &models.ImageVariant{Status: models.VariantStatusFailed}
+		assert.False(t, variantReadyForSubmit(variant, now))
 	})
 }
 

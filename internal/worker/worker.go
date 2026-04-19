@@ -19,9 +19,28 @@ var (
 	workerPoolLog       = utils.ForModule("WorkerPool")
 )
 
+type InFlightTaskSnapshot struct {
+	ImageID    uint
+	VariantIDs []uint
+}
+
+type inFlightTaskRegistry struct {
+	mu     sync.Mutex
+	nextID uint64
+	tasks  map[uint64]InFlightTaskSnapshot
+}
+
+type inFlightTaskLease struct {
+	registry *inFlightTaskRegistry
+	id       uint64
+}
+
 var (
 	globalPool     *Pool
 	globalPoolOnce sync.Once
+	inFlightTasks  = inFlightTaskRegistry{
+		tasks: make(map[uint64]InFlightTaskSnapshot),
+	}
 )
 
 var workerMemoryCheck = func() error {
@@ -97,6 +116,7 @@ type Pool struct {
 	taskCh   chan func()
 	wg       sync.WaitGroup
 	isClosed atomic.Bool
+	doneCh   chan struct{}
 
 	submittedCount atomic.Uint64
 	executedCount  atomic.Uint64
@@ -179,6 +199,17 @@ func StopGlobalPool() {
 	}
 }
 
+func ShutdownGlobalPool(ctx context.Context) error {
+	if globalPool == nil {
+		return nil
+	}
+	return globalPool.ShutdownContext(ctx)
+}
+
+func CurrentInFlightTasks() []InFlightTaskSnapshot {
+	return inFlightTasks.Snapshots()
+}
+
 // NewPool 创建新的任务池
 func NewPool(workers, queueSize int) *Pool {
 	if queueSize <= 0 {
@@ -191,6 +222,7 @@ func NewPool(workers, queueSize int) *Pool {
 	p := &Pool{
 		taskCh:   make(chan func(), queueSize),
 		queueCap: queueSize,
+		doneCh:   make(chan struct{}),
 	}
 
 	InitGlobalSemaphore(DefaultImageProcessingConfig())
@@ -199,6 +231,11 @@ func NewPool(workers, queueSize int) *Pool {
 		p.wg.Add(1)
 		go p.worker()
 	}
+
+	go func() {
+		p.wg.Wait()
+		close(p.doneCh)
+	}()
 
 	p.workerCount = workers
 	workerPoolLog.Infof("Started with %d workers, queue size %d", workers, queueSize)
@@ -286,11 +323,21 @@ func (p *Pool) waitForMemory() error {
 
 // Stop 关闭池
 func (p *Pool) Stop() {
+	_ = p.ShutdownContext(context.Background())
+}
+
+func (p *Pool) ShutdownContext(ctx context.Context) error {
 	if p.isClosed.CompareAndSwap(false, true) {
 		workerPoolLog.Infof("Stopping")
 		close(p.taskCh)
-		p.wg.Wait()
+	}
+
+	select {
+	case <-p.doneCh:
 		workerPoolLog.Infof("Stopped gracefully")
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -304,4 +351,69 @@ func (p *Pool) GetStats() PoolStats {
 		QueueCap:    p.queueCap,
 		WorkerCount: p.workerCount,
 	}
+}
+
+func beginInFlightTask(imageID uint, variantIDs []uint) *inFlightTaskLease {
+	if imageID == 0 && len(variantIDs) == 0 {
+		return nil
+	}
+	return inFlightTasks.Begin(imageID, variantIDs)
+}
+
+func (r *inFlightTaskRegistry) Begin(imageID uint, variantIDs []uint) *inFlightTaskLease {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.nextID++
+	id := r.nextID
+	r.tasks[id] = InFlightTaskSnapshot{
+		ImageID:    imageID,
+		VariantIDs: append([]uint(nil), variantIDs...),
+	}
+
+	return &inFlightTaskLease{
+		registry: r,
+		id:       id,
+	}
+}
+
+func (r *inFlightTaskRegistry) Snapshots() []InFlightTaskSnapshot {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	snapshots := make([]InFlightTaskSnapshot, 0, len(r.tasks))
+	for _, snapshot := range r.tasks {
+		snapshots = append(snapshots, InFlightTaskSnapshot{
+			ImageID:    snapshot.ImageID,
+			VariantIDs: append([]uint(nil), snapshot.VariantIDs...),
+		})
+	}
+	return snapshots
+}
+
+func (l *inFlightTaskLease) Update(imageID uint, variantIDs []uint) {
+	if l == nil || l.registry == nil {
+		return
+	}
+
+	l.registry.mu.Lock()
+	defer l.registry.mu.Unlock()
+
+	if _, ok := l.registry.tasks[l.id]; !ok {
+		return
+	}
+	l.registry.tasks[l.id] = InFlightTaskSnapshot{
+		ImageID:    imageID,
+		VariantIDs: append([]uint(nil), variantIDs...),
+	}
+}
+
+func (l *inFlightTaskLease) Release() {
+	if l == nil || l.registry == nil {
+		return
+	}
+
+	l.registry.mu.Lock()
+	defer l.registry.mu.Unlock()
+	delete(l.registry.tasks, l.id)
 }

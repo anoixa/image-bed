@@ -39,11 +39,11 @@ type ImageRequestBody struct {
 }
 
 type ImageListResponse struct {
-	Images     []*ImageDTO `json:"images"`
-	Total      int64       `json:"total"`
-	Page       int         `json:"page"`
-	Limit      int         `json:"limit"`
-	TotalPages int         `json:"total_pages"`
+	Images     []ImageDTO `json:"images"`
+	Total      int64      `json:"total"`
+	Page       int        `json:"page"`
+	Limit      int        `json:"limit"`
+	TotalPages int        `json:"total_pages"`
 }
 
 // ListImages 获取图片列表
@@ -100,15 +100,15 @@ func (h *Handler) ListImages(c *gin.Context) {
 	})
 }
 
-func (h *Handler) toImageDTO(image *models.Image) *ImageDTO {
+func (h *Handler) toImageDTO(image *models.Image) ImageDTO {
 	if image == nil {
-		return nil
+		return ImageDTO{}
 	}
 
 	imageUrl := utils.BuildImageURL(h.baseURL, image.Identifier)
 	thumbnailUrl := utils.BuildThumbnailURL(h.baseURL, image.Identifier)
 
-	return &ImageDTO{
+	return ImageDTO{
 		ID:           image.ID,
 		Identifier:   image.Identifier,
 		URL:          imageUrl,
@@ -123,8 +123,8 @@ func (h *Handler) toImageDTO(image *models.Image) *ImageDTO {
 	}
 }
 
-func (h *Handler) toImageDTOs(images []*models.Image) []*ImageDTO {
-	dtos := make([]*ImageDTO, len(images))
+func (h *Handler) toImageDTOs(images []*models.Image) []ImageDTO {
+	dtos := make([]ImageDTO, len(images))
 	for i, image := range images {
 		dtos[i] = h.toImageDTO(image)
 	}

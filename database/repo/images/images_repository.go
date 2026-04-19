@@ -18,6 +18,18 @@ type Repository struct {
 	*repo.GenericRepository[models.Image]
 }
 
+var imageListSelectColumns = []string{
+	"images.id",
+	"images.identifier",
+	"images.original_name",
+	"images.file_size",
+	"images.mime_type",
+	"images.width",
+	"images.height",
+	"images.is_public",
+	"images.created_at",
+}
+
 // RandomImageFilter 随机图片筛选条件
 type RandomImageFilter struct {
 	AlbumID          *uint
@@ -259,7 +271,7 @@ func (r *Repository) GetImageList(storageConfigIDs []uint, identifier, search st
 		orderBy = "created_at asc"
 	}
 
-	err := db.Order(orderBy).Offset(offset).Limit(pageSize).Find(&imageList).Error
+	err := db.Select(imageListSelectColumns).Order(orderBy).Offset(offset).Limit(pageSize).Find(&imageList).Error
 	return imageList, total, err
 }
 
@@ -307,6 +319,21 @@ func (r *Repository) RemoveImagesFromAllAlbums(imageIDs []uint) error {
 // UpdateVariantStatus 更新图片变体状态
 func (r *Repository) UpdateVariantStatus(imageID uint, status models.ImageVariantStatus) error {
 	return r.db.Model(&models.Image{}).Where("id = ?", imageID).Update("variant_status", status).Error
+}
+
+func (r *Repository) ResetProcessingVariantStatus(imageIDs []uint, status models.ImageVariantStatus) (int64, error) {
+	if len(imageIDs) == 0 {
+		return 0, nil
+	}
+
+	result := r.db.Model(&models.Image{}).
+		Where("id IN ? AND variant_status = ?", imageIDs, models.ImageVariantStatusProcessing).
+		Updates(map[string]any{
+			"variant_status": status,
+			"updated_at":     time.Now(),
+		})
+
+	return result.RowsAffected, result.Error
 }
 
 // TouchVariantProcessingStatus refreshes updated_at while an image remains in

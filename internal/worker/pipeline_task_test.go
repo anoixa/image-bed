@@ -22,9 +22,23 @@ type mockVariantRepo struct {
 	updateCompletedErr error
 	updateFailedCalls  []uint
 	touchCalls         [][]uint
+	statusCASCalls     []statusCASCall
+}
+
+type statusCASCall struct {
+	id        uint
+	expected  string
+	newStatus string
+	errMsg    string
 }
 
 func (m *mockVariantRepo) UpdateStatusCAS(id uint, expected, newStatus, errMsg string) (bool, error) {
+	m.statusCASCalls = append(m.statusCASCalls, statusCASCall{
+		id:        id,
+		expected:  expected,
+		newStatus: newStatus,
+		errMsg:    errMsg,
+	})
 	return true, nil
 }
 
@@ -105,8 +119,9 @@ func TestSaveVariantResults_UpdateCompletedError_CallsUpdateFailed(t *testing.T)
 		VariantRepo:   repo,
 	}
 	result := &pipelineResult{StoragePath: "webp/foo.webp", Width: 100, Height: 100, FileSize: 1000, FileHash: "abc"}
+	acquiredVariants := []uint{7}
 
-	err := task.saveVariantResults(nil, result, nil)
+	err := task.saveVariantResults(&acquiredVariants, nil, result, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "db down")
@@ -187,4 +202,21 @@ func TestShouldKeepAVIF(t *testing.T) {
 	assert.False(t, shouldKeepAVIF(95, 100))
 	assert.False(t, shouldKeepAVIF(110, 100))
 	assert.True(t, shouldKeepAVIF(90, 0))
+}
+
+func TestFinalizeOnlyRollsBackStillTrackedVariants(t *testing.T) {
+	repo := &mockVariantRepo{}
+	task := &ImagePipelineTask{VariantRepo: repo}
+
+	acquiredVariants := []uint{11, 12}
+	task.releaseTrackedVariant(&acquiredVariants, 11)
+	task.finalize(&acquiredVariants)
+
+	require.Len(t, repo.statusCASCalls, 1)
+	assert.Equal(t, statusCASCall{
+		id:        12,
+		expected:  models.VariantStatusProcessing,
+		newStatus: models.VariantStatusPending,
+		errMsg:    "",
+	}, repo.statusCASCalls[0])
 }

@@ -3,6 +3,7 @@ package image
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/anoixa/image-bed/cache"
 	config "github.com/anoixa/image-bed/config/db"
@@ -40,6 +41,7 @@ func NewConverter(cm *config.Manager, variantRepo *images.VariantRepository, ima
 // 使用 PipelineTask 顺序生成缩略图、WebP 和 AVIF。
 func (c *Converter) TriggerConversion(image *models.Image) {
 	ctx := context.Background()
+	now := time.Now()
 
 	converterLog.Debugf("TriggerConversion called for image %s (mime=%s, size=%d)",
 		image.Identifier, image.MimeType, image.FileSize)
@@ -88,8 +90,8 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 			converterLog.Debugf("Failed to upsert thumbnail variant: %v", err)
 			return
 		}
-		if thumbVariant.Status != models.VariantStatusPending {
-			converterLog.Debugf("Thumbnail variant %d status=%s, skip", thumbVariant.ID, thumbVariant.Status)
+		if !variantReadyForSubmit(thumbVariant, now) {
+			converterLog.Debugf("Thumbnail variant %d not ready for submit (status=%s, next_retry_at=%v), skip", thumbVariant.ID, thumbVariant.Status, thumbVariant.NextRetryAt)
 			thumbVariant = nil
 		}
 	}
@@ -103,8 +105,8 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 			c.failPendingVariantsOnSubmitFailure(image, fmt.Sprintf("submit aborted during webp preparation: %v", err), thumbVariant)
 			return
 		}
-		if webpVariant.Status != models.VariantStatusPending {
-			converterLog.Debugf("WebP variant %d status=%s, skip", webpVariant.ID, webpVariant.Status)
+		if !variantReadyForSubmit(webpVariant, now) {
+			converterLog.Debugf("WebP variant %d not ready for submit (status=%s, next_retry_at=%v), skip", webpVariant.ID, webpVariant.Status, webpVariant.NextRetryAt)
 			webpVariant = nil
 		}
 	}
@@ -117,8 +119,8 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 			c.failPendingVariantsOnSubmitFailure(image, fmt.Sprintf("submit aborted during avif preparation: %v", err), thumbVariant, webpVariant)
 			return
 		}
-		if avifVariant.Status != models.VariantStatusPending {
-			converterLog.Debugf("AVIF variant %d status=%s, skip", avifVariant.ID, avifVariant.Status)
+		if !variantReadyForSubmit(avifVariant, now) {
+			converterLog.Debugf("AVIF variant %d not ready for submit (status=%s, next_retry_at=%v), skip", avifVariant.ID, avifVariant.Status, avifVariant.NextRetryAt)
 			avifVariant = nil
 		}
 	}
@@ -227,6 +229,16 @@ func shouldTriggerVariantConversion(image *models.Image, settings *config.ImageP
 
 func shouldStartVariantPipeline(thumbnailEnabled, webpEnabled, avifEnabled bool) bool {
 	return thumbnailEnabled || webpEnabled || avifEnabled
+}
+
+func variantReadyForSubmit(variant *models.ImageVariant, now time.Time) bool {
+	if variant == nil || variant.Status != models.VariantStatusPending {
+		return false
+	}
+	if variant.NextRetryAt != nil && variant.NextRetryAt.After(now) {
+		return false
+	}
+	return true
 }
 
 // getVariantID 辅助函数：从变体指针获取ID

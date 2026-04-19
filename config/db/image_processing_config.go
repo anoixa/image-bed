@@ -151,29 +151,41 @@ func (m *Manager) GetImageProcessingSettings(ctx context.Context) (*ImageProcess
 		return cached, nil
 	}
 
-	config, err := m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryImageProcessing)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			if err := m.ensureDefaultImageProcessingConfig(ctx); err != nil {
-				return nil, fmt.Errorf("failed to create default image processing config: %w", err)
+	v, err, _ := m.loads.Do(keyImageProcessing, func() (any, error) {
+		config, err := m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryImageProcessing)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				if err := m.ensureDefaultImageProcessingConfig(ctx); err != nil {
+					return nil, fmt.Errorf("failed to create default image processing config: %w", err)
+				}
+				config, err = m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryImageProcessing)
+				if err != nil {
+					return nil, fmt.Errorf("failed to get image processing config after creation: %w", err)
+				}
+			} else {
+				return nil, fmt.Errorf("failed to get image processing config: %w", err)
 			}
-			config, err = m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryImageProcessing)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get image processing config after creation: %w", err)
-			}
-		} else {
-			return nil, fmt.Errorf("failed to get image processing config: %w", err)
 		}
-	}
 
-	configMap, err := m.crypto.Decrypt(config.ConfigJSON)
+		configMap, err := m.crypto.Decrypt(config.ConfigJSON)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decrypt image processing config: %w", err)
+		}
+
+		settings := &ImageProcessingSettings{}
+		if err := mapstructure.Decode(configMap, settings); err != nil {
+			return nil, fmt.Errorf("failed to decode image processing settings: %w", err)
+		}
+
+		return settings, nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to decrypt image processing config: %w", err)
+		return nil, err
 	}
 
-	settings := &ImageProcessingSettings{}
-	if err := mapstructure.Decode(configMap, settings); err != nil {
-		return nil, fmt.Errorf("failed to decode image processing settings: %w", err)
+	settings, ok := v.(*ImageProcessingSettings)
+	if !ok || settings == nil {
+		return nil, fmt.Errorf("failed to decode cached image processing settings")
 	}
 
 	m.cache.SetImageProcessing(settings)

@@ -187,6 +187,7 @@ type ImagePipelineTask struct {
 	VariantRepo     VariantRepository
 	ImageRepo       ImageRepository
 	CacheHelper     *cache.Helper
+	inFlightLease   *inFlightTaskLease
 }
 
 const avifMinSavingsPercent int64 = 5
@@ -328,17 +329,24 @@ func (t *ImagePipelineTask) Execute() {
 		pipelineLog.Debugf("CAS success: AVIF variant %d is now processing", t.AVIFVariantID)
 	}
 
+	t.inFlightLease = beginInFlightTask(t.ImageID, acquiredVariants)
+	defer func() {
+		if t.inFlightLease != nil {
+			t.inFlightLease.Release()
+		}
+	}()
+
 	semaphore := GetGlobalSemaphore()
 	if err := semaphore.Acquire(ctx); err != nil {
 		pipelineLog.Debugf("Failed to acquire semaphore: %v", err)
 		if t.ThumbVariantID > 0 {
-			_ = t.VariantRepo.UpdateFailed(t.ThumbVariantID, fmt.Sprintf("semaphore: %v", err))
+			t.markVariantFailed(&acquiredVariants, t.ThumbVariantID, fmt.Sprintf("semaphore: %v", err))
 		}
 		if t.WebPVariantID > 0 {
-			_ = t.VariantRepo.UpdateFailed(t.WebPVariantID, fmt.Sprintf("semaphore: %v", err))
+			t.markVariantFailed(&acquiredVariants, t.WebPVariantID, fmt.Sprintf("semaphore: %v", err))
 		}
 		if t.AVIFVariantID > 0 {
-			_ = t.VariantRepo.UpdateFailed(t.AVIFVariantID, fmt.Sprintf("semaphore: %v", err))
+			t.markVariantFailed(&acquiredVariants, t.AVIFVariantID, fmt.Sprintf("semaphore: %v", err))
 		}
 		_ = t.ImageRepo.UpdateVariantStatus(t.ImageID, models.ImageVariantStatusFailed)
 		t.deleteCacheOnTerminalState("failed")
@@ -350,7 +358,7 @@ func (t *ImagePipelineTask) Execute() {
 
 	pipelineLog.Debugf("Starting processing for image=%s, thumbVariant=%d, webpVariant=%d, avifVariant=%d",
 		t.StoragePath, t.ThumbVariantID, t.WebPVariantID, t.AVIFVariantID)
-	if err := t.runPipeline(ctx); err != nil {
+	if err := t.runPipeline(ctx, &acquiredVariants); err != nil {
 		pipelineLog.Debugf("Processing failed: %v", err)
 		_ = t.ImageRepo.UpdateVariantStatus(t.ImageID, models.ImageVariantStatusFailed)
 		t.deleteCacheOnTerminalState("failed")
@@ -361,17 +369,17 @@ func (t *ImagePipelineTask) Execute() {
 }
 
 // runPipeline 执行处理流水线
-func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
+func (t *ImagePipelineTask) runPipeline(ctx context.Context, acquiredVariants *[]uint) error {
 	filePath, cleanup, err := t.getProcessingFilePath(ctx)
 	if err != nil {
 		if t.ThumbVariantID > 0 {
-			_ = t.VariantRepo.UpdateFailed(t.ThumbVariantID, fmt.Sprintf("get file: %v", err))
+			t.markVariantFailed(acquiredVariants, t.ThumbVariantID, fmt.Sprintf("get file: %v", err))
 		}
 		if t.WebPVariantID > 0 {
-			_ = t.VariantRepo.UpdateFailed(t.WebPVariantID, fmt.Sprintf("get file: %v", err))
+			t.markVariantFailed(acquiredVariants, t.WebPVariantID, fmt.Sprintf("get file: %v", err))
 		}
 		if t.AVIFVariantID > 0 {
-			_ = t.VariantRepo.UpdateFailed(t.AVIFVariantID, fmt.Sprintf("get file: %v", err))
+			t.markVariantFailed(acquiredVariants, t.AVIFVariantID, fmt.Sprintf("get file: %v", err))
 		}
 		return fmt.Errorf("get processing file: %w", err)
 	}
@@ -386,11 +394,11 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
 		switch {
 		case err != nil:
 			pipelineLog.Debugf("Thumbnail failed: %v", err)
-			_ = t.VariantRepo.UpdateFailed(t.ThumbVariantID, err.Error())
+			t.markVariantFailed(acquiredVariants, t.ThumbVariantID, err.Error())
 			hasFailed = true
 		case result == nil:
 			pipelineLog.Debugf("Thumbnail skipped, deleting variant %d", t.ThumbVariantID)
-			_ = t.VariantRepo.DeleteVariant(t.ThumbVariantID)
+			t.deleteTrackedVariant(acquiredVariants, t.ThumbVariantID)
 			thumbSkipped = true
 		default:
 			thumbResult = result
@@ -408,10 +416,10 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
 		if err != nil {
 			pipelineLog.Debugf("Failed to load image: %v", err)
 			if t.WebPVariantID > 0 {
-				_ = t.VariantRepo.UpdateFailed(t.WebPVariantID, fmt.Sprintf("load image: %v", err))
+				t.markVariantFailed(acquiredVariants, t.WebPVariantID, fmt.Sprintf("load image: %v", err))
 			}
 			if t.AVIFVariantID > 0 {
-				_ = t.VariantRepo.UpdateFailed(t.AVIFVariantID, fmt.Sprintf("load image: %v", err))
+				t.markVariantFailed(acquiredVariants, t.AVIFVariantID, fmt.Sprintf("load image: %v", err))
 			}
 			hasFailed = true
 		} else {
@@ -424,11 +432,11 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
 		switch {
 		case err != nil:
 			pipelineLog.Debugf("WebP failed: %v", err)
-			_ = t.VariantRepo.UpdateFailed(t.WebPVariantID, err.Error())
+			t.markVariantFailed(acquiredVariants, t.WebPVariantID, err.Error())
 			hasFailed = true
 		case result == nil:
 			pipelineLog.Debugf("WebP skipped, deleting variant %d", t.WebPVariantID)
-			_ = t.VariantRepo.DeleteVariant(t.WebPVariantID)
+			t.deleteTrackedVariant(acquiredVariants, t.WebPVariantID)
 			webpSkipped = true
 		default:
 			webpResult = result
@@ -442,13 +450,13 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
 		switch {
 		case err != nil:
 			pipelineLog.Debugf("AVIF failed: %v", err)
-			_ = t.VariantRepo.UpdateFailed(t.AVIFVariantID, err.Error())
+			t.markVariantFailed(acquiredVariants, t.AVIFVariantID, err.Error())
 			if avifRequired {
 				hasFailed = true
 			}
 		case result == nil:
 			pipelineLog.Debugf("AVIF skipped, deleting variant %d", t.AVIFVariantID)
-			_ = t.VariantRepo.DeleteVariant(t.AVIFVariantID)
+			t.deleteTrackedVariant(acquiredVariants, t.AVIFVariantID)
 			avifSkipped = true
 		default:
 			avifResult = result
@@ -457,7 +465,7 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context) error {
 	}
 
 	if hasSuccess {
-		if err := t.saveVariantResults(thumbResult, webpResult, avifResult); err != nil {
+		if err := t.saveVariantResults(acquiredVariants, thumbResult, webpResult, avifResult); err != nil {
 			pipelineLog.Debugf("Failed to persist variant results: %v", err)
 			hasFailed = true
 		}
@@ -762,7 +770,7 @@ func resolveImageVariantStatus(hasThumbVariant, hasWebPVariant, hasAVIFVariant, 
 }
 
 // saveVariantResults 保存变体结果，任一变体写库失败时返回 error
-func (t *ImagePipelineTask) saveVariantResults(thumbResult, webpResult, avifResult *pipelineResult) error {
+func (t *ImagePipelineTask) saveVariantResults(acquiredVariants *[]uint, thumbResult, webpResult, avifResult *pipelineResult) error {
 	var firstErr error
 
 	if t.ThumbVariantID > 0 && thumbResult != nil {
@@ -776,10 +784,12 @@ func (t *ImagePipelineTask) saveVariantResults(thumbResult, webpResult, avifResu
 			thumbResult.Height,
 		); err != nil {
 			pipelineLog.Debugf("Failed to mark thumb variant %d completed: %v", t.ThumbVariantID, err)
-			_ = t.VariantRepo.UpdateFailed(t.ThumbVariantID, "failed to persist result: "+err.Error())
+			t.markVariantFailed(acquiredVariants, t.ThumbVariantID, "failed to persist result: "+err.Error())
 			if firstErr == nil {
 				firstErr = err
 			}
+		} else {
+			t.releaseTrackedVariant(acquiredVariants, t.ThumbVariantID)
 		}
 	}
 
@@ -794,10 +804,12 @@ func (t *ImagePipelineTask) saveVariantResults(thumbResult, webpResult, avifResu
 			webpResult.Height,
 		); err != nil {
 			pipelineLog.Debugf("Failed to mark webp variant %d completed: %v", t.WebPVariantID, err)
-			_ = t.VariantRepo.UpdateFailed(t.WebPVariantID, "failed to persist result: "+err.Error())
+			t.markVariantFailed(acquiredVariants, t.WebPVariantID, "failed to persist result: "+err.Error())
 			if firstErr == nil {
 				firstErr = err
 			}
+		} else {
+			t.releaseTrackedVariant(acquiredVariants, t.WebPVariantID)
 		}
 	}
 
@@ -812,14 +824,53 @@ func (t *ImagePipelineTask) saveVariantResults(thumbResult, webpResult, avifResu
 			avifResult.Height,
 		); err != nil {
 			pipelineLog.Debugf("Failed to mark avif variant %d completed: %v", t.AVIFVariantID, err)
-			_ = t.VariantRepo.UpdateFailed(t.AVIFVariantID, "failed to persist result: "+err.Error())
+			t.markVariantFailed(acquiredVariants, t.AVIFVariantID, "failed to persist result: "+err.Error())
 			if firstErr == nil && t.WebPVariantID == 0 {
 				firstErr = err
 			}
+		} else {
+			t.releaseTrackedVariant(acquiredVariants, t.AVIFVariantID)
 		}
 	}
 
 	return firstErr
+}
+
+func (t *ImagePipelineTask) releaseTrackedVariant(acquiredVariants *[]uint, id uint) {
+	if acquiredVariants == nil || len(*acquiredVariants) == 0 || id == 0 {
+		return
+	}
+
+	filtered := (*acquiredVariants)[:0]
+	for _, variantID := range *acquiredVariants {
+		if variantID != id {
+			filtered = append(filtered, variantID)
+		}
+	}
+	*acquiredVariants = filtered
+	t.syncInFlightTracking(*acquiredVariants)
+}
+
+func (t *ImagePipelineTask) markVariantFailed(acquiredVariants *[]uint, id uint, errMsg string) {
+	if id == 0 || t.VariantRepo == nil {
+		return
+	}
+	if err := t.VariantRepo.UpdateFailed(id, errMsg); err != nil {
+		pipelineLog.Debugf("Failed to mark variant %d failed: %v", id, err)
+		return
+	}
+	t.releaseTrackedVariant(acquiredVariants, id)
+}
+
+func (t *ImagePipelineTask) deleteTrackedVariant(acquiredVariants *[]uint, id uint) {
+	if id == 0 || t.VariantRepo == nil {
+		return
+	}
+	if err := t.VariantRepo.DeleteVariant(id); err != nil {
+		pipelineLog.Debugf("Failed to delete skipped variant %d: %v", id, err)
+		return
+	}
+	t.releaseTrackedVariant(acquiredVariants, id)
 }
 
 // deleteCacheOnTerminalState 终端状态删除缓存
@@ -876,6 +927,12 @@ func (t *ImagePipelineTask) touchProcessingState(acquiredVariants []uint) {
 		if err := t.ImageRepo.TouchVariantProcessingStatus(t.ImageID); err != nil {
 			pipelineLog.Debugf("Failed to heartbeat image %d: %v", t.ImageID, err)
 		}
+	}
+}
+
+func (t *ImagePipelineTask) syncInFlightTracking(acquiredVariants []uint) {
+	if t.inFlightLease != nil {
+		t.inFlightLease.Update(t.ImageID, acquiredVariants)
 	}
 }
 

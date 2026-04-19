@@ -11,6 +11,7 @@ import (
 	"github.com/anoixa/image-bed/database/repo/configs"
 	cryptoservice "github.com/anoixa/image-bed/internal/crypto"
 	"github.com/anoixa/image-bed/storage"
+	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 )
 
@@ -24,6 +25,7 @@ type Manager struct {
 	cache    *CacheLayer
 	eventBus *EventBus
 	dataPath string
+	loads    singleflight.Group
 }
 
 // NewManager 创建配置管理器
@@ -456,23 +458,39 @@ const globalTransferModeKey = "system:transfer_mode"
 
 // GetGlobalTransferMode 获取全局转发模式
 func (m *Manager) GetGlobalTransferMode(ctx context.Context) storage.TransferMode {
-	config, err := m.repo.GetByKey(ctx, globalTransferModeKey)
+	if cached, ok := m.cache.GetTransferMode(); ok {
+		return cached
+	}
+
+	v, err, _ := m.loads.Do(keyTransferMode, func() (any, error) {
+		config, err := m.repo.GetByKey(ctx, globalTransferModeKey)
+		if err != nil {
+			return storage.TransferModeAuto, err
+		}
+
+		configMap, err := m.crypto.Decrypt(config.ConfigJSON)
+		if err != nil {
+			return storage.TransferModeAuto, err
+		}
+
+		mode, ok := configMap["mode"].(string)
+		if !ok {
+			return storage.TransferModeAuto, nil
+		}
+
+		return storage.TransferMode(mode), nil
+	})
 	if err != nil {
+		configManagerLog.Debugf("Falling back to default transfer mode after cache miss load error: %v", err)
 		return storage.TransferModeAuto // 默认 auto
 	}
 
-	configMap, err := m.crypto.Decrypt(config.ConfigJSON)
-	if err != nil {
-		configManagerLog.Errorf("Failed to decrypt transfer mode: %v", err)
-		return storage.TransferModeAuto
-	}
-
-	mode, ok := configMap["mode"].(string)
+	mode, ok := v.(storage.TransferMode)
 	if !ok {
 		return storage.TransferModeAuto
 	}
-
-	return storage.TransferMode(mode)
+	m.cache.SetTransferMode(mode)
+	return mode
 }
 
 // SetGlobalTransferMode 设置全局转发模式
@@ -490,17 +508,25 @@ func (m *Manager) SetGlobalTransferMode(ctx context.Context, mode storage.Transf
 	existing, err := m.repo.GetByKey(ctx, globalTransferModeKey)
 	if err != nil {
 		// 创建新配置
-		return m.repo.Create(ctx, &models.SystemConfig{
+		if err := m.repo.Create(ctx, &models.SystemConfig{
 			Category:    models.ConfigCategorySystem,
 			Name:        "Global Transfer Mode",
 			Key:         globalTransferModeKey,
 			ConfigJSON:  encryptedJSON,
 			IsEnabled:   true,
 			Description: "全局图片转发模式: auto(自动), always_proxy(总是代理), always_direct(总是直链)",
-		})
+		}); err != nil {
+			return err
+		}
+		m.cache.SetTransferMode(mode)
+		return nil
 	}
 
 	// 更新配置
 	existing.ConfigJSON = encryptedJSON
-	return m.repo.Update(ctx, existing)
+	if err := m.repo.Update(ctx, existing); err != nil {
+		return err
+	}
+	m.cache.SetTransferMode(mode)
+	return nil
 }

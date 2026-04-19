@@ -16,6 +16,7 @@ import (
 	"github.com/anoixa/image-bed/config"
 	configSvc "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database"
+	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/accounts"
 	"github.com/anoixa/image-bed/database/repo/albums"
 	"github.com/anoixa/image-bed/database/repo/images"
@@ -223,15 +224,23 @@ func RunServer() {
 	}
 	serveLog.Infof("Shutting down server")
 
-	// 停止全局 Worker 池
-	worker.StopGlobalPool()
+	httpCtx, cancelHTTP := context.WithTimeout(context.Background(), cfg.ServerWriteTimeout)
+	defer cancelHTTP()
+
+	if err := server.Shutdown(httpCtx); err != nil {
+		serveLog.Warnf("Server forced to shutdown: %v", err)
+	}
+
 	sweeperCancel()
 
-	ctx, cancel := context.WithTimeout(context.Background(), cfg.ServerWriteTimeout)
-	defer cancel()
+	workerCtx, cancelWorkers := context.WithTimeout(context.Background(), cfg.ServerWriteTimeout)
+	defer cancelWorkers()
 
-	if err := server.Shutdown(ctx); err != nil {
-		serveLog.Warnf("Server forced to shutdown: %v", err)
+	if err := worker.ShutdownGlobalPool(workerCtx); err != nil {
+		serveLog.Warnf("Worker pool did not drain before shutdown deadline: %v", err)
+		if rollbackErr := resetInFlightVariantWork(deps); rollbackErr != nil {
+			serveLog.Warnf("Failed to reset in-flight variant work during shutdown: %v", rollbackErr)
+		}
 	}
 
 	cleanup()
@@ -256,6 +265,54 @@ func InitDatabase(deps *Dependencies) error {
 	} else {
 		serveLog.Infof("Admin user already exists, skipping creation")
 	}
+	return nil
+}
+
+func resetInFlightVariantWork(deps *Dependencies) error {
+	return resetVariantWorkSnapshots(deps, worker.CurrentInFlightTasks())
+}
+
+func resetVariantWorkSnapshots(deps *Dependencies, snapshots []worker.InFlightTaskSnapshot) error {
+	if len(snapshots) == 0 {
+		return nil
+	}
+
+	variantIDs := make([]uint, 0)
+	imageIDs := make([]uint, 0)
+	seenVariants := make(map[uint]struct{})
+	seenImages := make(map[uint]struct{})
+
+	for _, snapshot := range snapshots {
+		if snapshot.ImageID > 0 {
+			if _, ok := seenImages[snapshot.ImageID]; !ok {
+				seenImages[snapshot.ImageID] = struct{}{}
+				imageIDs = append(imageIDs, snapshot.ImageID)
+			}
+		}
+		for _, variantID := range snapshot.VariantIDs {
+			if variantID == 0 {
+				continue
+			}
+			if _, ok := seenVariants[variantID]; ok {
+				continue
+			}
+			seenVariants[variantID] = struct{}{}
+			variantIDs = append(variantIDs, variantID)
+		}
+	}
+
+	variantRepo := images.NewVariantRepository(deps.DB)
+	resetVariants, err := variantRepo.ResetVariantsToPending(variantIDs)
+	if err != nil {
+		return err
+	}
+
+	resetImages, err := deps.Repositories.ImagesRepo.ResetProcessingVariantStatus(imageIDs, models.ImageVariantStatusNone)
+	if err != nil {
+		return err
+	}
+
+	serveLog.Infof("Reset %d in-flight variants and %d images during shutdown", resetVariants, resetImages)
 	return nil
 }
 

@@ -9,19 +9,22 @@ import (
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
+	"github.com/anoixa/image-bed/internal/worker"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/gin-gonic/gin"
 )
 
 type StatusResponse struct {
-	Version     string        `json:"version"`
-	CommitHash  string        `json:"commit_hash"`
-	GoVersion   string        `json:"go_version"`
-	Environment string        `json:"environment"`
-	Memory      MemoryStatus  `json:"memory"`
-	Runtime     RuntimeStatus `json:"runtime"`
-	Cache       CacheStatus   `json:"cache"`
-	DataDir     DirStatus     `json:"data_dir"`
+	Version     string              `json:"version"`
+	CommitHash  string              `json:"commit_hash"`
+	GoVersion   string              `json:"go_version"`
+	Environment string              `json:"environment"`
+	Memory      MemoryStatus        `json:"memory"`
+	Runtime     RuntimeStatus       `json:"runtime"`
+	Worker      WorkerStatus        `json:"worker"`
+	Sweeper     worker.SweeperStats `json:"sweeper"`
+	Cache       CacheStatus         `json:"cache"`
+	DataDir     DirStatus           `json:"data_dir"`
 }
 
 type MemoryStatus struct {
@@ -60,6 +63,17 @@ type MemoryStatus struct {
 
 type RuntimeStatus struct {
 	NumCPU int `json:"num_cpu"`
+}
+
+type WorkerStatus struct {
+	Submitted        uint64 `json:"submitted"`
+	Executed         uint64 `json:"executed"`
+	Failed           uint64 `json:"failed"`
+	QueueSize        int    `json:"queue_size"`
+	QueueCap         int    `json:"queue_cap"`
+	WorkerCount      int    `json:"worker_count"`
+	InFlightTasks    int    `json:"in_flight_tasks"`
+	InFlightVariants int    `json:"in_flight_variants"`
 }
 
 type CacheStatus struct {
@@ -103,6 +117,15 @@ func (h *Handler) GetStatus(c *gin.Context) {
 
 	// 获取数据目录信息
 	dataDirInfo := getDataDirInfo()
+	workerStats := worker.PoolStats{}
+	if pool := worker.GetGlobalPool(); pool != nil {
+		workerStats = pool.GetStats()
+	}
+	inFlightTasks := worker.CurrentInFlightTasks()
+	inFlightVariants := 0
+	for _, task := range inFlightTasks {
+		inFlightVariants += len(task.VariantIDs)
+	}
 
 	// 构建响应
 	response := StatusResponse{
@@ -146,6 +169,17 @@ func (h *Handler) GetStatus(c *gin.Context) {
 		Runtime: RuntimeStatus{
 			NumCPU: getNumCPU(),
 		},
+		Worker: WorkerStatus{
+			Submitted:        workerStats.Submitted,
+			Executed:         workerStats.Executed,
+			Failed:           workerStats.Failed,
+			QueueSize:        workerStats.QueueSize,
+			QueueCap:         workerStats.QueueCap,
+			WorkerCount:      workerStats.WorkerCount,
+			InFlightTasks:    len(inFlightTasks),
+			InFlightVariants: inFlightVariants,
+		},
+		Sweeper: worker.GetSweeperStats(),
 		Cache: CacheStatus{
 			Provider: cacheName,
 			Type:     cacheType,
@@ -235,9 +269,11 @@ func (h *Handler) GetVersion(c *gin.Context) {
 }
 
 type MetricsResponse struct {
-	RequestCount      int64   `json:"request_count"`
-	RequestDurationMs int64   `json:"request_duration_ms"`
-	AvgDurationMs     float64 `json:"avg_duration_ms"`
+	RequestCount      int64               `json:"request_count"`
+	RequestDurationMs int64               `json:"request_duration_ms"`
+	AvgDurationMs     float64             `json:"avg_duration_ms"`
+	Worker            WorkerStatus        `json:"worker"`
+	Sweeper           worker.SweeperStats `json:"sweeper"`
 }
 
 // GetMetrics
@@ -249,5 +285,26 @@ type MetricsResponse struct {
 // @Success      200  {object}  MetricsResponse  "Metrics data"
 // @Router       /system/metrics [get]
 func (h *Handler) GetMetrics(c *gin.Context) {
-	c.JSON(200, middleware.GetMetrics())
+	metrics := middleware.GetMetrics()
+	workerStats := worker.PoolStats{}
+	if pool := worker.GetGlobalPool(); pool != nil {
+		workerStats = pool.GetStats()
+	}
+	inFlightTasks := worker.CurrentInFlightTasks()
+	inFlightVariants := 0
+	for _, task := range inFlightTasks {
+		inFlightVariants += len(task.VariantIDs)
+	}
+	metrics["worker"] = WorkerStatus{
+		Submitted:        workerStats.Submitted,
+		Executed:         workerStats.Executed,
+		Failed:           workerStats.Failed,
+		QueueSize:        workerStats.QueueSize,
+		QueueCap:         workerStats.QueueCap,
+		WorkerCount:      workerStats.WorkerCount,
+		InFlightTasks:    len(inFlightTasks),
+		InFlightVariants: inFlightVariants,
+	}
+	metrics["sweeper"] = worker.GetSweeperStats()
+	c.JSON(200, metrics)
 }

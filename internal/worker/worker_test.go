@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"errors"
 	"sync/atomic"
 	"testing"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/anoixa/image-bed/utils"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSubmitRejectsTaskAfterBackpressureTimeout(t *testing.T) {
@@ -65,4 +67,37 @@ func TestEffectiveWorkerMemoryMB(t *testing.T) {
 		HeapInUseMB: 17,
 		VipsMemMB:   79,
 	}))
+}
+
+func TestShutdownContextTimesOutWhenWorkerIsStillRunning(t *testing.T) {
+	pool := NewPool(1, 1)
+
+	blocker := make(chan struct{})
+	submitted := pool.Submit(func() {
+		<-blocker
+	})
+	require.True(t, submitted)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	err := pool.ShutdownContext(ctx)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	close(blocker)
+	require.NoError(t, pool.ShutdownContext(context.Background()))
+}
+
+func TestInFlightTaskLeaseTracksLatestVariantSet(t *testing.T) {
+	lease := beginInFlightTask(42, []uint{1, 2, 3})
+	require.NotNil(t, lease)
+	defer lease.Release()
+
+	lease.Update(42, []uint{2, 3})
+	snapshots := CurrentInFlightTasks()
+	require.Len(t, snapshots, 1)
+	assert.Equal(t, uint(42), snapshots[0].ImageID)
+	assert.Equal(t, []uint{2, 3}, snapshots[0].VariantIDs)
+
+	lease.Release()
+	assert.Empty(t, CurrentInFlightTasks())
 }

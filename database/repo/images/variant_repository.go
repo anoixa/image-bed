@@ -2,6 +2,7 @@ package images
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/anoixa/image-bed/database/models"
@@ -83,6 +84,9 @@ func (r *VariantRepository) UpdateStatusCAS(id uint, expected, newStatus, errMsg
 		"status":     newStatus,
 		"updated_at": time.Now(),
 	}
+	if newStatus == models.VariantStatusProcessing {
+		updates["next_retry_at"] = nil
+	}
 	if errMsg != "" {
 		updates["error_message"] = errMsg
 	}
@@ -102,6 +106,8 @@ func (r *VariantRepository) UpdateCompleted(id uint, identifier, storagePath str
 		"width":         width,
 		"height":        height,
 		"error_message": "",
+		"retry_count":   0,
+		"next_retry_at": nil,
 		"updated_at":    time.Now(),
 	})
 
@@ -119,6 +125,7 @@ func (r *VariantRepository) UpdateFailed(id uint, errMsg string) error {
 	return r.db.Model(&models.ImageVariant{}).Where("id = ?", id).Updates(map[string]any{
 		"status":        models.VariantStatusFailed,
 		"error_message": errMsg,
+		"next_retry_at": nil,
 		"updated_at":    time.Now(),
 	}).Error
 }
@@ -157,13 +164,80 @@ func (r *VariantRepository) DeleteVariant(id uint) error {
 // duration back to pending so they can be retried. Returns the number of
 // affected rows.
 func (r *VariantRepository) ResetStaleProcessing(olderThan time.Duration) (int64, error) {
+	reset, _, err := r.RecoverStaleProcessing(olderThan, 3)
+	return reset, err
+}
+
+func (r *VariantRepository) RecoverStaleProcessing(olderThan time.Duration, maxRetries int) (resetCount, failedCount int64, err error) {
 	cutoff := time.Now().Add(-olderThan)
+	var staleVariants []models.ImageVariant
+	if err := r.db.Where("status = ? AND updated_at < ?", models.VariantStatusProcessing, cutoff).Find(&staleVariants).Error; err != nil {
+		return 0, 0, err
+	}
+
+	now := time.Now()
+	for _, variant := range staleVariants {
+		nextRetryCount := variant.RetryCount + 1
+		if maxRetries > 0 && nextRetryCount >= maxRetries {
+			result := r.db.Model(&models.ImageVariant{}).
+				Where("id = ? AND status = ?", variant.ID, models.VariantStatusProcessing).
+				Updates(map[string]any{
+					"status":        models.VariantStatusFailed,
+					"error_message": fmt.Sprintf("stale processing exceeded retry limit (%d/%d)", nextRetryCount, maxRetries),
+					"retry_count":   nextRetryCount,
+					"next_retry_at": nil,
+					"updated_at":    now,
+				})
+			if result.Error != nil {
+				return resetCount, failedCount, result.Error
+			}
+			failedCount += result.RowsAffected
+			continue
+		}
+
+		nextRetryAt := now.Add(staleRetryDelay(nextRetryCount))
+		result := r.db.Model(&models.ImageVariant{}).
+			Where("id = ? AND status = ?", variant.ID, models.VariantStatusProcessing).
+			Updates(map[string]any{
+				"status":        models.VariantStatusPending,
+				"error_message": "",
+				"retry_count":   nextRetryCount,
+				"next_retry_at": nextRetryAt,
+				"updated_at":    now,
+			})
+		if result.Error != nil {
+			return resetCount, failedCount, result.Error
+		}
+		resetCount += result.RowsAffected
+	}
+
+	return resetCount, failedCount, nil
+}
+
+func staleRetryDelay(retryCount int) time.Duration {
+	switch retryCount {
+	case 1:
+		return 5 * time.Minute
+	case 2:
+		return 15 * time.Minute
+	default:
+		return time.Hour
+	}
+}
+
+func (r *VariantRepository) ResetVariantsToPending(ids []uint) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
 	result := r.db.Model(&models.ImageVariant{}).
-		Where("status = ? AND updated_at < ?", models.VariantStatusProcessing, cutoff).
+		Where("id IN ? AND status = ?", ids, models.VariantStatusProcessing).
 		Updates(map[string]any{
 			"status":        models.VariantStatusPending,
 			"error_message": "",
+			"next_retry_at": nil,
 			"updated_at":    time.Now(),
 		})
+
 	return result.RowsAffected, result.Error
 }
