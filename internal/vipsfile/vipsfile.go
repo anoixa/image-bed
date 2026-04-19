@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/davidbyttow/govips/v2/vips"
@@ -74,7 +75,7 @@ type ImageHandle struct {
 
 var startupOnce sync.Once
 var startupErr error
-var started bool
+var started atomic.Bool
 var avifSupportOnce sync.Once
 var avifSupport bool
 
@@ -84,15 +85,14 @@ func Startup(config *vips.Config) error {
 	startupOnce.Do(func() {
 		startupErr = vips.Startup(config)
 		if startupErr == nil {
-			started = true
+			started.Store(true)
 		}
 	})
 	return startupErr
 }
 
 func Shutdown() {
-	if started {
-		started = false
+	if started.CompareAndSwap(true, false) {
 		vips.Shutdown()
 	}
 }
@@ -105,7 +105,7 @@ func ShutdownThread() {
 }
 
 func ensureStarted() error {
-	if !started {
+	if !started.Load() {
 		return ErrNotInitialized
 	}
 	return startupErr

@@ -72,6 +72,12 @@ func TestGetMetricsIncludesWorkerAndSweeperSections(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 
+	var response common.Response
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+
+	dataBytes, err := json.Marshal(response.Data)
+	require.NoError(t, err)
+
 	var payload struct {
 		RequestCount      int64               `json:"request_count"`
 		RequestDurationMs int64               `json:"request_duration_ms"`
@@ -79,7 +85,7 @@ func TestGetMetricsIncludesWorkerAndSweeperSections(t *testing.T) {
 		Worker            WorkerStatus        `json:"worker"`
 		Sweeper           worker.SweeperStats `json:"sweeper"`
 	}
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
+	require.NoError(t, json.Unmarshal(dataBytes, &payload))
 
 	assert.GreaterOrEqual(t, payload.RequestCount, int64(0))
 	assert.GreaterOrEqual(t, payload.Worker.QueueCap, 1)

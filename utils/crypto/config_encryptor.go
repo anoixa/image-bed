@@ -16,7 +16,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"time"
 )
 
 var configLog = utils.ForModule("Config")
@@ -245,13 +244,10 @@ func IsEncrypted(s string) bool {
 }
 
 // GenerateRandomKey 生成指定字节长度的随机密钥，返回 base64 编码的字符串
-func GenerateRandomKey(length int) string {
+func GenerateRandomKey(length int) (string, error) {
 	key := make([]byte, length)
 	if _, err := io.ReadFull(rand.Reader, key); err != nil {
-		for i := range key {
-			key[i] = byte(time.Now().UnixNano() % 256)
-			time.Sleep(time.Nanosecond)
-		}
+		return "", fmt.Errorf("failed to generate random key: %w", err)
 	}
-	return base64.StdEncoding.EncodeToString(key)
+	return base64.StdEncoding.EncodeToString(key), nil
 }

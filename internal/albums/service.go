@@ -23,8 +23,8 @@ func (s *Service) CreateAlbum(album *models.Album) error {
 	return s.repo.CreateAlbum(album)
 }
 
-func (s *Service) UpdateAlbum(album *models.Album) error {
-	return s.repo.UpdateAlbum(album)
+func (s *Service) UpdateAlbum(albumID uint, updates map[string]any) error {
+	return s.repo.UpdateAlbum(albumID, updates)
 }
 
 func (s *Service) DeleteAlbum(albumID, userID uint) error {

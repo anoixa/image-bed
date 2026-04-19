@@ -89,3 +89,10 @@ const (
 	keyImageProcessing = "config:image_processing"
 	keyTransferMode    = "config:transfer_mode"
 )
+
+// InvalidateAll 清除所有缓存
+func (c *CacheLayer) InvalidateAll() {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.localCache = make(map[string]any)
+}

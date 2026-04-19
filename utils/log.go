@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"unicode"
+	"unicode/utf8"
 )
 
 const (
@@ -271,7 +272,7 @@ func SanitizeLogMessage(msg string) string {
 	}
 	result := sb.String()
 	if len(result) > maxLogMessageLen {
-		return result[:maxLogMessageLen] + "..."
+		return truncateAtRuneBoundary(result, maxLogMessageLen)
 	}
 	return result
 }
@@ -279,7 +280,18 @@ func SanitizeLogMessage(msg string) string {
 // SanitizeLogUsername 清理用户名日志，限制长度
 func SanitizeLogUsername(username string) string {
 	if len(username) > 50 {
-		username = username[:50] + "..."
+		username = truncateAtRuneBoundary(username, 50)
 	}
 	return SanitizeLogMessage(username)
+}
+
+// truncateAtRuneBoundary 截断字符串，确保不在多字节 UTF-8 字符中间截断
+func truncateAtRuneBoundary(s string, maxBytes int) string {
+	for maxBytes > 0 && !utf8.RuneStart(s[maxBytes]) {
+		maxBytes--
+	}
+	if maxBytes <= 0 {
+		return "..."
+	}
+	return s[:maxBytes] + "..."
 }

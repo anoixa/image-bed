@@ -223,9 +223,10 @@ func (r *Repository) AlbumExists(albumID uint) (bool, error) {
 	return count > 0, err
 }
 
-// UpdateAlbum 更新相册
-func (r *Repository) UpdateAlbum(album *models.Album) error {
-	return r.db.Save(album).Error
+// UpdateAlbum 更新相册指定字段
+func (r *Repository) UpdateAlbum(albumID uint, updates map[string]any) error {
+	result := r.db.Model(&models.Album{}).Where("id = ?", albumID).Updates(updates)
+	return result.Error
 }
 
 // RemoveImagesFromAlbum 批量从相册移除图片

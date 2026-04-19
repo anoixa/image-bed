@@ -81,8 +81,8 @@ func newSQLiteDB(cfg *config.Config, gormLogger logger.Interface) (*gorm.DB, err
 
 // newPostgresDB 创建 PostgreSQL 连接
 func newPostgresDB(cfg *config.Config, gormLogger logger.Interface) (*gorm.DB, error) {
-	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
-		cfg.DBHost, cfg.DBPort, cfg.DBUsername, cfg.DBPassword, cfg.DBName)
+	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
+		cfg.DBHost, cfg.DBPort, cfg.DBUsername, cfg.DBPassword, cfg.DBName, cfg.DBSSLMode)
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger:                 gormLogger,

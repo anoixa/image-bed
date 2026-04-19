@@ -306,5 +306,5 @@ func (h *Handler) GetMetrics(c *gin.Context) {
 		InFlightVariants: inFlightVariants,
 	}
 	metrics["sweeper"] = worker.GetSweeperStats()
-	c.JSON(200, metrics)
+	common.RespondSuccess(c, metrics)
 }

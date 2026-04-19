@@ -38,6 +38,7 @@ type Config struct {
 	DBMaxOpenConns    int    `mapstructure:"db_max_open_conns"`
 	DBMaxIdleConns    int    `mapstructure:"db_max_idle_conns"`
 	DBConnMaxLifetime int    `mapstructure:"db_conn_max_lifetime"`
+	DBSSLMode         string `mapstructure:"db_ssl_mode"`
 
 	CacheMaxImageCacheSizeMB   int64 `mapstructure:"cache_max_image_cache_size_mb"`
 	CacheEnableImageCaching    bool  `mapstructure:"cache_enable_image_caching"`
@@ -141,6 +142,7 @@ func setDefaults() {
 	viper.SetDefault("db_max_open_conns", 25)
 	viper.SetDefault("db_max_idle_conns", 5)
 	viper.SetDefault("db_conn_max_lifetime", 3600)
+	viper.SetDefault("db_ssl_mode", "disable")
 
 	viper.SetDefault("cache_max_image_cache_size_mb", 10)
 	viper.SetDefault("cache_enable_image_caching", false)

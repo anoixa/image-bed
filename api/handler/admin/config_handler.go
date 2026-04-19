@@ -439,6 +439,16 @@ func (h *ConfigHandler) DisableConfig(c *gin.Context) {
 		return
 	}
 
+	config, getErr := h.manager.GetConfig(ctx, uint(id), false)
+	if getErr != nil {
+		common.RespondError(c, http.StatusNotFound, "Config not found")
+		return
+	}
+	if isHiddenExternalConfigCategory(config.Category) {
+		common.RespondError(c, http.StatusNotFound, "Config not found")
+		return
+	}
+
 	if err := h.manager.Disable(ctx, uint(id)); err != nil {
 		common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to disable config: %v", err))
 		return

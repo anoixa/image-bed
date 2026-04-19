@@ -46,11 +46,11 @@ func (h *Handler) CreateStaticToken(context *gin.Context) {
 	userID := context.GetUint(middleware.ContextUserIDKey)
 
 	randomToken, err := utils.GenerateRandomToken(64)
-	tokenPrefix := randomToken[:12]
 	if err != nil {
-		common.RespondError(context, http.StatusInternalServerError, err.Error())
+		common.RespondError(context, http.StatusInternalServerError, "Failed to generate API token")
 		return
 	}
+	tokenPrefix := randomToken[:12]
 	hasher := sha256.New()
 	hasher.Write([]byte(randomToken))
 	hashedToken := hex.EncodeToString(hasher.Sum(nil))

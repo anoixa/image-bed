@@ -90,7 +90,8 @@ func registerBasicRoutes(router *gin.Engine, deps *RouterDependencies) {
 		systemHandler := handlerSystem.NewHandler()
 		healthHandler := handlerSystem.NewHealthHandler(deps.DB, storage.GetDefault())
 
-		systemGroup.Any("/health", healthHandler.Handle)
+		systemGroup.GET("/health", healthHandler.Handle)
+		systemGroup.HEAD("/health", healthHandler.Handle)
 		systemGroup.GET("/version", systemHandler.GetVersion)
 		systemGroup.GET("/metrics", systemHandler.GetMetrics)
 

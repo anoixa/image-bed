@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/anoixa/image-bed/database/models"
@@ -42,10 +43,12 @@ func (r *Repository) GetOverviewStats() (*OverviewStats, error) {
 	}
 
 	// 相册数量
-	r.db.Model(&models.Album{}).
+	if err := r.db.Model(&models.Album{}).
 		Where("deleted_at IS NULL").
 		Select("COUNT(*)").
-		Scan(&result.AlbumTotal)
+		Scan(&result.AlbumTotal).Error; err != nil {
+		return nil, fmt.Errorf("failed to count albums: %w", err)
+	}
 
 	// 用户固定为1（单用户系统）
 	result.UserTotal = 1
@@ -88,24 +91,32 @@ func (r *Repository) GetImageTimeStats() (*ImageTimeStats, error) {
 	monthEnd := monthStart.AddDate(0, 1, 0)
 
 	// 今日
-	r.db.Model(&models.Image{}).
+	if err := r.db.Model(&models.Image{}).
 		Where("created_at >= ? AND created_at < ? AND deleted_at IS NULL", todayStart, todayEnd).
-		Count(&stats.Today)
+		Count(&stats.Today).Error; err != nil {
+		return nil, fmt.Errorf("failed to count today images: %w", err)
+	}
 
 	// 昨日
-	r.db.Model(&models.Image{}).
+	if err := r.db.Model(&models.Image{}).
 		Where("created_at >= ? AND created_at < ? AND deleted_at IS NULL", yesterdayStart, yesterdayEnd).
-		Count(&stats.Yesterday)
+		Count(&stats.Yesterday).Error; err != nil {
+		return nil, fmt.Errorf("failed to count yesterday images: %w", err)
+	}
 
 	// 本周
-	r.db.Model(&models.Image{}).
+	if err := r.db.Model(&models.Image{}).
 		Where("created_at >= ? AND created_at < ? AND deleted_at IS NULL", weekStart, weekEnd).
-		Count(&stats.ThisWeek)
+		Count(&stats.ThisWeek).Error; err != nil {
+		return nil, fmt.Errorf("failed to count this week images: %w", err)
+	}
 
 	// 本月
-	r.db.Model(&models.Image{}).
+	if err := r.db.Model(&models.Image{}).
 		Where("created_at >= ? AND created_at < ? AND deleted_at IS NULL", monthStart, monthEnd).
-		Count(&stats.ThisMonth)
+		Count(&stats.ThisMonth).Error; err != nil {
+		return nil, fmt.Errorf("failed to count this month images: %w", err)
+	}
 
 	return &stats, nil
 }

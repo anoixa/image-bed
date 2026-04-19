@@ -1,6 +1,7 @@
 package user
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/anoixa/image-bed/api/common"
@@ -65,15 +66,15 @@ func (h *Handler) ChangePassword(c *gin.Context) {
 		NewPassword: req.NewPassword,
 	})
 	if err != nil {
-		switch err.Error() {
-		case "user not found":
+		switch {
+		case errors.Is(err, user.ErrUserNotFound):
 			common.RespondError(c, http.StatusNotFound, "User not found")
-		case "invalid old password":
+		case errors.Is(err, user.ErrInvalidOldPassword):
 			common.RespondError(c, http.StatusUnauthorized, "Invalid old password")
-		case "new password cannot be the same as old password":
+		case errors.Is(err, user.ErrSamePassword):
 			common.RespondError(c, http.StatusBadRequest, "New password cannot be the same as old password")
 		default:
-			common.RespondError(c, http.StatusInternalServerError, err.Error())
+			common.RespondError(c, http.StatusInternalServerError, "Failed to change password")
 		}
 		return
 	}

@@ -120,8 +120,27 @@ func (r *VariantRepository) UpdateCompleted(id uint, identifier, storagePath str
 	return nil
 }
 
-// UpdateFailed 更新失败状态
+// UpdateFailed 更新失败状态（仅处理 processing 状态的变体）
 func (r *VariantRepository) UpdateFailed(id uint, errMsg string) error {
+	result := r.db.Model(&models.ImageVariant{}).
+		Where("id = ? AND status = ?", id, models.VariantStatusProcessing).
+		Updates(map[string]any{
+			"status":        models.VariantStatusFailed,
+			"error_message": errMsg,
+			"next_retry_at": nil,
+			"updated_at":    time.Now(),
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("variant %d not in processing state", id)
+	}
+	return nil
+}
+
+// ForceUpdateFailed 无条件更新失败状态（用于提交前失败等变体尚不在 processing 状态的场景）
+func (r *VariantRepository) ForceUpdateFailed(id uint, errMsg string) error {
 	return r.db.Model(&models.ImageVariant{}).Where("id = ?", id).Updates(map[string]any{
 		"status":        models.VariantStatusFailed,
 		"error_message": errMsg,

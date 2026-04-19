@@ -281,12 +281,13 @@ func (m *Manager) Enable(ctx context.Context, id uint) error {
 		return err
 	}
 
+	m.cache.InvalidateAll()
+
 	config, err := m.repo.GetByID(ctx, id)
 	if err != nil {
 		configManagerLog.Errorf("Enable: failed to fetch config %d after update: %v", id, err)
 		return nil
 	}
-	m.cache.Invalidate(config.Category)
 	m.eventBus.Publish(EventConfigUpdated, config)
 
 	return nil
@@ -298,12 +299,13 @@ func (m *Manager) Disable(ctx context.Context, id uint) error {
 		return err
 	}
 
+	m.cache.InvalidateAll()
+
 	config, err := m.repo.GetByID(ctx, id)
 	if err != nil {
 		configManagerLog.Errorf("Disable: failed to fetch config %d after update: %v", id, err)
 		return nil
 	}
-	m.cache.Invalidate(config.Category)
 	m.eventBus.Publish(EventConfigUpdated, config)
 
 	return nil

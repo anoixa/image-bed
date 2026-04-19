@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 
 	"github.com/anoixa/image-bed/database/models"
@@ -245,7 +246,8 @@ func (r *Repository) GetImageList(storageConfigIDs []uint, identifier, search st
 		db = db.Where("identifier = ?", identifier)
 	}
 	if search != "" {
-		db = db.Where("original_name LIKE ?", "%"+search+"%")
+		escaped := strings.NewReplacer("%", "\\%", "_", "\\_").Replace(search)
+		db = db.Where("original_name LIKE ? ESCAPE '\\'", "%"+escaped+"%")
 	}
 	if albumID != nil {
 		db = db.Joins("JOIN album_images ON album_images.image_id = images.id").

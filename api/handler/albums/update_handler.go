@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
@@ -77,7 +78,12 @@ func (h *Handler) UpdateAlbumHandler(c *gin.Context) {
 	album.Name = req.Name
 	album.Description = req.Description
 
-	if err := h.svc.UpdateAlbum(album); err != nil {
+	updates := map[string]any{
+		"name":        req.Name,
+		"description": req.Description,
+		"updated_at":  time.Now(),
+	}
+	if err := h.svc.UpdateAlbum(album.ID, updates); err != nil {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to update album")
 		return
 	}

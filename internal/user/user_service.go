@@ -14,6 +14,12 @@ type Service struct {
 	devicesRepo  *accounts.DeviceRepository
 }
 
+var (
+	ErrUserNotFound       = errors.New("user not found")
+	ErrInvalidOldPassword = errors.New("invalid old password")
+	ErrSamePassword       = errors.New("new password cannot be the same as old password")
+)
+
 // NewService 创建新的用户服务
 func NewService(accountsRepo *accounts.Repository, devicesRepo *accounts.DeviceRepository) *Service {
 	return &Service{
@@ -35,7 +41,7 @@ func (s *Service) ChangePassword(req ChangePasswordRequest) error {
 	user, err := s.accountsRepo.GetUserByID(req.UserID)
 	if err != nil {
 		if errors.Is(err, accounts.ErrUserNotFound) {
-			return errors.New("user not found")
+			return ErrUserNotFound
 		}
 		return fmt.Errorf("failed to get user: %w", err)
 	}
@@ -46,11 +52,11 @@ func (s *Service) ChangePassword(req ChangePasswordRequest) error {
 		return fmt.Errorf("password comparison failed: %w", err)
 	}
 	if !ok {
-		return errors.New("invalid old password")
+		return ErrInvalidOldPassword
 	}
 
 	if req.OldPassword == req.NewPassword {
-		return errors.New("new password cannot be the same as old password")
+		return ErrSamePassword
 	}
 
 	// 生成新密码哈希

@@ -132,10 +132,6 @@ const (
 // detectImageComplexity detects image complexity level.
 // fileSize is the compressed file size in bytes (used to estimate compression ratio).
 func detectImageComplexity(info vipsfile.ImageInfo, fileSize int64) ImageComplexity {
-	if info.HasAlpha {
-		return ComplexityLow
-	}
-
 	pixelCount := info.Width * info.Height
 
 	if pixelCount == 0 || fileSize == 0 {
@@ -148,7 +144,7 @@ func detectImageComplexity(info vipsfile.ImageInfo, fileSize int64) ImageComplex
 	case bytesPerPixel > 3.0:
 		return ComplexityLow
 	case bytesPerPixel > 2.0:
-		return ComplexityLow
+		return ComplexityMedium
 	case bytesPerPixel < 0.8:
 		return ComplexityHigh
 	case bytesPerPixel < 1.2:

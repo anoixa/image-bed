@@ -170,7 +170,7 @@ func (c *Converter) failPendingVariantsOnSubmitFailure(image *models.Image, reas
 			continue
 		}
 		hadPending = true
-		if err := c.variantRepo.UpdateFailed(variant.ID, reason); err != nil {
+		if err := c.variantRepo.ForceUpdateFailed(variant.ID, reason); err != nil {
 			converterLog.Warnf("Failed to mark variant %d failed after submit failure: %v", variant.ID, err)
 		}
 	}

@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 )
 
@@ -24,7 +25,7 @@ func IsCacheMiss(err error) bool {
 	return err == ErrCacheMiss
 }
 
-var defaultProvider Provider
+var defaultProvider atomic.Pointer[Provider]
 
 // Config 缓存配置
 type Config struct {
@@ -45,7 +46,7 @@ func Init(cfg Config) error {
 	if err != nil {
 		return fmt.Errorf("failed to create cache provider: %w", err)
 	}
-	defaultProvider = provider
+	defaultProvider.Store(&provider)
 	return nil
 }
 
@@ -62,7 +63,10 @@ func InitDefault() error {
 
 // GetDefault 获取默认缓存提供者
 func GetDefault() Provider {
-	return defaultProvider
+	if p := defaultProvider.Load(); p != nil {
+		return *p
+	}
+	return nil
 }
 
 func createProvider(cfg Config) (Provider, error) {
