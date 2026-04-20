@@ -276,11 +276,9 @@ func TestRepository_GetSoftDeletedImageByHash(t *testing.T) {
 	err = repo.DeleteImage(image)
 	require.NoError(t, err)
 
-	// GetImageByHash uses Unscoped, so it finds soft-deleted records too
-	found, err := repo.GetImageByHash("softhash")
-	require.NoError(t, err)
-	assert.Equal(t, "soft-del", found.Identifier)
-	assert.NotNil(t, found.DeletedAt)
+	// GetImageByHash should not return soft-deleted records.
+	_, err = repo.GetImageByHash("softhash")
+	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
 
 	// GetSoftDeletedImageByHash also works
 	found2, err := repo.GetSoftDeletedImageByHash("softhash")

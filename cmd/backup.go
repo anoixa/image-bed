@@ -198,6 +198,17 @@ func backupTable(db *gorm.DB, table string, tempDir string) (int64, error) {
 			}
 			count++
 		}
+	case "image_variants":
+		var records []models.ImageVariant
+		if err := db.Find(&records).Error; err != nil {
+			return 0, err
+		}
+		for _, r := range records {
+			if err := encoder.Encode(r); err != nil {
+				return 0, err
+			}
+			count++
+		}
 	case "albums":
 		var records []models.Album
 		if err := db.Find(&records).Error; err != nil {

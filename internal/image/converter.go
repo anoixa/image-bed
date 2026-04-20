@@ -40,6 +40,17 @@ func NewConverter(cm *config.Manager, variantRepo *images.VariantRepository, ima
 // TriggerConversion 触发图片转换（统一流水线）
 // 使用 PipelineTask 顺序生成缩略图、WebP 和 AVIF。
 func (c *Converter) TriggerConversion(image *models.Image) {
+	c.triggerConversion(image, false)
+}
+
+// TriggerConversionFromSweeper re-submits stale work recovered by the sweeper.
+// This path intentionally ignores variant retry windows because the sweeper has
+// already decided the stale work should be retried now.
+func (c *Converter) TriggerConversionFromSweeper(image *models.Image) {
+	c.triggerConversion(image, true)
+}
+
+func (c *Converter) triggerConversion(image *models.Image, ignoreRetryWindow bool) {
 	ctx := context.Background()
 	now := time.Now()
 
@@ -79,7 +90,7 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 			converterLog.Warnf("Failed to prepare thumbnail variant for image %s: %v", image.Identifier, err)
 			return
 		}
-		if !variantReadyForSubmit(thumbVariant, now) {
+		if !variantReadyForSubmit(thumbVariant, now, ignoreRetryWindow) {
 			thumbVariant = nil
 		}
 	}
@@ -93,7 +104,7 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 			c.failPendingVariantsOnSubmitFailure(image, fmt.Sprintf("submit aborted during webp preparation: %v", err), thumbVariant)
 			return
 		}
-		if !variantReadyForSubmit(webpVariant, now) {
+		if !variantReadyForSubmit(webpVariant, now, ignoreRetryWindow) {
 			webpVariant = nil
 		}
 	}
@@ -106,7 +117,7 @@ func (c *Converter) TriggerConversion(image *models.Image) {
 			c.failPendingVariantsOnSubmitFailure(image, fmt.Sprintf("submit aborted during avif preparation: %v", err), thumbVariant, webpVariant)
 			return
 		}
-		if !variantReadyForSubmit(avifVariant, now) {
+		if !variantReadyForSubmit(avifVariant, now, ignoreRetryWindow) {
 			avifVariant = nil
 		}
 	}
@@ -216,11 +227,11 @@ func shouldStartVariantPipeline(thumbnailEnabled, webpEnabled, avifEnabled bool)
 	return thumbnailEnabled || webpEnabled || avifEnabled
 }
 
-func variantReadyForSubmit(variant *models.ImageVariant, now time.Time) bool {
+func variantReadyForSubmit(variant *models.ImageVariant, now time.Time, ignoreRetryWindow bool) bool {
 	if variant == nil || variant.Status != models.VariantStatusPending {
 		return false
 	}
-	if variant.NextRetryAt != nil && variant.NextRetryAt.After(now) {
+	if !ignoreRetryWindow && variant.NextRetryAt != nil && variant.NextRetryAt.After(now) {
 		return false
 	}
 	return true

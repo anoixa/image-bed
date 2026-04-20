@@ -214,33 +214,6 @@ func (s *WriteService) processAndSaveImage(ctx context.Context, userID uint, sou
 		return nil, false, errors.New("database error during hash check")
 	}
 
-	if err == nil && img.DeletedAt.Valid {
-		if img.UserID != userID {
-			newImg, err := s.createDedupedImageRecord(img, userID, source.FileName, storageConfigID, isPublic)
-			if err != nil {
-				return nil, false, fmt.Errorf("failed to create deduped image record: %w", err)
-			}
-			submitBackgroundTask(func() { s.warmCache(newImg) })
-			return newImg, true, nil
-		}
-		updates := map[string]any{
-			"deleted_at":    nil,
-			"original_name": source.FileName,
-			"is_public":     isPublic,
-		}
-		restored, err := s.repo.UpdateImageByIdentifier(img.Identifier, updates)
-		if err != nil {
-			return nil, false, errors.New("failed to restore existing image data")
-		}
-
-		submitBackgroundTask(func() { s.warmCache(restored) })
-		if s.converter != nil {
-			submitBackgroundTask(func() { s.converter.TriggerConversion(restored) })
-		}
-
-		return restored, true, nil
-	}
-
 	if err == nil {
 		if img.UserID != userID {
 			newImg, err := s.createDedupedImageRecord(img, userID, source.FileName, storageConfigID, isPublic)
@@ -256,6 +229,43 @@ func (s *WriteService) processAndSaveImage(ctx context.Context, userID uint, sou
 			submitBackgroundTask(func() { s.converter.TriggerConversion(img) })
 		}
 		return img, true, nil
+	}
+
+	deletedImg, deletedErr := s.repo.GetSoftDeletedImageByHash(fileHash)
+	if deletedErr != nil && !errors.Is(deletedErr, gorm.ErrRecordNotFound) {
+		return nil, false, errors.New("database error during hash check")
+	}
+	if deletedErr == nil {
+		reusable, err := s.canReuseSoftDeletedImage(ctx, deletedImg)
+		if err != nil {
+			writeServiceLog.Warnf("Failed to verify soft-deleted image %s for hash reuse: %v", utils.SanitizeLogMessage(deletedImg.Identifier), err)
+		} else if reusable {
+			if deletedImg.UserID != userID {
+				newImg, err := s.createDedupedImageRecord(deletedImg, userID, source.FileName, storageConfigID, isPublic)
+				if err != nil {
+					return nil, false, fmt.Errorf("failed to create deduped image record: %w", err)
+				}
+				submitBackgroundTask(func() { s.warmCache(newImg) })
+				return newImg, true, nil
+			}
+
+			updates := map[string]any{
+				"deleted_at":    nil,
+				"original_name": source.FileName,
+				"is_public":     isPublic,
+			}
+			restored, err := s.repo.UpdateImageByIdentifier(deletedImg.Identifier, updates)
+			if err != nil {
+				return nil, false, errors.New("failed to restore existing image data")
+			}
+
+			submitBackgroundTask(func() { s.warmCache(restored) })
+			if s.converter != nil {
+				submitBackgroundTask(func() { s.converter.TriggerConversion(restored) })
+			}
+
+			return restored, true, nil
+		}
 	}
 
 	if _, err := src.Seek(0, io.SeekStart); err != nil {
@@ -312,6 +322,31 @@ func (s *WriteService) processAndSaveImage(ctx context.Context, userID uint, sou
 	}
 
 	return newImg, false, nil
+}
+
+func (s *WriteService) canReuseSoftDeletedImage(ctx context.Context, img *models.Image) (bool, error) {
+	if img == nil || img.StoragePath == "" {
+		return false, nil
+	}
+
+	refCount, err := s.repo.CountImagesByStoragePath(img.StoragePath)
+	if err != nil {
+		return false, err
+	}
+	if refCount > 0 {
+		return true, nil
+	}
+
+	provider, err := getStorageProviderByID(img.StorageConfigID)
+	if err != nil {
+		return false, err
+	}
+
+	exists, err := provider.Exists(ctx, img.StoragePath)
+	if err != nil {
+		return false, err
+	}
+	return exists, nil
 }
 
 func getUploadSourceSize(src io.Seeker, hintedSize int64) (int64, error) {

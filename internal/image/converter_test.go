@@ -88,7 +88,7 @@ func TestVariantReadyForSubmit(t *testing.T) {
 
 	t.Run("pending variant without retry window is ready", func(t *testing.T) {
 		variant := &models.ImageVariant{Status: models.VariantStatusPending}
-		assert.True(t, variantReadyForSubmit(variant, now))
+		assert.True(t, variantReadyForSubmit(variant, now, false))
 	})
 
 	t.Run("pending variant with future retry window is not ready", func(t *testing.T) {
@@ -97,12 +97,13 @@ func TestVariantReadyForSubmit(t *testing.T) {
 			Status:      models.VariantStatusPending,
 			NextRetryAt: &retryAt,
 		}
-		assert.False(t, variantReadyForSubmit(variant, now))
+		assert.False(t, variantReadyForSubmit(variant, now, false))
+		assert.True(t, variantReadyForSubmit(variant, now, true))
 	})
 
 	t.Run("failed variant is never ready", func(t *testing.T) {
 		variant := &models.ImageVariant{Status: models.VariantStatusFailed}
-		assert.False(t, variantReadyForSubmit(variant, now))
+		assert.False(t, variantReadyForSubmit(variant, now, false))
 	})
 }
 

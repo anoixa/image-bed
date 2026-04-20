@@ -2,6 +2,8 @@ package image
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -17,6 +19,18 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
+
+var tinyPNG = []byte{
+	0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+	0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+	0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+	0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+	0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41,
+	0x54, 0x78, 0x9c, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
+	0x00, 0x03, 0x01, 0x01, 0x00, 0xc9, 0xfe, 0x92,
+	0xef, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
+	0x44, 0xae, 0x42, 0x60, 0x82,
+}
 
 func setupImageServiceTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
@@ -133,4 +147,70 @@ func TestDeleteSingleDoesNotDeletePhysicalFileWhenDatabaseDeleteFails(t *testing
 	stored, getErr := repo.GetImageByIdentifier(image.Identifier)
 	require.NoError(t, getErr)
 	assert.Equal(t, image.Identifier, stored.Identifier)
+}
+
+func TestUploadSingleSourceDoesNotReuseSoftDeletedImageWithoutBackingFile(t *testing.T) {
+	db := setupImageServiceTestDB(t)
+	service, repo, _ := newTestWriteService(t, db)
+
+	const providerID uint = 91002
+	tempDir := t.TempDir()
+	require.NoError(t, storage.AddOrUpdateProvider(storage.StorageConfig{
+		ID:        providerID,
+		Name:      "test-local-reuse",
+		Type:      "local",
+		LocalPath: tempDir,
+	}))
+	t.Cleanup(func() {
+		_ = storage.RemoveProvider(providerID)
+	})
+
+	fileHashBytes := sha256.Sum256(tinyPNG)
+	fileHash := hex.EncodeToString(fileHashBytes[:])
+
+	softDeleted := &models.Image{
+		Identifier:      "deleted-image",
+		StoragePath:     "original/old/deleted.png",
+		OriginalName:    "deleted.png",
+		FileSize:        int64(len(tinyPNG)),
+		MimeType:        "image/png",
+		StorageConfigID: providerID,
+		FileHash:        fileHash,
+		Width:           1,
+		Height:          1,
+		UserID:          1,
+		IsPublic:        true,
+	}
+	require.NoError(t, repo.SaveImage(softDeleted))
+	require.NoError(t, repo.DeleteImage(softDeleted))
+
+	uploadPath := filepath.Join(t.TempDir(), "upload.png")
+	require.NoError(t, os.WriteFile(uploadPath, tinyPNG, 0o644))
+
+	result, err := service.UploadSingleSource(
+		context.Background(),
+		1,
+		NewTempUploadSource("upload.png", uploadPath, int64(len(tinyPNG))),
+		providerID,
+		true,
+		0,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.False(t, result.IsDuplicate)
+	assert.NotNil(t, result.Image)
+	assert.NotEqual(t, softDeleted.Identifier, result.Image.Identifier)
+	assert.NotEqual(t, softDeleted.StoragePath, result.Image.StoragePath)
+
+	restored, err := repo.GetSoftDeletedImageByHash(fileHash)
+	require.NoError(t, err)
+	assert.Equal(t, softDeleted.Identifier, restored.Identifier)
+	assert.NotNil(t, restored.DeletedAt)
+
+	active, err := repo.GetImageByHash(fileHash)
+	require.NoError(t, err)
+	assert.Equal(t, result.Image.Identifier, active.Identifier)
+
+	_, statErr := os.Stat(filepath.Join(tempDir, result.Image.StoragePath))
+	assert.NoError(t, statErr)
 }

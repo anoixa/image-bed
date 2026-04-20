@@ -287,6 +287,10 @@ func restoreTable(db *gorm.DB, tableName, jsonlPath string, stats *restoreStats,
 		restoreBatchWithCleanup(db, scanner, &lineNum, batchSize, dryRun, stats, tableName,
 			func() *models.Image { return &models.Image{} },
 			func(r *models.Image) { r.Albums = nil })
+	case "image_variants":
+		restoreBatchWithCleanup(db, scanner, &lineNum, batchSize, dryRun, stats, tableName,
+			func() *models.ImageVariant { return &models.ImageVariant{} },
+			func(r *models.ImageVariant) {})
 	case "albums":
 		restoreBatchWithCleanup(db, scanner, &lineNum, batchSize, dryRun, stats, tableName,
 			func() *models.Album { return &models.Album{} },
@@ -462,7 +466,7 @@ func insertAlbumImagesBatch(db *gorm.DB, batch []albumImageRecord, dryRun bool, 
 // truncateTables 清空表数据
 func truncateTables(db *gorm.DB, tablesToClear []string) error {
 	truncateOrder := []string{
-		"album_images", "api_tokens", "images",
+		"album_images", "image_variants", "api_tokens", "images",
 		"albums", "devices", "users",
 	}
 
@@ -492,6 +496,7 @@ func updateAutoIncrementSequences(db *gorm.DB, dbType string, stats *restoreStat
 		{"users", &models.User{}},
 		{"devices", &models.Device{}},
 		{"images", &models.Image{}},
+		{"image_variants", &models.ImageVariant{}},
 		{"albums", &models.Album{}},
 		{"api_tokens", &models.ApiToken{}},
 	}

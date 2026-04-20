@@ -78,15 +78,17 @@ func (h *Handler) UpdateAlbumHandler(c *gin.Context) {
 	album.Name = req.Name
 	album.Description = req.Description
 
+	updatedAt := time.Now()
 	updates := map[string]any{
 		"name":        req.Name,
 		"description": req.Description,
-		"updated_at":  time.Now(),
+		"updated_at":  updatedAt,
 	}
 	if err := h.svc.UpdateAlbum(album.ID, updates); err != nil {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to update album")
 		return
 	}
+	album.UpdatedAt = updatedAt
 
 	// 清除相册缓存和用户的相册列表缓存
 	utils.SafeGo(func() {

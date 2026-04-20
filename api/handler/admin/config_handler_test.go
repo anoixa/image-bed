@@ -3,6 +3,7 @@ package admin
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,13 +14,17 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 type stubConfigManager struct {
 	getConfigMaskSensitive bool
 	getConfigCalls         int
 	enableCalls            int
+	disableCalls           int
 	config                 *models.ConfigResponse
+	getConfigErr           error
+	disableErr             error
 }
 
 func (m *stubConfigManager) ListConfigs(ctx context.Context, category models.ConfigCategory, enabledOnly, maskSensitive bool) ([]*models.ConfigResponse, error) {
@@ -29,7 +34,7 @@ func (m *stubConfigManager) ListConfigs(ctx context.Context, category models.Con
 func (m *stubConfigManager) GetConfig(ctx context.Context, id uint, maskSensitive bool) (*models.ConfigResponse, error) {
 	m.getConfigCalls++
 	m.getConfigMaskSensitive = maskSensitive
-	return m.config, nil
+	return m.config, m.getConfigErr
 }
 
 func (m *stubConfigManager) CreateConfig(ctx context.Context, req *models.SystemConfigStoreRequest, userID uint) (*models.ConfigResponse, error) {
@@ -54,7 +59,8 @@ func (m *stubConfigManager) Enable(ctx context.Context, id uint) error {
 }
 
 func (m *stubConfigManager) Disable(ctx context.Context, id uint) error {
-	return nil
+	m.disableCalls++
+	return m.disableErr
 }
 
 func (m *stubConfigManager) GetGlobalTransferMode(ctx context.Context) storage.TransferMode {
@@ -143,6 +149,9 @@ func TestValidateRemoteStorageTestTarget(t *testing.T) {
 				return
 			}
 
+			if err != nil && strings.Contains(err.Error(), "operation not permitted") {
+				t.Skip("skipping public DNS resolution in sandboxed environment")
+			}
 			require.NoError(t, err)
 		})
 	}
@@ -242,4 +251,88 @@ func TestCreateConfigRejectsJWTCategory(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestDisableConfigReturnsNotFoundForMissingConfig(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	handler := NewConfigHandler(&stubConfigManager{getConfigErr: gorm.ErrRecordNotFound}, nil)
+	router := gin.New()
+	router.POST("/configs/:id/disable", handler.DisableConfig)
+
+	req := httptest.NewRequest(http.MethodPost, "/configs/42/disable", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestDisableConfigReturnsInternalErrorWhenGetConfigFails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	handler := NewConfigHandler(&stubConfigManager{getConfigErr: errors.New("decrypt failed")}, nil)
+	router := gin.New()
+	router.POST("/configs/:id/disable", handler.DisableConfig)
+
+	req := httptest.NewRequest(http.MethodPost, "/configs/42/disable", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+func TestGetConfigReturnsNotFoundForMissingConfig(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	handler := NewConfigHandler(&stubConfigManager{getConfigErr: gorm.ErrRecordNotFound}, nil)
+	router := gin.New()
+	router.GET("/configs/:id", handler.GetConfig)
+
+	req := httptest.NewRequest(http.MethodGet, "/configs/42", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestGetConfigReturnsInternalErrorWhenGetConfigFails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	handler := NewConfigHandler(&stubConfigManager{getConfigErr: errors.New("decrypt failed")}, nil)
+	router := gin.New()
+	router.GET("/configs/:id", handler.GetConfig)
+
+	req := httptest.NewRequest(http.MethodGet, "/configs/42", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+func TestSetDefaultConfigReturnsNotFoundForMissingConfig(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	handler := NewConfigHandler(&stubConfigManager{getConfigErr: gorm.ErrRecordNotFound}, nil)
+	router := gin.New()
+	router.POST("/configs/:id/default", handler.SetDefaultConfig)
+
+	req := httptest.NewRequest(http.MethodPost, "/configs/42/default", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestSetDefaultConfigReturnsInternalErrorWhenGetConfigFails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	handler := NewConfigHandler(&stubConfigManager{getConfigErr: errors.New("decrypt failed")}, nil)
+	router := gin.New()
+	router.POST("/configs/:id/default", handler.SetDefaultConfig)
+
+	req := httptest.NewRequest(http.MethodPost, "/configs/42/default", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusInternalServerError, w.Code)
 }

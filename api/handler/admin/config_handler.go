@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	imagesRepo "github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type configManager interface {
@@ -123,7 +125,12 @@ func (h *ConfigHandler) GetConfig(c *gin.Context) {
 
 	config, err := h.manager.GetConfig(ctx, uint(id), maskSensitive)
 	if err != nil {
-		common.RespondError(c, http.StatusNotFound, "Config not found")
+		adminConfigLog.Errorf("Failed to get config %d: %v", id, err)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			common.RespondError(c, http.StatusNotFound, "Config not found")
+		} else {
+			common.RespondError(c, http.StatusInternalServerError, "Failed to get config")
+		}
 		return
 	}
 	if isHiddenExternalConfigCategory(config.Category) {
@@ -341,7 +348,12 @@ func (h *ConfigHandler) SetDefaultConfig(c *gin.Context) {
 
 	config, err := h.manager.GetConfig(ctx, uint(id), false)
 	if err != nil {
-		common.RespondError(c, http.StatusNotFound, "Config not found")
+		adminConfigLog.Errorf("Failed to get config %d before set default: %v", id, err)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			common.RespondError(c, http.StatusNotFound, "Config not found")
+		} else {
+			common.RespondError(c, http.StatusInternalServerError, "Failed to get config")
+		}
 		return
 	}
 	if isHiddenExternalConfigCategory(config.Category) {
@@ -453,7 +465,12 @@ func (h *ConfigHandler) DisableConfig(c *gin.Context) {
 
 	config, getErr := h.manager.GetConfig(ctx, uint(id), false)
 	if getErr != nil {
-		common.RespondError(c, http.StatusNotFound, "Config not found")
+		adminConfigLog.Errorf("Failed to get config: %v", getErr)
+		if errors.Is(getErr, gorm.ErrRecordNotFound) {
+			common.RespondError(c, http.StatusNotFound, "Config not found")
+			return
+		}
+		common.RespondError(c, http.StatusInternalServerError, "Failed to get config")
 		return
 	}
 	if isHiddenExternalConfigCategory(config.Category) {
