@@ -23,7 +23,6 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
-	"runtime"
 )
 
 var pipelineLog = utils.ForModule("Pipeline")
@@ -260,7 +259,6 @@ func (t *ImagePipelineTask) getProcessingFilePath(ctx context.Context) (path str
 func (t *ImagePipelineTask) Execute() {
 	var acquiredVariants []uint
 	defer t.finalize(&acquiredVariants)
-	defer t.cleanupAfterPipeline()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
@@ -844,13 +842,6 @@ func (t *ImagePipelineTask) deleteCacheOnTerminalState(state string) {
 			pipelineLog.Warnf("Failed to delete cache for %s on %s: %v", t.ImageIdentifier, state, err)
 		}
 	}
-}
-
-// cleanupAfterPipeline releases Go/C allocator state back to the OS.
-// Called via defer from Execute() so it runs on success, error, and panic paths.
-func (t *ImagePipelineTask) cleanupAfterPipeline() {
-	runtime.GC()
-	vipsfile.MallocTrim()
 }
 
 func (t *ImagePipelineTask) startProcessingHeartbeat(parent context.Context, acquiredVariants []uint) func() {
