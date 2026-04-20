@@ -87,7 +87,7 @@ type UpdateConfigRequest struct {
 func (h *ConversionHandler) UpdateConfig(c *gin.Context) {
 	var req UpdateConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		common.RespondError(c, http.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err))
+		common.RespondError(c, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
@@ -97,7 +97,8 @@ func (h *ConversionHandler) UpdateConfig(c *gin.Context) {
 	// 获取现有配置
 	current, err := h.configManager.GetImageProcessingSettings(ctx)
 	if err != nil {
-		common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to get current config: %v", err))
+		adminConfigLog.Errorf("Failed to get current config: %v", err)
+		common.RespondError(c, http.StatusInternalServerError, "Failed to get current config")
 		return
 	}
 
@@ -160,7 +161,8 @@ func (h *ConversionHandler) UpdateConfig(c *gin.Context) {
 	}
 
 	if err := h.configManager.SaveImageProcessingSettings(ctx, current, userID); err != nil {
-		common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to save config: %v", err))
+		adminConfigLog.Errorf("Failed to save config: %v", err)
+		common.RespondError(c, http.StatusInternalServerError, "Failed to save config")
 		return
 	}
 

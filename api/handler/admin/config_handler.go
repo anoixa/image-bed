@@ -85,7 +85,8 @@ func (h *ConfigHandler) ListConfigs(c *gin.Context) {
 
 	configs, err := h.manager.ListConfigs(ctx, cat, enabledOnly, maskSensitive)
 	if err != nil {
-		common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to list configs: %v", err))
+		adminConfigLog.Errorf("Failed to list configs: %v", err)
+		common.RespondError(c, http.StatusInternalServerError, "Failed to list configs")
 		return
 	}
 
@@ -122,7 +123,7 @@ func (h *ConfigHandler) GetConfig(c *gin.Context) {
 
 	config, err := h.manager.GetConfig(ctx, uint(id), maskSensitive)
 	if err != nil {
-		common.RespondError(c, http.StatusNotFound, fmt.Sprintf("Config not found: %v", err))
+		common.RespondError(c, http.StatusNotFound, "Config not found")
 		return
 	}
 	if isHiddenExternalConfigCategory(config.Category) {
@@ -151,7 +152,7 @@ func (h *ConfigHandler) CreateConfig(c *gin.Context) {
 
 	var req models.SystemConfigStoreRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		common.RespondError(c, http.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err))
+		common.RespondError(c, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 	if isHiddenExternalConfigCategory(req.Category) {
@@ -175,7 +176,8 @@ func (h *ConfigHandler) CreateConfig(c *gin.Context) {
 
 	config, err := h.manager.CreateConfig(ctx, &req, userID)
 	if err != nil {
-		common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to create config: %v", err))
+		adminConfigLog.Errorf("Failed to create config: %v", err)
+		common.RespondError(c, http.StatusInternalServerError, "Failed to create config")
 		return
 	}
 
@@ -184,7 +186,8 @@ func (h *ConfigHandler) CreateConfig(c *gin.Context) {
 			if rollbackErr := h.manager.DeleteConfig(c.Request.Context(), config.ID); rollbackErr != nil {
 				adminConfigLog.Errorf("Failed to rollback storage config creation: %v", rollbackErr)
 			}
-			common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to load storage configuration: %v", err))
+			adminConfigLog.Errorf("Failed to load storage configuration: %v", err)
+			common.RespondError(c, http.StatusInternalServerError, "Failed to load storage configuration")
 			return
 		}
 	}
@@ -218,7 +221,7 @@ func (h *ConfigHandler) UpdateConfig(c *gin.Context) {
 
 	var req models.SystemConfigStoreRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		common.RespondError(c, http.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err))
+		common.RespondError(c, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 	if isHiddenExternalConfigCategory(req.Category) {
@@ -239,14 +242,16 @@ func (h *ConfigHandler) UpdateConfig(c *gin.Context) {
 
 	config, err := h.manager.UpdateConfig(ctx, uint(id), &req)
 	if err != nil {
-		common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to update config: %v", err))
+		adminConfigLog.Errorf("Failed to update config: %v", err)
+		common.RespondError(c, http.StatusInternalServerError, "Failed to update config")
 		return
 	}
 
 	// 如果是存储配置，热重载到存储层
 	if req.Category == models.ConfigCategoryStorage {
 		if err := h.reloadStorageConfig(config.ID, req.Config, config.IsDefault); err != nil {
-			common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to reload storage configuration: %v", err))
+			adminConfigLog.Errorf("Failed to reload storage configuration: %v", err)
+			common.RespondError(c, http.StatusInternalServerError, "Failed to reload storage configuration")
 			return
 		}
 	}
@@ -285,7 +290,8 @@ func (h *ConfigHandler) DeleteConfig(c *gin.Context) {
 		if h.imagesRepo != nil {
 			count, err := h.imagesRepo.CountImagesByStorageConfig(uint(id))
 			if err != nil {
-				common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to check associated images: %v", err))
+				adminConfigLog.Errorf("Failed to check associated images: %v", err)
+				common.RespondError(c, http.StatusInternalServerError, "Failed to check associated images")
 				return
 			}
 			if count > 0 {
@@ -302,7 +308,8 @@ func (h *ConfigHandler) DeleteConfig(c *gin.Context) {
 	}
 
 	if err := h.manager.DeleteConfig(c.Request.Context(), uint(id)); err != nil {
-		common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to delete config: %v", err))
+		adminConfigLog.Errorf("Failed to delete config: %v", err)
+		common.RespondError(c, http.StatusInternalServerError, "Failed to delete config")
 		return
 	}
 
@@ -334,7 +341,7 @@ func (h *ConfigHandler) SetDefaultConfig(c *gin.Context) {
 
 	config, err := h.manager.GetConfig(ctx, uint(id), false)
 	if err != nil {
-		common.RespondError(c, http.StatusNotFound, fmt.Sprintf("Config not found: %v", err))
+		common.RespondError(c, http.StatusNotFound, "Config not found")
 		return
 	}
 	if isHiddenExternalConfigCategory(config.Category) {
@@ -347,20 +354,23 @@ func (h *ConfigHandler) SetDefaultConfig(c *gin.Context) {
 		if err != nil {
 			// Provider 未加载，尝试热重载
 			if loadErr := h.reloadStorageConfig(config.ID, config.Config, false); loadErr != nil {
-				common.RespondError(c, http.StatusBadRequest, fmt.Sprintf("Storage provider not loaded and failed to reload: %v", loadErr))
+				adminConfigLog.Errorf("Storage provider not loaded and failed to reload: %v", loadErr)
+				common.RespondError(c, http.StatusBadRequest, "Storage provider not loaded and failed to reload")
 				return
 			}
 		}
 	}
 
 	if err := h.manager.SetDefault(ctx, uint(id)); err != nil {
-		common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to set default: %v", err))
+		adminConfigLog.Errorf("Failed to set default: %v", err)
+		common.RespondError(c, http.StatusInternalServerError, "Failed to set default")
 		return
 	}
 
 	if config.Category == models.ConfigCategoryStorage {
 		if err := storage.SetDefaultID(uint(id)); err != nil {
-			common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to set default storage: %v", err))
+			adminConfigLog.Errorf("Failed to set default storage: %v", err)
+			common.RespondError(c, http.StatusInternalServerError, "Failed to set default storage")
 			return
 		}
 	}
@@ -393,7 +403,8 @@ func (h *ConfigHandler) EnableConfig(c *gin.Context) {
 	// 先获取配置信息，用于后续热重载
 	config, getErr := h.manager.GetConfig(ctx, uint(id), false)
 	if getErr != nil {
-		common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to get config: %v", getErr))
+		adminConfigLog.Errorf("Failed to get config: %v", getErr)
+		common.RespondError(c, http.StatusInternalServerError, "Failed to get config")
 		return
 	}
 	if isHiddenExternalConfigCategory(config.Category) {
@@ -402,7 +413,8 @@ func (h *ConfigHandler) EnableConfig(c *gin.Context) {
 	}
 
 	if err := h.manager.Enable(ctx, uint(id)); err != nil {
-		common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to enable config: %v", err))
+		adminConfigLog.Errorf("Failed to enable config: %v", err)
+		common.RespondError(c, http.StatusInternalServerError, "Failed to enable config")
 		return
 	}
 
@@ -450,7 +462,8 @@ func (h *ConfigHandler) DisableConfig(c *gin.Context) {
 	}
 
 	if err := h.manager.Disable(ctx, uint(id)); err != nil {
-		common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to disable config: %v", err))
+		adminConfigLog.Errorf("Failed to disable config: %v", err)
+		common.RespondError(c, http.StatusInternalServerError, "Failed to disable config")
 		return
 	}
 
@@ -483,7 +496,7 @@ func (h *ConfigHandler) TestConfig(c *gin.Context) {
 		// 如果 body 为空或解析失败，尝试从数据库获取配置
 		config, getErr := h.manager.GetConfig(c.Request.Context(), uint(id), false)
 		if getErr != nil {
-			common.RespondError(c, http.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err))
+			common.RespondError(c, http.StatusBadRequest, "Invalid request body")
 			return
 		}
 		req = models.TestConfigRequest{
@@ -682,8 +695,14 @@ func validateRemoteStorageTestTarget(rawTarget string) error {
 		return fmt.Errorf("refusing to test local or private address: %s", host)
 	}
 
-	if ip := net.ParseIP(host); ip != nil && isBlockedRemoteStorageTestIP(ip) {
-		return fmt.Errorf("refusing to test local or private address: %s", host)
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return fmt.Errorf("failed to resolve host %s: %w", host, err)
+	}
+	for _, ip := range ips {
+		if isBlockedRemoteStorageTestIP(ip) {
+			return fmt.Errorf("refusing to test private/reserved address: %s resolves to %s", host, ip)
+		}
 	}
 
 	return nil
@@ -870,7 +889,7 @@ func (h *ConfigHandler) GetGlobalTransferMode(c *gin.Context) {
 func (h *ConfigHandler) SetGlobalTransferMode(c *gin.Context) {
 	var req SetTransferModeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		common.RespondError(c, http.StatusBadRequest, "Invalid request: "+err.Error())
+		common.RespondError(c, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
@@ -886,7 +905,8 @@ func (h *ConfigHandler) SetGlobalTransferMode(c *gin.Context) {
 
 	ctx := c.Request.Context()
 	if err := h.manager.SetGlobalTransferMode(ctx, mode); err != nil {
-		common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to set transfer mode: %v", err))
+		adminConfigLog.Errorf("Failed to set transfer mode: %v", err)
+		common.RespondError(c, http.StatusInternalServerError, "Failed to set transfer mode")
 		return
 	}
 

@@ -63,7 +63,7 @@ func (h *Handler) ListImages(c *gin.Context) {
 	var body ImageRequestBody
 
 	if err := c.ShouldBindJSON(&body); err != nil {
-		common.RespondError(c, http.StatusBadRequest, err.Error())
+		common.RespondError(c, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 

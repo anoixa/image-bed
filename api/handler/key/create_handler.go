@@ -38,7 +38,7 @@ func (h *Handler) CreateStaticToken(context *gin.Context) {
 	var requestBody req
 	if err := context.ShouldBindJSON(&requestBody); err != nil {
 		if err != io.EOF {
-			common.RespondError(context, http.StatusBadRequest, "Invalid JSON format: "+err.Error())
+			common.RespondError(context, http.StatusBadRequest, "Invalid request body")
 			return
 		}
 	}
@@ -66,7 +66,7 @@ func (h *Handler) CreateStaticToken(context *gin.Context) {
 	err = h.svc.CreateKey(&token)
 
 	if err != nil {
-		common.RespondError(context, http.StatusInternalServerError, err.Error())
+		common.RespondError(context, http.StatusInternalServerError, "Failed to create API token")
 		return
 	}
 

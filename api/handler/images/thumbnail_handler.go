@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/anoixa/image-bed/api/common"
@@ -35,6 +36,11 @@ func (h *Handler) GetThumbnail(c *gin.Context) {
 	identifier := c.Param("identifier")
 	if identifier == "" {
 		common.RespondError(c, http.StatusBadRequest, "Image identifier is required")
+		return
+	}
+
+	if strings.ContainsAny(identifier, "/\\") || strings.Contains(identifier, "..") {
+		common.RespondError(c, http.StatusBadRequest, "Invalid image identifier")
 		return
 	}
 

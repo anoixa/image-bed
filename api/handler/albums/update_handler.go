@@ -59,7 +59,7 @@ func (h *Handler) UpdateAlbumHandler(c *gin.Context) {
 
 	var req UpdateAlbumRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		common.RespondError(c, http.StatusBadRequest, err.Error())
+		common.RespondError(c, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 

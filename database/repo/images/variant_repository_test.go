@@ -62,7 +62,7 @@ func TestRecoverStaleProcessing(t *testing.T) {
 	require.NoError(t, db.Create(resetVariant).Error)
 	require.NoError(t, db.Create(failedVariant).Error)
 
-	resetCount, failedCount, err := repo.RecoverStaleProcessing(15*time.Minute, 3)
+	resetCount, failedCount, _, err := repo.RecoverStaleProcessing(15*time.Minute, 3)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), resetCount)
 	assert.Equal(t, int64(1), failedCount)

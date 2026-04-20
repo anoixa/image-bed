@@ -24,6 +24,7 @@ type SweeperStats struct {
 	FailedVariants   uint64 `json:"failed_variants"`
 	FailedImages     uint64 `json:"failed_images"`
 	ResetImages      uint64 `json:"reset_images"`
+	Retriggered      uint64 `json:"retriggered"`
 	LastRunUnix      int64  `json:"last_run_unix"`
 	LastSuccessUnix  int64  `json:"last_success_unix"`
 	LastErrorUnix    int64  `json:"last_error_unix"`
@@ -37,17 +38,23 @@ var sweeperStats = struct {
 	failedVariants  atomic.Uint64
 	failedImages    atomic.Uint64
 	resetImages     atomic.Uint64
+	retriggered     atomic.Uint64
 	lastRunUnix     atomic.Int64
 	lastSuccessUnix atomic.Int64
 	lastErrorUnix   atomic.Int64
 	lastError       atomic.Pointer[string]
 }{}
 
+// TriggerFunc re-enqueues an image for variant processing.
+type TriggerFunc func(image *models.Image)
+
 // StartVariantSweeper runs a background goroutine that periodically resets
 // stale processing variants back to pending so they can be retried.
-func StartVariantSweeper(ctx context.Context, db *gorm.DB) {
+// If triggerFn is non-nil, images with reset variants are re-submitted for processing.
+func StartVariantSweeper(ctx context.Context, db *gorm.DB, triggerFn TriggerFunc) {
 	go func() {
 		variantRepo := images.NewVariantRepository(db)
+		imageRepo := images.NewRepository(db)
 		ticker := time.NewTicker(sweeperInterval)
 		defer ticker.Stop()
 
@@ -59,18 +66,22 @@ func StartVariantSweeper(ctx context.Context, db *gorm.DB) {
 				sweeperLog.Infof("Stopped")
 				return
 			case <-ticker.C:
-				sweepOnce(ctx, variantRepo, db)
+				sweepOnce(ctx, variantRepo, imageRepo, db, triggerFn)
 			}
 		}
 	}()
 }
 
-func sweepOnce(ctx context.Context, variantRepo *images.VariantRepository, db *gorm.DB) {
-	now := time.Now()
+func sweepOnce(ctx context.Context, variantRepo *images.VariantRepository, imageRepo *images.Repository, db *gorm.DB, triggerFn TriggerFunc) {
+	start := time.Now()
+	now := start
 	sweeperStats.runs.Add(1)
 	sweeperStats.lastRunUnix.Store(now.Unix())
 	cutoff := time.Now().Add(-staleThreshold)
-	reset, failed, err := variantRepo.RecoverStaleProcessing(staleThreshold, staleMaxRetries)
+
+	var retriggered uint64
+
+	reset, failed, retriedImageIDs, err := variantRepo.RecoverStaleProcessing(staleThreshold, staleMaxRetries)
 	if err != nil {
 		recordSweeperError(now, err.Error())
 		sweeperLog.Warnf("Failed to reset stale variants: %v", err)
@@ -78,11 +89,24 @@ func sweepOnce(ctx context.Context, variantRepo *images.VariantRepository, db *g
 	}
 	if reset > 0 {
 		sweeperStats.resetVariants.Add(uint64(reset))
-		sweeperLog.Infof("Reset %d stale processing variants to pending", reset)
 	}
 	if failed > 0 {
 		sweeperStats.failedVariants.Add(uint64(failed))
-		sweeperLog.Infof("Marked %d stale processing variants as failed after reaching retry limit", failed)
+	}
+
+	// Re-trigger conversion for images with reset variants
+	if triggerFn != nil && len(retriedImageIDs) > 0 {
+		for _, imageID := range retriedImageIDs {
+			img, err := imageRepo.GetImageByID(imageID)
+			if err != nil {
+				sweeperLog.Warnf("Failed to fetch image %d for re-trigger: %v", imageID, err)
+				continue
+			}
+			triggerFn(img)
+			retriggered++
+		}
+		sweeperStats.retriggered.Add(retriggered)
+		sweeperLog.Infof("Re-triggered conversion for %d images", retriggered)
 	}
 
 	processingVariants := db.Table("image_variants").Select("1").
@@ -102,7 +126,6 @@ func sweepOnce(ctx context.Context, variantRepo *images.VariantRepository, db *g
 		sweeperLog.Warnf("Failed to mark stale processing images as failed: %v", failedImages.Error)
 	} else if failedImages.RowsAffected > 0 {
 		sweeperStats.failedImages.Add(uint64(failedImages.RowsAffected))
-		sweeperLog.Infof("Marked %d stale processing images as failed", failedImages.RowsAffected)
 	}
 
 	// Remaining stale images without failed variants can return to none and be
@@ -116,10 +139,13 @@ func sweepOnce(ctx context.Context, variantRepo *images.VariantRepository, db *g
 		sweeperLog.Warnf("Failed to reset stale image variant_status: %v", result.Error)
 	} else if result.RowsAffected > 0 {
 		sweeperStats.resetImages.Add(uint64(result.RowsAffected))
-		sweeperLog.Infof("Reset %d stale processing images to none", result.RowsAffected)
 	}
 
 	sweeperStats.lastSuccessUnix.Store(now.Unix())
+
+	elapsed := time.Since(start)
+	sweeperLog.Debugf("Sweep completed in %s: variants_reset=%d, variants_failed=%d, images_failed=%d, images_reset=%d, retriggered=%d",
+		elapsed, reset, failed, failedImages.RowsAffected, result.RowsAffected, retriggered)
 }
 
 func recordSweeperError(now time.Time, msg string) {
@@ -136,6 +162,7 @@ func GetSweeperStats() SweeperStats {
 		FailedVariants:  sweeperStats.failedVariants.Load(),
 		FailedImages:    sweeperStats.failedImages.Load(),
 		ResetImages:     sweeperStats.resetImages.Load(),
+		Retriggered:     sweeperStats.retriggered.Load(),
 		LastRunUnix:     sweeperStats.lastRunUnix.Load(),
 		LastSuccessUnix: sweeperStats.lastSuccessUnix.Load(),
 		LastErrorUnix:   sweeperStats.lastErrorUnix.Load(),

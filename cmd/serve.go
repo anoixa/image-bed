@@ -180,7 +180,7 @@ func RunServer() {
 
 	sweeperCtx, sweeperCancel := context.WithCancel(context.Background())
 	defer sweeperCancel()
-	worker.StartVariantSweeper(sweeperCtx, deps.DB)
+	worker.StartVariantSweeper(sweeperCtx, deps.DB, deps.Converter.TriggerConversion)
 
 	// 初始化 JWT
 	api.SetAuthKeysRepo(deps.Repositories.KeysRepo)

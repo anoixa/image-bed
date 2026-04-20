@@ -148,8 +148,8 @@ func runRestore(inputFile string, tables []string, dryRun, truncate bool) error 
 	}
 
 	// 按依赖顺序还原表
-	// 顺序：users -> devices -> images -> albums -> album_images -> api_tokens
-	restoreOrder := []string{"users", "devices", "images", "albums", "album_images", "api_tokens"}
+	// 顺序：users -> devices -> images -> image_variants -> albums -> album_images -> api_tokens
+	restoreOrder := []string{"users", "devices", "images", "image_variants", "albums", "album_images", "api_tokens"}
 
 	for _, table := range restoreOrder {
 		if !contains(tables, table) {

@@ -261,9 +261,8 @@ func autoMigrate(db *gorm.DB) error {
 
 // handleConflict 处理冲突
 // 返回值: shouldCreate (是否创建), shouldOverwrite (是否覆盖), error
-func handleConflict(targetDB *gorm.DB, _ any, where string, args []any, onConflict string) (bool, bool, error) {
-	var existing any
-	result := targetDB.Where(where, args...).First(&existing)
+func handleConflict(targetDB *gorm.DB, model any, where string, args []any, onConflict string) (bool, bool, error) {
+	result := targetDB.Model(model).Where(where, args...).First(model)
 
 	if result.Error == gorm.ErrRecordNotFound {
 		// 不存在，可以创建

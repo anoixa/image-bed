@@ -87,7 +87,7 @@ func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 
 	var req AddImagesToAlbumRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		common.RespondError(c, http.StatusBadRequest, err.Error())
+		common.RespondError(c, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
@@ -266,7 +266,7 @@ func (h *AlbumImageHandler) RemoveImagesFromAlbumHandler(c *gin.Context) {
 
 	var req RemoveImagesFromAlbumRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		common.RespondError(c, http.StatusBadRequest, err.Error())
+		common.RespondError(c, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 

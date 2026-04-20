@@ -24,7 +24,7 @@ type LoginRequest struct {
 	// Password
 	// required: true
 	// example: password123
-	Password string `json:"password" binding:"required"`
+	Password string `json:"password" binding:"required,max=1024"`
 }
 
 // LoginResponse 登录响应
@@ -78,7 +78,7 @@ func (h *LoginHandler) SetLoginService(loginService *auth.LoginService) {
 
 type userAuthRequestBody struct {
 	Username string `json:"username" binding:"required"`
-	Password string `json:"password" binding:"required"`
+	Password string `json:"password" binding:"required,max=1024"`
 }
 
 type loginResponse struct {
@@ -110,7 +110,7 @@ func (h *LoginHandler) LoginHandlerFunc(context *gin.Context) {
 
 	var req userAuthRequestBody
 	if err := context.ShouldBindJSON(&req); err != nil {
-		common.RespondError(context, http.StatusBadRequest, err.Error())
+		common.RespondError(context, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 

@@ -46,7 +46,7 @@ func (h *Handler) CreateAlbumHandler(c *gin.Context) {
 	userID := c.GetUint(middleware.ContextUserIDKey)
 	var req createAlbumRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		common.RespondError(c, http.StatusBadRequest, err.Error())
+		common.RespondError(c, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 

@@ -121,7 +121,7 @@ func runBackup(outputFile string, tables []string, keepDir bool) error {
 	}
 
 	if len(tables) == 0 {
-		tables = []string{"users", "devices", "images", "albums", "album_images", "api_tokens"}
+		tables = []string{"users", "devices", "images", "image_variants", "albums", "album_images", "api_tokens"}
 	}
 	metadata.Tables = tables
 

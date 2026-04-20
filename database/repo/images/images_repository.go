@@ -71,7 +71,7 @@ func (r *Repository) CountImagesByStoragePath(storagePath string) (int64, error)
 // GetImageByHash 通过哈希获取图片
 func (r *Repository) GetImageByHash(hash string) (*models.Image, error) {
 	var image models.Image
-	err := r.db.Where("file_hash = ?", hash).First(&image).Error
+	err := r.db.Unscoped().Where("file_hash = ?", hash).First(&image).Error
 	return &image, err
 }
 

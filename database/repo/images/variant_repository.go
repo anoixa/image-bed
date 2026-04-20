@@ -183,18 +183,19 @@ func (r *VariantRepository) DeleteVariant(id uint) error {
 // duration back to pending so they can be retried. Returns the number of
 // affected rows.
 func (r *VariantRepository) ResetStaleProcessing(olderThan time.Duration) (int64, error) {
-	reset, _, err := r.RecoverStaleProcessing(olderThan, 3)
+	reset, _, _, err := r.RecoverStaleProcessing(olderThan, 3)
 	return reset, err
 }
 
-func (r *VariantRepository) RecoverStaleProcessing(olderThan time.Duration, maxRetries int) (resetCount, failedCount int64, err error) {
+func (r *VariantRepository) RecoverStaleProcessing(olderThan time.Duration, maxRetries int) (resetCount, failedCount int64, retriedImageIDs []uint, err error) {
 	cutoff := time.Now().Add(-olderThan)
 	var staleVariants []models.ImageVariant
 	if err := r.db.Where("status = ? AND updated_at < ?", models.VariantStatusProcessing, cutoff).Find(&staleVariants).Error; err != nil {
-		return 0, 0, err
+		return 0, 0, nil, err
 	}
 
 	now := time.Now()
+	retriedSet := make(map[uint]bool)
 	for _, variant := range staleVariants {
 		nextRetryCount := variant.RetryCount + 1
 		if maxRetries > 0 && nextRetryCount >= maxRetries {
@@ -208,7 +209,7 @@ func (r *VariantRepository) RecoverStaleProcessing(olderThan time.Duration, maxR
 					"updated_at":    now,
 				})
 			if result.Error != nil {
-				return resetCount, failedCount, result.Error
+				return resetCount, failedCount, retriedImageIDs, result.Error
 			}
 			failedCount += result.RowsAffected
 			continue
@@ -225,12 +226,16 @@ func (r *VariantRepository) RecoverStaleProcessing(olderThan time.Duration, maxR
 				"updated_at":    now,
 			})
 		if result.Error != nil {
-			return resetCount, failedCount, result.Error
+			return resetCount, failedCount, retriedImageIDs, result.Error
 		}
 		resetCount += result.RowsAffected
+		retriedSet[variant.ImageID] = true
 	}
 
-	return resetCount, failedCount, nil
+	for id := range retriedSet {
+		retriedImageIDs = append(retriedImageIDs, id)
+	}
+	return resetCount, failedCount, retriedImageIDs, nil
 }
 
 func staleRetryDelay(retryCount int) time.Duration {

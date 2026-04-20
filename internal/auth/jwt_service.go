@@ -242,6 +242,10 @@ func (s *JWTService) ParseToken(tokenString string) (*TokenClaims, error) {
 		return nil, errors.New("invalid token claims")
 	}
 
+	if claims.Type != "access" {
+		return nil, errors.New("invalid token: expected access token")
+	}
+
 	return claims, nil
 }
 
