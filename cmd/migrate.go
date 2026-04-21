@@ -39,7 +39,9 @@ Examples:
   # Stop on conflict
   image-bed migrate run --from-sqlite ./data.db --to-postgres "..." --on-conflict=error`,
 	Run: func(cmd *cobra.Command, args []string) {
-		initCommandLogger()
+		if err := initCommandLogger(); err != nil {
+			exitWithErrorf("Failed to initialize config/logger: %v", err)
+		}
 
 		fromType, _ := cmd.Flags().GetString("from-type")
 		toType, _ := cmd.Flags().GetString("to-type")

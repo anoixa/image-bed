@@ -25,7 +25,9 @@ var cacheClearCmd = &cobra.Command{
 	Short: "Clear cache",
 	Long:  `Clear application cache. By default clears all image cache.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		initCommandLogger()
+		if err := initCommandLogger(); err != nil {
+			exitWithErrorf("Failed to initialize config/logger: %v", err)
+		}
 
 		imageOnly, _ := cmd.Flags().GetBool("image-only")
 		all, _ := cmd.Flags().GetBool("all")

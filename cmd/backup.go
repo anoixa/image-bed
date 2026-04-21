@@ -36,7 +36,9 @@ Example:
   # Backup specific tables only
   image-bed backup --tables users,images`,
 	Run: func(cmd *cobra.Command, args []string) {
-		initCommandLogger()
+		if err := initCommandLogger(); err != nil {
+			exitWithErrorf("Failed to initialize config/logger: %v", err)
+		}
 
 		outputFile, _ := cmd.Flags().GetString("output")
 		tables, _ := cmd.Flags().GetStringSlice("tables")

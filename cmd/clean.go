@@ -27,7 +27,9 @@ This includes:
   - Delete storage files without corresponding database records
   - Clean temp folder files`,
 	Run: func(cmd *cobra.Command, args []string) {
-		initCommandLogger()
+		if err := initCommandLogger(); err != nil {
+			exitWithErrorf("Failed to initialize config/logger: %v", err)
+		}
 
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		tempOnly, _ := cmd.Flags().GetBool("temp-only")

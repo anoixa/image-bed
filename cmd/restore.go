@@ -42,7 +42,9 @@ Example:
   # Clear existing data before restore
   image-bed restore --input ./backup.tar.gz --truncate`,
 	Run: func(cmd *cobra.Command, args []string) {
-		initCommandLogger()
+		if err := initCommandLogger(); err != nil {
+			exitWithErrorf("Failed to initialize config/logger: %v", err)
+		}
 
 		inputFile, _ := cmd.Flags().GetString("input")
 		tables, _ := cmd.Flags().GetStringSlice("tables")
