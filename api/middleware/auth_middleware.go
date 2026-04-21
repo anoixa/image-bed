@@ -13,44 +13,52 @@ import (
 
 func CombinedAuth(jwtService *auth.JWTService) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 获取 Authorization 头
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			common.RespondError(c, http.StatusUnauthorized, "No Authorization request header")
-			c.Abort()
-			return
-		}
-
-		// 解析 Scheme 和 Token
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) != 2 {
-			common.RespondError(c, http.StatusBadRequest, "Authorization field format error")
-			c.Abort()
-			return
-		}
-
-		scheme := parts[0]
-		token := parts[1]
-		var err error
-
-		switch scheme {
-		case AuthSchemeBearer:
-			err = handleJwtAuth(c, token, jwtService)
-		case AuthSchemeAPIKey:
-			err = handleStaticTokenAuth(c, token, jwtService)
-		default:
-			common.RespondError(c, http.StatusUnauthorized, "Unsupported authentication scheme")
-			c.Abort()
-			return
-		}
-
-		if err != nil {
+		if err := authenticateRequest(c, jwtService, false); err != nil {
 			common.RespondError(c, http.StatusUnauthorized, err.Error())
 			c.Abort()
 			return
 		}
 
 		c.Next()
+	}
+}
+
+func OptionalCombinedAuth(jwtService *auth.JWTService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if err := authenticateRequest(c, jwtService, true); err != nil {
+			common.RespondError(c, http.StatusUnauthorized, err.Error())
+			c.Abort()
+			return
+		}
+
+		c.Next()
+	}
+}
+
+func authenticateRequest(c *gin.Context, jwtService *auth.JWTService, allowMissing bool) error {
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		if allowMissing {
+			return nil
+		}
+		return errors.New("no Authorization request header")
+	}
+
+	parts := strings.SplitN(authHeader, " ", 2)
+	if len(parts) != 2 {
+		return errors.New("authorization field format error")
+	}
+
+	scheme := parts[0]
+	token := parts[1]
+
+	switch scheme {
+	case AuthSchemeBearer:
+		return handleJwtAuth(c, token, jwtService)
+	case AuthSchemeAPIKey:
+		return handleStaticTokenAuth(c, token, jwtService)
+	default:
+		return errors.New("unsupported authentication scheme")
 	}
 }
 

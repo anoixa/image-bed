@@ -202,6 +202,22 @@ func (s *S3Storage) Exists(ctx context.Context, storagePath string) (bool, error
 	return true, nil
 }
 
+func (s *S3Storage) GetObjectInfo(ctx context.Context, storagePath string) (ObjectInfo, error) {
+	stat, err := s.client.StatObject(ctx, s.bucketName, storagePath, minio.StatObjectOptions{})
+	if err != nil {
+		errResponse := minio.ToErrorResponse(err)
+		if errResponse.Code == "NoSuchKey" {
+			return ObjectInfo{}, fmt.Errorf("file not found in s3: %s", storagePath)
+		}
+		return ObjectInfo{}, fmt.Errorf("failed to stat object '%s': %w", storagePath, err)
+	}
+
+	return ObjectInfo{
+		Size:        stat.Size,
+		ContentType: stat.ContentType,
+	}, nil
+}
+
 func (s *S3Storage) Health(ctx context.Context) error {
 	_, err := s.client.ListBuckets(ctx)
 	if err != nil {

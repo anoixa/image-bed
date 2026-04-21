@@ -24,6 +24,15 @@ import (
 
 var fileDownloadGroup singleflight.Group
 
+const privateImageCacheControl = "private, no-store"
+
+func cacheControlForImage(isPublic bool) string {
+	if isPublic {
+		return config.CacheControlPublic
+	}
+	return privateImageCacheControl
+}
+
 // checkETag 检查客户端缓存是否有效
 // 如果客户端发送的 If-None-Match 与当前 ETag 匹配，返回 true 并写入 304 响应
 func checkETag(c *gin.Context, etag string) bool {
@@ -192,7 +201,7 @@ func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 		}
 	}()
 
-	h.serveReadSeekerContent(c, image.Identifier, image.MimeType, image.FileHash, stream, false)
+	h.serveReadSeekerContent(c, image.Identifier, image.MimeType, image.FileHash, stream, false, cacheControlForImage(image.IsPublic))
 }
 
 // getDirectURLIfPossible 尝试获取直链 URL
@@ -246,7 +255,7 @@ func (h *Handler) serveByStreaming(c *gin.Context, img *models.Image, streamer s
 		return true
 	}
 
-	c.Header("Cache-Control", config.CacheControlPublic)
+	c.Header("Cache-Control", cacheControlForImage(img.IsPublic))
 	c.Header("Content-Type", img.MimeType)
 
 	_, err := streamer.StreamTo(c.Request.Context(), img.StoragePath, c.Writer)
@@ -291,7 +300,7 @@ func (h *Handler) serveBySendfile(c *gin.Context, img *models.Image, opener stor
 	}
 	defer func() { _ = file.Close() }()
 
-	c.Header("Cache-Control", config.CacheControlPublic)
+	c.Header("Cache-Control", cacheControlForImage(img.IsPublic))
 	c.Header("Content-Type", img.MimeType)
 
 	http.ServeContent(c.Writer, c.Request, img.Identifier, time.Time{}, file)
@@ -305,7 +314,7 @@ func (h *Handler) serveImageData(c *gin.Context, img *models.Image, data []byte)
 		return
 	}
 
-	c.Header("Cache-Control", config.CacheControlPublic)
+	c.Header("Cache-Control", cacheControlForImage(img.IsPublic))
 	c.Header("Content-Type", img.MimeType)
 	c.Header("Content-Length", strconv.Itoa(len(data)))
 
@@ -332,18 +341,18 @@ func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *i
 	}
 
 	if imageData, ok := h.getOrPopulateImageDataCache(c.Request.Context(), provider, remoteImageDataCacheKey(img.StorageConfigID, result.StoragePath), result.StoragePath); ok {
-		h.serveVariantData(c, result, imageData)
+		h.serveVariantData(c, result, imageData, img.IsPublic)
 		return
 	}
 
 	if opener, ok := provider.(storage.FileOpener); ok {
-		if h.serveVariantBySendfile(c, result, opener) {
+		if h.serveVariantBySendfile(c, result, opener, img.IsPublic) {
 			return
 		}
 	}
 
 	if streamer, ok := provider.(storage.StreamProvider); ok {
-		if h.serveVariantByStreaming(c, result, streamer) {
+		if h.serveVariantByStreaming(c, result, streamer, img.IsPublic) {
 			return
 		}
 	}
@@ -361,17 +370,17 @@ func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *i
 		}
 	}()
 
-	h.serveReadSeekerContent(c, result.Identifier, result.MIMEType, result.Variant.FileHash, stream, true)
+	h.serveReadSeekerContent(c, result.Identifier, result.MIMEType, result.Variant.FileHash, stream, true, cacheControlForImage(img.IsPublic))
 }
 
 // serveVariantByStreaming 使用流式传输格式变体
-func (h *Handler) serveVariantByStreaming(c *gin.Context, result *image.VariantResult, streamer storage.StreamProvider) bool {
+func (h *Handler) serveVariantByStreaming(c *gin.Context, result *image.VariantResult, streamer storage.StreamProvider, isPublic bool) bool {
 	// 使用 FileHash 作为变体 ETag
 	if checkETag(c, result.Variant.FileHash) {
 		return true
 	}
 
-	c.Header("Cache-Control", config.CacheControlPublic)
+	c.Header("Cache-Control", cacheControlForImage(isPublic))
 	c.Header("Content-Type", result.MIMEType)
 	c.Header("X-Content-Type-Options", "nosniff")
 
@@ -384,7 +393,7 @@ func (h *Handler) serveVariantByStreaming(c *gin.Context, result *image.VariantR
 }
 
 // serveVariantBySendfile 使用 sendfile 传输格式变体
-func (h *Handler) serveVariantBySendfile(c *gin.Context, result *image.VariantResult, opener storage.FileOpener) bool {
+func (h *Handler) serveVariantBySendfile(c *gin.Context, result *image.VariantResult, opener storage.FileOpener, isPublic bool) bool {
 	// 检查 ETag 缓存（使用 FileHash 作为变体 ETag）
 	if checkETag(c, result.Variant.FileHash) {
 		return true
@@ -401,7 +410,7 @@ func (h *Handler) serveVariantBySendfile(c *gin.Context, result *image.VariantRe
 		return false
 	}
 
-	c.Header("Cache-Control", config.CacheControlPublic)
+	c.Header("Cache-Control", cacheControlForImage(isPublic))
 	c.Header("Content-Type", result.MIMEType)
 	c.Header("Content-Length", strconv.FormatInt(stat.Size(), 10))
 	c.Header("X-Content-Type-Options", "nosniff")
@@ -411,13 +420,13 @@ func (h *Handler) serveVariantBySendfile(c *gin.Context, result *image.VariantRe
 }
 
 // serveVariantData 从内存提供格式变体数据
-func (h *Handler) serveVariantData(c *gin.Context, result *image.VariantResult, data []byte) {
+func (h *Handler) serveVariantData(c *gin.Context, result *image.VariantResult, data []byte, isPublic bool) {
 	// 使用 FileHash 作为变体 ETag
 	if checkETag(c, result.Variant.FileHash) {
 		return
 	}
 
-	c.Header("Cache-Control", config.CacheControlPublic)
+	c.Header("Cache-Control", cacheControlForImage(isPublic))
 	c.Header("Content-Type", result.MIMEType)
 	c.Header("Content-Length", strconv.Itoa(len(data)))
 	c.Header("X-Content-Type-Options", "nosniff")
@@ -471,6 +480,26 @@ func (h *Handler) loadCacheableImageData(ctx context.Context, provider storage.P
 		return nil, false, nil
 	}
 
+	maxSize := h.cacheHelper.MaxCacheableImageSize()
+	if maxSize <= 0 {
+		return nil, false, nil
+	}
+
+	infoProvider, ok := provider.(storage.ObjectInfoProvider)
+	if !ok {
+		// Unknown remote size means a cache miss would force a full pre-read
+		// and then a second download for streaming. Skip binary caching instead.
+		return nil, false, nil
+	}
+
+	info, err := infoProvider.GetObjectInfo(ctx, storagePath)
+	if err != nil {
+		return nil, false, err
+	}
+	if info.Size > maxSize {
+		return nil, false, nil
+	}
+
 	stream, err := provider.GetWithContext(ctx, storagePath)
 	if err != nil {
 		return nil, false, err
@@ -480,11 +509,6 @@ func (h *Handler) loadCacheableImageData(ctx context.Context, provider storage.P
 			_ = closer.Close()
 		}
 	}()
-
-	maxSize := h.cacheHelper.MaxCacheableImageSize()
-	if maxSize <= 0 {
-		return nil, false, nil
-	}
 
 	if size, err := readRemainingReadSeekerSize(stream); err == nil && size > maxSize {
 		return nil, false, nil
@@ -517,12 +541,12 @@ func readRemainingReadSeekerSize(stream io.ReadSeeker) (int64, error) {
 	return endPos - currentPos, nil
 }
 
-func (h *Handler) serveReadSeekerContent(c *gin.Context, identifier, mimeType, etag string, stream io.ReadSeeker, noSniff bool) {
+func (h *Handler) serveReadSeekerContent(c *gin.Context, identifier, mimeType, etag string, stream io.ReadSeeker, noSniff bool, cacheControl string) {
 	if checkETag(c, etag) {
 		return
 	}
 
-	c.Header("Cache-Control", config.CacheControlPublic)
+	c.Header("Cache-Control", cacheControl)
 	c.Header("Content-Type", mimeType)
 	if noSniff {
 		c.Header("X-Content-Type-Options", "nosniff")

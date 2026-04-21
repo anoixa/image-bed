@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/anoixa/image-bed/database/models"
 	imageSvc "github.com/anoixa/image-bed/internal/image"
 )
 
@@ -100,12 +101,13 @@ func TestServeThumbnailByStreaming(t *testing.T) {
 		FileHash:    "thumb-hash",
 		MIMEType:    "image/webp",
 	}
+	image := &models.Image{IsPublic: true}
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodGet, "/thumbnails/test", nil)
 
-	ok := h.serveThumbnailByStreaming(c, result, provider)
+	ok := h.serveThumbnailByStreaming(c, image, result, provider)
 
 	require.True(t, ok)
 	assert.Equal(t, 1, provider.streamCalls)
@@ -126,6 +128,7 @@ func TestServeThumbnailByStreamingReturnsNotModifiedOnETagMatch(t *testing.T) {
 		FileHash:    "thumb-hash",
 		MIMEType:    "image/webp",
 	}
+	image := &models.Image{IsPublic: true}
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -133,10 +136,33 @@ func TestServeThumbnailByStreamingReturnsNotModifiedOnETagMatch(t *testing.T) {
 	req.Header.Set("If-None-Match", `W/"thumb-hash", "other"`)
 	c.Request = req
 
-	ok := h.serveThumbnailByStreaming(c, result, provider)
+	ok := h.serveThumbnailByStreaming(c, image, result, provider)
 
 	require.True(t, ok)
 	assert.Equal(t, 0, provider.streamCalls)
 	assert.Equal(t, http.StatusNotModified, c.Writer.Status())
 	assert.Equal(t, `"thumb-hash"`, w.Header().Get("ETag"))
+}
+
+func TestServeThumbnailByStreamingUsesPrivateCacheControlForPrivateImages(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	h := &Handler{}
+	provider := &thumbnailStreamProvider{}
+	result := &imageSvc.ThumbnailResult{
+		Identifier:  "thumb.webp",
+		StoragePath: "thumbs/thumb.webp",
+		FileHash:    "thumb-hash",
+		MIMEType:    "image/webp",
+	}
+	image := &models.Image{IsPublic: false}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/thumbnails/test", nil)
+
+	ok := h.serveThumbnailByStreaming(c, image, result, provider)
+
+	require.True(t, ok)
+	assert.Equal(t, privateImageCacheControl, w.Header().Get("Cache-Control"))
 }

@@ -85,11 +85,11 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 		defaultMaxBatchTotalMB = 500
 		minBatchRequestLimitMB = 100
 		batchRequestLimitRatio = 2
+		apiMaxConcurrency      = 100
+		publicMaxConcurrency   = 200
 	)
 
 	router.MaxMultipartMemory = multipartMemoryMB << 20
-	concurrencyLimiter := middleware.NewConcurrencyLimiter(100)
-	router.Use(concurrencyLimiter.Middleware())
 	requestBodyLimit := int64(defaultMaxBatchTotalMB) * batchRequestLimitRatio << 20
 	if requestBodyLimit < minBatchRequestLimitMB<<20 {
 		requestBodyLimit = minBatchRequestLimitMB << 20
@@ -115,20 +115,22 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	}
 
 	routerDeps := &RouterDependencies{
-		VariantRepo:      deps.VariantRepo,
-		DashboardRepo:    deps.DashboardRepo,
-		SqlDB:            deps.SqlDB,
-		Repositories:     deps.Repositories,
-		ConfigManager:    deps.ConfigManager,
-		Converter:        deps.Converter,
-		JWTService:       jwtService,
-		LoginService:     loginService,
-		AuthRateLimiter:  authRateLimiter,
-		APIRateLimiter:   apiRateLimiter,
-		ImageRateLimiter: imageRateLimiter,
-		CacheProvider:    deps.CacheProvider,
-		ServerVersion:    deps.ServerVersion,
-		Config:           deps.Config,
+		VariantRepo:       deps.VariantRepo,
+		DashboardRepo:     deps.DashboardRepo,
+		SqlDB:             deps.SqlDB,
+		Repositories:      deps.Repositories,
+		ConfigManager:     deps.ConfigManager,
+		Converter:         deps.Converter,
+		JWTService:        jwtService,
+		LoginService:      loginService,
+		AuthRateLimiter:   authRateLimiter,
+		APIRateLimiter:    apiRateLimiter,
+		ImageRateLimiter:  imageRateLimiter,
+		APIConcurrency:    middleware.NewConcurrencyLimiter(apiMaxConcurrency),
+		PublicConcurrency: middleware.NewConcurrencyLimiter(publicMaxConcurrency),
+		CacheProvider:     deps.CacheProvider,
+		ServerVersion:     deps.ServerVersion,
+		Config:            deps.Config,
 	}
 	RegisterRoutes(router, routerDeps)
 

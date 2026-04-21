@@ -97,6 +97,17 @@ type PathProvider interface {
 	GetFilePath(storagePath string) (string, error)
 }
 
+// ObjectInfo describes cheap-to-fetch metadata for a stored object.
+type ObjectInfo struct {
+	Size        int64
+	ContentType string
+}
+
+// ObjectInfoProvider exposes object metadata without downloading the object.
+type ObjectInfoProvider interface {
+	GetObjectInfo(ctx context.Context, storagePath string) (ObjectInfo, error)
+}
+
 // StreamProvider 流式传输到 ResponseWriter 的存储
 type StreamProvider interface {
 	Provider

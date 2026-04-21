@@ -41,20 +41,22 @@ func getBaseURL(cfg *config.Config) string {
 
 // RouterDependencies 路由注册依赖
 type RouterDependencies struct {
-	VariantRepo      *images.VariantRepository
-	DashboardRepo    *dashboardRepo.Repository
-	SqlDB            *sql.DB
-	Repositories     *Repositories
-	ConfigManager    *configSvc.Manager
-	Converter        *imageSvc.Converter
-	JWTService       *auth.JWTService
-	LoginService     *auth.LoginService
-	AuthRateLimiter  *middleware.IPRateLimiter
-	APIRateLimiter   *middleware.IPRateLimiter
-	ImageRateLimiter *middleware.IPRateLimiter
-	CacheProvider    cache.Provider
-	ServerVersion    ServerVersion
-	Config           *config.Config
+	VariantRepo       *images.VariantRepository
+	DashboardRepo     *dashboardRepo.Repository
+	SqlDB             *sql.DB
+	Repositories      *Repositories
+	ConfigManager     *configSvc.Manager
+	Converter         *imageSvc.Converter
+	JWTService        *auth.JWTService
+	LoginService      *auth.LoginService
+	AuthRateLimiter   *middleware.IPRateLimiter
+	APIRateLimiter    *middleware.IPRateLimiter
+	ImageRateLimiter  *middleware.IPRateLimiter
+	APIConcurrency    *middleware.ConcurrencyLimiter
+	PublicConcurrency *middleware.ConcurrencyLimiter
+	CacheProvider     cache.Provider
+	ServerVersion     ServerVersion
+	Config            *config.Config
 }
 
 // RegisterRoutes 注册所有路由
@@ -89,6 +91,9 @@ func newImageHandler(deps *RouterDependencies) *handlerImages.Handler {
 func registerBasicRoutes(router *gin.Engine, deps *RouterDependencies) {
 	// System Routes
 	systemGroup := router.Group("/system")
+	if deps.APIConcurrency != nil {
+		systemGroup.Use(deps.APIConcurrency.Middleware())
+	}
 	{
 		systemHandler := handlerSystem.NewHandler()
 		healthHandler := handlerSystem.NewHealthHandler(deps.SqlDB, storage.GetDefault())
@@ -119,6 +124,10 @@ func registerBasicRoutes(router *gin.Engine, deps *RouterDependencies) {
 func registerPublicRoutes(router *gin.Engine, deps *RouterDependencies, imageHandler *handlerImages.Handler) {
 	// 公共图片访问
 	publicGroup := router.Group("/images")
+	if deps.PublicConcurrency != nil {
+		publicGroup.Use(deps.PublicConcurrency.Middleware())
+	}
+	publicGroup.Use(middleware.OptionalCombinedAuth(deps.JWTService))
 	publicGroup.Use(deps.ImageRateLimiter.Middleware())
 	{
 		publicGroup.GET("/random", imageHandler.RandomImage)
@@ -126,6 +135,10 @@ func registerPublicRoutes(router *gin.Engine, deps *RouterDependencies, imageHan
 	}
 
 	thumbnailGroup := router.Group("/thumbnails")
+	if deps.PublicConcurrency != nil {
+		thumbnailGroup.Use(deps.PublicConcurrency.Middleware())
+	}
+	thumbnailGroup.Use(middleware.OptionalCombinedAuth(deps.JWTService))
 	thumbnailGroup.Use(deps.ImageRateLimiter.Middleware())
 	{
 		thumbnailGroup.GET("/:identifier", imageHandler.GetThumbnail)
@@ -151,6 +164,9 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies, imageHandle
 	userHandler := handlerUser.NewHandler(userService)
 
 	apiGroup := router.Group("/api")
+	if deps.APIConcurrency != nil {
+		apiGroup.Use(deps.APIConcurrency.Middleware())
+	}
 	apiGroup.Use(func(context *gin.Context) {
 		context.Header("Cache-Control", config.CacheControlNoStore)
 		context.Next()

@@ -221,6 +221,27 @@ func (s *WebDAVStorage) Exists(ctx context.Context, storagePath string) (bool, e
 	return false, err
 }
 
+func (s *WebDAVStorage) GetObjectInfo(ctx context.Context, storagePath string) (ObjectInfo, error) {
+	select {
+	case <-ctx.Done():
+		return ObjectInfo{}, ctx.Err()
+	default:
+	}
+
+	fullPath := s.fullPath(storagePath)
+	info, err := s.client.Stat(fullPath)
+	if err != nil {
+		if gowebdav.IsErrNotFound(err) {
+			return ObjectInfo{}, fmt.Errorf("file not found: %s", storagePath)
+		}
+		return ObjectInfo{}, err
+	}
+
+	return ObjectInfo{
+		Size: info.Size(),
+	}, nil
+}
+
 // Health 检查存储健康状态
 func (s *WebDAVStorage) Health(ctx context.Context) error {
 	// 先检查上下文是否已取消

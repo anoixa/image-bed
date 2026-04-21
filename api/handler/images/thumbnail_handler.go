@@ -109,13 +109,13 @@ func (h *Handler) serveThumbnailImage(c *gin.Context, image *models.Image, resul
 	}
 
 	if opener, ok := provider.(storage.FileOpener); ok {
-		if h.serveThumbnailBySendfile(c, result, opener) {
+		if h.serveThumbnailBySendfile(c, image, result, opener) {
 			return
 		}
 	}
 
 	if streamer, ok := provider.(storage.StreamProvider); ok {
-		if h.serveThumbnailByStreaming(c, result, streamer) {
+		if h.serveThumbnailByStreaming(c, image, result, streamer) {
 			return
 		}
 	}
@@ -130,15 +130,15 @@ func (h *Handler) serveThumbnailImage(c *gin.Context, image *models.Image, resul
 			_ = closer.Close()
 		}
 	}()
-	h.serveReadSeekerContent(c, result.Identifier, result.MIMEType, result.FileHash, stream, true)
+	h.serveReadSeekerContent(c, result.Identifier, result.MIMEType, result.FileHash, stream, true, cacheControlForImage(image.IsPublic))
 }
 
-func (h *Handler) serveThumbnailByStreaming(c *gin.Context, result *image.ThumbnailResult, streamer storage.StreamProvider) bool {
+func (h *Handler) serveThumbnailByStreaming(c *gin.Context, image *models.Image, result *image.ThumbnailResult, streamer storage.StreamProvider) bool {
 	if checkETag(c, result.FileHash) {
 		return true
 	}
 
-	c.Header("Cache-Control", config.CacheControlPublic)
+	c.Header("Cache-Control", cacheControlForImage(image.IsPublic))
 	c.Header("Content-Type", result.MIMEType)
 	c.Header("X-Content-Type-Options", "nosniff")
 
@@ -149,7 +149,7 @@ func (h *Handler) serveThumbnailByStreaming(c *gin.Context, result *image.Thumbn
 	return true
 }
 
-func (h *Handler) serveThumbnailBySendfile(c *gin.Context, result *image.ThumbnailResult, opener storage.FileOpener) bool {
+func (h *Handler) serveThumbnailBySendfile(c *gin.Context, image *models.Image, result *image.ThumbnailResult, opener storage.FileOpener) bool {
 	if checkETag(c, result.FileHash) {
 		return true
 	}
@@ -165,7 +165,7 @@ func (h *Handler) serveThumbnailBySendfile(c *gin.Context, result *image.Thumbna
 		return false
 	}
 
-	c.Header("Cache-Control", config.CacheControlPublic)
+	c.Header("Cache-Control", cacheControlForImage(image.IsPublic))
 	c.Header("Content-Type", result.MIMEType)
 	c.Header("Content-Length", strconv.FormatInt(stat.Size(), 10))
 	c.Header("X-Content-Type-Options", "nosniff")
