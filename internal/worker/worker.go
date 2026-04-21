@@ -172,14 +172,6 @@ func (s *ImageProcessingSemaphore) Release() {
 	}
 }
 
-// min 返回较小的整数
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // InitGlobalPool 初始化全局任务池
 func InitGlobalPool(workers, queueSize int) {
 	globalPoolOnce.Do(func() {
