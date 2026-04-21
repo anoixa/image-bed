@@ -14,10 +14,10 @@ import (
 var dashboardLog = utils.ForModule("Dashboard")
 
 type StatsRepository interface {
-	GetOverviewStats() (*dashboard.OverviewStats, error)
-	GetImageTimeStats() (*dashboard.ImageTimeStats, error)
-	GetStorageStats() ([]dashboard.StorageStat, error)
-	GetDailyStats(days int) ([]dashboard.DailyStat, error)
+	GetOverviewStats(ctx context.Context) (*dashboard.OverviewStats, error)
+	GetImageTimeStats(ctx context.Context) (*dashboard.ImageTimeStats, error)
+	GetStorageStats(ctx context.Context) ([]dashboard.StorageStat, error)
+	GetDailyStats(ctx context.Context, days int) ([]dashboard.DailyStat, error)
 }
 
 type Service struct {
@@ -89,25 +89,25 @@ func (s *Service) GetStats(ctx context.Context) (*StatsResponse, error) {
 	}
 
 	// 查询概览统计
-	overview, err := s.repo.GetOverviewStats()
+	overview, err := s.repo.GetOverviewStats(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	// 查询时间维度统计
-	timeStats, err := s.repo.GetImageTimeStats()
+	timeStats, err := s.repo.GetImageTimeStats(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	// 查询存储统计
-	storageStats, err := s.repo.GetStorageStats()
+	storageStats, err := s.repo.GetStorageStats(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	// 查询趋势数据
-	dailyStats, err := s.repo.GetDailyStats(30)
+	dailyStats, err := s.repo.GetDailyStats(ctx, 30)
 	if err != nil {
 		return nil, err
 	}

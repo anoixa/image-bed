@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -21,6 +22,11 @@ func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{db: db}
 }
 
+// WithContext 返回带上下文的仓库副本
+func (r *Repository) WithContext(ctx context.Context) *Repository {
+	return &Repository{db: r.db.WithContext(ctx)}
+}
+
 // OverviewStats 概览统计
 type OverviewStats struct {
 	ImageTotal   int64
@@ -30,11 +36,13 @@ type OverviewStats struct {
 }
 
 // GetOverviewStats 获取概览统计
-func (r *Repository) GetOverviewStats() (*OverviewStats, error) {
+func (r *Repository) GetOverviewStats(ctx context.Context) (*OverviewStats, error) {
 	var result OverviewStats
 
+	db := r.db.WithContext(ctx)
+
 	// 图片总数和存储大小
-	err := r.db.Model(&models.Image{}).
+	err := db.Model(&models.Image{}).
 		Select("COUNT(*) as image_total, COALESCE(SUM(file_size), 0) as storage_total").
 		Where("deleted_at IS NULL").
 		Scan(&result).Error
@@ -43,7 +51,7 @@ func (r *Repository) GetOverviewStats() (*OverviewStats, error) {
 	}
 
 	// 相册数量
-	if err := r.db.Model(&models.Album{}).
+	if err := db.Model(&models.Album{}).
 		Where("deleted_at IS NULL").
 		Select("COUNT(*)").
 		Scan(&result.AlbumTotal).Error; err != nil {
@@ -65,9 +73,10 @@ type ImageTimeStats struct {
 }
 
 // GetImageTimeStats 获取图片时间维度统计
-func (r *Repository) GetImageTimeStats() (*ImageTimeStats, error) {
+func (r *Repository) GetImageTimeStats(ctx context.Context) (*ImageTimeStats, error) {
 	var stats ImageTimeStats
 	now := time.Now()
+	db := r.db.WithContext(ctx)
 
 	// 计算今日时间范围
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
@@ -91,28 +100,28 @@ func (r *Repository) GetImageTimeStats() (*ImageTimeStats, error) {
 	monthEnd := monthStart.AddDate(0, 1, 0)
 
 	// 今日
-	if err := r.db.Model(&models.Image{}).
+	if err := db.Model(&models.Image{}).
 		Where("created_at >= ? AND created_at < ? AND deleted_at IS NULL", todayStart, todayEnd).
 		Count(&stats.Today).Error; err != nil {
 		return nil, fmt.Errorf("failed to count today images: %w", err)
 	}
 
 	// 昨日
-	if err := r.db.Model(&models.Image{}).
+	if err := db.Model(&models.Image{}).
 		Where("created_at >= ? AND created_at < ? AND deleted_at IS NULL", yesterdayStart, yesterdayEnd).
 		Count(&stats.Yesterday).Error; err != nil {
 		return nil, fmt.Errorf("failed to count yesterday images: %w", err)
 	}
 
 	// 本周
-	if err := r.db.Model(&models.Image{}).
+	if err := db.Model(&models.Image{}).
 		Where("created_at >= ? AND created_at < ? AND deleted_at IS NULL", weekStart, weekEnd).
 		Count(&stats.ThisWeek).Error; err != nil {
 		return nil, fmt.Errorf("failed to count this week images: %w", err)
 	}
 
 	// 本月
-	if err := r.db.Model(&models.Image{}).
+	if err := db.Model(&models.Image{}).
 		Where("created_at >= ? AND created_at < ? AND deleted_at IS NULL", monthStart, monthEnd).
 		Count(&stats.ThisMonth).Error; err != nil {
 		return nil, fmt.Errorf("failed to count this month images: %w", err)
@@ -130,10 +139,10 @@ type StorageStat struct {
 }
 
 // GetStorageStats 获取各存储类型统计
-func (r *Repository) GetStorageStats() ([]StorageStat, error) {
+func (r *Repository) GetStorageStats(ctx context.Context) ([]StorageStat, error) {
 	var stats []StorageStat
 
-	err := r.db.Table("images i").
+	err := r.db.WithContext(ctx).Table("images i").
 		Select("i.storage_config_id as storage_id, sc.name as storage_name, COUNT(*) as count, SUM(i.file_size) as size").
 		Joins("LEFT JOIN system_configs sc ON i.storage_config_id = sc.id").
 		Where("i.deleted_at IS NULL").
@@ -151,7 +160,7 @@ type DailyStat struct {
 }
 
 // GetDailyStats 获取近 N 天每日统计
-func (r *Repository) GetDailyStats(days int) ([]DailyStat, error) {
+func (r *Repository) GetDailyStats(ctx context.Context, days int) ([]DailyStat, error) {
 	var stats []DailyStat
 
 	// 计算起始时间（N天前的零点）
@@ -161,7 +170,7 @@ func (r *Repository) GetDailyStats(days int) ([]DailyStat, error) {
 
 	statsRepoLog.Debugf("Querying from %s, days=%d", startDate.Format("2006-01-02"), days)
 
-	err := r.db.Table("images").
+	err := r.db.WithContext(ctx).Table("images").
 		Select("DATE(created_at) as date, COUNT(*) as count").
 		Where("created_at >= ? AND deleted_at IS NULL", startDate).
 		Group("DATE(created_at)").
