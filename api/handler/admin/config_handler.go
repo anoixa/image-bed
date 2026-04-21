@@ -171,7 +171,7 @@ func (h *ConfigHandler) CreateConfig(c *gin.Context) {
 
 	// test connection
 	if req.Category == models.ConfigCategoryStorage {
-		testResult := h.testConfig(&models.TestConfigRequest{
+		testResult := h.testConfig(ctx, &models.TestConfigRequest{
 			Category: req.Category,
 			Config:   req.Config,
 		})
@@ -237,7 +237,7 @@ func (h *ConfigHandler) UpdateConfig(c *gin.Context) {
 	}
 
 	if req.Category == models.ConfigCategoryStorage {
-		testResult := h.testConfig(&models.TestConfigRequest{
+		testResult := h.testConfig(ctx, &models.TestConfigRequest{
 			Category: req.Category,
 			Config:   req.Config,
 		})
@@ -526,7 +526,7 @@ func (h *ConfigHandler) TestConfig(c *gin.Context) {
 		return
 	}
 
-	result := h.testConfig(&req)
+	result := h.testConfig(c.Request.Context(), &req)
 	common.RespondSuccess(c, result)
 }
 
@@ -551,10 +551,10 @@ func filterVisibleConfigs(configs []*models.ConfigResponse) []*models.ConfigResp
 }
 
 // testConfig 测试配置
-func (h *ConfigHandler) testConfig(req *models.TestConfigRequest) *models.TestConfigResponse {
+func (h *ConfigHandler) testConfig(ctx context.Context, req *models.TestConfigRequest) *models.TestConfigResponse {
 	switch req.Category {
 	case models.ConfigCategoryStorage:
-		return h.testStorageConfig(req.Config)
+		return h.testStorageConfig(ctx, req.Config)
 	case models.ConfigCategoryImageProcessing:
 		return &models.TestConfigResponse{
 			Success: true,
@@ -569,7 +569,10 @@ func (h *ConfigHandler) testConfig(req *models.TestConfigRequest) *models.TestCo
 }
 
 // testStorageConfig 测试存储配置
-func (h *ConfigHandler) testStorageConfig(config map[string]any) *models.TestConfigResponse {
+func (h *ConfigHandler) testStorageConfig(ctx context.Context, config map[string]any) *models.TestConfigResponse {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
 	storageType, _ := config["type"].(string)
 	if storageType == "" {
 		return &models.TestConfigResponse{
@@ -595,7 +598,6 @@ func (h *ConfigHandler) testStorageConfig(config map[string]any) *models.TestCon
 				Message: fmt.Sprintf("Failed to create local storage: %v", err),
 			}
 		}
-		ctx := context.Background()
 		if err := provider.Health(ctx); err != nil {
 			return &models.TestConfigResponse{
 				Success: false,
@@ -638,7 +640,6 @@ func (h *ConfigHandler) testStorageConfig(config map[string]any) *models.TestCon
 				Message: fmt.Sprintf("Failed to create S3 storage: %v", err),
 			}
 		}
-		ctx := context.Background()
 		if err := provider.Health(ctx); err != nil {
 			return &models.TestConfigResponse{
 				Success: false,
@@ -677,7 +678,6 @@ func (h *ConfigHandler) testStorageConfig(config map[string]any) *models.TestCon
 				Message: fmt.Sprintf("Failed to create WebDAV storage: %v", err),
 			}
 		}
-		ctx := context.Background()
 		if err := provider.Health(ctx); err != nil {
 			return &models.TestConfigResponse{
 				Success: false,

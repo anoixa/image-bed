@@ -165,7 +165,7 @@ func TestTestStorageConfigRejectsBlockedRemoteAddresses(t *testing.T) {
 	t.Run("Rejects blocked S3 endpoint", func(t *testing.T) {
 		t.Parallel()
 
-		result := handler.testStorageConfig(map[string]any{
+		result := handler.testStorageConfig(context.Background(), map[string]any{
 			"type":              "s3",
 			"endpoint":          "127.0.0.1:9000",
 			"bucket_name":       "images",
@@ -181,7 +181,7 @@ func TestTestStorageConfigRejectsBlockedRemoteAddresses(t *testing.T) {
 	t.Run("Rejects blocked WebDAV URL", func(t *testing.T) {
 		t.Parallel()
 
-		result := handler.testStorageConfig(map[string]any{
+		result := handler.testStorageConfig(context.Background(), map[string]any{
 			"type":        "webdav",
 			"webdav_url":  "http://localhost:8080/dav",
 			"webdav_root": "/",

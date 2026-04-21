@@ -43,7 +43,8 @@ func TestResetVariantWorkSnapshotsResetsProcessingState(t *testing.T) {
 	require.NoError(t, db.Create(webp).Error)
 
 	deps := &Dependencies{
-		DB: db,
+		DB:          db,
+		VariantRepo: variantRepo,
 		Repositories: &core.Repositories{
 			ImagesRepo: imageRepo,
 		},

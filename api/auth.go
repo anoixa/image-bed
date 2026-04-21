@@ -9,59 +9,27 @@ import (
 	"github.com/anoixa/image-bed/internal/auth"
 )
 
-var (
-	// jwtService JWT 服务实例
-	jwtService   *auth.JWTService
-	authKeysRepo *keys.Repository
-)
-
-// SetJWTService 设置 JWT 服务
-func SetJWTService(service *auth.JWTService) {
-	jwtService = service
+// NewJWTServiceFromConfig 从应用配置创建 JWT 服务
+func NewJWTServiceFromConfig(cfg *appconfig.Config, manager *configSvc.Manager, keysRepo *keys.Repository) (*auth.JWTService, error) {
+	return auth.NewJWTService(cfg, manager, keysRepo)
 }
 
-// SetAuthKeysRepo 设置 Keys 仓库
-func SetAuthKeysRepo(repo *keys.Repository) {
-	authKeysRepo = repo
-}
-
-// TokenInitFromConfig 从应用配置初始化 JWT
-func TokenInitFromConfig(cfg *appconfig.Config, manager *configSvc.Manager) error {
-	var err error
-	jwtService, err = auth.NewJWTService(cfg, manager, authKeysRepo)
-	return err
-}
-
-// GetJWTConfig 获取当前 JWT 配置
-func GetJWTConfig() (secret []byte, expiresIn, refreshExpiresIn time.Duration) {
-	if jwtService == nil {
-		return nil, 0, 0
-	}
-	config := jwtService.GetConfig()
-	return config.Secret, config.ExpiresIn, config.RefreshExpiresIn
-}
-
-// GetJWTService 获取 JWT 服务实例
-func GetJWTService() *auth.JWTService {
-	return jwtService
-}
-
-// InitTestJWT 初始化测试用的 JWT 配置
-func InitTestJWT(secret, expiresInStr, refreshExpiresInStr string) error {
+// NewTestJWTService 创建测试用 JWT 服务
+func NewTestJWTService(secret, expiresInStr, refreshExpiresInStr string) (*auth.JWTService, error) {
 	expiresIn, err := time.ParseDuration(expiresInStr)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	refreshExpiresIn, err := time.ParseDuration(refreshExpiresInStr)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	jwtService = &auth.JWTService{}
+	jwtService := &auth.JWTService{}
 	jwtService.SetConfig(auth.TokenConfig{
 		Secret:           []byte(secret),
 		ExpiresIn:        expiresIn,
 		RefreshExpiresIn: refreshExpiresIn,
 	})
-	return nil
+	return jwtService, nil
 }

@@ -1,7 +1,6 @@
 package albums
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -92,7 +91,8 @@ func (h *Handler) UpdateAlbumHandler(c *gin.Context) {
 
 	// 清除相册缓存和用户的相册列表缓存
 	utils.SafeGo(func() {
-		ctx := context.Background()
+		ctx, cancel := utils.DetachedContext(5 * time.Second)
+		defer cancel()
 		if err := h.cacheHelper.DeleteCachedAlbum(ctx, uint(albumID)); err != nil {
 			albumLog.Debugf("Failed to delete album cache for %d: %v", albumID, err)
 		}

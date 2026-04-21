@@ -19,7 +19,6 @@ var configManagerLog = utils.ForModule("ConfigManager")
 
 // Manager 配置管理器
 type Manager struct {
-	db       *gorm.DB
 	repo     configs.Repository
 	crypto   *CryptoLayer
 	cache    *CacheLayer
@@ -34,7 +33,6 @@ func NewManager(db *gorm.DB, dataPath string) *Manager {
 	cryptoSvc := cryptoservice.NewService(dataPath)
 
 	return &Manager{
-		db:       db,
 		repo:     repo,
 		crypto:   NewCryptoLayer(repo, cryptoSvc),
 		cache:    NewCacheLayer(),

@@ -29,7 +29,6 @@ import (
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
-	"gorm.io/gorm"
 )
 
 // getBaseURL 从配置获取基础 URL
@@ -42,8 +41,8 @@ func getBaseURL(cfg *config.Config) string {
 
 // RouterDependencies 路由注册依赖
 type RouterDependencies struct {
-	DB               *gorm.DB
 	VariantRepo      *images.VariantRepository
+	DashboardRepo    *dashboardRepo.Repository
 	SqlDB            *sql.DB
 	Repositories     *Repositories
 	ConfigManager    *configSvc.Manager
@@ -100,7 +99,7 @@ func registerBasicRoutes(router *gin.Engine, deps *RouterDependencies) {
 		systemGroup.GET("/metrics", systemHandler.GetMetrics)
 
 		authSystemGroup := systemGroup.Group("")
-		authSystemGroup.Use(middleware.CombinedAuth())
+		authSystemGroup.Use(middleware.CombinedAuth(deps.JWTService))
 		authSystemGroup.Use(middleware.Authorize(middleware.AllowJWTOnly...))
 		authSystemGroup.GET("/status", systemHandler.GetStatus)
 	}
@@ -145,8 +144,7 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies, imageHandle
 	keyHandler := key.NewHandler(keyService)
 	loginHandler := api.NewLoginHandlerWithService(deps.LoginService, cfg)
 
-	dashboardRepository := dashboardRepo.NewRepository(deps.DB)
-	dashboardService := svcDashboard.NewService(dashboardRepository, deps.CacheProvider)
+	dashboardService := svcDashboard.NewService(deps.DashboardRepo, deps.CacheProvider)
 	dashboardHandler := handlerDashboard.NewHandler(dashboardService)
 
 	userService := svcUser.NewService(deps.Repositories.AccountsRepo, deps.Repositories.DevicesRepo)
@@ -168,7 +166,7 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies, imageHandle
 
 		v1 := apiGroup.Group("/v1")
 		v1.Use(deps.APIRateLimiter.Middleware())
-		v1.Use(middleware.CombinedAuth())
+		v1.Use(middleware.CombinedAuth(deps.JWTService))
 		{
 			// Images
 			imagesGroup := v1.Group("/images")

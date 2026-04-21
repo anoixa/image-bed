@@ -1,8 +1,8 @@
 package albums
 
 import (
-	"context"
 	"net/http"
+	"time"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
@@ -63,7 +63,8 @@ func (h *Handler) CreateAlbumHandler(c *gin.Context) {
 
 	// 清除用户相册列表缓存
 	utils.SafeGo(func() {
-		ctx := context.Background()
+		ctx, cancel := utils.DetachedContext(5 * time.Second)
+		defer cancel()
 		if err := h.cacheHelper.DeleteCachedAlbumList(ctx, userID); err != nil {
 			albumLog.Debugf("Failed to delete album list cache for user %d: %v", userID, err)
 		}

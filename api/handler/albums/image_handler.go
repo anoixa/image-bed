@@ -1,7 +1,6 @@
 package albums
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -147,7 +146,8 @@ func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 
 	if addedCount > 0 {
 		utils.SafeGo(func() {
-			ctx := context.Background()
+			ctx, cancel := utils.DetachedContext(5 * time.Second)
+			defer cancel()
 			if err := h.cacheHelper.DeleteCachedAlbum(ctx, uint(albumID)); err != nil {
 				albumLog.Debugf("Failed to delete album cache for %d: %v", albumID, err)
 			}
@@ -220,7 +220,8 @@ func (h *AlbumImageHandler) RemoveImageFromAlbumHandler(c *gin.Context) {
 
 	// 清除相关缓存
 	utils.SafeGo(func() {
-		ctx := context.Background()
+		ctx, cancel := utils.DetachedContext(5 * time.Second)
+		defer cancel()
 		if err := h.cacheHelper.DeleteCachedAlbum(ctx, uint(albumID)); err != nil {
 			albumLog.Debugf("Failed to delete album cache for %d: %v", albumID, err)
 		}
@@ -326,7 +327,8 @@ func (h *AlbumImageHandler) RemoveImagesFromAlbumHandler(c *gin.Context) {
 
 	if removedCount > 0 {
 		utils.SafeGo(func() {
-			ctx := context.Background()
+			ctx, cancel := utils.DetachedContext(5 * time.Second)
+			defer cancel()
 			if err := h.cacheHelper.DeleteCachedAlbum(ctx, uint(albumID)); err != nil {
 				albumLog.Debugf("Failed to delete album cache for %d: %v", albumID, err)
 			}

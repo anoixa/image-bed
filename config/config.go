@@ -14,6 +14,7 @@ import (
 var (
 	globalConfig Config
 	once         sync.Once
+	initErr      error
 )
 
 // Config 扁平化配置结构体
@@ -78,10 +79,11 @@ type Config struct {
 }
 
 // InitConfig Initialize configuration
-func InitConfig() {
+func InitConfig() error {
 	once.Do(func() {
-		loadConfig()
+		initErr = loadConfig()
 	})
+	return initErr
 }
 
 func Get() *Config {
@@ -89,7 +91,7 @@ func Get() *Config {
 }
 
 // loadConfig Core configuration loading
-func loadConfig() {
+func loadConfig() error {
 	setDefaults()
 
 	viper.SetConfigFile(".env")
@@ -107,8 +109,7 @@ func loadConfig() {
 	}
 
 	if err := viper.Unmarshal(&globalConfig); err != nil {
-		fmt.Fprintf(os.Stderr, "Fatal error: Unable to unmarshal config, %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("unable to unmarshal config: %w", err)
 	}
 
 	// WorkerCount: -1 = 使用当前 GOMAXPROCS, 0 = 使用默认值 (max(2, GOMAXPROCS)), >0 = 使用指定值
@@ -118,6 +119,8 @@ func loadConfig() {
 	case globalConfig.WorkerCount == 0:
 		globalConfig.WorkerCount = getCpus()
 	}
+
+	return nil
 }
 
 // setDefaults 设置默认值

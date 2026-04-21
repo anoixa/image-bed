@@ -142,7 +142,7 @@ func TestFailPendingVariantsOnSubmitFailureMarksVariantsAndImageFailed(t *testin
 		variantRepo: variantRepo,
 	}
 
-	converter.failPendingVariantsOnSubmitFailure(image, "worker task submission rejected", thumb, webp)
+	converter.failPendingVariantsOnSubmitFailure(imageRepo, variantRepo, image, "worker task submission rejected", thumb, webp)
 
 	updatedImage, err := imageRepo.GetImageByIdentifier(image.Identifier)
 	require.NoError(t, err)

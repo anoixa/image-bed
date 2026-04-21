@@ -7,20 +7,19 @@ import (
 
 	"github.com/anoixa/image-bed/utils"
 
-	"github.com/anoixa/image-bed/api"
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
 	configSvc "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/repo/accounts"
 	"github.com/anoixa/image-bed/database/repo/albums"
+	dashboardRepo "github.com/anoixa/image-bed/database/repo/dashboard"
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/database/repo/keys"
 	"github.com/anoixa/image-bed/internal/auth"
 	imageSvc "github.com/anoixa/image-bed/internal/image"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 )
 
 var serverLog = utils.ForModule("Server")
@@ -42,8 +41,10 @@ type ServerVersion struct {
 
 // ServerDependencies 服务器依赖项
 type ServerDependencies struct {
-	DB            *gorm.DB
+	SqlDB         *sql.DB
 	Repositories  *Repositories
+	VariantRepo   *images.VariantRepository
+	DashboardRepo *dashboardRepo.Repository
 	ConfigManager *configSvc.Manager
 	Converter     *imageSvc.Converter
 	JWTService    *auth.JWTService
@@ -107,33 +108,16 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 		imageRateLimiter.StopCleanup()
 	}
 
-	var jwtService *auth.JWTService
+	jwtService := deps.JWTService
 	var loginService *auth.LoginService
-
-	if deps.JWTService != nil {
-		jwtService = deps.JWTService
-	} else if deps.Config != nil {
-		var err error
-		jwtService, err = auth.NewJWTService(deps.Config, deps.ConfigManager, deps.Repositories.KeysRepo)
-		if err != nil {
-			serverLog.Errorf("Failed to initialize JWT service from app config: %v, using defaults", err)
-		}
-	}
-
 	if jwtService != nil {
 		loginService = auth.NewLoginService(deps.Repositories.AccountsRepo, deps.Repositories.DevicesRepo, jwtService)
-		api.SetJWTService(jwtService)
-	}
-
-	var sqlDB *sql.DB
-	if deps.DB != nil {
-		sqlDB, _ = deps.DB.DB()
 	}
 
 	routerDeps := &RouterDependencies{
-		DB:               deps.DB,
-		VariantRepo:      images.NewVariantRepository(deps.DB),
-		SqlDB:            sqlDB,
+		VariantRepo:      deps.VariantRepo,
+		DashboardRepo:    deps.DashboardRepo,
+		SqlDB:            deps.SqlDB,
 		Repositories:     deps.Repositories,
 		ConfigManager:    deps.ConfigManager,
 		Converter:        deps.Converter,

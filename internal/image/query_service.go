@@ -25,7 +25,7 @@ func NewQueryService(repo *images.Repository, configManager *dbconfig.Manager) *
 }
 
 // ListImages 获取图片列表
-func (s *QueryService) ListImages(storageType string, identifier string, search string, albumID *uint, startTime, endTime int64, sort string, page int, limit int, userID int) (*ListImagesResult, error) {
+func (s *QueryService) ListImages(ctx context.Context, storageType string, identifier string, search string, albumID *uint, startTime, endTime int64, sort string, page int, limit int, userID int) (*ListImagesResult, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -37,7 +37,7 @@ func (s *QueryService) ListImages(storageType string, identifier string, search 
 		limit = config.MaxPerPage
 	}
 
-	storageConfigIDs, err := s.resolveStorageConfigIDs(context.Background(), storageType)
+	storageConfigIDs, err := s.resolveStorageConfigIDs(ctx, storageType)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +51,7 @@ func (s *QueryService) ListImages(storageType string, identifier string, search 
 		}, nil
 	}
 
-	list, total, err := s.repo.GetImageList(storageConfigIDs, identifier, search, albumID, startTime, endTime, sort, page, limit, userID)
+	list, total, err := s.repo.WithContext(ctx).GetImageList(storageConfigIDs, identifier, search, albumID, startTime, endTime, sort, page, limit, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get image list: %w", err)
 	}
@@ -95,11 +95,11 @@ func (s *QueryService) resolveStorageConfigIDs(ctx context.Context, storageType 
 }
 
 // GetImageByIdentifier 获取图片
-func (s *QueryService) GetImageByIdentifier(identifier string) (*models.Image, error) {
-	return s.repo.GetImageByIdentifier(identifier)
+func (s *QueryService) GetImageByIdentifier(ctx context.Context, identifier string) (*models.Image, error) {
+	return s.repo.WithContext(ctx).GetImageByIdentifier(identifier)
 }
 
 // UpdateImageByIdentifier 更新图片
-func (s *QueryService) UpdateImageByIdentifier(identifier string, updates map[string]any) (*models.Image, error) {
-	return s.repo.UpdateImageByIdentifier(identifier, updates)
+func (s *QueryService) UpdateImageByIdentifier(ctx context.Context, identifier string, updates map[string]any) (*models.Image, error) {
+	return s.repo.WithContext(ctx).UpdateImageByIdentifier(identifier, updates)
 }

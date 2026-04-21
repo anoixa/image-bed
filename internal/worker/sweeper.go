@@ -69,7 +69,7 @@ func StartVariantSweeper(ctx context.Context, variantRepo *images.VariantReposit
 	}()
 }
 
-func sweepOnce(_ context.Context, variantRepo *images.VariantRepository, imageRepo *images.Repository, triggerFn TriggerFunc) {
+func sweepOnce(ctx context.Context, variantRepo *images.VariantRepository, imageRepo *images.Repository, triggerFn TriggerFunc) {
 	start := time.Now()
 	now := start
 	sweeperStats.runs.Add(1)
@@ -78,7 +78,7 @@ func sweepOnce(_ context.Context, variantRepo *images.VariantRepository, imageRe
 
 	var retriggered uint64
 
-	reset, failed, retriedImageIDs, err := variantRepo.RecoverStaleProcessing(staleThreshold, staleMaxRetries)
+	reset, failed, retriedImageIDs, err := variantRepo.WithContext(ctx).RecoverStaleProcessing(staleThreshold, staleMaxRetries)
 	if err != nil {
 		recordSweeperError(now, err.Error())
 		sweeperLog.Warnf("Failed to reset stale variants: %v", err)
@@ -93,8 +93,9 @@ func sweepOnce(_ context.Context, variantRepo *images.VariantRepository, imageRe
 
 	// Re-trigger conversion for images with reset variants
 	if triggerFn != nil && len(retriedImageIDs) > 0 {
+		repoWithCtx := imageRepo.WithContext(ctx)
 		for _, imageID := range retriedImageIDs {
-			img, err := imageRepo.GetImageByID(imageID)
+			img, err := repoWithCtx.GetImageByID(imageID)
 			if err != nil {
 				sweeperLog.Warnf("Failed to fetch image %d for re-trigger: %v", imageID, err)
 				continue
@@ -108,7 +109,8 @@ func sweepOnce(_ context.Context, variantRepo *images.VariantRepository, imageRe
 
 	// Images that are no longer processing and have at least one failed
 	// variant should surface as failed rather than silently reverting to none.
-	failedRows, err := imageRepo.MarkStaleProcessingAsFailed(cutoff, retriedImageIDs)
+	repoWithCtx := imageRepo.WithContext(ctx)
+	failedRows, err := repoWithCtx.MarkStaleProcessingAsFailed(cutoff, retriedImageIDs)
 	if err != nil {
 		recordSweeperError(now, err.Error())
 		sweeperLog.Warnf("Failed to mark stale processing images as failed: %v", err)
@@ -118,7 +120,7 @@ func sweepOnce(_ context.Context, variantRepo *images.VariantRepository, imageRe
 
 	// Remaining stale images without failed variants can return to none and be
 	// retriggered on demand.
-	resetRows, err := imageRepo.ResetStaleProcessingToNone(cutoff, retriedImageIDs)
+	resetRows, err := repoWithCtx.ResetStaleProcessingToNone(cutoff, retriedImageIDs)
 	if err != nil {
 		recordSweeperError(now, err.Error())
 		sweeperLog.Warnf("Failed to reset stale image variant_status: %v", err)

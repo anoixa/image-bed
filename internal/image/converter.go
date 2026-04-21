@@ -1,7 +1,6 @@
 package image
 
 import (
-	"context"
 	"fmt"
 	"time"
 
@@ -51,8 +50,11 @@ func (c *Converter) TriggerConversionFromSweeper(image *models.Image) {
 }
 
 func (c *Converter) triggerConversion(image *models.Image, ignoreRetryWindow bool) {
-	ctx := context.Background()
+	ctx, cancel := utils.DetachedContext(5 * time.Second)
+	defer cancel()
 	now := time.Now()
+	variantRepo := c.variantRepo.WithContext(ctx)
+	imageRepo := c.imageRepo.WithContext(ctx)
 
 	settings, err := c.configManager.GetImageProcessingSettings(ctx)
 	if err != nil {
@@ -85,7 +87,7 @@ func (c *Converter) triggerConversion(image *models.Image, ignoreRetryWindow boo
 	if thumbnailEnabled {
 		size := settings.ThumbnailSizes[0]
 		thumbFormat := models.FormatThumbnailSize(size.Width)
-		thumbVariant, err = c.variantRepo.UpsertPending(image.ID, thumbFormat)
+		thumbVariant, err = variantRepo.UpsertPending(image.ID, thumbFormat)
 		if err != nil {
 			converterLog.Warnf("Failed to prepare thumbnail variant for image %s: %v", image.Identifier, err)
 			return
@@ -98,10 +100,10 @@ func (c *Converter) triggerConversion(image *models.Image, ignoreRetryWindow boo
 	// 创建 WebP 变体记录（如果启用）
 	var webpVariant *models.ImageVariant
 	if webpEnabled {
-		webpVariant, err = c.variantRepo.UpsertPending(image.ID, models.FormatWebP)
+		webpVariant, err = variantRepo.UpsertPending(image.ID, models.FormatWebP)
 		if err != nil {
 			converterLog.Warnf("Failed to prepare WebP variant for image %s: %v", image.Identifier, err)
-			c.failPendingVariantsOnSubmitFailure(image, fmt.Sprintf("submit aborted during webp preparation: %v", err), thumbVariant)
+			c.failPendingVariantsOnSubmitFailure(imageRepo, variantRepo, image, fmt.Sprintf("submit aborted during webp preparation: %v", err), thumbVariant)
 			return
 		}
 		if !variantReadyForSubmit(webpVariant, now, ignoreRetryWindow) {
@@ -111,10 +113,10 @@ func (c *Converter) triggerConversion(image *models.Image, ignoreRetryWindow boo
 
 	var avifVariant *models.ImageVariant
 	if avifEnabled {
-		avifVariant, err = c.variantRepo.UpsertPending(image.ID, models.FormatAVIF)
+		avifVariant, err = variantRepo.UpsertPending(image.ID, models.FormatAVIF)
 		if err != nil {
 			converterLog.Warnf("Failed to prepare AVIF variant for image %s: %v", image.Identifier, err)
-			c.failPendingVariantsOnSubmitFailure(image, fmt.Sprintf("submit aborted during avif preparation: %v", err), thumbVariant, webpVariant)
+			c.failPendingVariantsOnSubmitFailure(imageRepo, variantRepo, image, fmt.Sprintf("submit aborted during avif preparation: %v", err), thumbVariant, webpVariant)
 			return
 		}
 		if !variantReadyForSubmit(avifVariant, now, ignoreRetryWindow) {
@@ -130,7 +132,7 @@ func (c *Converter) triggerConversion(image *models.Image, ignoreRetryWindow boo
 	pool := worker.GetGlobalPool()
 	if pool == nil {
 		converterLog.Warnf("Worker pool unavailable for image %s", image.Identifier)
-		c.failPendingVariantsOnSubmitFailure(image, "worker pool not initialized", thumbVariant, webpVariant, avifVariant)
+		c.failPendingVariantsOnSubmitFailure(imageRepo, variantRepo, image, "worker pool not initialized", thumbVariant, webpVariant, avifVariant)
 		return
 	}
 
@@ -139,7 +141,7 @@ func (c *Converter) triggerConversion(image *models.Image, ignoreRetryWindow boo
 	if storageProvider == nil {
 		converterLog.Warnf("Storage provider unavailable for image %s (StorageConfigID=%d)",
 			image.Identifier, image.StorageConfigID)
-		c.failPendingVariantsOnSubmitFailure(image, "storage provider unavailable", thumbVariant, webpVariant, avifVariant)
+		c.failPendingVariantsOnSubmitFailure(imageRepo, variantRepo, image, "storage provider unavailable", thumbVariant, webpVariant, avifVariant)
 		return
 	}
 
@@ -165,23 +167,23 @@ func (c *Converter) triggerConversion(image *models.Image, ignoreRetryWindow boo
 
 	if !ok {
 		converterLog.Warnf("Failed to submit pipeline task for %s", image.Identifier)
-		c.failPendingVariantsOnSubmitFailure(image, "worker task submission rejected", thumbVariant, webpVariant, avifVariant)
+		c.failPendingVariantsOnSubmitFailure(imageRepo, variantRepo, image, "worker task submission rejected", thumbVariant, webpVariant, avifVariant)
 		return
 	}
 
-	if err := c.markImageProcessing(image); err != nil {
+	if err := c.markImageProcessing(imageRepo, image); err != nil {
 		converterLog.Warnf("Failed to update image %s status after submit: %v", image.Identifier, err)
 	}
 }
 
-func (c *Converter) failPendingVariantsOnSubmitFailure(image *models.Image, reason string, variants ...*models.ImageVariant) {
+func (c *Converter) failPendingVariantsOnSubmitFailure(imageRepo *images.Repository, variantRepo *images.VariantRepository, image *models.Image, reason string, variants ...*models.ImageVariant) {
 	hadPending := false
 	for _, variant := range variants {
 		if variant == nil || variant.Status != models.VariantStatusPending {
 			continue
 		}
 		hadPending = true
-		if err := c.variantRepo.ForceUpdateFailed(variant.ID, reason); err != nil {
+		if err := variantRepo.ForceUpdateFailed(variant.ID, reason); err != nil {
 			converterLog.Warnf("Failed to mark variant %d failed after submit failure: %v", variant.ID, err)
 		}
 	}
@@ -190,7 +192,7 @@ func (c *Converter) failPendingVariantsOnSubmitFailure(image *models.Image, reas
 		return
 	}
 
-	if err := c.imageRepo.UpdateVariantStatus(image.ID, models.ImageVariantStatusFailed); err != nil {
+	if err := imageRepo.UpdateVariantStatus(image.ID, models.ImageVariantStatusFailed); err != nil {
 		converterLog.Warnf("Failed to mark image %s failed after submit failure: %v", image.Identifier, err)
 		return
 	}
@@ -245,11 +247,11 @@ func getVariantID(v *models.ImageVariant) uint {
 	return v.ID
 }
 
-func (c *Converter) markImageProcessing(image *models.Image) error {
+func (c *Converter) markImageProcessing(imageRepo *images.Repository, image *models.Image) error {
 	if image.VariantStatus == models.ImageVariantStatusProcessing {
 		return nil
 	}
-	if err := c.imageRepo.UpdateVariantStatus(image.ID, models.ImageVariantStatusProcessing); err != nil {
+	if err := imageRepo.UpdateVariantStatus(image.ID, models.ImageVariantStatusProcessing); err != nil {
 		return err
 	}
 	image.VariantStatus = models.ImageVariantStatusProcessing

@@ -84,7 +84,7 @@ func TestCreateDedupedImageRecordPreservesOriginalStorageConfig(t *testing.T) {
 	}
 	require.NoError(t, repo.SaveImage(existing))
 
-	deduped, err := service.createDedupedImageRecord(existing, 2, "copy.webp", 99, false)
+	deduped, err := service.createDedupedImageRecord(context.Background(), existing, 2, "copy.webp", 99, false)
 	require.NoError(t, err)
 
 	assert.Equal(t, existing.StoragePath, deduped.StoragePath)

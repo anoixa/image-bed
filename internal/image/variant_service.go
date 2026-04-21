@@ -91,8 +91,8 @@ func (s *VariantService) handleOriginalWithConversion(image *models.Image, shoul
 }
 
 // handleCompletedVariants 处理已完成变体的情况
-func (s *VariantService) handleCompletedVariants(_ context.Context, image *models.Image, acceptHeader string, settings *config.ImageProcessingSettings) (*VariantResult, error) {
-	variants, err := s.variantRepo.GetVariantsByImageID(image.ID)
+func (s *VariantService) handleCompletedVariants(ctx context.Context, image *models.Image, acceptHeader string, settings *config.ImageProcessingSettings) (*VariantResult, error) {
+	variants, err := s.variantRepo.WithContext(ctx).GetVariantsByImageID(image.ID)
 	if err != nil {
 		return nil, err
 	}

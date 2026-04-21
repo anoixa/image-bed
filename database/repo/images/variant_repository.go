@@ -1,6 +1,7 @@
 package images
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -18,6 +19,11 @@ type VariantRepository struct {
 // NewVariantRepository 创建仓库
 func NewVariantRepository(db *gorm.DB) *VariantRepository {
 	return &VariantRepository{db: db}
+}
+
+// WithContext 返回带上下文的仓库副本。
+func (r *VariantRepository) WithContext(ctx context.Context) *VariantRepository {
+	return &VariantRepository{db: r.db.WithContext(ctx)}
 }
 
 // GetVariantsByImageID 获取图片的所有变体

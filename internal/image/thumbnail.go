@@ -38,7 +38,7 @@ func NewThumbnailService(variantRepo *images.VariantRepository) *ThumbnailServic
 func (s *ThumbnailService) GetThumbnail(ctx context.Context, image *models.Image, width int) (*ThumbnailResult, error) {
 	format := formatThumbnailSize(width)
 
-	variant, err := s.variantRepo.GetVariantByImageIDAndFormat(image.ID, format)
+	variant, err := s.variantRepo.WithContext(ctx).GetVariantByImageIDAndFormat(image.ID, format)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
@@ -78,7 +78,7 @@ func (s *ThumbnailService) EnsureThumbnail(ctx context.Context, image *models.Im
 
 // GetWebPVariant 获取 WebP 格式变体（用于缩略图降级）
 func (s *ThumbnailService) GetWebPVariant(ctx context.Context, image *models.Image) (*ThumbnailResult, bool, error) {
-	variant, err := s.variantRepo.GetVariantByImageIDAndFormat(image.ID, "webp")
+	variant, err := s.variantRepo.WithContext(ctx).GetVariantByImageIDAndFormat(image.ID, "webp")
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, false, nil

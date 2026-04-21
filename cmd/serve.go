@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
@@ -19,6 +20,7 @@ import (
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/accounts"
 	"github.com/anoixa/image-bed/database/repo/albums"
+	dashboardRepo "github.com/anoixa/image-bed/database/repo/dashboard"
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/database/repo/keys"
 	imageSvc "github.com/anoixa/image-bed/internal/image"
@@ -42,7 +44,9 @@ var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start API server",
 	Run: func(cmd *cobra.Command, args []string) {
-		initCommandLogger()
+		if err := initCommandLogger(); err != nil {
+			exitWithErrorf("Failed to initialize config/logger: %v", err)
+		}
 		RunServer()
 	},
 }
@@ -54,7 +58,10 @@ func init() {
 // Dependencies 服务器依赖项
 type Dependencies struct {
 	DB            *gorm.DB
+	SqlDB         *sql.DB
 	Repositories  *core.Repositories
+	VariantRepo   *images.VariantRepository
+	DashboardRepo *dashboardRepo.Repository
 	ConfigManager *configSvc.Manager
 	Converter     *imageSvc.Converter
 }
@@ -72,6 +79,12 @@ func InitDependencies(cfg *config.Config) (*Dependencies, error) {
 		return nil, fmt.Errorf("failed to auto migrate database: %w", err)
 	}
 	dependenciesLog.Infof("Database migration completed")
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		_ = database.Close(db)
+		return nil, fmt.Errorf("failed to extract sql db handle: %w", err)
+	}
 
 	repos := &core.Repositories{
 		AccountsRepo: accounts.NewRepository(db),
@@ -117,12 +130,16 @@ func InitDependencies(cfg *config.Config) (*Dependencies, error) {
 
 	variantRepo := images.NewVariantRepository(db)
 	imageRepo := images.NewRepository(db)
+	dashboardRepository := dashboardRepo.NewRepository(db)
 	cacheHelper := cache.NewHelper(cache.GetDefault())
 	converter := imageSvc.NewConverter(configManager, variantRepo, imageRepo, storage.GetDefault(), cacheHelper)
 
 	return &Dependencies{
 		DB:            db,
+		SqlDB:         sqlDB,
 		Repositories:  repos,
+		VariantRepo:   variantRepo,
+		DashboardRepo: dashboardRepository,
 		ConfigManager: configManager,
 		Converter:     converter,
 	}, nil
@@ -137,7 +154,9 @@ func (d *Dependencies) Close() error {
 }
 
 func RunServer() {
-	config.InitConfig()
+	if err := config.InitConfig(); err != nil {
+		exitWithErrorf("Failed to initialize config: %v", err)
+	}
 	cfg := config.Get()
 
 	utils.InitLogger(config.IsDevelopment())
@@ -180,20 +199,21 @@ func RunServer() {
 
 	sweeperCtx, sweeperCancel := context.WithCancel(context.Background())
 	defer sweeperCancel()
-	worker.StartVariantSweeper(sweeperCtx, images.NewVariantRepository(deps.DB), deps.Repositories.ImagesRepo, deps.Converter.TriggerConversionFromSweeper)
+	worker.StartVariantSweeper(sweeperCtx, deps.VariantRepo, deps.Repositories.ImagesRepo, deps.Converter.TriggerConversionFromSweeper)
 
-	// 初始化 JWT
-	api.SetAuthKeysRepo(deps.Repositories.KeysRepo)
-	if err := api.TokenInitFromConfig(cfg, deps.ConfigManager); err != nil {
+	jwtService, err := api.NewJWTServiceFromConfig(cfg, deps.ConfigManager, deps.Repositories.KeysRepo)
+	if err != nil {
 		exitWithErrorf("Failed to initialize JWT: %v", err)
 	}
 
 	serverDeps := &core.ServerDependencies{
-		DB:            deps.DB,
+		SqlDB:         deps.SqlDB,
 		Repositories:  deps.Repositories,
+		VariantRepo:   deps.VariantRepo,
+		DashboardRepo: deps.DashboardRepo,
 		ConfigManager: deps.ConfigManager,
 		Converter:     deps.Converter,
-		JWTService:    api.GetJWTService(),
+		JWTService:    jwtService,
 		Config:        cfg,
 		CacheProvider: cache.GetDefault(),
 		ServerVersion: core.ServerVersion{
@@ -301,8 +321,7 @@ func resetVariantWorkSnapshots(deps *Dependencies, snapshots []worker.InFlightTa
 		}
 	}
 
-	variantRepo := images.NewVariantRepository(deps.DB)
-	resetVariants, err := variantRepo.ResetVariantsToPending(variantIDs)
+	resetVariants, err := deps.VariantRepo.ResetVariantsToPending(variantIDs)
 	if err != nil {
 		return err
 	}

@@ -187,7 +187,10 @@ func (s *WriteService) processAndSaveImage(ctx context.Context, userID uint, sou
 	defer func() { _ = src.Close() }()
 
 	header := make([]byte, 512)
-	n, _ := io.ReadFull(src, header)
+	n, err := io.ReadFull(src, header)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return nil, false, fmt.Errorf("failed to read file header: %w", err)
+	}
 	header = header[:n]
 
 	isImage, mimeType := validator.IsImageBytes(header)
@@ -209,14 +212,14 @@ func (s *WriteService) processAndSaveImage(ctx context.Context, userID uint, sou
 
 	fileHash := hex.EncodeToString(hash.Sum(nil))
 
-	img, err := s.repo.GetImageByHash(fileHash)
+	img, err := s.repo.WithContext(ctx).GetImageByHash(fileHash)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, false, errors.New("database error during hash check")
 	}
 
 	if err == nil {
 		if img.UserID != userID {
-			newImg, err := s.createDedupedImageRecord(img, userID, source.FileName, storageConfigID, isPublic)
+			newImg, err := s.createDedupedImageRecord(ctx, img, userID, source.FileName, storageConfigID, isPublic)
 			if err != nil {
 				return nil, false, fmt.Errorf("failed to create deduped image record: %w", err)
 			}
@@ -231,7 +234,7 @@ func (s *WriteService) processAndSaveImage(ctx context.Context, userID uint, sou
 		return img, true, nil
 	}
 
-	deletedImg, deletedErr := s.repo.GetSoftDeletedImageByHash(fileHash)
+	deletedImg, deletedErr := s.repo.WithContext(ctx).GetSoftDeletedImageByHash(fileHash)
 	if deletedErr != nil && !errors.Is(deletedErr, gorm.ErrRecordNotFound) {
 		return nil, false, errors.New("database error during hash check")
 	}
@@ -241,7 +244,7 @@ func (s *WriteService) processAndSaveImage(ctx context.Context, userID uint, sou
 			writeServiceLog.Warnf("Failed to verify soft-deleted image %s for hash reuse: %v", utils.SanitizeLogMessage(deletedImg.Identifier), err)
 		} else if reusable {
 			if deletedImg.UserID != userID {
-				newImg, err := s.createDedupedImageRecord(deletedImg, userID, source.FileName, storageConfigID, isPublic)
+				newImg, err := s.createDedupedImageRecord(ctx, deletedImg, userID, source.FileName, storageConfigID, isPublic)
 				if err != nil {
 					return nil, false, fmt.Errorf("failed to create deduped image record: %w", err)
 				}
@@ -254,7 +257,7 @@ func (s *WriteService) processAndSaveImage(ctx context.Context, userID uint, sou
 				"original_name": source.FileName,
 				"is_public":     isPublic,
 			}
-			restored, err := s.repo.UpdateImageByIdentifier(deletedImg.Identifier, updates)
+			restored, err := s.repo.WithContext(ctx).UpdateImageByIdentifier(deletedImg.Identifier, updates)
 			if err != nil {
 				return nil, false, errors.New("failed to restore existing image data")
 			}
@@ -305,7 +308,7 @@ func (s *WriteService) processAndSaveImage(ctx context.Context, userID uint, sou
 		UserID:          userID,
 	}
 
-	if err := s.repo.SaveImage(newImg); err != nil {
+	if err := s.repo.WithContext(ctx).SaveImage(newImg); err != nil {
 		_ = storageProvider.DeleteWithContext(ctx, storagePath)
 		return nil, false, errors.New("failed to save image metadata")
 	}
@@ -329,7 +332,7 @@ func (s *WriteService) canReuseSoftDeletedImage(ctx context.Context, img *models
 		return false, nil
 	}
 
-	refCount, err := s.repo.CountImagesByStoragePath(img.StoragePath)
+	refCount, err := s.repo.WithContext(ctx).CountImagesByStoragePath(img.StoragePath)
 	if err != nil {
 		return false, err
 	}
@@ -369,7 +372,7 @@ func getUploadSourceSize(src io.Seeker, hintedSize int64) (int64, error) {
 }
 
 // createDedupedImageRecord 为不同用户创建去重后的新图片记录
-func (s *WriteService) createDedupedImageRecord(existing *models.Image, userID uint, originalName string, _ uint, isPublic bool) (*models.Image, error) {
+func (s *WriteService) createDedupedImageRecord(ctx context.Context, existing *models.Image, userID uint, originalName string, _ uint, isPublic bool) (*models.Image, error) {
 	ids := s.pathGenerator.GenerateOriginalIdentifiers(existing.FileHash+fmt.Sprintf("_%d", userID), filepath.Ext(originalName), time.Now())
 
 	newImg := &models.Image{
@@ -386,7 +389,7 @@ func (s *WriteService) createDedupedImageRecord(existing *models.Image, userID u
 		UserID:          userID,
 	}
 
-	if err := s.repo.SaveImage(newImg); err != nil {
+	if err := s.repo.WithContext(ctx).SaveImage(newImg); err != nil {
 		return nil, err
 	}
 
@@ -397,7 +400,7 @@ func (s *WriteService) warmCache(image *models.Image) {
 	if s.cacheHelper == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := utils.DetachedContext(5 * time.Second)
 	defer cancel()
 	_ = s.cacheHelper.CacheImage(ctx, image)
 }

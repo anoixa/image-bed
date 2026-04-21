@@ -6,15 +6,12 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/anoixa/image-bed/api"
 	"github.com/anoixa/image-bed/api/common"
+	"github.com/anoixa/image-bed/internal/auth"
 	"github.com/gin-gonic/gin"
 )
 
-// jwtServiceAccessor 获取 JWT 服务
-var jwtServiceAccessor = api.GetJWTService
-
-func CombinedAuth() gin.HandlerFunc {
+func CombinedAuth(jwtService *auth.JWTService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// 获取 Authorization 头
 		authHeader := c.GetHeader("Authorization")
@@ -38,9 +35,9 @@ func CombinedAuth() gin.HandlerFunc {
 
 		switch scheme {
 		case AuthSchemeBearer:
-			err = handleJwtAuth(c, token)
+			err = handleJwtAuth(c, token, jwtService)
 		case AuthSchemeAPIKey:
-			err = handleStaticTokenAuth(c, token)
+			err = handleStaticTokenAuth(c, token, jwtService)
 		default:
 			common.RespondError(c, http.StatusUnauthorized, "Unsupported authentication scheme")
 			c.Abort()
@@ -57,8 +54,7 @@ func CombinedAuth() gin.HandlerFunc {
 	}
 }
 
-func handleJwtAuth(c *gin.Context, token string) error {
-	jwtService := jwtServiceAccessor()
+func handleJwtAuth(c *gin.Context, token string, jwtService *auth.JWTService) error {
 	if jwtService == nil {
 		return errors.New("JWT service not initialized")
 	}
@@ -88,8 +84,7 @@ func handleJwtAuth(c *gin.Context, token string) error {
 	return nil
 }
 
-func handleStaticTokenAuth(c *gin.Context, token string) error {
-	jwtService := jwtServiceAccessor()
+func handleStaticTokenAuth(c *gin.Context, token string, jwtService *auth.JWTService) error {
 	if jwtService == nil {
 		return errors.New("JWT service not initialized")
 	}

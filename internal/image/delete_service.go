@@ -30,7 +30,7 @@ func NewDeleteService(repo *images.Repository, variantRepo *images.VariantReposi
 }
 
 func (s *DeleteService) DeleteSingle(ctx context.Context, identifier string, userID uint) (*DeleteResult, error) {
-	img, err := s.repo.GetImageByIdentifier(identifier)
+	img, err := s.repo.WithContext(ctx).GetImageByIdentifier(identifier)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return &DeleteResult{Success: false, Error: errors.New("image not found")}, nil
@@ -54,7 +54,7 @@ func (s *DeleteService) DeleteSingle(ctx context.Context, identifier string, use
 	s.deleteVariantsForImage(ctx, img)
 
 	if img.StoragePath != "" {
-		refCount, err := s.repo.CountImagesByStoragePath(img.StoragePath)
+		refCount, err := s.repo.WithContext(ctx).CountImagesByStoragePath(img.StoragePath)
 		if err != nil {
 			deleteLog.Errorf("Failed to count references for storage path %s: %v", img.StoragePath, err)
 		} else if refCount == 0 {
@@ -92,7 +92,7 @@ func (s *DeleteService) DeleteBatch(ctx context.Context, identifiers []string, u
 			continue
 		}
 
-		refCount, err := s.repo.CountImagesByStoragePath(img.StoragePath)
+		refCount, err := s.repo.WithContext(ctx).CountImagesByStoragePath(img.StoragePath)
 		if err != nil {
 			deleteLog.Errorf("Failed to count references for storage path %s: %v", img.StoragePath, err)
 			continue
@@ -128,7 +128,7 @@ func (s *DeleteService) ClearImageCache(ctx context.Context, identifier string) 
 }
 
 func (s *DeleteService) deleteVariantsForImage(ctx context.Context, img *models.Image) {
-	variants, err := s.variantRepo.GetVariantsByImageID(img.ID)
+	variants, err := s.variantRepo.WithContext(ctx).GetVariantsByImageID(img.ID)
 	if err != nil {
 		deleteLog.Errorf("Failed to get variants for image %d: %v", img.ID, err)
 		return
@@ -156,7 +156,7 @@ func (s *DeleteService) deleteVariantsForImage(ctx context.Context, img *models.
 		}
 	}
 
-	if err := s.variantRepo.DeleteByImageID(img.ID); err != nil {
+	if err := s.variantRepo.WithContext(ctx).DeleteByImageID(img.ID); err != nil {
 		deleteLog.Errorf("Failed to delete variant records for image %d: %v", img.ID, err)
 	}
 }

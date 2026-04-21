@@ -52,7 +52,7 @@ func (s *ReadService) GetImageMetadata(ctx context.Context, identifier string) (
 	}
 
 	resultChan := imageGroup.DoChan(identifier, func() (any, error) {
-		imagePtr, err := s.repo.GetImageByIdentifier(identifier)
+		imagePtr, err := s.repo.WithContext(ctx).GetImageByIdentifier(identifier)
 		if err != nil {
 			if isTransientError(err) {
 				return nil, ErrTemporaryFailure
@@ -70,7 +70,7 @@ func (s *ReadService) GetImageMetadata(ctx context.Context, identifier string) (
 				return
 			}
 
-			cacheCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			cacheCtx, cancel := utils.DetachedContext(10 * time.Second)
 			defer cancel()
 			if cacheErr := s.cacheHelper.CacheImage(cacheCtx, img); cacheErr != nil {
 				readLog.Debugf("Failed to cache image metadata for '%s': %v", img.Identifier, cacheErr)
@@ -119,7 +119,7 @@ func (s *ReadService) GetImageWithVariant(ctx context.Context, identifier string
 
 // GetRandomImageWithVariant 获取随机图片
 func (s *ReadService) GetRandomImageWithVariant(ctx context.Context, filter *images.RandomImageFilter, acceptHeader string) (*ImageResultDTO, error) {
-	image, err := s.repo.GetRandomPublicImage(filter)
+	image, err := s.repo.WithContext(ctx).GetRandomPublicImage(filter)
 	if err != nil {
 		return nil, err
 	}
