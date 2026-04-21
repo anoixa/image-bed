@@ -2,6 +2,7 @@ package image
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/anoixa/image-bed/cache"
@@ -39,17 +40,35 @@ func NewConverter(cm *config.Manager, variantRepo *images.VariantRepository, ima
 // TriggerConversion 触发图片转换（统一流水线）
 // 使用 PipelineTask 顺序生成缩略图、WebP 和 AVIF。
 func (c *Converter) TriggerConversion(image *models.Image) {
-	c.triggerConversion(image, false)
+	c.triggerConversion(image, false, "")
+}
+
+// TriggerConversionWithLocalFile triggers conversion with a pre-staged local
+// file, allowing the pipeline to skip downloading from remote storage.
+// Ownership of localPath transfers to the pipeline; it will be cleaned up
+// after processing completes or on submission failure.
+func (c *Converter) TriggerConversionWithLocalFile(image *models.Image, localPath string) {
+	c.triggerConversion(image, false, localPath)
 }
 
 // TriggerConversionFromSweeper re-submits stale work recovered by the sweeper.
 // This path intentionally ignores variant retry windows because the sweeper has
 // already decided the stale work should be retried now.
 func (c *Converter) TriggerConversionFromSweeper(image *models.Image) {
-	c.triggerConversion(image, true)
+	c.triggerConversion(image, true, "")
 }
 
-func (c *Converter) triggerConversion(image *models.Image, ignoreRetryWindow bool) {
+func (c *Converter) triggerConversion(image *models.Image, ignoreRetryWindow bool, localFilePath string) {
+	// Register cleanup FIRST so localFilePath is removed on any exit path
+	// (panic, early return, or failed submission). On successful submission
+	// the pipeline task takes ownership and cleans up the file itself.
+	submitted := false
+	defer func() {
+		if !submitted && localFilePath != "" {
+			_ = os.Remove(localFilePath)
+		}
+	}()
+
 	ctx, cancel := utils.DetachedContext(5 * time.Second)
 	defer cancel()
 	now := time.Now()
@@ -161,6 +180,7 @@ func (c *Converter) triggerConversion(image *models.Image, ignoreRetryWindow boo
 			VariantRepo:     c.variantRepo,
 			ImageRepo:       c.imageRepo,
 			CacheHelper:     c.cacheHelper,
+			LocalFilePath:   localFilePath,
 		}
 		task.Execute()
 	})
@@ -170,6 +190,7 @@ func (c *Converter) triggerConversion(image *models.Image, ignoreRetryWindow boo
 		c.failPendingVariantsOnSubmitFailure(imageRepo, variantRepo, image, "worker task submission rejected", thumbVariant, webpVariant, avifVariant)
 		return
 	}
+	submitted = true
 
 	if err := c.markImageProcessing(imageRepo, image); err != nil {
 		converterLog.Warnf("Failed to update image %s status after submit: %v", image.Identifier, err)

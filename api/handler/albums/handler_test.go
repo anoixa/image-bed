@@ -317,7 +317,13 @@ func TestUpdateAlbumHandlerReturnsFreshUpdatedAt(t *testing.T) {
 		BufferItems: 64,
 	})
 	require.NoError(t, err)
-	defer func() { _ = provider.Close() }()
+	defer func() {
+		// Give the async cache goroutine time to finish before closing
+		// the cache provider. ristretto's Wait() will race with Close()
+		// if the goroutine is still running.
+		time.Sleep(50 * time.Millisecond)
+		_ = provider.Close()
+	}()
 
 	handler := NewHandler(svc, provider, "")
 

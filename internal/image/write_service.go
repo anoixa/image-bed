@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -179,7 +180,18 @@ func (s *WriteService) UploadBatchSources(ctx context.Context, userID uint, file
 }
 
 // processAndSaveImage 处理并保存图片
-func (s *WriteService) processAndSaveImage(ctx context.Context, userID uint, source UploadSource, storageProvider storage.Provider, storageConfigID uint, isPublic bool, defaultAlbumID uint) (*models.Image, bool, error) {
+func (s *WriteService) processAndSaveImage(ctx context.Context, userID uint, source UploadSource, storageProvider storage.Provider, storageConfigID uint, isPublic bool, defaultAlbumID uint) (resultImg *models.Image, isDup bool, retErr error) {
+	// Ensure temp file is cleaned up on any exit path (panic, error, dedup)
+	// unless ownership is explicitly transferred to the converter.
+	tempFileConsumed := false
+	if source.TempFilePath != "" {
+		defer func() {
+			if !tempFileConsumed {
+				cleanupOwnedTempFile(source.TempFilePath)
+			}
+		}()
+	}
+
 	src, err := source.Open()
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to open file: %w", err)
@@ -198,19 +210,24 @@ func (s *WriteService) processAndSaveImage(ctx context.Context, userID uint, sou
 		return nil, false, errors.New("the uploaded file type is not supported")
 	}
 
-	hash := sha256.New()
-	if _, err := hash.Write(header); err != nil {
-		return nil, false, fmt.Errorf("failed to hash file header: %w", err)
+	var fileHash string
+	if source.PrecomputedHash != "" {
+		fileHash = source.PrecomputedHash
+	} else {
+		hash := sha256.New()
+		if _, err := hash.Write(header); err != nil {
+			return nil, false, fmt.Errorf("failed to hash file header: %w", err)
+		}
+
+		bufPtr := pool.SharedBufferPool.Get().(*[]byte)
+		defer pool.SharedBufferPool.Put(bufPtr)
+
+		if _, err = io.CopyBuffer(hash, src, *bufPtr); err != nil {
+			return nil, false, fmt.Errorf("failed to hash file stream: %w", err)
+		}
+
+		fileHash = hex.EncodeToString(hash.Sum(nil))
 	}
-
-	bufPtr := pool.SharedBufferPool.Get().(*[]byte)
-	defer pool.SharedBufferPool.Put(bufPtr)
-
-	if _, err = io.CopyBuffer(hash, src, *bufPtr); err != nil {
-		return nil, false, fmt.Errorf("failed to hash file stream: %w", err)
-	}
-
-	fileHash := hex.EncodeToString(hash.Sum(nil))
 
 	img, err := s.repo.WithContext(ctx).GetImageByHash(fileHash)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -218,6 +235,7 @@ func (s *WriteService) processAndSaveImage(ctx context.Context, userID uint, sou
 	}
 
 	if err == nil {
+		tempFileConsumed = true // dedup -- defer will skip cleanup
 		if img.UserID != userID {
 			newImg, err := s.createDedupedImageRecord(ctx, img, userID, source.FileName, storageConfigID, isPublic)
 			if err != nil {
@@ -243,6 +261,7 @@ func (s *WriteService) processAndSaveImage(ctx context.Context, userID uint, sou
 		if err != nil {
 			writeServiceLog.Warnf("Failed to verify soft-deleted image %s for hash reuse: %v", utils.SanitizeLogMessage(deletedImg.Identifier), err)
 		} else if reusable {
+				tempFileConsumed = true // soft-delete reuse -- defer will skip cleanup
 			if deletedImg.UserID != userID {
 				newImg, err := s.createDedupedImageRecord(ctx, deletedImg, userID, source.FileName, storageConfigID, isPublic)
 				if err != nil {
@@ -321,8 +340,14 @@ func (s *WriteService) processAndSaveImage(ctx context.Context, userID uint, sou
 
 	submitBackgroundTask(func() { s.warmCache(newImg) })
 	if s.converter != nil {
-		submitBackgroundTask(func() { s.converter.TriggerConversion(newImg) })
+		tempFileConsumed = true // ownership transferred to converter
+		if source.TempFilePath != "" {
+			submitBackgroundTask(func() { s.converter.TriggerConversionWithLocalFile(newImg, source.TempFilePath) })
+		} else {
+			submitBackgroundTask(func() { s.converter.TriggerConversion(newImg) })
+		}
 	}
+	// converter == nil: tempFileConsumed stays false, defer cleans up
 
 	return newImg, false, nil
 }
@@ -403,4 +428,12 @@ func (s *WriteService) warmCache(image *models.Image) {
 	ctx, cancel := utils.DetachedContext(5 * time.Second)
 	defer cancel()
 	_ = s.cacheHelper.CacheImage(ctx, image)
+}
+
+// cleanupOwnedTempFile removes a temp file whose ownership was transferred
+// from the upload handler. Safe to call with empty string (no-op).
+func cleanupOwnedTempFile(path string) {
+	if path != "" {
+		_ = os.Remove(path)
+	}
 }

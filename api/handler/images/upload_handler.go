@@ -1,6 +1,8 @@
 package images
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -193,10 +195,18 @@ func parseMultipartUploadRequest(r *http.Request, settings *dbconfig.ImageProces
 	)
 
 	cleanup := func() {
-		for _, tempFile := range tempFiles {
-			tempFile.cleanup()
+			for _, tempFile := range tempFiles {
+				tempFile.cleanup()
+			}
+			// Also clean up files whose ownership was transferred to
+			// WriteService/Pipeline. On the happy path these are already
+			// removed, so os.Remove on a non-existent file is harmless.
+			for _, f := range request.files {
+				if f.TempFilePath != "" {
+					_ = os.Remove(f.TempFilePath)
+				}
+			}
 		}
-	}
 
 	maxFileSize := int64(0)
 	if settings.MaxFileSizeMB > 0 {
@@ -249,7 +259,7 @@ func parseMultipartUploadRequest(r *http.Request, settings *dbconfig.ImageProces
 			return nil, nil, &uploadRequestError{status: http.StatusBadRequest, message: "Maximum 10 files allowed per upload"}
 		}
 
-		tempFile, size, writeErr := writePartToTempFile(part, maxFileSize)
+		tempFile, size, fileHash, writeErr := writePartToTempFile(part, maxFileSize)
 		_ = part.Close()
 		if writeErr != nil {
 			cleanup()
@@ -270,8 +280,11 @@ func parseMultipartUploadRequest(r *http.Request, settings *dbconfig.ImageProces
 			}
 		}
 
-		tempFiles = append(tempFiles, tempFile)
-		request.files = append(request.files, imagesvc.NewTempUploadSource(fileName, tempFile.path, size))
+		// Transfer temp file ownership to WriteService/Pipeline — do NOT add to tempFiles.
+		src := imagesvc.NewTempUploadSource(fileName, tempFile.path, size)
+		src.TempFilePath = tempFile.path
+		src.PrecomputedHash = fileHash
+		request.files = append(request.files, src)
 	}
 
 	return request, cleanup, nil
@@ -288,10 +301,10 @@ func readSmallFormField(part io.Reader, maxBytes int64) (string, error) {
 	return string(data), nil
 }
 
-func writePartToTempFile(part io.Reader, maxFileSize int64) (uploadTempFile, int64, error) {
+func writePartToTempFile(part io.Reader, maxFileSize int64) (uploadTempFile, int64, string, error) {
 	tmp, err := os.CreateTemp(config.TempDir, "upload-stream-*")
 	if err != nil {
-		return uploadTempFile{}, 0, fmt.Errorf("create temp file: %w", err)
+		return uploadTempFile{}, 0, "", fmt.Errorf("create temp file: %w", err)
 	}
 
 	tempFile := uploadTempFile{path: tmp.Name()}
@@ -308,25 +321,26 @@ func writePartToTempFile(part io.Reader, maxFileSize int64) (uploadTempFile, int
 		reader = io.LimitReader(part, maxFileSize+1)
 	}
 
-	written, err := io.CopyBuffer(tmp, reader, *bufPtr)
+	hash := sha256.New()
+	written, err := io.CopyBuffer(io.MultiWriter(tmp, hash), reader, *bufPtr)
 	if err != nil {
 		cleanup()
-		return uploadTempFile{}, 0, fmt.Errorf("write temp file: %w", err)
+		return uploadTempFile{}, 0, "", fmt.Errorf("write temp file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
 		tempFile.cleanup()
-		return uploadTempFile{}, 0, fmt.Errorf("close temp file: %w", err)
+		return uploadTempFile{}, 0, "", fmt.Errorf("close temp file: %w", err)
 	}
 
 	if maxFileSize > 0 && written > maxFileSize {
 		tempFile.cleanup()
-		return uploadTempFile{}, 0, &uploadRequestError{
+		return uploadTempFile{}, 0, "", &uploadRequestError{
 			status:  http.StatusRequestEntityTooLarge,
 			message: fmt.Sprintf("File size (%.2f MB) exceeds maximum allowed (%d MB)", float64(written)/1024/1024, maxFileSize/(1024*1024)),
 		}
 	}
 
-	return tempFile, written, nil
+	return tempFile, written, hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 func asUploadRequestError(err error, target **uploadRequestError) bool {

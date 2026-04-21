@@ -10,9 +10,11 @@ import (
 // UploadSource describes a single uploaded file that can be reopened for
 // validation, hashing, image inspection, and final storage save.
 type UploadSource struct {
-	FileName string
-	FileSize int64
-	Open     func() (io.ReadSeekCloser, error)
+	FileName        string
+	FileSize        int64
+	TempFilePath    string // optional: local temp file path (ownership transferred, caller must NOT clean up)
+	PrecomputedHash string // optional: SHA256 hash computed during initial write
+	Open            func() (io.ReadSeekCloser, error)
 }
 
 func uploadSourceFromFileHeader(fileHeader *multipart.FileHeader) UploadSource {
