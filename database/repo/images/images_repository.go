@@ -295,6 +295,47 @@ func (r *Repository) GetImagesByAlbumID(albumID uint, page, pageSize int) ([]*mo
 	return imageList, total, err
 }
 
+// MarkStaleProcessingAsFailed updates stale processing images to Failed if they
+// have no processing variants but at least one failed variant.
+// excludeIDs are excluded from the update (e.g. re-triggered images).
+func (r *Repository) MarkStaleProcessingAsFailed(cutoff time.Time, excludeIDs []uint) (int64, error) {
+	processingVariants := r.db.Table("image_variants").Select("1").
+		Where("image_variants.image_id = images.id AND image_variants.status = ?", models.VariantStatusProcessing)
+	failedVariants := r.db.Table("image_variants").Select("1").
+		Where("image_variants.image_id = images.id AND image_variants.status = ?", models.VariantStatusFailed)
+
+	q := r.db.Model(&models.Image{}).
+		Where("variant_status = ? AND updated_at < ?", models.ImageVariantStatusProcessing, cutoff).
+		Where("NOT EXISTS (?)", processingVariants).
+		Where("EXISTS (?)", failedVariants)
+
+	if len(excludeIDs) > 0 {
+		q = q.Where("id NOT IN ?", excludeIDs)
+	}
+
+	result := q.Update("variant_status", models.ImageVariantStatusFailed)
+	return result.RowsAffected, result.Error
+}
+
+// ResetStaleProcessingToNone resets stale processing images back to None when
+// they have no remaining processing variants.
+// excludeIDs are excluded from the update (e.g. re-triggered images).
+func (r *Repository) ResetStaleProcessingToNone(cutoff time.Time, excludeIDs []uint) (int64, error) {
+	processingVariants := r.db.Table("image_variants").Select("1").
+		Where("image_variants.image_id = images.id AND image_variants.status = ?", models.VariantStatusProcessing)
+
+	q := r.db.Model(&models.Image{}).
+		Where("variant_status = ? AND updated_at < ?", models.ImageVariantStatusProcessing, cutoff).
+		Where("NOT EXISTS (?)", processingVariants)
+
+	if len(excludeIDs) > 0 {
+		q = q.Where("id NOT IN ?", excludeIDs)
+	}
+
+	result := q.Update("variant_status", models.ImageVariantStatusNone)
+	return result.RowsAffected, result.Error
+}
+
 // WithContext 返回带上下文的仓库
 func (r *Repository) WithContext(ctx context.Context) *Repository {
 	return &Repository{db: r.db.WithContext(ctx)}

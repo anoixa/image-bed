@@ -1,6 +1,7 @@
 package core
 
 import (
+	"database/sql"
 	"net/http"
 	"time"
 
@@ -124,8 +125,15 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 		api.SetJWTService(jwtService)
 	}
 
+	var sqlDB *sql.DB
+	if deps.DB != nil {
+		sqlDB, _ = deps.DB.DB()
+	}
+
 	routerDeps := &RouterDependencies{
 		DB:               deps.DB,
+		VariantRepo:      images.NewVariantRepository(deps.DB),
+		SqlDB:            sqlDB,
 		Repositories:     deps.Repositories,
 		ConfigManager:    deps.ConfigManager,
 		Converter:        deps.Converter,

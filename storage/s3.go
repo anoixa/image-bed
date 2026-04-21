@@ -23,8 +23,9 @@ import (
 
 var s3Log = utils.ForModule("S3")
 
-// mustGetSystemCertPool 获取系统证书池
-func mustGetSystemCertPool() *x509.CertPool {
+// getSystemCertPool returns the system certificate pool, falling back to an
+// empty pool on error. Unlike the Go "Must" convention, this does not panic.
+func getSystemCertPool() *x509.CertPool {
 	pool, err := x509.SystemCertPool()
 	if err != nil {
 		s3Log.Errorf("Failed to load system cert pool: %v", err)
@@ -86,7 +87,7 @@ func NewS3Storage(cfg S3Config) (*S3Storage, error) {
 
 	// SSL 自定义证书配置
 	if secure && os.Getenv("SSL_CERT_FILE") != "" {
-		rootCAs := mustGetSystemCertPool()
+		rootCAs := getSystemCertPool()
 		if data, err := os.ReadFile(os.Getenv("SSL_CERT_FILE")); err == nil {
 			rootCAs.AppendCertsFromPEM(data)
 		}

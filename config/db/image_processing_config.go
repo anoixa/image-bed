@@ -194,13 +194,15 @@ func (m *Manager) GetImageProcessingSettings(ctx context.Context) (*ImageProcess
 
 // ensureDefaultImageProcessingConfig 确保默认图片处理配置存在
 func (m *Manager) ensureDefaultImageProcessingConfig(ctx context.Context) error {
-	count, err := m.repo.CountByCategory(ctx, models.ConfigCategoryImageProcessing)
-	if err != nil {
-		return err
-	}
-
-	if count > 0 {
+	// Check for an existing enabled default config, not just any config.
+	// CountByCategory ignores is_enabled, so a disabled-only config would
+	// pass the count check but cause GetDefaultByCategory to fail.
+	_, err := m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryImageProcessing)
+	if err == nil {
 		return nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
 	}
 
 	defaultSettings := DefaultImageProcessingSettings()

@@ -8,7 +8,6 @@ import (
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/utils"
-	"gorm.io/gorm"
 )
 
 const sweeperInterval = 5 * time.Minute
@@ -51,10 +50,8 @@ type TriggerFunc func(image *models.Image)
 // StartVariantSweeper runs a background goroutine that periodically resets
 // stale processing variants back to pending so they can be retried.
 // If triggerFn is non-nil, images with reset variants are re-submitted for processing.
-func StartVariantSweeper(ctx context.Context, db *gorm.DB, triggerFn TriggerFunc) {
+func StartVariantSweeper(ctx context.Context, variantRepo *images.VariantRepository, imageRepo *images.Repository, triggerFn TriggerFunc) {
 	go func() {
-		variantRepo := images.NewVariantRepository(db)
-		imageRepo := images.NewRepository(db)
 		ticker := time.NewTicker(sweeperInterval)
 		defer ticker.Stop()
 
@@ -66,13 +63,13 @@ func StartVariantSweeper(ctx context.Context, db *gorm.DB, triggerFn TriggerFunc
 				sweeperLog.Infof("Stopped")
 				return
 			case <-ticker.C:
-				sweepOnce(ctx, variantRepo, imageRepo, db, triggerFn)
+				sweepOnce(ctx, variantRepo, imageRepo, triggerFn)
 			}
 		}
 	}()
 }
 
-func sweepOnce(ctx context.Context, variantRepo *images.VariantRepository, imageRepo *images.Repository, db *gorm.DB, triggerFn TriggerFunc) {
+func sweepOnce(_ context.Context, variantRepo *images.VariantRepository, imageRepo *images.Repository, triggerFn TriggerFunc) {
 	start := time.Now()
 	now := start
 	sweeperStats.runs.Add(1)
@@ -109,43 +106,31 @@ func sweepOnce(ctx context.Context, variantRepo *images.VariantRepository, image
 		sweeperLog.Infof("Re-triggered conversion for %d images", retriggered)
 	}
 
-	processingVariants := db.Table("image_variants").Select("1").
-		Where("image_variants.image_id = images.id AND image_variants.status = ?", models.VariantStatusProcessing)
-	failedVariants := db.Table("image_variants").Select("1").
-		Where("image_variants.image_id = images.id AND image_variants.status = ?", models.VariantStatusFailed)
-
 	// Images that are no longer processing and have at least one failed
 	// variant should surface as failed rather than silently reverting to none.
-	failedImages := db.Model(&models.Image{}).
-		Where("variant_status = ? AND updated_at < ?", models.ImageVariantStatusProcessing, cutoff).
-		Where("NOT EXISTS (?)", processingVariants).
-		Where("EXISTS (?)", failedVariants).
-		Update("variant_status", models.ImageVariantStatusFailed)
-	if failedImages.Error != nil {
-		recordSweeperError(now, failedImages.Error.Error())
-		sweeperLog.Warnf("Failed to mark stale processing images as failed: %v", failedImages.Error)
-	} else if failedImages.RowsAffected > 0 {
-		sweeperStats.failedImages.Add(uint64(failedImages.RowsAffected))
+	failedRows, err := imageRepo.MarkStaleProcessingAsFailed(cutoff, retriedImageIDs)
+	if err != nil {
+		recordSweeperError(now, err.Error())
+		sweeperLog.Warnf("Failed to mark stale processing images as failed: %v", err)
+	} else if failedRows > 0 {
+		sweeperStats.failedImages.Add(uint64(failedRows))
 	}
 
 	// Remaining stale images without failed variants can return to none and be
 	// retriggered on demand.
-	result := db.Model(&models.Image{}).
-		Where("variant_status = ? AND updated_at < ?", models.ImageVariantStatusProcessing, cutoff).
-		Where("NOT EXISTS (?)", processingVariants).
-		Update("variant_status", models.ImageVariantStatusNone)
-	if result.Error != nil {
-		recordSweeperError(now, result.Error.Error())
-		sweeperLog.Warnf("Failed to reset stale image variant_status: %v", result.Error)
-	} else if result.RowsAffected > 0 {
-		sweeperStats.resetImages.Add(uint64(result.RowsAffected))
+	resetRows, err := imageRepo.ResetStaleProcessingToNone(cutoff, retriedImageIDs)
+	if err != nil {
+		recordSweeperError(now, err.Error())
+		sweeperLog.Warnf("Failed to reset stale image variant_status: %v", err)
+	} else if resetRows > 0 {
+		sweeperStats.resetImages.Add(uint64(resetRows))
 	}
 
 	sweeperStats.lastSuccessUnix.Store(now.Unix())
 
 	elapsed := time.Since(start)
 	sweeperLog.Debugf("Sweep completed in %s: variants_reset=%d, variants_failed=%d, images_failed=%d, images_reset=%d, retriggered=%d",
-		elapsed, reset, failed, failedImages.RowsAffected, result.RowsAffected, retriggered)
+		elapsed, reset, failed, failedRows, resetRows, retriggered)
 }
 
 func recordSweeperError(now time.Time, msg string) {

@@ -1,6 +1,7 @@
 package core
 
 import (
+	"database/sql"
 	"net/http/pprof"
 	"strings"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/anoixa/image-bed/config"
 	configSvc "github.com/anoixa/image-bed/config/db"
 	dashboardRepo "github.com/anoixa/image-bed/database/repo/dashboard"
+	"github.com/anoixa/image-bed/database/repo/images"
 	svcAlbums "github.com/anoixa/image-bed/internal/albums"
 	"github.com/anoixa/image-bed/internal/auth"
 	svcDashboard "github.com/anoixa/image-bed/internal/dashboard"
@@ -41,6 +43,8 @@ func getBaseURL(cfg *config.Config) string {
 // RouterDependencies 路由注册依赖
 type RouterDependencies struct {
 	DB               *gorm.DB
+	VariantRepo      *images.VariantRepository
+	SqlDB            *sql.DB
 	Repositories     *Repositories
 	ConfigManager    *configSvc.Manager
 	Converter        *imageSvc.Converter
@@ -73,7 +77,7 @@ func newImageHandler(deps *RouterDependencies) *handlerImages.Handler {
 	return handlerImages.NewHandler(
 		deps.CacheProvider,
 		deps.Repositories.ImagesRepo,
-		deps.DB,
+		deps.VariantRepo,
 		deps.Converter,
 		deps.ConfigManager,
 		cfg,
@@ -88,7 +92,7 @@ func registerBasicRoutes(router *gin.Engine, deps *RouterDependencies) {
 	systemGroup := router.Group("/system")
 	{
 		systemHandler := handlerSystem.NewHandler()
-		healthHandler := handlerSystem.NewHealthHandler(deps.DB, storage.GetDefault())
+		healthHandler := handlerSystem.NewHealthHandler(deps.SqlDB, storage.GetDefault())
 
 		systemGroup.GET("/health", healthHandler.Handle)
 		systemGroup.HEAD("/health", healthHandler.Handle)
