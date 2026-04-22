@@ -20,7 +20,7 @@ require (
 	github.com/swaggo/gin-swagger v1.6.1
 	github.com/swaggo/swag v1.16.6
 	golang.org/x/crypto v0.50.0
-	golang.org/x/image v0.38.0
+	golang.org/x/image v0.39.0
 	golang.org/x/sync v0.20.0
 	golang.org/x/time v0.14.0
 	gorm.io/driver/postgres v1.6.0
