@@ -182,6 +182,7 @@ type ImagePipelineTask struct {
 	VariantRepo     VariantRepository
 	ImageRepo       ImageRepository
 	CacheHelper     *cache.Helper
+	LocalFilePath   string // optional: pre-staged local file, skip download from remote
 	inFlightLease   *inFlightTaskLease
 }
 
@@ -195,6 +196,17 @@ var processingHeartbeatInterval = 4 * time.Minute
 // Caller must invoke the returned cleanup func exactly once via defer.
 func (t *ImagePipelineTask) getProcessingFilePath(ctx context.Context) (path string, cleanup func(), err error) {
 	noop := func() {}
+
+	// Pre-staged local file (e.g. from upload handler) — skip download entirely.
+	if t.LocalFilePath != "" {
+		if _, statErr := os.Stat(t.LocalFilePath); statErr == nil {
+			path := t.LocalFilePath
+			t.LocalFilePath = "" // mark consumed — Execute's defer won't double-clean
+			return path, func() { _ = os.Remove(path) }, nil
+		}
+		// File already gone (e.g. cleaned up by timeout); fall through to normal path.
+		t.LocalFilePath = ""
+	}
 
 	// Local storage: return path directly, no temp file needed
 	if pp, ok := t.Storage.(storage.PathProvider); ok {
@@ -259,6 +271,18 @@ func (t *ImagePipelineTask) getProcessingFilePath(ctx context.Context) (path str
 func (t *ImagePipelineTask) Execute() {
 	var acquiredVariants []uint
 	defer t.finalize(&acquiredVariants)
+
+	// Ensure LocalFilePath is cleaned up on any exit path (panic, early
+	// return before runPipeline, or failed acquisition). On the happy path,
+	// getProcessingFilePath consumes it by setting the field to "" and
+	// returns its own cleanup func — this defer sees the empty string and skips.
+	if t.LocalFilePath != "" {
+		defer func() {
+			if t.LocalFilePath != "" {
+				_ = os.Remove(t.LocalFilePath)
+			}
+		}()
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
@@ -840,6 +864,11 @@ func (t *ImagePipelineTask) deleteCacheOnTerminalState(state string) {
 		ctx := context.Background()
 		if err := t.CacheHelper.DeleteCachedImage(ctx, t.ImageIdentifier); err != nil {
 			pipelineLog.Warnf("Failed to delete cache for %s on %s: %v", t.ImageIdentifier, state, err)
+		}
+		if t.ImageID > 0 {
+			if err := t.CacheHelper.DeleteCachedImageVariants(ctx, t.ImageID); err != nil {
+				pipelineLog.Warnf("Failed to delete variant cache for image %d on %s: %v", t.ImageID, state, err)
+			}
 		}
 	}
 }

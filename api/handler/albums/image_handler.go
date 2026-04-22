@@ -145,7 +145,7 @@ func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 	})
 
 	if addedCount > 0 {
-		utils.SafeGo(func() {
+		albumAsync(func() {
 			ctx, cancel := utils.DetachedContext(5 * time.Second)
 			defer cancel()
 			if err := h.cacheHelper.DeleteCachedAlbum(ctx, uint(albumID)); err != nil {
@@ -219,7 +219,7 @@ func (h *AlbumImageHandler) RemoveImageFromAlbumHandler(c *gin.Context) {
 	common.RespondSuccessMessage(c, "Image removed from album successfully", nil)
 
 	// 清除相关缓存
-	utils.SafeGo(func() {
+	albumAsync(func() {
 		ctx, cancel := utils.DetachedContext(5 * time.Second)
 		defer cancel()
 		if err := h.cacheHelper.DeleteCachedAlbum(ctx, uint(albumID)); err != nil {
@@ -326,7 +326,7 @@ func (h *AlbumImageHandler) RemoveImagesFromAlbumHandler(c *gin.Context) {
 	})
 
 	if removedCount > 0 {
-		utils.SafeGo(func() {
+		albumAsync(func() {
 			ctx, cancel := utils.DetachedContext(5 * time.Second)
 			defer cancel()
 			if err := h.cacheHelper.DeleteCachedAlbum(ctx, uint(albumID)); err != nil {

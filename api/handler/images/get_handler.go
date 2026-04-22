@@ -134,8 +134,10 @@ func (h *Handler) GetImage(c *gin.Context) {
 	}
 
 	if result.IsOriginal {
+		middleware.RecordImageOriginalResponse()
 		h.serveOriginalImage(c, result.Image)
 	} else {
+		middleware.RecordImageVariantResponse()
 		variantResult := &image.VariantResult{
 			IsOriginal:  false,
 			Variant:     result.Variant,
@@ -156,6 +158,7 @@ func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 
 	// 检查是否可以使用直链
 	if directURL := h.getDirectURLIfPossible(c, image); directURL != "" {
+		middleware.RecordImageDirectRedirect()
 		c.Header("Cache-Control", config.CacheControlPublic)
 		c.Redirect(http.StatusFound, directURL)
 		return
@@ -173,6 +176,7 @@ func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 	}
 
 	if imageData, ok := h.getOrPopulateImageDataCache(c.Request.Context(), provider, image.Identifier, storagePath); ok {
+		middleware.RecordImageCacheResponse()
 		h.serveImageData(c, image, imageData)
 		return
 	}
@@ -201,6 +205,7 @@ func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 		}
 	}()
 
+	middleware.RecordImageReaderResponse()
 	h.serveReadSeekerContent(c, image.Identifier, image.MimeType, image.FileHash, stream, false, cacheControlForImage(image.IsPublic))
 }
 
@@ -266,6 +271,7 @@ func (h *Handler) serveByStreaming(c *gin.Context, img *models.Image, streamer s
 		imageHandlerLog.Errorf("serveByStreaming failed to stream image %s (path: %s): %v", utils.SanitizeLogMessage(img.Identifier), img.StoragePath, err)
 		return false
 	}
+	middleware.RecordImageStreamResponse()
 	return true
 }
 
@@ -304,6 +310,7 @@ func (h *Handler) serveBySendfile(c *gin.Context, img *models.Image, opener stor
 	c.Header("Content-Type", img.MimeType)
 
 	http.ServeContent(c.Writer, c.Request, img.Identifier, time.Time{}, file)
+	middleware.RecordImageSendfileResponse()
 	return true
 }
 
@@ -325,6 +332,7 @@ func (h *Handler) serveImageData(c *gin.Context, img *models.Image, data []byte)
 func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *image.VariantResult) {
 	// 检查变体是否可以使用直链（使用变体自己的路径）
 	if directURL := h.getVariantDirectURLIfPossible(c, img, result.StoragePath); directURL != "" {
+		middleware.RecordImageDirectRedirect()
 		c.Header("Cache-Control", config.CacheControlPublic)
 		c.Redirect(http.StatusFound, directURL)
 		return
@@ -341,6 +349,7 @@ func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *i
 	}
 
 	if imageData, ok := h.getOrPopulateImageDataCache(c.Request.Context(), provider, remoteImageDataCacheKey(img.StorageConfigID, result.StoragePath), result.StoragePath); ok {
+		middleware.RecordImageCacheResponse()
 		h.serveVariantData(c, result, imageData, img.IsPublic)
 		return
 	}
@@ -370,6 +379,7 @@ func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *i
 		}
 	}()
 
+	middleware.RecordImageReaderResponse()
 	h.serveReadSeekerContent(c, result.Identifier, result.MIMEType, result.Variant.FileHash, stream, true, cacheControlForImage(img.IsPublic))
 }
 
@@ -389,6 +399,7 @@ func (h *Handler) serveVariantByStreaming(c *gin.Context, result *image.VariantR
 		// 客户端断开连接是正常情况
 		return utils.IsClientDisconnect(err)
 	}
+	middleware.RecordImageStreamResponse()
 	return true
 }
 
@@ -416,6 +427,7 @@ func (h *Handler) serveVariantBySendfile(c *gin.Context, result *image.VariantRe
 	c.Header("X-Content-Type-Options", "nosniff")
 
 	http.ServeContent(c.Writer, c.Request, result.Identifier, stat.ModTime(), file)
+	middleware.RecordImageSendfileResponse()
 	return true
 }
 
@@ -459,8 +471,10 @@ func (h *Handler) getOrPopulateImageDataCache(ctx context.Context, provider stor
 
 	imageData, err := h.cacheHelper.GetCachedImageData(ctx, cacheKey)
 	if err == nil {
+		middleware.RecordImageDataCacheHit()
 		return imageData, true
 	}
+	middleware.RecordImageDataCacheMiss()
 
 	imageData, ok, err := h.loadCacheableImageData(ctx, provider, storagePath)
 	if err != nil {

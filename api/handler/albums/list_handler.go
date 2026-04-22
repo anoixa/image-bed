@@ -98,7 +98,7 @@ func (h *Handler) ListAlbumsHandler(c *gin.Context) {
 	}
 
 	// 异步写入缓存
-	utils.SafeGo(func() {
+	albumAsync(func() {
 		ctx, cancel := utils.DetachedContext(5 * time.Second)
 		defer cancel()
 		cacheData := CachedAlbumList{

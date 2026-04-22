@@ -214,3 +214,155 @@ func TestUploadSingleSourceDoesNotReuseSoftDeletedImageWithoutBackingFile(t *tes
 	_, statErr := os.Stat(filepath.Join(tempDir, result.Image.StoragePath))
 	assert.NoError(t, statErr)
 }
+
+func TestUploadSingleSourceCleansTempFileForDuplicateImage(t *testing.T) {
+	db := setupImageServiceTestDB(t)
+	service, repo, _ := newTestWriteService(t, db)
+
+	const providerID uint = 91003
+	tempDir := t.TempDir()
+	require.NoError(t, storage.AddOrUpdateProvider(storage.StorageConfig{
+		ID:        providerID,
+		Name:      "test-local-duplicate-cleanup",
+		Type:      "local",
+		LocalPath: tempDir,
+	}))
+	t.Cleanup(func() {
+		_ = storage.RemoveProvider(providerID)
+	})
+
+	fileHashBytes := sha256.Sum256(tinyPNG)
+	fileHash := hex.EncodeToString(fileHashBytes[:])
+	existing := &models.Image{
+		Identifier:      "dup-image",
+		StoragePath:     "original/2026/04/dup.png",
+		OriginalName:    "dup.png",
+		FileSize:        int64(len(tinyPNG)),
+		MimeType:        "image/png",
+		StorageConfigID: providerID,
+		FileHash:        fileHash,
+		Width:           1,
+		Height:          1,
+		UserID:          1,
+		IsPublic:        true,
+	}
+	require.NoError(t, repo.SaveImage(existing))
+
+	uploadPath := filepath.Join(t.TempDir(), "duplicate-upload.png")
+	require.NoError(t, os.WriteFile(uploadPath, tinyPNG, 0o644))
+
+	result, err := service.UploadSingleSource(
+		context.Background(),
+		1,
+		NewTempUploadSource("duplicate-upload.png", uploadPath, int64(len(tinyPNG))),
+		providerID,
+		true,
+		0,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.IsDuplicate)
+
+	_, statErr := os.Stat(uploadPath)
+	require.Error(t, statErr)
+	assert.True(t, os.IsNotExist(statErr))
+}
+
+func TestUploadSingleSourceCleansTempFileForReusableSoftDeletedImage(t *testing.T) {
+	db := setupImageServiceTestDB(t)
+	service, repo, _ := newTestWriteService(t, db)
+
+	const providerID uint = 91004
+	tempDir := t.TempDir()
+	require.NoError(t, storage.AddOrUpdateProvider(storage.StorageConfig{
+		ID:        providerID,
+		Name:      "test-local-soft-delete-cleanup",
+		Type:      "local",
+		LocalPath: tempDir,
+	}))
+	t.Cleanup(func() {
+		_ = storage.RemoveProvider(providerID)
+	})
+
+	fileHashBytes := sha256.Sum256(tinyPNG)
+	fileHash := hex.EncodeToString(fileHashBytes[:])
+
+	storagePath := "original/2026/04/reusable.png"
+	absolutePath := filepath.Join(tempDir, storagePath)
+	require.NoError(t, os.MkdirAll(filepath.Dir(absolutePath), 0o755))
+	require.NoError(t, os.WriteFile(absolutePath, tinyPNG, 0o644))
+
+	softDeleted := &models.Image{
+		Identifier:      "soft-deleted-reusable",
+		StoragePath:     storagePath,
+		OriginalName:    "reusable.png",
+		FileSize:        int64(len(tinyPNG)),
+		MimeType:        "image/png",
+		StorageConfigID: providerID,
+		FileHash:        fileHash,
+		Width:           1,
+		Height:          1,
+		UserID:          1,
+		IsPublic:        true,
+	}
+	require.NoError(t, repo.SaveImage(softDeleted))
+	require.NoError(t, repo.DeleteImage(softDeleted))
+
+	uploadPath := filepath.Join(t.TempDir(), "reusable-upload.png")
+	require.NoError(t, os.WriteFile(uploadPath, tinyPNG, 0o644))
+
+	result, err := service.UploadSingleSource(
+		context.Background(),
+		2,
+		NewTempUploadSource("reusable-upload.png", uploadPath, int64(len(tinyPNG))),
+		providerID,
+		true,
+		0,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.IsDuplicate)
+	assert.NotEqual(t, softDeleted.Identifier, result.Identifier)
+	assert.Equal(t, uint(2), result.Image.UserID)
+
+	_, statErr := os.Stat(uploadPath)
+	require.Error(t, statErr)
+	assert.True(t, os.IsNotExist(statErr))
+}
+
+func TestUploadSingleSourceCleansTempFileWhenConversionTaskIsDropped(t *testing.T) {
+	db := setupImageServiceTestDB(t)
+	service, _, _ := newTestWriteService(t, db)
+	service.converter = &Converter{}
+
+	const providerID uint = 91005
+	tempDir := t.TempDir()
+	require.NoError(t, storage.AddOrUpdateProvider(storage.StorageConfig{
+		ID:        providerID,
+		Name:      "test-local-task-drop-cleanup",
+		Type:      "local",
+		LocalPath: tempDir,
+	}))
+	t.Cleanup(func() {
+		_ = storage.RemoveProvider(providerID)
+	})
+
+	uploadPath := filepath.Join(t.TempDir(), "dropped-task-upload.png")
+	require.NoError(t, os.WriteFile(uploadPath, tinyPNG, 0o644))
+
+	result, err := service.UploadSingleSource(
+		context.Background(),
+		1,
+		NewTempUploadSource("dropped-task-upload.png", uploadPath, int64(len(tinyPNG))),
+		providerID,
+		true,
+		0,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.False(t, result.IsDuplicate)
+
+	_, statErr := os.Stat(uploadPath)
+	require.Error(t, statErr)
+	assert.True(t, os.IsNotExist(statErr))
+}

@@ -5,10 +5,12 @@ import (
 	"errors"
 	"time"
 
+	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/utils"
+	"gorm.io/gorm"
 )
 
 var readLog = utils.ForModule("ReadService")
@@ -47,7 +49,15 @@ func (s *ReadService) GetImageMetadata(ctx context.Context, identifier string) (
 
 	if s.cacheHelper != nil {
 		if err := s.cacheHelper.GetCachedImage(ctx, identifier, &image); err == nil {
+			middleware.RecordImageMetadataCacheHit()
 			return &image, nil
+		}
+	}
+	middleware.RecordImageMetadataCacheMiss()
+	imageCacheKey := cache.ImageCachePrefix + identifier
+	if s.cacheHelper != nil {
+		if isEmpty, err := s.cacheHelper.IsEmptyValue(ctx, imageCacheKey); err == nil && isEmpty {
+			return nil, gorm.ErrRecordNotFound
 		}
 	}
 
@@ -56,6 +66,11 @@ func (s *ReadService) GetImageMetadata(ctx context.Context, identifier string) (
 		if err != nil {
 			if isTransientError(err) {
 				return nil, ErrTemporaryFailure
+			}
+			if errors.Is(err, gorm.ErrRecordNotFound) && s.cacheHelper != nil {
+				cacheCtx, cancel := utils.DetachedContext(5 * time.Second)
+				defer cancel()
+				_ = s.cacheHelper.CacheEmptyValue(cacheCtx, imageCacheKey)
 			}
 			return nil, err
 		}

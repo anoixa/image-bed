@@ -3,6 +3,7 @@ package image
 import (
 	"context"
 
+	"github.com/anoixa/image-bed/cache"
 	config "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
@@ -28,13 +29,15 @@ type VariantResult struct {
 type VariantService struct {
 	variantRepo   *images.VariantRepository
 	configManager *config.Manager
+	cacheHelper   *cache.Helper
 }
 
 // NewVariantService 创建服务
-func NewVariantService(repo *images.VariantRepository, cm *config.Manager) *VariantService {
+func NewVariantService(repo *images.VariantRepository, cm *config.Manager, cacheHelper *cache.Helper) *VariantService {
 	return &VariantService{
 		variantRepo:   repo,
 		configManager: cm,
+		cacheHelper:   cacheHelper,
 	}
 }
 
@@ -92,10 +95,27 @@ func (s *VariantService) handleOriginalWithConversion(image *models.Image, shoul
 
 // handleCompletedVariants 处理已完成变体的情况
 func (s *VariantService) handleCompletedVariants(ctx context.Context, image *models.Image, acceptHeader string, settings *config.ImageProcessingSettings) (*VariantResult, error) {
-	variants, err := s.variantRepo.WithContext(ctx).GetVariantsByImageID(image.ID)
+	var variants []models.ImageVariant
+	if s.cacheHelper != nil {
+		if err := s.cacheHelper.GetCachedImageVariants(ctx, image.ID, &variants); err == nil {
+			return s.selectFromVariants(image, acceptHeader, settings, variants), nil
+		}
+	}
+
+	var fetched []models.ImageVariant
+	fetched, err := s.variantRepo.WithContext(ctx).GetVariantsByImageID(image.ID)
 	if err != nil {
 		return nil, err
 	}
+	variants = fetched
+	if s.cacheHelper != nil {
+		_ = s.cacheHelper.CacheImageVariants(ctx, image.ID, variants)
+	}
+
+	return s.selectFromVariants(image, acceptHeader, settings, variants), nil
+}
+
+func (s *VariantService) selectFromVariants(image *models.Image, acceptHeader string, settings *config.ImageProcessingSettings, variants []models.ImageVariant) *VariantResult {
 
 	available := make(map[format.FormatType]bool)
 	variantMap := make(map[format.FormatType]*models.ImageVariant)
@@ -138,5 +158,5 @@ func (s *VariantService) handleCompletedVariants(ctx context.Context, image *mod
 		}
 	}
 
-	return result, nil
+	return result
 }

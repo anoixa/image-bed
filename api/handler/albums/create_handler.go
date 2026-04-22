@@ -62,7 +62,7 @@ func (h *Handler) CreateAlbumHandler(c *gin.Context) {
 	}
 
 	// 清除用户相册列表缓存
-	utils.SafeGo(func() {
+	albumAsync(func() {
 		ctx, cancel := utils.DetachedContext(5 * time.Second)
 		defer cancel()
 		if err := h.cacheHelper.DeleteCachedAlbumList(ctx, userID); err != nil {

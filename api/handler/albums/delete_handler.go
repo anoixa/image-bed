@@ -54,7 +54,7 @@ func (h *Handler) DeleteAlbumHandler(c *gin.Context) {
 	}
 
 	// 清除相册缓存和用户的相册列表缓存
-	utils.SafeGo(func() {
+	albumAsync(func() {
 		ctx, cancel := utils.DetachedContext(5 * time.Second)
 		defer cancel()
 		if err := h.cacheHelper.DeleteCachedAlbum(ctx, uint(albumID)); err != nil {

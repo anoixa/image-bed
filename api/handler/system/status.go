@@ -269,11 +269,13 @@ func (h *Handler) GetVersion(c *gin.Context) {
 }
 
 type MetricsResponse struct {
-	RequestCount      int64               `json:"request_count"`
-	RequestDurationMs int64               `json:"request_duration_ms"`
-	AvgDurationMs     float64             `json:"avg_duration_ms"`
-	Worker            WorkerStatus        `json:"worker"`
-	Sweeper           worker.SweeperStats `json:"sweeper"`
+	RequestCount      int64                    `json:"request_count"`
+	RequestDurationMs int64                    `json:"request_duration_ms"`
+	AvgDurationMs     float64                  `json:"avg_duration_ms"`
+	Upload            middleware.UploadMetrics `json:"upload"`
+	ImageDelivery     middleware.ImageMetrics  `json:"image_delivery"`
+	Worker            WorkerStatus             `json:"worker"`
+	Sweeper           worker.SweeperStats      `json:"sweeper"`
 }
 
 // GetMetrics

@@ -159,6 +159,12 @@ func (s *DeleteService) deleteVariantsForImage(ctx context.Context, img *models.
 	if err := s.variantRepo.WithContext(ctx).DeleteByImageID(img.ID); err != nil {
 		deleteLog.Errorf("Failed to delete variant records for image %d: %v", img.ID, err)
 	}
+
+	if s.cacheHelper != nil {
+		if err := s.cacheHelper.DeleteCachedImageVariants(ctx, img.ID); err != nil {
+			deleteLog.Warnf("Failed to delete variant cache for image %d: %v", img.ID, err)
+		}
+	}
 }
 
 func (s *DeleteService) clearImageCache(ctx context.Context, identifier string) {

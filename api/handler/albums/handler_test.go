@@ -317,7 +317,12 @@ func TestUpdateAlbumHandlerReturnsFreshUpdatedAt(t *testing.T) {
 		BufferItems: 64,
 	})
 	require.NoError(t, err)
-	defer func() { _ = provider.Close() }()
+	prevAsync := albumAsync
+	albumAsync = func(fn func()) { fn() }
+	t.Cleanup(func() {
+		albumAsync = prevAsync
+		_ = provider.Close()
+	})
 
 	handler := NewHandler(svc, provider, "")
 
