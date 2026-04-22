@@ -36,30 +36,39 @@ type OverviewStats struct {
 }
 
 // GetOverviewStats 获取概览统计
-func (r *Repository) GetOverviewStats(ctx context.Context) (*OverviewStats, error) {
+func (r *Repository) GetOverviewStats(ctx context.Context, userID *uint) (*OverviewStats, error) {
 	var result OverviewStats
 
 	db := r.db.WithContext(ctx)
 
-	// 图片总数和存储大小
-	err := db.Model(&models.Image{}).
+	imageQuery := db.Model(&models.Image{}).Where("deleted_at IS NULL")
+	if userID != nil {
+		imageQuery = imageQuery.Where("user_id = ?", *userID)
+	}
+
+	err := imageQuery.
 		Select("COUNT(*) as image_total, COALESCE(SUM(file_size), 0) as storage_total").
-		Where("deleted_at IS NULL").
 		Scan(&result).Error
 	if err != nil {
 		return nil, err
 	}
 
-	// 相册数量
-	if err := db.Model(&models.Album{}).
-		Where("deleted_at IS NULL").
-		Select("COUNT(*)").
-		Scan(&result.AlbumTotal).Error; err != nil {
+	albumQuery := db.Model(&models.Album{}).Where("deleted_at IS NULL")
+	if userID != nil {
+		albumQuery = albumQuery.Where("user_id = ?", *userID)
+	}
+	if err := albumQuery.Select("COUNT(*)").Scan(&result.AlbumTotal).Error; err != nil {
 		return nil, fmt.Errorf("failed to count albums: %w", err)
 	}
 
-	// 用户固定为1（单用户系统）
-	result.UserTotal = 1
+	// 普通用户视角不应看到全局用户总数
+	if userID == nil {
+		if err := db.Model(&models.User{}).Count(&result.UserTotal).Error; err != nil {
+			return nil, fmt.Errorf("failed to count users: %w", err)
+		}
+	} else {
+		result.UserTotal = 1
+	}
 
 	return &result, nil
 }
@@ -73,7 +82,7 @@ type ImageTimeStats struct {
 }
 
 // GetImageTimeStats 获取图片时间维度统计
-func (r *Repository) GetImageTimeStats(ctx context.Context) (*ImageTimeStats, error) {
+func (r *Repository) GetImageTimeStats(ctx context.Context, userID *uint) (*ImageTimeStats, error) {
 	var stats ImageTimeStats
 	now := time.Now()
 	db := r.db.WithContext(ctx)
@@ -99,30 +108,35 @@ func (r *Repository) GetImageTimeStats(ctx context.Context) (*ImageTimeStats, er
 	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
 	monthEnd := monthStart.AddDate(0, 1, 0)
 
+	baseQuery := db.Model(&models.Image{}).Where("deleted_at IS NULL")
+	if userID != nil {
+		baseQuery = baseQuery.Where("user_id = ?", *userID)
+	}
+
 	// 今日
-	if err := db.Model(&models.Image{}).
-		Where("created_at >= ? AND created_at < ? AND deleted_at IS NULL", todayStart, todayEnd).
+	if err := baseQuery.Session(&gorm.Session{}).
+		Where("created_at >= ? AND created_at < ?", todayStart, todayEnd).
 		Count(&stats.Today).Error; err != nil {
 		return nil, fmt.Errorf("failed to count today images: %w", err)
 	}
 
 	// 昨日
-	if err := db.Model(&models.Image{}).
-		Where("created_at >= ? AND created_at < ? AND deleted_at IS NULL", yesterdayStart, yesterdayEnd).
+	if err := baseQuery.Session(&gorm.Session{}).
+		Where("created_at >= ? AND created_at < ?", yesterdayStart, yesterdayEnd).
 		Count(&stats.Yesterday).Error; err != nil {
 		return nil, fmt.Errorf("failed to count yesterday images: %w", err)
 	}
 
 	// 本周
-	if err := db.Model(&models.Image{}).
-		Where("created_at >= ? AND created_at < ? AND deleted_at IS NULL", weekStart, weekEnd).
+	if err := baseQuery.Session(&gorm.Session{}).
+		Where("created_at >= ? AND created_at < ?", weekStart, weekEnd).
 		Count(&stats.ThisWeek).Error; err != nil {
 		return nil, fmt.Errorf("failed to count this week images: %w", err)
 	}
 
 	// 本月
-	if err := db.Model(&models.Image{}).
-		Where("created_at >= ? AND created_at < ? AND deleted_at IS NULL", monthStart, monthEnd).
+	if err := baseQuery.Session(&gorm.Session{}).
+		Where("created_at >= ? AND created_at < ?", monthStart, monthEnd).
 		Count(&stats.ThisMonth).Error; err != nil {
 		return nil, fmt.Errorf("failed to count this month images: %w", err)
 	}
@@ -139,13 +153,18 @@ type StorageStat struct {
 }
 
 // GetStorageStats 获取各存储类型统计
-func (r *Repository) GetStorageStats(ctx context.Context) ([]StorageStat, error) {
+func (r *Repository) GetStorageStats(ctx context.Context, userID *uint) ([]StorageStat, error) {
 	var stats []StorageStat
 
-	err := r.db.WithContext(ctx).Table("images i").
+	query := r.db.WithContext(ctx).Table("images i").
 		Select("i.storage_config_id as storage_id, sc.name as storage_name, COUNT(*) as count, SUM(i.file_size) as size").
 		Joins("LEFT JOIN system_configs sc ON i.storage_config_id = sc.id").
-		Where("i.deleted_at IS NULL").
+		Where("i.deleted_at IS NULL")
+	if userID != nil {
+		query = query.Where("i.user_id = ?", *userID)
+	}
+
+	err := query.
 		Group("i.storage_config_id, sc.name").
 		Order("size DESC").
 		Scan(&stats).Error
@@ -160,7 +179,7 @@ type DailyStat struct {
 }
 
 // GetDailyStats 获取近 N 天每日统计
-func (r *Repository) GetDailyStats(ctx context.Context, days int) ([]DailyStat, error) {
+func (r *Repository) GetDailyStats(ctx context.Context, days int, userID *uint) ([]DailyStat, error) {
 	var stats []DailyStat
 
 	// 计算起始时间（N天前的零点）
@@ -170,9 +189,14 @@ func (r *Repository) GetDailyStats(ctx context.Context, days int) ([]DailyStat, 
 
 	statsRepoLog.Debugf("Querying from %s, days=%d", startDate.Format("2006-01-02"), days)
 
-	err := r.db.WithContext(ctx).Table("images").
+	query := r.db.WithContext(ctx).Table("images").
 		Select("DATE(created_at) as date, COUNT(*) as count").
-		Where("created_at >= ? AND deleted_at IS NULL", startDate).
+		Where("created_at >= ? AND deleted_at IS NULL", startDate)
+	if userID != nil {
+		query = query.Where("user_id = ?", *userID)
+	}
+
+	err := query.
 		Group("DATE(created_at)").
 		Order("date").
 		Scan(&stats).Error

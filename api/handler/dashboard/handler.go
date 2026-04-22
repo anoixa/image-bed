@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/anoixa/image-bed/api/common"
+	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/internal/dashboard"
 	"github.com/gin-gonic/gin"
 )
@@ -29,7 +30,16 @@ func NewHandler(svc *dashboard.Service) *Handler {
 // @Security     ApiKeyAuth
 // @Router       /api/v1/dashboard/stats [get]
 func (h *Handler) GetStats(c *gin.Context) {
-	stats, err := h.svc.GetStats(c.Request.Context())
+	// For regular users, scope to their own data
+	// For admins, show global stats
+	var userID *uint
+	role := c.GetString(middleware.ContextRoleKey)
+	if role != middleware.RoleAdmin {
+		uid := c.GetUint(middleware.ContextUserIDKey)
+		userID = &uid
+	}
+
+	stats, err := h.svc.GetStats(c.Request.Context(), userID)
 	if err != nil {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to get dashboard stats")
 		return
@@ -50,7 +60,14 @@ func (h *Handler) GetStats(c *gin.Context) {
 // @Security     ApiKeyAuth
 // @Router       /api/v1/dashboard/stats/refresh [post]
 func (h *Handler) RefreshStats(c *gin.Context) {
-	if err := h.svc.RefreshCache(c.Request.Context()); err != nil {
+	var userID *uint
+	role := c.GetString(middleware.ContextRoleKey)
+	if role != middleware.RoleAdmin {
+		uid := c.GetUint(middleware.ContextUserIDKey)
+		userID = &uid
+	}
+
+	if err := h.svc.RefreshCache(c.Request.Context(), userID); err != nil {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to refresh stats")
 		return
 	}
@@ -59,10 +76,10 @@ func (h *Handler) RefreshStats(c *gin.Context) {
 }
 
 func (h *Handler) SetupRoutes(router *gin.RouterGroup, authMiddleware gin.HandlerFunc) {
-	dashboard := router.Group("/dashboard")
-	dashboard.Use(authMiddleware)
+	dashGroup := router.Group("/dashboard")
+	dashGroup.Use(authMiddleware)
 	{
-		dashboard.GET("/stats", h.GetStats)
-		dashboard.POST("/stats/refresh", h.RefreshStats)
+		dashGroup.GET("/stats", h.GetStats)
+		dashGroup.POST("/stats/refresh", h.RefreshStats)
 	}
 }
