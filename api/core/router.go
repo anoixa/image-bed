@@ -19,6 +19,7 @@ import (
 	configSvc "github.com/anoixa/image-bed/config/db"
 	dashboardRepo "github.com/anoixa/image-bed/database/repo/dashboard"
 	"github.com/anoixa/image-bed/database/repo/images"
+	svcAdmin "github.com/anoixa/image-bed/internal/admin"
 	svcAlbums "github.com/anoixa/image-bed/internal/albums"
 	"github.com/anoixa/image-bed/internal/auth"
 	svcDashboard "github.com/anoixa/image-bed/internal/dashboard"
@@ -277,6 +278,22 @@ func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies, imageHan
 		// 全局转发模式配置
 		adminGroup.GET("/transfer-mode", configHandler.GetGlobalTransferMode)
 		adminGroup.POST("/transfer-mode", configHandler.SetGlobalTransferMode)
+
+		// User management
+		userSvc := svcAdmin.NewUserService(
+			deps.Repositories.AccountsRepo,
+			deps.Repositories.DevicesRepo,
+			deps.Repositories.KeysRepo,
+			deps.Repositories.ImagesRepo,
+			deps.Repositories.AlbumsRepo,
+		)
+		userHandler := admin.NewUserHandler(userSvc)
+		adminGroup.GET("/users", userHandler.ListUsers)
+		adminGroup.POST("/users", userHandler.CreateUser)
+		adminGroup.PUT("/users/:id/role", userHandler.UpdateRole)
+		adminGroup.PUT("/users/:id/status", userHandler.UpdateStatus)
+		adminGroup.POST("/users/:id/reset-password", userHandler.ResetPassword)
+		adminGroup.DELETE("/users/:id", userHandler.DeleteUser)
 	}
 }
 
