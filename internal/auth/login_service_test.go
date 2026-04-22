@@ -3,9 +3,9 @@ package auth
 import (
 	"testing"
 
+	appconfig "github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/accounts"
-	appconfig "github.com/anoixa/image-bed/config"
 	cryptopackage "github.com/anoixa/image-bed/utils/crypto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
