@@ -195,18 +195,13 @@ func parseMultipartUploadRequest(r *http.Request, settings *dbconfig.ImageProces
 	)
 
 	cleanup := func() {
-			for _, tempFile := range tempFiles {
-				tempFile.cleanup()
-			}
-			// Also clean up files whose ownership was transferred to
-			// WriteService/Pipeline. On the happy path these are already
-			// removed, so os.Remove on a non-existent file is harmless.
-			for _, f := range request.files {
-				if f.TempFilePath != "" {
-					_ = os.Remove(f.TempFilePath)
-				}
-			}
+		for _, tempFile := range tempFiles {
+			tempFile.cleanup()
 		}
+		for _, f := range request.files {
+			f.CleanupRequestTempFile()
+		}
+	}
 
 	maxFileSize := int64(0)
 	if settings.MaxFileSizeMB > 0 {

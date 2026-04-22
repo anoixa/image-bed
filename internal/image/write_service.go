@@ -235,7 +235,6 @@ func (s *WriteService) processAndSaveImage(ctx context.Context, userID uint, sou
 	}
 
 	if err == nil {
-		tempFileConsumed = true // dedup -- defer will skip cleanup
 		if img.UserID != userID {
 			newImg, err := s.createDedupedImageRecord(ctx, img, userID, source.FileName, storageConfigID, isPublic)
 			if err != nil {
@@ -261,7 +260,6 @@ func (s *WriteService) processAndSaveImage(ctx context.Context, userID uint, sou
 		if err != nil {
 			writeServiceLog.Warnf("Failed to verify soft-deleted image %s for hash reuse: %v", utils.SanitizeLogMessage(deletedImg.Identifier), err)
 		} else if reusable {
-				tempFileConsumed = true // soft-delete reuse -- defer will skip cleanup
 			if deletedImg.UserID != userID {
 				newImg, err := s.createDedupedImageRecord(ctx, deletedImg, userID, source.FileName, storageConfigID, isPublic)
 				if err != nil {
@@ -340,9 +338,11 @@ func (s *WriteService) processAndSaveImage(ctx context.Context, userID uint, sou
 
 	submitBackgroundTask(func() { s.warmCache(newImg) })
 	if s.converter != nil {
-		tempFileConsumed = true // ownership transferred to converter
 		if source.TempFilePath != "" {
-			submitBackgroundTask(func() { s.converter.TriggerConversionWithLocalFile(newImg, source.TempFilePath) })
+			if submitBackgroundTask(func() { s.converter.TriggerConversionWithLocalFile(newImg, source.TempFilePath) }) {
+				tempFileConsumed = true
+				source.ReleaseRequestCleanup()
+			}
 		} else {
 			submitBackgroundTask(func() { s.converter.TriggerConversion(newImg) })
 		}

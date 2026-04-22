@@ -5,6 +5,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"testing"
 
 	dbconfig "github.com/anoixa/image-bed/config/db"
@@ -79,4 +80,66 @@ func TestParseMultipartUploadRequestRejectsTooManyFiles(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, http.StatusBadRequest, requestErr.status)
 	assert.Equal(t, "Maximum 10 files allowed per upload", requestErr.message)
+}
+
+func TestParseMultipartUploadRequestCleanupRemovesUnreleasedTempFile(t *testing.T) {
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+
+	fileWriter, err := writer.CreateFormFile("files", "a.txt")
+	require.NoError(t, err)
+	_, err = io.Copy(fileWriter, bytes.NewReader([]byte("hello world")))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	req, err := http.NewRequest(http.MethodPost, "/upload", body)
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	parsed, cleanup, err := parseMultipartUploadRequest(req, &dbconfig.ImageProcessingSettings{
+		MaxFileSizeMB:   10,
+		MaxBatchTotalMB: 20,
+	})
+	require.NoError(t, err)
+	require.Len(t, parsed.files, 1)
+
+	path := parsed.files[0].TempFilePath
+	_, err = os.Stat(path)
+	require.NoError(t, err)
+
+	cleanup()
+
+	_, err = os.Stat(path)
+	require.Error(t, err)
+	assert.True(t, os.IsNotExist(err))
+}
+
+func TestParseMultipartUploadRequestCleanupSkipsReleasedTempFile(t *testing.T) {
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+
+	fileWriter, err := writer.CreateFormFile("files", "a.txt")
+	require.NoError(t, err)
+	_, err = io.Copy(fileWriter, bytes.NewReader([]byte("hello world")))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	req, err := http.NewRequest(http.MethodPost, "/upload", body)
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	parsed, cleanup, err := parseMultipartUploadRequest(req, &dbconfig.ImageProcessingSettings{
+		MaxFileSizeMB:   10,
+		MaxBatchTotalMB: 20,
+	})
+	require.NoError(t, err)
+	require.Len(t, parsed.files, 1)
+
+	path := parsed.files[0].TempFilePath
+	parsed.files[0].ReleaseRequestCleanup()
+	cleanup()
+
+	_, err = os.Stat(path)
+	require.NoError(t, err)
+	require.NoError(t, os.Remove(path))
 }
