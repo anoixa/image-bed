@@ -285,6 +285,16 @@ func InitDatabase(deps *Dependencies) error {
 	} else {
 		serveLog.Infof("Admin user already exists, skipping creation")
 	}
+
+	// Backfill empty status for legacy users (upgrade path)
+	rows, err := deps.Repositories.AccountsRepo.BackfillEmptyUserStatus(models.UserStatusActive)
+	if err != nil {
+		return fmt.Errorf("failed to backfill user status: %w", err)
+	}
+	if rows > 0 {
+		serveLog.Infof("Backfilled %d legacy users with status=active", rows)
+	}
+
 	return nil
 }
 
