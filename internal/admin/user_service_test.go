@@ -81,13 +81,39 @@ func TestUpdateUserRole(t *testing.T) {
 	repo := accounts.NewRepository(db)
 	svc := NewUserService(repo, nil, nil, nil, nil)
 
-	user, _, _ := svc.CreateUser("target", "password123", models.RoleUser)
+	user, _, err := svc.CreateUser("target", "password123", models.RoleUser)
+	require.NoError(t, err)
 
-	err := svc.UpdateRole(user.ID, models.RoleAdmin)
+	err = svc.UpdateRole(user.ID, models.RoleAdmin)
 	require.NoError(t, err)
 
 	updated, _ := repo.GetUserByID(user.ID)
 	assert.Equal(t, models.RoleAdmin, updated.Role)
+}
+
+func TestUpdateRole_UserNotFound(t *testing.T) {
+	db := setupAdminTestDB(t)
+	svc := NewUserService(accounts.NewRepository(db), nil, nil, nil, nil)
+
+	err := svc.UpdateRole(99999, models.RoleAdmin)
+	assert.ErrorIs(t, err, ErrUserNotFound)
+}
+
+func TestUpdateRole_DemoteLastAdmin(t *testing.T) {
+	db := setupAdminTestDB(t)
+	repo := accounts.NewRepository(db)
+	svc := NewUserService(repo, nil, nil, nil, nil)
+
+	admin := &models.User{
+		Username: "admin",
+		Password: "hash",
+		Role:     models.RoleAdmin,
+		Status:   models.UserStatusActive,
+	}
+	require.NoError(t, repo.CreateUser(admin))
+
+	err := svc.UpdateRole(admin.ID, models.RoleUser)
+	assert.ErrorIs(t, err, ErrLastAdmin)
 }
 
 func TestDisableUser(t *testing.T) {

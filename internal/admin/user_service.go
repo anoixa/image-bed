@@ -111,6 +111,22 @@ func (s *UserService) CreateUser(username, password, role string) (*models.User,
 
 // UpdateRole 更新用户角色
 func (s *UserService) UpdateRole(userID uint, role string) error {
+	user, err := s.accountsRepo.GetUserByID(userID)
+	if err != nil {
+		return ErrUserNotFound
+	}
+
+	// Demoting the last active admin to user must be blocked
+	if user.Role == models.RoleAdmin && role != models.RoleAdmin {
+		isLast, err := s.isLastAdmin(userID)
+		if err != nil {
+			return err
+		}
+		if isLast {
+			return ErrLastAdmin
+		}
+	}
+
 	return s.accountsRepo.UpdateUserRole(userID, role)
 }
 
