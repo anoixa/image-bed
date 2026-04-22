@@ -9,21 +9,21 @@ import (
 	albumRepo "github.com/anoixa/image-bed/database/repo/albums"
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/database/repo/keys"
-	cryptopackage "github.com/anoixa/image-bed/utils/crypto"
 	"github.com/anoixa/image-bed/utils"
+	cryptopackage "github.com/anoixa/image-bed/utils/crypto"
 )
 
 var adminLog = utils.ForModule("AdminUser")
 
 var (
-	ErrUsernameEmpty    = errors.New("username cannot be empty")
-	ErrPasswordTooShort = errors.New("password must be at least 6 characters")
-	ErrUsernameExists   = errors.New("username already exists")
-	ErrUserNotFound     = errors.New("user not found")
-	ErrUserHasOwnedData = errors.New("cannot delete user with owned images or albums")
-	ErrLastAdmin        = errors.New("cannot modify or delete the last admin")
+	ErrUsernameEmpty     = errors.New("username cannot be empty")
+	ErrPasswordTooShort  = errors.New("password must be at least 6 characters")
+	ErrUsernameExists    = errors.New("username already exists")
+	ErrUserNotFound      = errors.New("user not found")
+	ErrUserHasOwnedData  = errors.New("cannot delete user with owned images or albums")
+	ErrLastAdmin         = errors.New("cannot modify or delete the last admin")
 	ErrCannotDisableSelf = errors.New("cannot disable yourself")
-	ErrInvalidRole      = errors.New("invalid role")
+	ErrInvalidRole       = errors.New("invalid role")
 )
 
 const minPasswordLength = 6

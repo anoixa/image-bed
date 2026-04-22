@@ -13,17 +13,13 @@ import (
 
 func setupTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(t.Name()), &gorm.Config{
+	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		sqlDB, _ := db.DB()
-		if sqlDB != nil {
-			sqlDB.Close()
-		}
-	})
 	require.NoError(t, db.AutoMigrate(&models.User{}))
+	// Clean table to isolate each test
+	db.Exec("DELETE FROM users")
 	return db
 }
 

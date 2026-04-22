@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/anoixa/image-bed/database/models"
-	albumRepo "github.com/anoixa/image-bed/database/repo/albums"
 	"github.com/anoixa/image-bed/database/repo/accounts"
+	albumRepo "github.com/anoixa/image-bed/database/repo/albums"
 	"github.com/anoixa/image-bed/database/repo/keys"
 	cryptopackage "github.com/anoixa/image-bed/utils/crypto"
 	"github.com/stretchr/testify/assert"
@@ -234,8 +234,10 @@ func TestListUsers(t *testing.T) {
 	db := setupAdminTestDB(t)
 	svc := NewUserService(accounts.NewRepository(db), nil, nil, nil, nil)
 
-	svc.CreateUser("a", "password123", models.RoleUser)
-	svc.CreateUser("b", "password123", models.RoleUser)
+	_, _, err := svc.CreateUser("a", "password123", models.RoleUser)
+	require.NoError(t, err)
+	_, _, err = svc.CreateUser("b", "password123", models.RoleUser)
+	require.NoError(t, err)
 
 	users, total, err := svc.ListUsers(1, 10)
 	require.NoError(t, err)

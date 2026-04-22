@@ -22,7 +22,7 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-func setupUserHandlerTest(t *testing.T) (*gin.Engine, *admin.UserService, *authpkg.JWTService) {
+func setupUserHandlerTest(t *testing.T) (*gin.Engine, *admin.UserService, *authpkg.JWTService, uint) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 
@@ -41,6 +41,15 @@ func setupUserHandlerTest(t *testing.T) (*gin.Engine, *admin.UserService, *authp
 	jwtSvc, err := api.NewTestJWTService("0123456789abcdef0123456789abcdef", "15m", "24h")
 	require.NoError(t, err)
 
+	// Create an admin user for auth — this ensures the JWT userID matches a real admin
+	adminUser := &models.User{
+		Username: "test-admin",
+		Password: "hash",
+		Role:     models.RoleAdmin,
+		Status:   models.UserStatusActive,
+	}
+	require.NoError(t, repo.CreateUser(adminUser))
+
 	router := gin.New()
 	adminGroup := router.Group("/api/v1/admin")
 	adminGroup.Use(middleware.CombinedAuth(jwtSvc))
@@ -55,11 +64,11 @@ func setupUserHandlerTest(t *testing.T) (*gin.Engine, *admin.UserService, *authp
 		adminGroup.DELETE("/users/:id", handler.DeleteUser)
 	}
 
-	return router, svc, jwtSvc
+	return router, svc, jwtSvc, adminUser.ID
 }
 
-func adminAuthHeader(jwtSvc *authpkg.JWTService) string {
-	tokenPair, err := jwtSvc.GenerateTokens("admin", 1, middleware.RoleAdmin)
+func adminAuthHeader(jwtSvc *authpkg.JWTService, adminUserID uint) string {
+	tokenPair, err := jwtSvc.GenerateTokens("test-admin", adminUserID, middleware.RoleAdmin)
 	if err != nil {
 		panic(err)
 	}
@@ -67,13 +76,14 @@ func adminAuthHeader(jwtSvc *authpkg.JWTService) string {
 }
 
 func TestListUsersHandler(t *testing.T) {
-	router, svc, jwtSvc := setupUserHandlerTest(t)
+	router, svc, jwtSvc, adminID := setupUserHandlerTest(t)
 
 	// Create test users via service
-	svc.CreateUser("user1", "password123", models.RoleUser)
+	_, _, err := svc.CreateUser("user1", "password123", models.RoleUser)
+	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/users", nil)
-	req.Header.Set("Authorization", adminAuthHeader(jwtSvc))
+	req.Header.Set("Authorization", adminAuthHeader(jwtSvc, adminID))
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -85,7 +95,7 @@ func TestListUsersHandler(t *testing.T) {
 }
 
 func TestCreateUserHandler(t *testing.T) {
-	router, _, jwtSvc := setupUserHandlerTest(t)
+	router, _, jwtSvc, adminID := setupUserHandlerTest(t)
 
 	body, _ := json.Marshal(map[string]string{
 		"username": "newuser",
@@ -93,7 +103,7 @@ func TestCreateUserHandler(t *testing.T) {
 		"role":     "user",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/users", bytes.NewReader(body))
-	req.Header.Set("Authorization", adminAuthHeader(jwtSvc))
+	req.Header.Set("Authorization", adminAuthHeader(jwtSvc, adminID))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -102,10 +112,10 @@ func TestCreateUserHandler(t *testing.T) {
 }
 
 func TestCreateUserHandlerEmptyBody(t *testing.T) {
-	router, _, jwtSvc := setupUserHandlerTest(t)
+	router, _, jwtSvc, adminID := setupUserHandlerTest(t)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/users", nil)
-	req.Header.Set("Authorization", adminAuthHeader(jwtSvc))
+	req.Header.Set("Authorization", adminAuthHeader(jwtSvc, adminID))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -114,12 +124,13 @@ func TestCreateUserHandlerEmptyBody(t *testing.T) {
 }
 
 func TestDeleteUserHandler(t *testing.T) {
-	router, svc, jwtSvc := setupUserHandlerTest(t)
+	router, svc, jwtSvc, adminID := setupUserHandlerTest(t)
 
-	user, _, _ := svc.CreateUser("to-delete", "password123", models.RoleUser)
+	user, _, err := svc.CreateUser("to-delete", "password123", models.RoleUser)
+	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/v1/admin/users/%d", user.ID), nil)
-	req.Header.Set("Authorization", adminAuthHeader(jwtSvc))
+	req.Header.Set("Authorization", adminAuthHeader(jwtSvc, adminID))
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
