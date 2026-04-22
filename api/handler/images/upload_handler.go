@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
@@ -49,7 +50,9 @@ func (h *Handler) UploadImage(c *gin.Context) {
 		return
 	}
 
+	parseStart := time.Now()
 	request, cleanup, err := parseMultipartUploadRequest(c.Request, settings)
+	middleware.RecordUploadParseDuration(time.Since(parseStart))
 	if err != nil {
 		if uploadErr, ok := err.(*uploadRequestError); ok {
 			common.RespondError(c, uploadErr.status, uploadErr.message)

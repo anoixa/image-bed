@@ -865,6 +865,11 @@ func (t *ImagePipelineTask) deleteCacheOnTerminalState(state string) {
 		if err := t.CacheHelper.DeleteCachedImage(ctx, t.ImageIdentifier); err != nil {
 			pipelineLog.Warnf("Failed to delete cache for %s on %s: %v", t.ImageIdentifier, state, err)
 		}
+		if t.ImageID > 0 {
+			if err := t.CacheHelper.DeleteCachedImageVariants(ctx, t.ImageID); err != nil {
+				pipelineLog.Warnf("Failed to delete variant cache for image %d on %s: %v", t.ImageID, state, err)
+			}
+		}
 	}
 }
 

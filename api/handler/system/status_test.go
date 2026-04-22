@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/anoixa/image-bed/api/common"
+	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/internal/worker"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -79,15 +80,19 @@ func TestGetMetricsIncludesWorkerAndSweeperSections(t *testing.T) {
 	require.NoError(t, err)
 
 	var payload struct {
-		RequestCount      int64               `json:"request_count"`
-		RequestDurationMs int64               `json:"request_duration_ms"`
-		AvgDurationMs     float64             `json:"avg_duration_ms"`
-		Worker            WorkerStatus        `json:"worker"`
-		Sweeper           worker.SweeperStats `json:"sweeper"`
+		RequestCount      int64                    `json:"request_count"`
+		RequestDurationMs int64                    `json:"request_duration_ms"`
+		AvgDurationMs     float64                  `json:"avg_duration_ms"`
+		Upload            middleware.UploadMetrics `json:"upload"`
+		ImageDelivery     middleware.ImageMetrics  `json:"image_delivery"`
+		Worker            WorkerStatus             `json:"worker"`
+		Sweeper           worker.SweeperStats      `json:"sweeper"`
 	}
 	require.NoError(t, json.Unmarshal(dataBytes, &payload))
 
 	assert.GreaterOrEqual(t, payload.RequestCount, int64(0))
+	assert.GreaterOrEqual(t, payload.Upload.ParseRequests, int64(0))
+	assert.GreaterOrEqual(t, payload.ImageDelivery.MetadataCacheHits, int64(0))
 	assert.GreaterOrEqual(t, payload.Worker.QueueCap, 1)
 	assert.GreaterOrEqual(t, payload.Worker.WorkerCount, 1)
 	assert.GreaterOrEqual(t, payload.Sweeper.Runs, uint64(0))

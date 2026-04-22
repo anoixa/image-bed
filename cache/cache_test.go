@@ -163,6 +163,46 @@ func TestHelper_GetCachedImage(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestHelper_GetCachedImage_EmptyMarkerReturnsMiss(t *testing.T) {
+	mock := newMockProvider("mock")
+	helper := NewHelper(mock)
+
+	ctx := context.Background()
+	key := ImageCachePrefix + "missing-image"
+	err := helper.CacheEmptyValue(ctx, key)
+	assert.NoError(t, err)
+
+	var cachedImage models.Image
+	err = helper.GetCachedImage(ctx, "missing-image", &cachedImage)
+	assert.ErrorIs(t, err, ErrCacheMiss)
+}
+
+func TestHelper_CacheImage_ClearsEmptyMarker(t *testing.T) {
+	mock := newMockProvider("mock")
+	helper := NewHelper(mock)
+
+	ctx := context.Background()
+	key := ImageCachePrefix + "test-image-123"
+	err := helper.CacheEmptyValue(ctx, key)
+	assert.NoError(t, err)
+
+	image := &models.Image{
+		Identifier:   "test-image-123",
+		OriginalName: "test.jpg",
+	}
+	err = helper.CacheImage(ctx, image)
+	assert.NoError(t, err)
+
+	isEmpty, err := helper.IsEmptyValue(ctx, key)
+	assert.ErrorIs(t, err, ErrCacheMiss)
+	assert.False(t, isEmpty)
+
+	var cachedImage models.Image
+	err = helper.GetCachedImage(ctx, image.Identifier, &cachedImage)
+	assert.NoError(t, err)
+	assert.Equal(t, image.Identifier, cachedImage.Identifier)
+}
+
 func TestHelper_GetCachedImage_NilProvider(t *testing.T) {
 	helper := NewHelper(nil)
 
@@ -188,6 +228,33 @@ func TestHelper_DeleteCachedImage_NilProvider(t *testing.T) {
 	ctx := context.Background()
 	err := helper.DeleteCachedImage(ctx, "test-image-123")
 	assert.NoError(t, err)
+}
+
+func TestHelper_CacheImageVariantsRoundTrip(t *testing.T) {
+	mock := newMockProvider("mock")
+	helper := NewHelper(mock)
+
+	ctx := context.Background()
+	variants := []models.ImageVariant{
+		{ImageID: 42, Identifier: "variant-webp", Format: models.FormatWebP, Status: models.VariantStatusCompleted},
+		{ImageID: 42, Identifier: "variant-avif", Format: models.FormatAVIF, Status: models.VariantStatusCompleted},
+	}
+
+	err := helper.CacheImageVariants(ctx, 42, variants)
+	assert.NoError(t, err)
+
+	var cached []models.ImageVariant
+	err = helper.GetCachedImageVariants(ctx, 42, &cached)
+	assert.NoError(t, err)
+	assert.Len(t, cached, 2)
+	assert.Equal(t, "variant-webp", cached[0].Identifier)
+	assert.Equal(t, "variant-avif", cached[1].Identifier)
+
+	err = helper.DeleteCachedImageVariants(ctx, 42)
+	assert.NoError(t, err)
+
+	err = helper.GetCachedImageVariants(ctx, 42, &cached)
+	assert.ErrorIs(t, err, ErrCacheMiss)
 }
 
 // --- Utils 测试 ---

@@ -218,6 +218,12 @@ func (c *Converter) failPendingVariantsOnSubmitFailure(imageRepo *images.Reposit
 		return
 	}
 	image.VariantStatus = models.ImageVariantStatusFailed
+	if c.cacheHelper != nil {
+		ctx, cancel := utils.DetachedContext(5 * time.Second)
+		defer cancel()
+		_ = c.cacheHelper.DeleteCachedImage(ctx, image.Identifier)
+		_ = c.cacheHelper.DeleteCachedImageVariants(ctx, image.ID)
+	}
 }
 
 func shouldTriggerVariantConversion(image *models.Image, settings *config.ImageProcessingSettings) bool {

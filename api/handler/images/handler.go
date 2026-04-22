@@ -29,10 +29,6 @@ type Handler struct {
 }
 
 func NewHandler(cacheProvider cache.Provider, imagesRepo *images.Repository, variantRepo *images.VariantRepository, converter *image.Converter, configManager *configSvc.Manager, cfg *config.Config, baseURL string, albumsRepo *albums.Repository) *Handler {
-	variantService := image.NewVariantService(variantRepo, configManager)
-
-	thumbnailService := image.NewThumbnailService(variantRepo)
-
 	helperCfg := cache.HelperConfig{
 		ImageCacheTTL:         cache.DefaultImageCacheExpiration,
 		ImageDataCacheTTL:     1 * time.Hour,
@@ -51,6 +47,8 @@ func NewHandler(cacheProvider cache.Provider, imagesRepo *images.Repository, var
 	}
 
 	cacheHelper := cache.NewHelper(cacheProvider, helperCfg)
+	variantService := image.NewVariantService(variantRepo, configManager, cacheHelper)
+	thumbnailService := image.NewThumbnailService(variantRepo)
 	writeService := image.NewWriteService(imagesRepo, albumsRepo, converter, cacheHelper, baseURL)
 	readService := image.NewReadService(imagesRepo, variantService, converter, cacheHelper, baseURL, image.SubmitBackgroundTask)
 	deleteService := image.NewDeleteService(imagesRepo, variantRepo, cacheHelper)
