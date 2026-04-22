@@ -1,6 +1,7 @@
 package core
 
 import (
+	"database/sql"
 	"net/http/pprof"
 	"strings"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/anoixa/image-bed/config"
 	configSvc "github.com/anoixa/image-bed/config/db"
 	dashboardRepo "github.com/anoixa/image-bed/database/repo/dashboard"
+	"github.com/anoixa/image-bed/database/repo/images"
 	svcAlbums "github.com/anoixa/image-bed/internal/albums"
 	"github.com/anoixa/image-bed/internal/auth"
 	svcDashboard "github.com/anoixa/image-bed/internal/dashboard"
@@ -27,31 +29,34 @@ import (
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
-	"gorm.io/gorm"
 )
 
 // getBaseURL 从配置获取基础 URL
 func getBaseURL(cfg *config.Config) string {
-	if cfg != nil && cfg.ServerDomain != "" {
-		return cfg.ServerDomain
+	if cfg != nil {
+		return cfg.BaseURL()
 	}
 	return ""
 }
 
 // RouterDependencies 路由注册依赖
 type RouterDependencies struct {
-	DB               *gorm.DB
-	Repositories     *Repositories
-	ConfigManager    *configSvc.Manager
-	Converter        *imageSvc.Converter
-	JWTService       *auth.JWTService
-	LoginService     *auth.LoginService
-	AuthRateLimiter  *middleware.IPRateLimiter
-	APIRateLimiter   *middleware.IPRateLimiter
-	ImageRateLimiter *middleware.IPRateLimiter
-	CacheProvider    cache.Provider
-	ServerVersion    ServerVersion
-	Config           *config.Config
+	VariantRepo       *images.VariantRepository
+	DashboardRepo     *dashboardRepo.Repository
+	SqlDB             *sql.DB
+	Repositories      *Repositories
+	ConfigManager     *configSvc.Manager
+	Converter         *imageSvc.Converter
+	JWTService        *auth.JWTService
+	LoginService      *auth.LoginService
+	AuthRateLimiter   *middleware.IPRateLimiter
+	APIRateLimiter    *middleware.IPRateLimiter
+	ImageRateLimiter  *middleware.IPRateLimiter
+	APIConcurrency    *middleware.ConcurrencyLimiter
+	PublicConcurrency *middleware.ConcurrencyLimiter
+	CacheProvider     cache.Provider
+	ServerVersion     ServerVersion
+	Config            *config.Config
 }
 
 // RegisterRoutes 注册所有路由
@@ -73,7 +78,7 @@ func newImageHandler(deps *RouterDependencies) *handlerImages.Handler {
 	return handlerImages.NewHandler(
 		deps.CacheProvider,
 		deps.Repositories.ImagesRepo,
-		deps.DB,
+		deps.VariantRepo,
 		deps.Converter,
 		deps.ConfigManager,
 		cfg,
@@ -86,16 +91,20 @@ func newImageHandler(deps *RouterDependencies) *handlerImages.Handler {
 func registerBasicRoutes(router *gin.Engine, deps *RouterDependencies) {
 	// System Routes
 	systemGroup := router.Group("/system")
+	if deps.APIConcurrency != nil {
+		systemGroup.Use(deps.APIConcurrency.Middleware())
+	}
 	{
 		systemHandler := handlerSystem.NewHandler()
-		healthHandler := handlerSystem.NewHealthHandler(deps.DB, storage.GetDefault())
+		healthHandler := handlerSystem.NewHealthHandler(deps.SqlDB, storage.GetDefault())
 
-		systemGroup.Any("/health", healthHandler.Handle)
+		systemGroup.GET("/health", healthHandler.Handle)
+		systemGroup.HEAD("/health", healthHandler.Handle)
 		systemGroup.GET("/version", systemHandler.GetVersion)
 		systemGroup.GET("/metrics", systemHandler.GetMetrics)
 
 		authSystemGroup := systemGroup.Group("")
-		authSystemGroup.Use(middleware.CombinedAuth())
+		authSystemGroup.Use(middleware.CombinedAuth(deps.JWTService))
 		authSystemGroup.Use(middleware.Authorize(middleware.AllowJWTOnly...))
 		authSystemGroup.GET("/status", systemHandler.GetStatus)
 	}
@@ -115,6 +124,10 @@ func registerBasicRoutes(router *gin.Engine, deps *RouterDependencies) {
 func registerPublicRoutes(router *gin.Engine, deps *RouterDependencies, imageHandler *handlerImages.Handler) {
 	// 公共图片访问
 	publicGroup := router.Group("/images")
+	if deps.PublicConcurrency != nil {
+		publicGroup.Use(deps.PublicConcurrency.Middleware())
+	}
+	publicGroup.Use(middleware.OptionalCombinedAuth(deps.JWTService))
 	publicGroup.Use(deps.ImageRateLimiter.Middleware())
 	{
 		publicGroup.GET("/random", imageHandler.RandomImage)
@@ -122,6 +135,10 @@ func registerPublicRoutes(router *gin.Engine, deps *RouterDependencies, imageHan
 	}
 
 	thumbnailGroup := router.Group("/thumbnails")
+	if deps.PublicConcurrency != nil {
+		thumbnailGroup.Use(deps.PublicConcurrency.Middleware())
+	}
+	thumbnailGroup.Use(middleware.OptionalCombinedAuth(deps.JWTService))
 	thumbnailGroup.Use(deps.ImageRateLimiter.Middleware())
 	{
 		thumbnailGroup.GET("/:identifier", imageHandler.GetThumbnail)
@@ -140,14 +157,16 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies, imageHandle
 	keyHandler := key.NewHandler(keyService)
 	loginHandler := api.NewLoginHandlerWithService(deps.LoginService, cfg)
 
-	dashboardRepository := dashboardRepo.NewRepository(deps.DB)
-	dashboardService := svcDashboard.NewService(dashboardRepository, deps.CacheProvider)
+	dashboardService := svcDashboard.NewService(deps.DashboardRepo, deps.CacheProvider)
 	dashboardHandler := handlerDashboard.NewHandler(dashboardService)
 
-	userService := svcUser.NewService(deps.Repositories.AccountsRepo)
+	userService := svcUser.NewService(deps.Repositories.AccountsRepo, deps.Repositories.DevicesRepo)
 	userHandler := handlerUser.NewHandler(userService)
 
 	apiGroup := router.Group("/api")
+	if deps.APIConcurrency != nil {
+		apiGroup.Use(deps.APIConcurrency.Middleware())
+	}
 	apiGroup.Use(func(context *gin.Context) {
 		context.Header("Cache-Control", config.CacheControlNoStore)
 		context.Next()
@@ -163,7 +182,7 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies, imageHandle
 
 		v1 := apiGroup.Group("/v1")
 		v1.Use(deps.APIRateLimiter.Middleware())
-		v1.Use(middleware.CombinedAuth())
+		v1.Use(middleware.CombinedAuth(deps.JWTService))
 		{
 			// Images
 			imagesGroup := v1.Group("/images")

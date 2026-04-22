@@ -17,6 +17,11 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+var (
+	databaseLog    = utils.ForModule("Database")
+	dbMigrationLog = utils.ForModule("DBMigration")
+)
+
 // TxFunc 事务函数类型
 type TxFunc func(tx *gorm.DB) error
 
@@ -70,14 +75,14 @@ func newSQLiteDB(cfg *config.Config, gormLogger logger.Interface) (*gorm.DB, err
 		return nil, fmt.Errorf("failed to connect to SQLite database: %w", err)
 	}
 
-	utils.LogIfDevf("Using SQLite database: %s", path)
+	databaseLog.Debugf("Using SQLite database: %s", path)
 	return db, nil
 }
 
 // newPostgresDB 创建 PostgreSQL 连接
 func newPostgresDB(cfg *config.Config, gormLogger logger.Interface) (*gorm.DB, error) {
-	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
-		cfg.DBHost, cfg.DBPort, cfg.DBUsername, cfg.DBPassword, cfg.DBName)
+	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
+		cfg.DBHost, cfg.DBPort, cfg.DBUsername, cfg.DBPassword, cfg.DBName, cfg.DBSSLMode)
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger:                 gormLogger,
@@ -89,7 +94,7 @@ func newPostgresDB(cfg *config.Config, gormLogger logger.Interface) (*gorm.DB, e
 		return nil, fmt.Errorf("failed to connect to PostgreSQL database: %w", err)
 	}
 
-	utils.LogIfDevf("Using PostgreSQL database: %s@%s:%d/%s", cfg.DBUsername, cfg.DBHost, cfg.DBPort, cfg.DBName)
+	databaseLog.Debugf("Using PostgreSQL database: %s@%s:%d/%s", cfg.DBUsername, cfg.DBHost, cfg.DBPort, cfg.DBName)
 	return db, nil
 }
 
@@ -99,7 +104,7 @@ func newGormLogger() logger.Interface {
 	colorful := false
 
 	if config.IsDevelopment() {
-		logLevel = logger.Info
+		logLevel = logger.Warn
 		colorful = true
 	}
 
@@ -167,9 +172,9 @@ func fixSystemConfigIndexes(db *gorm.DB) error {
 	// 删除旧索引
 	dropOldIndexSQL := `DROP INDEX IF EXISTS idx_system_configs_key`
 	if err := db.Exec(dropOldIndexSQL).Error; err != nil {
-		utils.Warnf("[DB Migration] Warning: failed to drop old index: %v", err)
+		dbMigrationLog.Warnf("Failed to drop old index: %v", err)
 	} else {
-		utils.Errorf("[DB Migration] Dropped old index idx_system_configs_key")
+		dbMigrationLog.Infof("Dropped old index idx_system_configs_key")
 	}
 
 	// 创建新条件索引
@@ -186,7 +191,7 @@ func fixSystemConfigIndexes(db *gorm.DB) error {
 			return fmt.Errorf("failed to create new index: %w", err)
 		}
 	} else {
-		utils.Infof("[DB Migration] Created new partial index idx_key_unique")
+		dbMigrationLog.Infof("Created new partial index idx_key_unique")
 	}
 
 	return nil
@@ -213,22 +218,22 @@ func fixImageIdentifierIndexes(db *gorm.DB) error {
 	}
 
 	if dbType == "sqlite" {
-		utils.LogIfDevf("[DB Migration] SQLite detected, skipping partial index for images.identifier")
+		dbMigrationLog.Debugf("SQLite detected, skipping partial index for images.identifier")
 		return nil
 	}
 
 	dropOldIndexSQL := `DROP INDEX IF EXISTS idx_identifier`
 	if err := db.Exec(dropOldIndexSQL).Error; err != nil {
-		utils.Warnf("[DB Migration] Warning: failed to drop old index idx_identifier: %v", err)
+		dbMigrationLog.Warnf("Failed to drop old index idx_identifier: %v", err)
 	} else {
-		utils.Errorf("[DB Migration] Dropped old index idx_identifier")
+		dbMigrationLog.Infof("Dropped old index idx_identifier")
 	}
 
 	dropOldIndexSQL2 := `DROP INDEX IF EXISTS idx_images_identifier`
 	if err := db.Exec(dropOldIndexSQL2).Error; err != nil {
-		utils.Warnf("[DB Migration] Warning: failed to drop old index idx_images_identifier: %v", err)
+		dbMigrationLog.Warnf("Failed to drop old index idx_images_identifier: %v", err)
 	} else {
-		utils.Errorf("[DB Migration] Dropped old index idx_images_identifier")
+		dbMigrationLog.Infof("Dropped old index idx_images_identifier")
 	}
 
 	createIndexSQL := `CREATE UNIQUE INDEX IF NOT EXISTS idx_images_identifier_active ON images(identifier) WHERE deleted_at IS NULL`
@@ -238,7 +243,7 @@ func fixImageIdentifierIndexes(db *gorm.DB) error {
 			return fmt.Errorf("failed to create partial index for images.identifier: %w", err)
 		}
 	} else {
-		utils.Infof("[DB Migration] Created partial unique index idx_images_identifier_active on images.identifier (WHERE deleted_at IS NULL)")
+		dbMigrationLog.Infof("Created partial unique index idx_images_identifier_active on images.identifier (WHERE deleted_at IS NULL)")
 	}
 
 	return nil

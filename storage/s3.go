@@ -21,11 +21,14 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
-// mustGetSystemCertPool 获取系统证书池
-func mustGetSystemCertPool() *x509.CertPool {
+var s3Log = utils.ForModule("S3")
+
+// getSystemCertPool returns the system certificate pool, falling back to an
+// empty pool on error. Unlike the Go "Must" convention, this does not panic.
+func getSystemCertPool() *x509.CertPool {
 	pool, err := x509.SystemCertPool()
 	if err != nil {
-		utils.Errorf("Failed to load system cert pool: %v", err)
+		s3Log.Errorf("Failed to load system cert pool: %v", err)
 		return x509.NewCertPool()
 	}
 	return pool
@@ -84,7 +87,7 @@ func NewS3Storage(cfg S3Config) (*S3Storage, error) {
 
 	// SSL 自定义证书配置
 	if secure && os.Getenv("SSL_CERT_FILE") != "" {
-		rootCAs := mustGetSystemCertPool()
+		rootCAs := getSystemCertPool()
 		if data, err := os.ReadFile(os.Getenv("SSL_CERT_FILE")); err == nil {
 			rootCAs.AppendCertsFromPEM(data)
 		}
@@ -113,7 +116,7 @@ func NewS3Storage(cfg S3Config) (*S3Storage, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to create bucket '%s': %w", cfg.BucketName, err)
 		}
-		utils.Infof("Successfully created bucket: %s", cfg.BucketName)
+		s3Log.Infof("Successfully created bucket: %s", cfg.BucketName)
 	}
 
 	return &S3Storage{
@@ -199,6 +202,22 @@ func (s *S3Storage) Exists(ctx context.Context, storagePath string) (bool, error
 	return true, nil
 }
 
+func (s *S3Storage) GetObjectInfo(ctx context.Context, storagePath string) (ObjectInfo, error) {
+	stat, err := s.client.StatObject(ctx, s.bucketName, storagePath, minio.StatObjectOptions{})
+	if err != nil {
+		errResponse := minio.ToErrorResponse(err)
+		if errResponse.Code == "NoSuchKey" {
+			return ObjectInfo{}, fmt.Errorf("file not found in s3: %s", storagePath)
+		}
+		return ObjectInfo{}, fmt.Errorf("failed to stat object '%s': %w", storagePath, err)
+	}
+
+	return ObjectInfo{
+		Size:        stat.Size,
+		ContentType: stat.ContentType,
+	}, nil
+}
+
 func (s *S3Storage) Health(ctx context.Context) error {
 	_, err := s.client.ListBuckets(ctx)
 	if err != nil {
@@ -230,7 +249,7 @@ func (s *S3Storage) StreamTo(ctx context.Context, storagePath string, w http.Res
 		}
 
 		if !utils.IsClientDisconnect(err) {
-			utils.Errorf("[S3] Stat failed for %s: %v, continuing without Content-Length", storagePath, err)
+			s3Log.Errorf("Stat failed for %s: %v, continuing without Content-Length", storagePath, err)
 		}
 	} else {
 		if w.Header().Get("Content-Type") == "" {
@@ -239,7 +258,7 @@ func (s *S3Storage) StreamTo(ctx context.Context, storagePath string, w http.Res
 		w.Header().Set("Content-Length", strconv.FormatInt(stat.Size, 10))
 
 		if stat.Size > 10*1024*1024 {
-			utils.LogIfDevf("[S3] Large file detected: %s (%.2f MB), using optimized streaming", storagePath, float64(stat.Size)/(1024*1024))
+			s3Log.Debugf("Large file detected: %s (%.2f MB), using optimized streaming", storagePath, float64(stat.Size)/(1024*1024))
 		}
 	}
 	w.WriteHeader(http.StatusOK)

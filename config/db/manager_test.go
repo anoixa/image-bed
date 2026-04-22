@@ -3,6 +3,7 @@ package config
 import (
 	"testing"
 
+	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/stretchr/testify/assert"
 )
@@ -112,6 +113,24 @@ func TestTransferModeConstants(t *testing.T) {
 func TestGlobalTransferModeKey(t *testing.T) {
 	// 验证全局转发模式的 key 常量
 	assert.Equal(t, "system:transfer_mode", globalTransferModeKey)
+}
+
+func TestCacheLayerTransferMode(t *testing.T) {
+	cache := NewCacheLayer()
+
+	mode, ok := cache.GetTransferMode()
+	assert.False(t, ok)
+	assert.Empty(t, mode)
+
+	cache.SetTransferMode(storage.TransferModeAlwaysProxy)
+	mode, ok = cache.GetTransferMode()
+	assert.True(t, ok)
+	assert.Equal(t, storage.TransferModeAlwaysProxy, mode)
+
+	cache.Invalidate(models.ConfigCategorySystem)
+	mode, ok = cache.GetTransferMode()
+	assert.False(t, ok)
+	assert.Empty(t, mode)
 }
 
 func TestGetStringFromMap(t *testing.T) {

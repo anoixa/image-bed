@@ -5,12 +5,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"github.com/anoixa/image-bed/utils"
 	"time"
 
 	"github.com/anoixa/image-bed/database/models"
+	"github.com/anoixa/image-bed/utils"
 	"gorm.io/gorm"
 )
+
+var keysRepoLog = utils.ForModule("KeysRepository")
 
 // Repository API Token 仓库
 type Repository struct {
@@ -59,7 +61,7 @@ func (r *Repository) updateTokenLastUsed(tokenID uint) {
 	ctx := context.Background()
 	err := r.db.WithContext(ctx).Model(&models.ApiToken{}).Where("id = ?", tokenID).Update("last_used_at", time.Now()).Error
 	if err != nil {
-		utils.Errorf("Failed to update last_used_at for token ID %d: %v", tokenID, err)
+		keysRepoLog.Errorf("Failed to update last_used_at for token ID %d: %v", tokenID, err)
 	}
 }
 

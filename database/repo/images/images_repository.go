@@ -3,8 +3,10 @@ package images
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 
 	"github.com/anoixa/image-bed/database/models"
@@ -16,6 +18,18 @@ import (
 type Repository struct {
 	db *gorm.DB
 	*repo.GenericRepository[models.Image]
+}
+
+var imageListSelectColumns = []string{
+	"images.id",
+	"images.identifier",
+	"images.original_name",
+	"images.file_size",
+	"images.mime_type",
+	"images.width",
+	"images.height",
+	"images.is_public",
+	"images.created_at",
 }
 
 // RandomImageFilter 随机图片筛选条件
@@ -233,7 +247,8 @@ func (r *Repository) GetImageList(storageConfigIDs []uint, identifier, search st
 		db = db.Where("identifier = ?", identifier)
 	}
 	if search != "" {
-		db = db.Where("original_name LIKE ?", "%"+search+"%")
+		escaped := strings.NewReplacer("%", "\\%", "_", "\\_").Replace(search)
+		db = db.Where("original_name LIKE ? ESCAPE '\\'", "%"+escaped+"%")
 	}
 	if albumID != nil {
 		db = db.Joins("JOIN album_images ON album_images.image_id = images.id").
@@ -259,7 +274,7 @@ func (r *Repository) GetImageList(storageConfigIDs []uint, identifier, search st
 		orderBy = "created_at asc"
 	}
 
-	err := db.Order(orderBy).Offset(offset).Limit(pageSize).Find(&imageList).Error
+	err := db.Select(imageListSelectColumns).Order(orderBy).Offset(offset).Limit(pageSize).Find(&imageList).Error
 	return imageList, total, err
 }
 
@@ -279,6 +294,47 @@ func (r *Repository) GetImagesByAlbumID(albumID uint, page, pageSize int) ([]*mo
 	offset := (page - 1) * pageSize
 	err := db.Order("images.created_at desc").Offset(offset).Limit(pageSize).Find(&imageList).Error
 	return imageList, total, err
+}
+
+// MarkStaleProcessingAsFailed updates stale processing images to Failed if they
+// have no processing variants but at least one failed variant.
+// excludeIDs are excluded from the update (e.g. re-triggered images).
+func (r *Repository) MarkStaleProcessingAsFailed(cutoff time.Time, excludeIDs []uint) (int64, error) {
+	processingVariants := r.db.Table("image_variants").Select("1").
+		Where("image_variants.image_id = images.id AND image_variants.status = ?", models.VariantStatusProcessing)
+	failedVariants := r.db.Table("image_variants").Select("1").
+		Where("image_variants.image_id = images.id AND image_variants.status = ?", models.VariantStatusFailed)
+
+	q := r.db.Model(&models.Image{}).
+		Where("variant_status = ? AND updated_at < ?", models.ImageVariantStatusProcessing, cutoff).
+		Where("NOT EXISTS (?)", processingVariants).
+		Where("EXISTS (?)", failedVariants)
+
+	if len(excludeIDs) > 0 {
+		q = q.Where("id NOT IN ?", excludeIDs)
+	}
+
+	result := q.Update("variant_status", models.ImageVariantStatusFailed)
+	return result.RowsAffected, result.Error
+}
+
+// ResetStaleProcessingToNone resets stale processing images back to None when
+// they have no remaining processing variants.
+// excludeIDs are excluded from the update (e.g. re-triggered images).
+func (r *Repository) ResetStaleProcessingToNone(cutoff time.Time, excludeIDs []uint) (int64, error) {
+	processingVariants := r.db.Table("image_variants").Select("1").
+		Where("image_variants.image_id = images.id AND image_variants.status = ?", models.VariantStatusProcessing)
+
+	q := r.db.Model(&models.Image{}).
+		Where("variant_status = ? AND updated_at < ?", models.ImageVariantStatusProcessing, cutoff).
+		Where("NOT EXISTS (?)", processingVariants)
+
+	if len(excludeIDs) > 0 {
+		q = q.Where("id NOT IN ?", excludeIDs)
+	}
+
+	result := q.Update("variant_status", models.ImageVariantStatusNone)
+	return result.RowsAffected, result.Error
 }
 
 // WithContext 返回带上下文的仓库
@@ -307,6 +363,30 @@ func (r *Repository) RemoveImagesFromAllAlbums(imageIDs []uint) error {
 // UpdateVariantStatus 更新图片变体状态
 func (r *Repository) UpdateVariantStatus(imageID uint, status models.ImageVariantStatus) error {
 	return r.db.Model(&models.Image{}).Where("id = ?", imageID).Update("variant_status", status).Error
+}
+
+func (r *Repository) ResetProcessingVariantStatus(imageIDs []uint, status models.ImageVariantStatus) (int64, error) {
+	if len(imageIDs) == 0 {
+		return 0, nil
+	}
+
+	result := r.db.Model(&models.Image{}).
+		Where("id IN ? AND variant_status = ?", imageIDs, models.ImageVariantStatusProcessing).
+		Updates(map[string]any{
+			"variant_status": status,
+			"updated_at":     time.Now(),
+		})
+
+	return result.RowsAffected, result.Error
+}
+
+// TouchVariantProcessingStatus refreshes updated_at while an image remains in
+// processing so stale detection does not race with active work.
+func (r *Repository) TouchVariantProcessingStatus(imageID uint) error {
+	return r.db.Model(&models.Image{}).
+		Where("id = ? AND variant_status = ?", imageID, models.ImageVariantStatusProcessing).
+		Update("updated_at", time.Now()).
+		Error
 }
 
 // GetImagesByVariantStatus 根据变体状态获取图片列表
@@ -348,15 +428,24 @@ func (r *Repository) GetRandomPublicImage(filter *RandomImageFilter) (*models.Im
 		}
 	}
 
-	var total int64
-	if err := db.Distinct("images.id").Count(&total).Error; err != nil {
+	idQuery := db.Session(&gorm.Session{}).
+		Distinct("images.id").
+		Select("images.id")
+
+	var bounds struct {
+		MinID uint
+		MaxID uint
+	}
+	if err := r.db.Table("(?) AS filtered_images", idQuery).
+		Select("MIN(id) AS min_id, MAX(id) AS max_id").
+		Scan(&bounds).Error; err != nil {
 		return nil, err
 	}
-	if total == 0 {
+	if bounds.MaxID == 0 {
 		return nil, gorm.ErrRecordNotFound
 	}
 
-	offset, err := randomOffset(total)
+	targetID, err := randomUint(bounds.MinID, bounds.MaxID)
 	if err != nil {
 		return nil, err
 	}
@@ -364,13 +453,23 @@ func (r *Repository) GetRandomPublicImage(filter *RandomImageFilter) (*models.Im
 	var selected struct {
 		ID uint
 	}
-	if err := db.Distinct("images.id").
-		Select("images.id").
-		Order("images.id ASC").
-		Offset(offset).
-		Limit(1).
-		Take(&selected).Error; err != nil {
-		return nil, err
+	selectByTarget := func(operator, order string) error {
+		return db.Session(&gorm.Session{}).
+			Select("images.id").
+			Distinct("images.id").
+			Where("images.id "+operator+" ?", targetID).
+			Order(order).
+			Limit(1).
+			Take(&selected).Error
+	}
+
+	if err := selectByTarget(">=", "images.id ASC"); err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+		if err := selectByTarget("<", "images.id DESC"); err != nil {
+			return nil, err
+		}
 	}
 
 	var image models.Image
@@ -380,15 +479,17 @@ func (r *Repository) GetRandomPublicImage(filter *RandomImageFilter) (*models.Im
 	return &image, nil
 }
 
-func randomOffset(total int64) (int, error) {
-	if total <= 0 {
-		return 0, nil
+func randomUint(minID, maxID uint) (uint, error) {
+	if maxID <= minID {
+		return minID, nil
 	}
-	n, err := rand.Int(rand.Reader, big.NewInt(total))
+
+	width := int64(maxID-minID) + 1
+	n, err := rand.Int(rand.Reader, big.NewInt(width))
 	if err != nil {
 		return 0, err
 	}
-	return int(n.Int64()), nil
+	return minID + uint(n.Int64()), nil
 }
 
 // DeleteBatchResult 批量删除结果

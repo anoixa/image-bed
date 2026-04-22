@@ -14,20 +14,24 @@ import (
 
 // MemoryStats 内存统计
 type MemoryStats struct {
-	HeapAllocMB   float64
-	HeapSysMB     float64
-	HeapInUseMB   float64
-	StackSysMB    float64
-	TotalAllocMB  float64
-	RSSMB         float64
-	NumGC         uint32
-	GCSysMB       float64
-	LastGCTime    time.Time
-	Goroutines    int
-	VipsMemMB     float64
-	VipsMemHighMB float64
-	VipsAllocs    int64
-	VipsOpenFiles int64
+	HeapAllocMB    float64
+	HeapSysMB      float64
+	HeapInUseMB    float64
+	HeapIdleMB     float64
+	HeapReleasedMB float64
+	StackSysMB     float64
+	TotalAllocMB   float64
+	RSSMB          float64
+	RssAnonMB      float64
+	RssFileMB      float64
+	NumGC          uint32
+	GCSysMB        float64
+	LastGCTime     time.Time
+	Goroutines     int
+	VipsMemMB      float64
+	VipsMemHighMB  float64
+	VipsAllocs     int64
+	VipsOpenFiles  int64
 }
 
 // bytesToMB 将字节转换为 MB
@@ -39,24 +43,28 @@ func bytesToMB(bytes uint64) float64 {
 func GetMemoryStats() MemoryStats {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	rssBytes, _ := readProcessRSSBytes()
+	memInfo, _ := readProcessMemoryInfo()
 	vipsStats := getVipsMemoryStats()
 
 	return MemoryStats{
-		HeapAllocMB:   bytesToMB(m.HeapAlloc),
-		HeapSysMB:     bytesToMB(m.HeapSys),
-		HeapInUseMB:   bytesToMB(m.HeapInuse),
-		StackSysMB:    bytesToMB(m.StackSys),
-		TotalAllocMB:  bytesToMB(m.TotalAlloc),
-		RSSMB:         bytesToMB(rssBytes),
-		NumGC:         m.NumGC,
-		GCSysMB:       bytesToMB(m.GCSys),
-		LastGCTime:    time.Unix(0, int64(m.LastGC)),
-		Goroutines:    runtime.NumGoroutine(),
-		VipsMemMB:     bytesToMB(uint64(vipsStats.Mem)),
-		VipsMemHighMB: bytesToMB(uint64(vipsStats.MemHigh)),
-		VipsAllocs:    vipsStats.Allocs,
-		VipsOpenFiles: vipsStats.Files,
+		HeapAllocMB:    bytesToMB(m.HeapAlloc),
+		HeapSysMB:      bytesToMB(m.HeapSys),
+		HeapInUseMB:    bytesToMB(m.HeapInuse),
+		HeapIdleMB:     bytesToMB(m.HeapIdle),
+		HeapReleasedMB: bytesToMB(m.HeapReleased),
+		StackSysMB:     bytesToMB(m.StackSys),
+		TotalAllocMB:   bytesToMB(m.TotalAlloc),
+		RSSMB:          bytesToMB(memInfo.RSSBytes),
+		RssAnonMB:      bytesToMB(memInfo.RssAnonBytes),
+		RssFileMB:      bytesToMB(memInfo.RssFileBytes),
+		NumGC:          m.NumGC,
+		GCSysMB:        bytesToMB(m.GCSys),
+		LastGCTime:     time.Unix(0, int64(m.LastGC)),
+		Goroutines:     runtime.NumGoroutine(),
+		VipsMemMB:      bytesToMB(uint64(vipsStats.Mem)),
+		VipsMemHighMB:  bytesToMB(uint64(vipsStats.MemHigh)),
+		VipsAllocs:     vipsStats.Allocs,
+		VipsOpenFiles:  vipsStats.Files,
 	}
 }
 
@@ -145,44 +153,99 @@ func ReadProcessRSS() (float64, error) {
 	return bytesToMB(rssBytes), nil
 }
 
-func readProcessRSSBytes() (uint64, error) {
-	rssBytes, err := readProcStatusRSSBytes("/proc/self/status")
+type procStatusMemoryInfo struct {
+	RSSBytes     uint64
+	RssAnonBytes uint64
+	RssFileBytes uint64
+}
+
+func readProcessMemoryInfo() (procStatusMemoryInfo, error) {
+	info, err := readProcStatusMemoryInfo("/proc/self/status")
 	if err == nil {
-		return rssBytes, nil
+		return info, nil
+	}
+
+	rssBytes, statmErr := readStatmRSSBytes("/proc/self/statm")
+	if statmErr != nil {
+		return procStatusMemoryInfo{}, statmErr
+	}
+
+	return procStatusMemoryInfo{RSSBytes: rssBytes}, nil
+}
+
+func readProcessRSSBytes() (uint64, error) {
+	info, err := readProcStatusMemoryInfo("/proc/self/status")
+	if err == nil {
+		return info.RSSBytes, nil
 	}
 
 	return readStatmRSSBytes("/proc/self/statm")
 }
 
-func readProcStatusRSSBytes(path string) (uint64, error) {
+func readProcStatusMemoryInfo(path string) (procStatusMemoryInfo, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return 0, err
+		return procStatusMemoryInfo{}, err
 	}
 
-	return parseProcStatusRSSBytes(string(data))
+	return parseProcStatusMemoryInfo(string(data))
 }
 
 func parseProcStatusRSSBytes(data string) (uint64, error) {
+	info, err := parseProcStatusMemoryInfo(data)
+	if err != nil {
+		return 0, err
+	}
+	return info.RSSBytes, nil
+}
+
+func parseProcStatusMemoryInfo(data string) (procStatusMemoryInfo, error) {
+	var info procStatusMemoryInfo
+
 	for _, line := range strings.Split(data, "\n") {
-		if !strings.HasPrefix(line, "VmRSS:") {
+		switch {
+		case strings.HasPrefix(line, "VmRSS:"):
+			valueBytes, err := parseProcStatusKBLine(line, "VmRSS")
+			if err != nil {
+				return procStatusMemoryInfo{}, err
+			}
+			info.RSSBytes = valueBytes
+		case strings.HasPrefix(line, "RssAnon:"):
+			valueBytes, err := parseProcStatusKBLine(line, "RssAnon")
+			if err != nil {
+				return procStatusMemoryInfo{}, err
+			}
+			info.RssAnonBytes = valueBytes
+		case strings.HasPrefix(line, "RssFile:"):
+			valueBytes, err := parseProcStatusKBLine(line, "RssFile")
+			if err != nil {
+				return procStatusMemoryInfo{}, err
+			}
+			info.RssFileBytes = valueBytes
+		default:
 			continue
 		}
-
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			return 0, fmt.Errorf("invalid VmRSS line: %q", line)
-		}
-
-		valueKB, err := strconv.ParseUint(fields[1], 10, 64)
-		if err != nil {
-			return 0, fmt.Errorf("parse VmRSS value: %w", err)
-		}
-
-		return valueKB * 1024, nil
 	}
 
-	return 0, fmt.Errorf("VmRSS not found")
+	if info.RSSBytes == 0 {
+		return procStatusMemoryInfo{}, fmt.Errorf("VmRSS not found")
+	}
+
+	return info, nil
+}
+
+func parseProcStatusKBLine(line, field string) (uint64, error) {
+	fields := strings.Fields(line)
+	if len(fields) < 2 {
+		return 0, fmt.Errorf("invalid %s line: %q", field, line)
+	}
+
+	valueKB, err := strconv.ParseUint(fields[1], 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parse %s value: %w", field, err)
+	}
+
+	return valueKB * 1024, nil
 }
 
 func readStatmRSSBytes(path string) (uint64, error) {

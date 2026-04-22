@@ -72,7 +72,7 @@ func (r *DeviceRepository) GetDeviceByRefreshToken(refreshToken string) (*models
 
 // DeleteRefreshToken 删除刷新令牌
 func (r *DeviceRepository) DeleteRefreshToken(device *models.Device) error {
-	return r.db.Where("device_id", device.DeviceID).Delete(device).Error
+	return r.db.Where("device_id = ?", device.DeviceID).Delete(&models.Device{}).Error
 }
 
 // SaveDevice 保存设备

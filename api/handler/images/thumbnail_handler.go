@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/anoixa/image-bed/api/common"
@@ -35,6 +36,11 @@ func (h *Handler) GetThumbnail(c *gin.Context) {
 	identifier := c.Param("identifier")
 	if identifier == "" {
 		common.RespondError(c, http.StatusBadRequest, "Image identifier is required")
+		return
+	}
+
+	if strings.ContainsAny(identifier, "/\\") || strings.Contains(identifier, "..") {
+		common.RespondError(c, http.StatusBadRequest, "Invalid image identifier")
 		return
 	}
 
@@ -78,6 +84,7 @@ func (h *Handler) GetThumbnail(c *gin.Context) {
 	if !exists {
 		webpResult, webpExists, _ := h.thumbnailService.GetWebPVariant(ctx, image)
 		if webpExists {
+			middleware.RecordImageThumbnailResponse()
 			h.serveThumbnailImage(c, image, webpResult)
 			return
 		}
@@ -85,12 +92,14 @@ func (h *Handler) GetThumbnail(c *gin.Context) {
 		return
 	}
 
+	middleware.RecordImageThumbnailResponse()
 	h.serveThumbnailImage(c, image, thumbnailResult)
 }
 
 // serveThumbnailImage 提供缩略图（支持直链模式）
 func (h *Handler) serveThumbnailImage(c *gin.Context, image *models.Image, result *image.ThumbnailResult) {
 	if directURL := h.getVariantDirectURLIfPossible(c, image, result.StoragePath); directURL != "" {
+		middleware.RecordImageDirectRedirect()
 		c.Header("Cache-Control", config.CacheControlPublic)
 		c.Redirect(http.StatusFound, directURL)
 		return
@@ -103,13 +112,13 @@ func (h *Handler) serveThumbnailImage(c *gin.Context, image *models.Image, resul
 	}
 
 	if opener, ok := provider.(storage.FileOpener); ok {
-		if h.serveThumbnailBySendfile(c, result, opener) {
+		if h.serveThumbnailBySendfile(c, image, result, opener) {
 			return
 		}
 	}
 
 	if streamer, ok := provider.(storage.StreamProvider); ok {
-		if h.serveThumbnailByStreaming(c, result, streamer) {
+		if h.serveThumbnailByStreaming(c, image, result, streamer) {
 			return
 		}
 	}
@@ -124,15 +133,16 @@ func (h *Handler) serveThumbnailImage(c *gin.Context, image *models.Image, resul
 			_ = closer.Close()
 		}
 	}()
-	h.serveReadSeekerContent(c, result.Identifier, result.MIMEType, result.FileHash, stream, true)
+	middleware.RecordImageReaderResponse()
+	h.serveReadSeekerContent(c, result.Identifier, result.MIMEType, result.FileHash, stream, true, cacheControlForImage(image.IsPublic))
 }
 
-func (h *Handler) serveThumbnailByStreaming(c *gin.Context, result *image.ThumbnailResult, streamer storage.StreamProvider) bool {
+func (h *Handler) serveThumbnailByStreaming(c *gin.Context, image *models.Image, result *image.ThumbnailResult, streamer storage.StreamProvider) bool {
 	if checkETag(c, result.FileHash) {
 		return true
 	}
 
-	c.Header("Cache-Control", config.CacheControlPublic)
+	c.Header("Cache-Control", cacheControlForImage(image.IsPublic))
 	c.Header("Content-Type", result.MIMEType)
 	c.Header("X-Content-Type-Options", "nosniff")
 
@@ -140,10 +150,11 @@ func (h *Handler) serveThumbnailByStreaming(c *gin.Context, result *image.Thumbn
 	if err != nil {
 		return utils.IsClientDisconnect(err)
 	}
+	middleware.RecordImageStreamResponse()
 	return true
 }
 
-func (h *Handler) serveThumbnailBySendfile(c *gin.Context, result *image.ThumbnailResult, opener storage.FileOpener) bool {
+func (h *Handler) serveThumbnailBySendfile(c *gin.Context, image *models.Image, result *image.ThumbnailResult, opener storage.FileOpener) bool {
 	if checkETag(c, result.FileHash) {
 		return true
 	}
@@ -159,12 +170,13 @@ func (h *Handler) serveThumbnailBySendfile(c *gin.Context, result *image.Thumbna
 		return false
 	}
 
-	c.Header("Cache-Control", config.CacheControlPublic)
+	c.Header("Cache-Control", cacheControlForImage(image.IsPublic))
 	c.Header("Content-Type", result.MIMEType)
 	c.Header("Content-Length", strconv.FormatInt(stat.Size(), 10))
 	c.Header("X-Content-Type-Options", "nosniff")
 
 	http.ServeContent(c.Writer, c.Request, result.Identifier, stat.ModTime().Truncate(time.Second), file)
+	middleware.RecordImageSendfileResponse()
 	return true
 }
 

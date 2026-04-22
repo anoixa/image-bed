@@ -5,14 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/anoixa/image-bed/utils"
 	"strings"
 
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/configs"
 	cryptoservice "github.com/anoixa/image-bed/internal/crypto"
+	"github.com/anoixa/image-bed/utils"
 	"gorm.io/gorm"
 )
+
+var cryptoLayerLog = utils.ForModule("CryptoLayer")
 
 // CryptoLayer 配置加密层
 type CryptoLayer struct {
@@ -91,7 +93,7 @@ func (c *CryptoLayer) ensureCanary() error {
 		return fmt.Errorf("failed to decrypt canary, master key may be incorrect: %w", err)
 	}
 
-	utils.Infof("[CryptoLayer] Canary verified successfully")
+	cryptoLayerLog.Infof("Canary verified successfully")
 	return nil
 }
 
@@ -123,6 +125,6 @@ func (c *CryptoLayer) createCanary(ctx context.Context) error {
 		return err
 	}
 
-	utils.Infof("[CryptoLayer] Canary created successfully")
+	cryptoLayerLog.Infof("Canary created successfully")
 	return nil
 }

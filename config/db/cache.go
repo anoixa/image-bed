@@ -30,6 +30,8 @@ func (c *CacheLayer) Invalidate(category models.ConfigCategory) {
 		delete(c.localCache, keyStorage)
 	case models.ConfigCategoryImageProcessing:
 		delete(c.localCache, keyImageProcessing)
+	case models.ConfigCategorySystem:
+		delete(c.localCache, keyTransferMode)
 	}
 }
 
@@ -67,7 +69,30 @@ func (c *CacheLayer) SetImageProcessing(settings *ImageProcessingSettings) {
 	c.localCache[keyImageProcessing] = settings
 }
 
+func (c *CacheLayer) GetTransferMode() (storage.TransferMode, bool) {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+	if val, ok := c.localCache[keyTransferMode]; ok {
+		return val.(storage.TransferMode), true
+	}
+	return "", false
+}
+
+func (c *CacheLayer) SetTransferMode(mode storage.TransferMode) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.localCache[keyTransferMode] = mode
+}
+
 const (
 	keyStorage         = "config:storage"
 	keyImageProcessing = "config:image_processing"
+	keyTransferMode    = "config:transfer_mode"
 )
+
+// InvalidateAll 清除所有缓存
+func (c *CacheLayer) InvalidateAll() {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.localCache = make(map[string]any)
+}

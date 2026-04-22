@@ -2,10 +2,12 @@ package config
 
 import (
 	"context"
-	"github.com/anoixa/image-bed/utils"
 
 	"github.com/anoixa/image-bed/database/models"
+	"github.com/anoixa/image-bed/utils"
 )
+
+var configMigrationLog = utils.ForModule("ConfigMigration")
 
 // MigrateFromLegacy 从旧配置（config.yaml）迁移到数据库
 func (m *Manager) MigrateFromLegacy(legacyStorage map[string]any) error {
@@ -19,7 +21,7 @@ func (m *Manager) MigrateFromLegacy(legacyStorage map[string]any) error {
 	// 只迁移 storage 配置（cache 配置现在从环境变量读取）
 	if storageCount == 0 && len(legacyStorage) > 0 {
 		if err := m.migrateStorage(ctx, legacyStorage); err != nil {
-			utils.Errorf("[ConfigMigration] Failed to migrate storage config: %v", err)
+			configMigrationLog.Errorf("Failed to migrate storage config: %v", err)
 		}
 	}
 
@@ -68,7 +70,7 @@ func (m *Manager) migrateStorage(ctx context.Context, legacy map[string]any) err
 		return err
 	}
 
-	utils.Infof("[ConfigMigration] Storage config migrated successfully")
+	configMigrationLog.Infof("Storage config migrated successfully")
 	return nil
 }
 
@@ -89,13 +91,13 @@ func (m *Manager) CreateDefaultConfigs() error {
 
 	if storageCount == 0 {
 		if err := m.createDefaultStorage(ctx); err != nil {
-			utils.Errorf("[ConfigMigration] Failed to create default storage config: %v", err)
+			configMigrationLog.Errorf("Failed to create default storage config: %v", err)
 		}
 	}
 
 	if imageProcessingCount == 0 {
 		if err := m.ensureDefaultImageProcessingConfig(ctx); err != nil {
-			utils.Errorf("[ConfigMigration] Failed to create default image processing config: %v", err)
+			configMigrationLog.Errorf("Failed to create default image processing config: %v", err)
 		}
 	}
 
@@ -123,7 +125,7 @@ func (m *Manager) createDefaultStorage(ctx context.Context) error {
 		return err
 	}
 
-	utils.Infof("[ConfigMigration] Default storage config created")
+	configMigrationLog.Infof("Default storage config created")
 	return nil
 }
 

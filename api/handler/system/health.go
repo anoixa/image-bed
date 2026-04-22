@@ -10,19 +10,18 @@ import (
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 )
 
 var startTime = time.Now()
 
 type HealthHandler struct {
-	db              *gorm.DB
+	sqlDB           *sql.DB
 	storageProvider storage.Provider
 }
 
-func NewHealthHandler(db *gorm.DB, storageProvider storage.Provider) *HealthHandler {
+func NewHealthHandler(sqlDB *sql.DB, storageProvider storage.Provider) *HealthHandler {
 	return &HealthHandler{
-		db:              db,
+		sqlDB:           sqlDB,
 		storageProvider: storageProvider,
 	}
 }
@@ -37,9 +36,8 @@ func NewHealthHandler(db *gorm.DB, storageProvider storage.Provider) *HealthHand
 // @Success      503  {object}  map[string]any  "Service is unhealthy"
 // @Router       /system/health [get]
 func (h *HealthHandler) Handle(context *gin.Context) {
-	sqlDB, _ := h.db.DB()
 	checks := gin.H{
-		"database": checkDatabaseHealth(sqlDB),
+		"database": checkDatabaseHealth(h.sqlDB),
 		"cache":    checkCacheHealth(),
 		"storage":  h.checkStorageHealth(context.Request.Context()),
 	}

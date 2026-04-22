@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/anoixa/image-bed/utils"
 	"strings"
 
 	"github.com/anoixa/image-bed/database/models"
@@ -152,29 +151,41 @@ func (m *Manager) GetImageProcessingSettings(ctx context.Context) (*ImageProcess
 		return cached, nil
 	}
 
-	config, err := m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryImageProcessing)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			if err := m.ensureDefaultImageProcessingConfig(ctx); err != nil {
-				return nil, fmt.Errorf("failed to create default image processing config: %w", err)
+	v, err, _ := m.loads.Do(keyImageProcessing, func() (any, error) {
+		config, err := m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryImageProcessing)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				if err := m.ensureDefaultImageProcessingConfig(ctx); err != nil {
+					return nil, fmt.Errorf("failed to create default image processing config: %w", err)
+				}
+				config, err = m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryImageProcessing)
+				if err != nil {
+					return nil, fmt.Errorf("failed to get image processing config after creation: %w", err)
+				}
+			} else {
+				return nil, fmt.Errorf("failed to get image processing config: %w", err)
 			}
-			config, err = m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryImageProcessing)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get image processing config after creation: %w", err)
-			}
-		} else {
-			return nil, fmt.Errorf("failed to get image processing config: %w", err)
 		}
-	}
 
-	configMap, err := m.crypto.Decrypt(config.ConfigJSON)
+		configMap, err := m.crypto.Decrypt(config.ConfigJSON)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decrypt image processing config: %w", err)
+		}
+
+		settings := &ImageProcessingSettings{}
+		if err := mapstructure.Decode(configMap, settings); err != nil {
+			return nil, fmt.Errorf("failed to decode image processing settings: %w", err)
+		}
+
+		return settings, nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to decrypt image processing config: %w", err)
+		return nil, err
 	}
 
-	settings := &ImageProcessingSettings{}
-	if err := mapstructure.Decode(configMap, settings); err != nil {
-		return nil, fmt.Errorf("failed to decode image processing settings: %w", err)
+	settings, ok := v.(*ImageProcessingSettings)
+	if !ok || settings == nil {
+		return nil, fmt.Errorf("failed to decode cached image processing settings")
 	}
 
 	m.cache.SetImageProcessing(settings)
@@ -183,13 +194,15 @@ func (m *Manager) GetImageProcessingSettings(ctx context.Context) (*ImageProcess
 
 // ensureDefaultImageProcessingConfig 确保默认图片处理配置存在
 func (m *Manager) ensureDefaultImageProcessingConfig(ctx context.Context) error {
-	count, err := m.repo.CountByCategory(ctx, models.ConfigCategoryImageProcessing)
-	if err != nil {
-		return err
-	}
-
-	if count > 0 {
+	// Check for an existing enabled default config, not just any config.
+	// CountByCategory ignores is_enabled, so a disabled-only config would
+	// pass the count check but cause GetDefaultByCategory to fail.
+	_, err := m.repo.GetDefaultByCategory(ctx, models.ConfigCategoryImageProcessing)
+	if err == nil {
 		return nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
 	}
 
 	defaultSettings := DefaultImageProcessingSettings()
@@ -226,7 +239,7 @@ func (m *Manager) ensureDefaultImageProcessingConfig(ctx context.Context) error 
 		return fmt.Errorf("failed to create default image processing config: %w", err)
 	}
 
-	utils.Infof("[ConfigManager] Default image processing config created successfully")
+	configManagerLog.Infof("Default image processing config created successfully")
 	return nil
 }
 

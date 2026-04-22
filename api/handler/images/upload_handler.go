@@ -1,19 +1,21 @@
 package images
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/config"
 	dbconfig "github.com/anoixa/image-bed/config/db"
 	imagesvc "github.com/anoixa/image-bed/internal/image"
-	"github.com/anoixa/image-bed/utils"
 	"github.com/anoixa/image-bed/utils/pool"
 	"github.com/gin-gonic/gin"
 )
@@ -43,18 +45,20 @@ func (h *Handler) UploadImage(c *gin.Context) {
 	ctx := c.Request.Context()
 	settings, err := h.configManager.GetImageProcessingSettings(ctx)
 	if err != nil {
-		utils.Errorf("[UploadImage] Failed to get processing settings: %v", err)
+		imageHandlerLog.Errorf("Failed to get processing settings: %v", err)
 		common.RespondError(c, http.StatusInternalServerError, "Failed to get processing settings")
 		return
 	}
 
+	parseStart := time.Now()
 	request, cleanup, err := parseMultipartUploadRequest(c.Request, settings)
+	middleware.RecordUploadParseDuration(time.Since(parseStart))
 	if err != nil {
 		if uploadErr, ok := err.(*uploadRequestError); ok {
 			common.RespondError(c, uploadErr.status, uploadErr.message)
 			return
 		}
-		utils.Errorf("[UploadImage] Failed to parse multipart request: %v", err)
+		imageHandlerLog.Errorf("Failed to parse multipart request: %v", err)
 		common.RespondError(c, http.StatusBadRequest, "Invalid form data")
 		return
 	}
@@ -67,7 +71,7 @@ func (h *Handler) UploadImage(c *gin.Context) {
 
 	storageConfigID, err := h.resolveStorageConfigIDValue(c, request.strategyID)
 	if err != nil {
-		utils.Errorf("[UploadImage] Failed to resolve storage config: %v", err)
+		imageHandlerLog.Errorf("Failed to resolve storage config: %v", err)
 		common.RespondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -102,7 +106,7 @@ func (h *Handler) UploadImage(c *gin.Context) {
 	// 多文件：返回批量格式
 	results, err := h.writeService.UploadBatchSources(ctx, userID, request.files, storageConfigID, isPublic, settings.DefaultAlbumID, settings.ConcurrentUploadLimit)
 	if err != nil {
-		utils.Errorf("[UploadImage] Failed to process batch upload for user=%d: %v", userID, err)
+		imageHandlerLog.Errorf("Failed to process batch upload for user=%d: %v", userID, err)
 		if !c.IsAborted() {
 			common.RespondError(c, http.StatusInternalServerError, "Failed to process uploads")
 		}
@@ -197,6 +201,9 @@ func parseMultipartUploadRequest(r *http.Request, settings *dbconfig.ImageProces
 		for _, tempFile := range tempFiles {
 			tempFile.cleanup()
 		}
+		for _, f := range request.files {
+			f.CleanupRequestTempFile()
+		}
 	}
 
 	maxFileSize := int64(0)
@@ -250,7 +257,7 @@ func parseMultipartUploadRequest(r *http.Request, settings *dbconfig.ImageProces
 			return nil, nil, &uploadRequestError{status: http.StatusBadRequest, message: "Maximum 10 files allowed per upload"}
 		}
 
-		tempFile, size, writeErr := writePartToTempFile(part, maxFileSize)
+		tempFile, size, fileHash, writeErr := writePartToTempFile(part, maxFileSize)
 		_ = part.Close()
 		if writeErr != nil {
 			cleanup()
@@ -271,8 +278,11 @@ func parseMultipartUploadRequest(r *http.Request, settings *dbconfig.ImageProces
 			}
 		}
 
-		tempFiles = append(tempFiles, tempFile)
-		request.files = append(request.files, imagesvc.NewTempUploadSource(fileName, tempFile.path, size))
+		// Transfer temp file ownership to WriteService/Pipeline — do NOT add to tempFiles.
+		src := imagesvc.NewTempUploadSource(fileName, tempFile.path, size)
+		src.TempFilePath = tempFile.path
+		src.PrecomputedHash = fileHash
+		request.files = append(request.files, src)
 	}
 
 	return request, cleanup, nil
@@ -289,10 +299,10 @@ func readSmallFormField(part io.Reader, maxBytes int64) (string, error) {
 	return string(data), nil
 }
 
-func writePartToTempFile(part io.Reader, maxFileSize int64) (uploadTempFile, int64, error) {
+func writePartToTempFile(part io.Reader, maxFileSize int64) (uploadTempFile, int64, string, error) {
 	tmp, err := os.CreateTemp(config.TempDir, "upload-stream-*")
 	if err != nil {
-		return uploadTempFile{}, 0, fmt.Errorf("create temp file: %w", err)
+		return uploadTempFile{}, 0, "", fmt.Errorf("create temp file: %w", err)
 	}
 
 	tempFile := uploadTempFile{path: tmp.Name()}
@@ -309,25 +319,26 @@ func writePartToTempFile(part io.Reader, maxFileSize int64) (uploadTempFile, int
 		reader = io.LimitReader(part, maxFileSize+1)
 	}
 
-	written, err := io.CopyBuffer(tmp, reader, *bufPtr)
+	hash := sha256.New()
+	written, err := io.CopyBuffer(io.MultiWriter(tmp, hash), reader, *bufPtr)
 	if err != nil {
 		cleanup()
-		return uploadTempFile{}, 0, fmt.Errorf("write temp file: %w", err)
+		return uploadTempFile{}, 0, "", fmt.Errorf("write temp file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
 		tempFile.cleanup()
-		return uploadTempFile{}, 0, fmt.Errorf("close temp file: %w", err)
+		return uploadTempFile{}, 0, "", fmt.Errorf("close temp file: %w", err)
 	}
 
 	if maxFileSize > 0 && written > maxFileSize {
 		tempFile.cleanup()
-		return uploadTempFile{}, 0, &uploadRequestError{
+		return uploadTempFile{}, 0, "", &uploadRequestError{
 			status:  http.StatusRequestEntityTooLarge,
 			message: fmt.Sprintf("File size (%.2f MB) exceeds maximum allowed (%d MB)", float64(written)/1024/1024, maxFileSize/(1024*1024)),
 		}
 	}
 
-	return tempFile, written, nil
+	return tempFile, written, hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 func asUploadRequestError(err error, target **uploadRequestError) bool {

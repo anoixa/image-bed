@@ -15,6 +15,9 @@ func NewService(repo *albums.Repository) *Service {
 	return &Service{repo: repo}
 }
 
+// ErrAlbumNotFound 相册未找到或无权限
+var ErrAlbumNotFound = albums.ErrAlbumNotFound
+
 func (s *Service) GetAlbumWithImagesByID(albumID, userID uint) (*models.Album, error) {
 	return s.repo.GetAlbumWithImagesByID(albumID, userID)
 }
@@ -23,8 +26,8 @@ func (s *Service) CreateAlbum(album *models.Album) error {
 	return s.repo.CreateAlbum(album)
 }
 
-func (s *Service) UpdateAlbum(album *models.Album) error {
-	return s.repo.UpdateAlbum(album)
+func (s *Service) UpdateAlbum(albumID uint, updates map[string]any) error {
+	return s.repo.UpdateAlbum(albumID, updates)
 }
 
 func (s *Service) DeleteAlbum(albumID, userID uint) error {
@@ -35,7 +38,7 @@ func (s *Service) GetUserAlbums(userID uint, page, limit int) ([]*AlbumInfo, int
 	return s.repo.GetUserAlbums(userID, page, limit)
 }
 
-func (s *Service) AddImagesToAlbum(albumID, userID uint, imageIDs []uint) error {
+func (s *Service) AddImagesToAlbum(albumID, userID uint, imageIDs []uint) (int64, error) {
 	return s.repo.AddImagesToAlbum(albumID, userID, imageIDs)
 }
 

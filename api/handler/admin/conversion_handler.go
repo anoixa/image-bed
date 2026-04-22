@@ -3,17 +3,24 @@ package admin
 import (
 	"fmt"
 	"net/http"
+	"slices"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
 	config "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
+	"github.com/anoixa/image-bed/internal/vipsfile"
 	"github.com/gin-gonic/gin"
 )
 
 // ConversionHandler 转换配置处理器
 type ConversionHandler struct {
 	configManager *config.Manager
+}
+
+type ConversionConfigResponse struct {
+	*config.ImageProcessingSettings
+	AVIFSupported bool `json:"avif_supported"`
 }
 
 // NewConversionHandler 创建处理器
@@ -40,7 +47,7 @@ func (h *ConversionHandler) GetConfig(c *gin.Context) {
 		return
 	}
 
-	common.RespondSuccess(c, settings)
+	common.RespondSuccess(c, buildConversionConfigResponse(settings))
 }
 
 // UpdateConfigRequest 更新配置请求（所有字段可选）
@@ -80,7 +87,7 @@ type UpdateConfigRequest struct {
 func (h *ConversionHandler) UpdateConfig(c *gin.Context) {
 	var req UpdateConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		common.RespondError(c, http.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err))
+		common.RespondError(c, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
@@ -90,7 +97,8 @@ func (h *ConversionHandler) UpdateConfig(c *gin.Context) {
 	// 获取现有配置
 	current, err := h.configManager.GetImageProcessingSettings(ctx)
 	if err != nil {
-		common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to get current config: %v", err))
+		adminConfigLog.Errorf("Failed to get current config: %v", err)
+		common.RespondError(c, http.StatusInternalServerError, "Failed to get current config")
 		return
 	}
 
@@ -147,10 +155,39 @@ func (h *ConversionHandler) UpdateConfig(c *gin.Context) {
 		current.APIKeyEnabled = *req.APIKeyEnabled
 	}
 
+	if err := validateConversionConfigUpdate(&req, current, vipsfile.SupportsAVIFEncoding()); err != nil {
+		common.RespondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	if err := h.configManager.SaveImageProcessingSettings(ctx, current, userID); err != nil {
-		common.RespondError(c, http.StatusInternalServerError, fmt.Sprintf("Failed to save config: %v", err))
+		adminConfigLog.Errorf("Failed to save config: %v", err)
+		common.RespondError(c, http.StatusInternalServerError, "Failed to save config")
 		return
 	}
 
 	common.RespondSuccess(c, gin.H{"message": "Config updated"})
+}
+
+func buildConversionConfigResponse(settings *config.ImageProcessingSettings) ConversionConfigResponse {
+	return ConversionConfigResponse{
+		ImageProcessingSettings: settings,
+		AVIFSupported:           vipsfile.SupportsAVIFEncoding(),
+	}
+}
+
+func validateConversionConfigUpdate(req *UpdateConfigRequest, current *config.ImageProcessingSettings, avifSupported bool) error {
+	if avifSupported {
+		return nil
+	}
+
+	if req.ConversionEnabledFormats != nil && slices.Contains(req.ConversionEnabledFormats, models.FormatAVIF) {
+		return fmt.Errorf("avif conversion is not supported by the current server runtime")
+	}
+
+	if slices.Contains(current.ConversionEnabledFormats, models.FormatAVIF) {
+		return fmt.Errorf("avif conversion is not supported by the current server runtime")
+	}
+
+	return nil
 }

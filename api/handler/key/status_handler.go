@@ -3,7 +3,6 @@ package key
 import (
 	"errors"
 	"fmt"
-	"github.com/anoixa/image-bed/utils"
 	"net/http"
 	"strconv"
 
@@ -52,7 +51,7 @@ func (h *Handler) executeTokenAction(c *gin.Context, action TokenAction, actionV
 			return
 		}
 
-		utils.Errorf("Failed to %s API token %d for user %d: %v", actionVerb, tokenID, userID, err)
+		keyLog.Errorf("Failed to %s API token %d for user %d: %v", actionVerb, tokenID, userID, err)
 		common.RespondError(c, http.StatusInternalServerError,
 			fmt.Sprintf("Failed to %s the API token due to an internal error.", actionVerb))
 		return

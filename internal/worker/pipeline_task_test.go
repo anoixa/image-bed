@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/storage"
@@ -20,9 +21,24 @@ import (
 type mockVariantRepo struct {
 	updateCompletedErr error
 	updateFailedCalls  []uint
+	touchCalls         [][]uint
+	statusCASCalls     []statusCASCall
+}
+
+type statusCASCall struct {
+	id        uint
+	expected  string
+	newStatus string
+	errMsg    string
 }
 
 func (m *mockVariantRepo) UpdateStatusCAS(id uint, expected, newStatus, errMsg string) (bool, error) {
+	m.statusCASCalls = append(m.statusCASCalls, statusCASCall{
+		id:        id,
+		expected:  expected,
+		newStatus: newStatus,
+		errMsg:    errMsg,
+	})
 	return true, nil
 }
 
@@ -35,12 +51,39 @@ func (m *mockVariantRepo) UpdateFailed(id uint, errMsg string) error {
 	return nil
 }
 
+func (m *mockVariantRepo) TouchProcessing(ids []uint) error {
+	copied := append([]uint(nil), ids...)
+	m.touchCalls = append(m.touchCalls, copied)
+	return nil
+}
+
 func (m *mockVariantRepo) GetByID(id uint) (*models.ImageVariant, error) {
 	return nil, nil
 }
 
 func (m *mockVariantRepo) DeleteVariant(id uint) error {
 	return nil
+}
+
+func (m *mockVariantRepo) ResetStaleProcessing(olderThan time.Duration) (int64, error) {
+	return 0, nil
+}
+
+type mockImageRepo struct {
+	touchedImageIDs []uint
+}
+
+func (m *mockImageRepo) UpdateVariantStatus(imageID uint, status models.ImageVariantStatus) error {
+	return nil
+}
+
+func (m *mockImageRepo) TouchVariantProcessingStatus(imageID uint) error {
+	m.touchedImageIDs = append(m.touchedImageIDs, imageID)
+	return nil
+}
+
+func (m *mockImageRepo) GetImageByID(id uint) (*models.Image, error) {
+	return nil, nil
 }
 
 func TestGetProcessingFilePath_LocalStorage(t *testing.T) {
@@ -76,12 +119,29 @@ func TestSaveVariantResults_UpdateCompletedError_CallsUpdateFailed(t *testing.T)
 		VariantRepo:   repo,
 	}
 	result := &pipelineResult{StoragePath: "webp/foo.webp", Width: 100, Height: 100, FileSize: 1000, FileHash: "abc"}
+	acquiredVariants := []uint{7}
 
-	err := task.saveVariantResults(nil, result)
+	err := task.saveVariantResults(&acquiredVariants, nil, result, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "db down")
 	assert.Contains(t, repo.updateFailedCalls, uint(7), "UpdateFailed must be called for the variant")
+}
+
+func TestTouchProcessingStateRefreshesImageAndVariants(t *testing.T) {
+	variantRepo := &mockVariantRepo{}
+	imageRepo := &mockImageRepo{}
+	task := &ImagePipelineTask{
+		ImageID:     42,
+		VariantRepo: variantRepo,
+		ImageRepo:   imageRepo,
+	}
+
+	task.touchProcessingState([]uint{3, 5})
+
+	require.Len(t, variantRepo.touchCalls, 1)
+	assert.Equal(t, []uint{3, 5}, variantRepo.touchCalls[0])
+	assert.Equal(t, []uint{42}, imageRepo.touchedImageIDs)
 }
 
 func TestStageVariantFileFromPath(t *testing.T) {
@@ -112,22 +172,51 @@ func TestCreateVariantTempPath(t *testing.T) {
 
 func TestResolveImageVariantStatus(t *testing.T) {
 	t.Run("thumbnail completed and webp skipped", func(t *testing.T) {
-		status := resolveImageVariantStatus(true, true, true, false, false, true)
+		status := resolveImageVariantStatus(true, true, false, true, false, false, false, true, false)
 		assert.Equal(t, models.ImageVariantStatusThumbnailCompleted, status)
 	})
 
 	t.Run("both completed", func(t *testing.T) {
-		status := resolveImageVariantStatus(true, true, true, true, false, false)
+		status := resolveImageVariantStatus(true, true, false, true, true, false, false, false, false)
 		assert.Equal(t, models.ImageVariantStatusCompleted, status)
 	})
 
 	t.Run("webp only completed", func(t *testing.T) {
-		status := resolveImageVariantStatus(false, true, false, true, false, false)
+		status := resolveImageVariantStatus(false, true, false, false, true, false, false, false, false)
 		assert.Equal(t, models.ImageVariantStatusCompleted, status)
 	})
 
 	t.Run("all skipped", func(t *testing.T) {
-		status := resolveImageVariantStatus(true, true, false, false, true, true)
+		status := resolveImageVariantStatus(true, true, false, false, false, false, true, true, false)
 		assert.Equal(t, models.ImageVariantStatusNone, status)
 	})
+
+	t.Run("avif only completed", func(t *testing.T) {
+		status := resolveImageVariantStatus(false, false, true, false, false, true, false, false, false)
+		assert.Equal(t, models.ImageVariantStatusCompleted, status)
+	})
+}
+
+func TestShouldKeepAVIF(t *testing.T) {
+	assert.True(t, shouldKeepAVIF(94, 100))
+	assert.False(t, shouldKeepAVIF(95, 100))
+	assert.False(t, shouldKeepAVIF(110, 100))
+	assert.True(t, shouldKeepAVIF(90, 0))
+}
+
+func TestFinalizeOnlyRollsBackStillTrackedVariants(t *testing.T) {
+	repo := &mockVariantRepo{}
+	task := &ImagePipelineTask{VariantRepo: repo}
+
+	acquiredVariants := []uint{11, 12}
+	task.releaseTrackedVariant(&acquiredVariants, 11)
+	task.finalize(&acquiredVariants)
+
+	require.Len(t, repo.statusCASCalls, 1)
+	assert.Equal(t, statusCASCall{
+		id:        12,
+		expected:  models.VariantStatusProcessing,
+		newStatus: models.VariantStatusPending,
+		errMsg:    "",
+	}, repo.statusCASCalls[0])
 }

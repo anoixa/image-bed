@@ -3,21 +3,44 @@ package worker
 import (
 	"context"
 	"fmt"
-	appconfig "github.com/anoixa/image-bed/config"
-	"github.com/anoixa/image-bed/utils"
+	"github.com/anoixa/image-bed/internal/vipsfile"
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"time"
+
+	appconfig "github.com/anoixa/image-bed/config"
+	"github.com/anoixa/image-bed/utils"
 )
 
 var (
 	globalSemaphore     *ImageProcessingSemaphore
 	globalSemaphoreOnce sync.Once
+	workerPoolLog       = utils.ForModule("WorkerPool")
 )
+
+type InFlightTaskSnapshot struct {
+	ImageID    uint
+	VariantIDs []uint
+}
+
+type inFlightTaskRegistry struct {
+	mu     sync.Mutex
+	nextID uint64
+	tasks  map[uint64]InFlightTaskSnapshot
+}
+
+type inFlightTaskLease struct {
+	registry *inFlightTaskRegistry
+	id       uint64
+}
 
 var (
 	globalPool     *Pool
 	globalPoolOnce sync.Once
+	inFlightTasks  = inFlightTaskRegistry{
+		tasks: make(map[uint64]InFlightTaskSnapshot),
+	}
 )
 
 var workerMemoryCheck = func() error {
@@ -27,10 +50,10 @@ var workerMemoryCheck = func() error {
 		return nil
 	}
 
-	checkOnce := func() (float64, float64) {
+	checkOnce := func() (float64, utils.MemoryStats) {
 		stats := utils.GetMemoryStats()
 		effectiveMB := effectiveWorkerMemoryMB(stats)
-		return effectiveMB, stats.VipsMemMB
+		return effectiveMB, stats
 	}
 
 	effectiveMB, _ := checkOnce()
@@ -40,18 +63,27 @@ var workerMemoryCheck = func() error {
 
 	runtime.GC()
 
-	effectiveMB, vipsMB := checkOnce()
+	effectiveMB, stats := checkOnce()
 	if effectiveMB >= float64(limit) {
-		return fmt.Errorf("%w: effective=%.2fMB rss/vips threshold=%dMB vips=%.2fMB", appconfig.ErrMemoryLimitExceeded, effectiveMB, limit, vipsMB)
+		return fmt.Errorf(
+			"%w: effective=%.2fMB active threshold=%dMB heap_in_use=%.2fMB heap_alloc=%.2fMB rss=%.2fMB vips=%.2fMB",
+			appconfig.ErrMemoryLimitExceeded,
+			effectiveMB,
+			limit,
+			stats.HeapInUseMB,
+			stats.HeapAllocMB,
+			stats.RSSMB,
+			stats.VipsMemMB,
+		)
 	}
 
 	return nil
 }
 
 func effectiveWorkerMemoryMB(stats utils.MemoryStats) float64 {
-	effectiveMB := stats.RSSMB
-	if combined := stats.HeapAllocMB + stats.VipsMemMB; combined > effectiveMB {
-		effectiveMB = combined
+	effectiveMB := stats.HeapInUseMB + stats.VipsMemMB
+	if effectiveMB < stats.HeapAllocMB+stats.VipsMemMB {
+		effectiveMB = stats.HeapAllocMB + stats.VipsMemMB
 	}
 	return effectiveMB
 }
@@ -84,6 +116,7 @@ type Pool struct {
 	taskCh   chan func()
 	wg       sync.WaitGroup
 	isClosed atomic.Bool
+	doneCh   chan struct{}
 
 	submittedCount atomic.Uint64
 	executedCount  atomic.Uint64
@@ -108,7 +141,7 @@ func InitGlobalSemaphore(config *ImageProcessingConfig) {
 			semaphore: make(chan struct{}, config.MaxConcurrentImages),
 			config:    config,
 		}
-		utils.Infof("[WorkerPool] Image processing semaphore initialized, max concurrent: %d", config.MaxConcurrentImages)
+		workerPoolLog.Infof("Image processing semaphore initialized, max concurrent: %d", config.MaxConcurrentImages)
 	})
 }
 
@@ -135,16 +168,8 @@ func (s *ImageProcessingSemaphore) Release() {
 	select {
 	case <-s.semaphore:
 	default:
-		utils.Warnf("[WorkerPool] Warning: releasing unacquired semaphore")
+		workerPoolLog.Warnf("Releasing unacquired semaphore")
 	}
-}
-
-// min 返回较小的整数
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // InitGlobalPool 初始化全局任务池
@@ -166,6 +191,17 @@ func StopGlobalPool() {
 	}
 }
 
+func ShutdownGlobalPool(ctx context.Context) error {
+	if globalPool == nil {
+		return nil
+	}
+	return globalPool.ShutdownContext(ctx)
+}
+
+func CurrentInFlightTasks() []InFlightTaskSnapshot {
+	return inFlightTasks.Snapshots()
+}
+
 // NewPool 创建新的任务池
 func NewPool(workers, queueSize int) *Pool {
 	if queueSize <= 0 {
@@ -178,6 +214,7 @@ func NewPool(workers, queueSize int) *Pool {
 	p := &Pool{
 		taskCh:   make(chan func(), queueSize),
 		queueCap: queueSize,
+		doneCh:   make(chan struct{}),
 	}
 
 	InitGlobalSemaphore(DefaultImageProcessingConfig())
@@ -187,17 +224,30 @@ func NewPool(workers, queueSize int) *Pool {
 		go p.worker()
 	}
 
+	go func() {
+		p.wg.Wait()
+		close(p.doneCh)
+	}()
+
 	p.workerCount = workers
-	utils.Infof("[WorkerPool] Started with %d workers, queue size %d", workers, queueSize)
+	workerPoolLog.Infof("Started with %d workers, queue size %d", workers, queueSize)
 	return p
 }
 
 // worker 实际执行任务的 Goroutine
 func (p *Pool) worker() {
 	defer p.wg.Done()
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	defer vipsfile.ShutdownThread()
+
 	for task := range p.taskCh {
 		if task != nil {
 			p.executeTaskWithRecovery(task)
+			// Release libvips thread-local state between independent jobs.
+			// This keeps long-lived worker threads from accumulating stale
+			// per-thread state and avoids reusing corrupted state after cgo faults.
+			vipsfile.ShutdownThread()
 		}
 	}
 }
@@ -208,7 +258,7 @@ func (p *Pool) executeTaskWithRecovery(task func()) {
 	defer func() {
 		if r := recover(); r != nil {
 			p.failedCount.Add(1)
-			utils.Errorf("[WorkerPool] Task panicked: %v", r)
+			workerPoolLog.Errorf("Task panicked: %v", r)
 		}
 	}()
 	task()
@@ -219,8 +269,8 @@ func (p *Pool) Submit(task func()) (ok bool) {
 	if p.isClosed.Load() {
 		return false
 	}
-	if err := workerMemoryCheck(); err != nil {
-		utils.Warnf("[WorkerPool] Rejecting task submission due to memory limit: %v", err)
+	if err := p.waitForMemory(); err != nil {
+		workerPoolLog.Warnf("Rejecting task submission after backpressure wait: %v", err)
 		return false
 	}
 	defer func() {
@@ -233,18 +283,53 @@ func (p *Pool) Submit(task func()) (ok bool) {
 		p.submittedCount.Add(1)
 		return true
 	default:
-		utils.Warnf("[WorkerPool] Task queue full, dropping task")
+		workerPoolLog.Warnf("Task queue full, dropping task")
 		return false
+	}
+}
+
+var backpressureTimeout = 30 * time.Second
+var backpressureInterval = 2 * time.Second
+
+// waitForMemory waits up to 30s for memory to drop below the worker limit.
+func (p *Pool) waitForMemory() error {
+	// Fast path: memory is fine.
+	if err := workerMemoryCheck(); err == nil {
+		return nil
+	}
+
+	// Try to free memory immediately.
+	runtime.GC()
+
+	deadline := time.Now().Add(backpressureTimeout)
+	for {
+		if err := workerMemoryCheck(); err == nil {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("memory still over limit after %v backpressure wait", backpressureTimeout)
+		}
+		time.Sleep(backpressureInterval)
 	}
 }
 
 // Stop 关闭池
 func (p *Pool) Stop() {
+	_ = p.ShutdownContext(context.Background())
+}
+
+func (p *Pool) ShutdownContext(ctx context.Context) error {
 	if p.isClosed.CompareAndSwap(false, true) {
-		utils.Infof("[WorkerPool] Stopping...")
+		workerPoolLog.Infof("Stopping")
 		close(p.taskCh)
-		p.wg.Wait()
-		utils.Infof("[WorkerPool] Stopped gracefully.")
+	}
+
+	select {
+	case <-p.doneCh:
+		workerPoolLog.Infof("Stopped gracefully")
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -258,4 +343,69 @@ func (p *Pool) GetStats() PoolStats {
 		QueueCap:    p.queueCap,
 		WorkerCount: p.workerCount,
 	}
+}
+
+func beginInFlightTask(imageID uint, variantIDs []uint) *inFlightTaskLease {
+	if imageID == 0 && len(variantIDs) == 0 {
+		return nil
+	}
+	return inFlightTasks.Begin(imageID, variantIDs)
+}
+
+func (r *inFlightTaskRegistry) Begin(imageID uint, variantIDs []uint) *inFlightTaskLease {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.nextID++
+	id := r.nextID
+	r.tasks[id] = InFlightTaskSnapshot{
+		ImageID:    imageID,
+		VariantIDs: append([]uint(nil), variantIDs...),
+	}
+
+	return &inFlightTaskLease{
+		registry: r,
+		id:       id,
+	}
+}
+
+func (r *inFlightTaskRegistry) Snapshots() []InFlightTaskSnapshot {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	snapshots := make([]InFlightTaskSnapshot, 0, len(r.tasks))
+	for _, snapshot := range r.tasks {
+		snapshots = append(snapshots, InFlightTaskSnapshot{
+			ImageID:    snapshot.ImageID,
+			VariantIDs: append([]uint(nil), snapshot.VariantIDs...),
+		})
+	}
+	return snapshots
+}
+
+func (l *inFlightTaskLease) Update(imageID uint, variantIDs []uint) {
+	if l == nil || l.registry == nil {
+		return
+	}
+
+	l.registry.mu.Lock()
+	defer l.registry.mu.Unlock()
+
+	if _, ok := l.registry.tasks[l.id]; !ok {
+		return
+	}
+	l.registry.tasks[l.id] = InFlightTaskSnapshot{
+		ImageID:    imageID,
+		VariantIDs: append([]uint(nil), variantIDs...),
+	}
+}
+
+func (l *inFlightTaskLease) Release() {
+	if l == nil || l.registry == nil {
+		return
+	}
+
+	l.registry.mu.Lock()
+	defer l.registry.mu.Unlock()
+	delete(l.registry.tasks, l.id)
 }

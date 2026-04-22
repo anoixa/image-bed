@@ -39,11 +39,11 @@ type ImageRequestBody struct {
 }
 
 type ImageListResponse struct {
-	Images     []*ImageDTO `json:"images"`
-	Total      int64       `json:"total"`
-	Page       int         `json:"page"`
-	Limit      int         `json:"limit"`
-	TotalPages int         `json:"total_pages"`
+	Images     []ImageDTO `json:"images"`
+	Total      int64      `json:"total"`
+	Page       int        `json:"page"`
+	Limit      int        `json:"limit"`
+	TotalPages int        `json:"total_pages"`
 }
 
 // ListImages 获取图片列表
@@ -63,7 +63,7 @@ func (h *Handler) ListImages(c *gin.Context) {
 	var body ImageRequestBody
 
 	if err := c.ShouldBindJSON(&body); err != nil {
-		common.RespondError(c, http.StatusBadRequest, err.Error())
+		common.RespondError(c, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
@@ -82,9 +82,9 @@ func (h *Handler) ListImages(c *gin.Context) {
 		limit = config.MaxPerPage
 	}
 
-	result, err := h.queryService.ListImages(body.StorageType, body.Identifier, body.Search, body.AlbumID, body.StartTime, body.EndTime, body.Sort, page, limit, int(userID))
+	result, err := h.queryService.ListImages(c.Request.Context(), body.StorageType, body.Identifier, body.Search, body.AlbumID, body.StartTime, body.EndTime, body.Sort, page, limit, int(userID))
 	if err != nil {
-		utils.Errorf("[ListImages] Failed to get image list for user=%d: %v", userID, err)
+		imageHandlerLog.Errorf("Failed to get image list for user=%d: %v", userID, err)
 		common.RespondError(c, http.StatusInternalServerError, "Failed to get image list")
 		return
 	}
@@ -100,15 +100,15 @@ func (h *Handler) ListImages(c *gin.Context) {
 	})
 }
 
-func (h *Handler) toImageDTO(image *models.Image) *ImageDTO {
+func (h *Handler) toImageDTO(image *models.Image) ImageDTO {
 	if image == nil {
-		return nil
+		return ImageDTO{}
 	}
 
 	imageUrl := utils.BuildImageURL(h.baseURL, image.Identifier)
 	thumbnailUrl := utils.BuildThumbnailURL(h.baseURL, image.Identifier)
 
-	return &ImageDTO{
+	return ImageDTO{
 		ID:           image.ID,
 		Identifier:   image.Identifier,
 		URL:          imageUrl,
@@ -123,8 +123,8 @@ func (h *Handler) toImageDTO(image *models.Image) *ImageDTO {
 	}
 }
 
-func (h *Handler) toImageDTOs(images []*models.Image) []*ImageDTO {
-	dtos := make([]*ImageDTO, len(images))
+func (h *Handler) toImageDTOs(images []*models.Image) []ImageDTO {
+	dtos := make([]ImageDTO, len(images))
 	for i, image := range images {
 		dtos[i] = h.toImageDTO(image)
 	}

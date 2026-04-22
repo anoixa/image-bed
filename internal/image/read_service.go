@@ -5,11 +5,15 @@ import (
 	"errors"
 	"time"
 
+	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/utils"
+	"gorm.io/gorm"
 )
+
+var readLog = utils.ForModule("ReadService")
 
 // ReadService 负责图片读取相关用例
 type ReadService struct {
@@ -45,15 +49,28 @@ func (s *ReadService) GetImageMetadata(ctx context.Context, identifier string) (
 
 	if s.cacheHelper != nil {
 		if err := s.cacheHelper.GetCachedImage(ctx, identifier, &image); err == nil {
+			middleware.RecordImageMetadataCacheHit()
 			return &image, nil
+		}
+	}
+	middleware.RecordImageMetadataCacheMiss()
+	imageCacheKey := cache.ImageCachePrefix + identifier
+	if s.cacheHelper != nil {
+		if isEmpty, err := s.cacheHelper.IsEmptyValue(ctx, imageCacheKey); err == nil && isEmpty {
+			return nil, gorm.ErrRecordNotFound
 		}
 	}
 
 	resultChan := imageGroup.DoChan(identifier, func() (any, error) {
-		imagePtr, err := s.repo.GetImageByIdentifier(identifier)
+		imagePtr, err := s.repo.WithContext(ctx).GetImageByIdentifier(identifier)
 		if err != nil {
 			if isTransientError(err) {
 				return nil, ErrTemporaryFailure
+			}
+			if errors.Is(err, gorm.ErrRecordNotFound) && s.cacheHelper != nil {
+				cacheCtx, cancel := utils.DetachedContext(5 * time.Second)
+				defer cancel()
+				_ = s.cacheHelper.CacheEmptyValue(cacheCtx, imageCacheKey)
 			}
 			return nil, err
 		}
@@ -61,17 +78,17 @@ func (s *ReadService) GetImageMetadata(ctx context.Context, identifier string) (
 		go func(img *models.Image) {
 			defer func() {
 				if r := recover(); r != nil {
-					utils.LogIfDevf("Panic in async cache goroutine for '%s': %v", img.Identifier, r)
+					readLog.Debugf("Panic in async cache goroutine for '%s': %v", img.Identifier, r)
 				}
 			}()
 			if s.cacheHelper == nil {
 				return
 			}
 
-			cacheCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			cacheCtx, cancel := utils.DetachedContext(10 * time.Second)
 			defer cancel()
 			if cacheErr := s.cacheHelper.CacheImage(cacheCtx, img); cacheErr != nil {
-				utils.LogIfDevf("Failed to cache image metadata for '%s': %v", img.Identifier, cacheErr)
+				readLog.Debugf("Failed to cache image metadata for '%s': %v", img.Identifier, cacheErr)
 			}
 		}(imagePtr)
 
@@ -117,7 +134,7 @@ func (s *ReadService) GetImageWithVariant(ctx context.Context, identifier string
 
 // GetRandomImageWithVariant 获取随机图片
 func (s *ReadService) GetRandomImageWithVariant(ctx context.Context, filter *images.RandomImageFilter, acceptHeader string) (*ImageResultDTO, error) {
-	image, err := s.repo.GetRandomPublicImage(filter)
+	image, err := s.repo.WithContext(ctx).GetRandomPublicImage(filter)
 	if err != nil {
 		return nil, err
 	}
@@ -126,11 +143,13 @@ func (s *ReadService) GetRandomImageWithVariant(ctx context.Context, filter *ima
 }
 
 func (s *ReadService) buildImageResult(ctx context.Context, image *models.Image, acceptHeader string) *ImageResultDTO {
+	accessURL := utils.BuildImageURL(s.baseURL, image.Identifier)
+
 	if s.variantService == nil {
 		return &ImageResultDTO{
 			Image:      image,
 			IsOriginal: true,
-			URL:        utils.BuildImageURL(s.baseURL, image.Identifier),
+			URL:        accessURL,
 			MIMEType:   image.MimeType,
 		}
 	}
@@ -140,7 +159,7 @@ func (s *ReadService) buildImageResult(ctx context.Context, image *models.Image,
 		return &ImageResultDTO{
 			Image:      image,
 			IsOriginal: true,
-			URL:        utils.BuildImageURL(s.baseURL, image.Identifier),
+			URL:        accessURL,
 			MIMEType:   image.MimeType,
 		}
 	}
@@ -158,19 +177,19 @@ func (s *ReadService) buildImageResult(ctx context.Context, image *models.Image,
 	}
 
 	if variantResult.IsOriginal {
-		result.URL = utils.BuildImageURL(s.baseURL, image.Identifier)
+		result.URL = accessURL
 		result.MIMEType = image.MimeType
 		return result
 	}
 
 	result.Variant = variantResult.Variant
 	if variantResult.Variant != nil {
-		result.URL = utils.BuildImageURL(s.baseURL, variantResult.Variant.Identifier)
+		result.URL = accessURL
 		return result
 	}
 
 	result.IsOriginal = true
-	result.URL = utils.BuildImageURL(s.baseURL, image.Identifier)
+	result.URL = accessURL
 	result.MIMEType = image.MimeType
 	return result
 }

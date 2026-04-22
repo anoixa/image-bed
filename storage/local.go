@@ -186,6 +186,32 @@ func (s *LocalStorage) GetFilePath(storagePath string) (string, error) {
 	return s.validatePath(storagePath)
 }
 
+// GetObjectInfo returns object metadata without opening a streaming read path.
+func (s *LocalStorage) GetObjectInfo(ctx context.Context, storagePath string) (ObjectInfo, error) {
+	select {
+	case <-ctx.Done():
+		return ObjectInfo{}, ctx.Err()
+	default:
+	}
+
+	fullPath, err := s.validatePath(storagePath)
+	if err != nil {
+		return ObjectInfo{}, fmt.Errorf("invalid storage path: %w", err)
+	}
+
+	stat, err := os.Stat(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ObjectInfo{}, fmt.Errorf("file not found: %w", err)
+		}
+		return ObjectInfo{}, fmt.Errorf("failed to stat file: %w", err)
+	}
+
+	return ObjectInfo{
+		Size: stat.Size(),
+	}, nil
+}
+
 // DeleteWithContext 从本地存储删除文件
 func (s *LocalStorage) DeleteWithContext(ctx context.Context, storagePath string) error {
 	select {

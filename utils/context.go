@@ -4,22 +4,32 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 )
 
-// IsContextCanceled 检查错误是否是由于上下文取消导致的
+// DetachedContext returns a fresh background-based context for best-effort work
+// that should survive request cancellation, while still respecting a hard timeout.
+func DetachedContext(timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout > 0 {
+		return context.WithTimeout(context.Background(), timeout)
+	}
+	return context.WithCancel(context.Background())
+}
+
+// IsContextCanceled reports whether err represents request cancellation.
 func IsContextCanceled(err error) bool {
 	if err == nil {
 		return false
 	}
-	// 检查直接的上下文错误
 	if errors.Is(err, context.Canceled) {
 		return true
 	}
 
-	return strings.Contains(err.Error(), "context canceled")
+	errText := strings.ToLower(err.Error())
+	return strings.Contains(errText, "context canceled")
 }
 
-// IsClientDisconnect 检查错误是否是客户端断开连接
+// IsClientDisconnect reports whether the client side terminated the request.
 func IsClientDisconnect(err error) bool {
 	return IsContextCanceled(err)
 }

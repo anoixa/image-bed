@@ -1,26 +1,28 @@
 package core
 
 import (
+	"database/sql"
 	"net/http"
 	"time"
 
 	"github.com/anoixa/image-bed/utils"
 
-	"github.com/anoixa/image-bed/api"
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
 	configSvc "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/repo/accounts"
 	"github.com/anoixa/image-bed/database/repo/albums"
+	dashboardRepo "github.com/anoixa/image-bed/database/repo/dashboard"
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/database/repo/keys"
 	"github.com/anoixa/image-bed/internal/auth"
 	imageSvc "github.com/anoixa/image-bed/internal/image"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 )
+
+var serverLog = utils.ForModule("Server")
 
 // Repositories 所有数据库仓库
 type Repositories struct {
@@ -39,8 +41,10 @@ type ServerVersion struct {
 
 // ServerDependencies 服务器依赖项
 type ServerDependencies struct {
-	DB            *gorm.DB
+	SqlDB         *sql.DB
 	Repositories  *Repositories
+	VariantRepo   *images.VariantRepository
+	DashboardRepo *dashboardRepo.Repository
 	ConfigManager *configSvc.Manager
 	Converter     *imageSvc.Converter
 	JWTService    *auth.JWTService
@@ -72,7 +76,7 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	}))
 
 	if err := router.SetTrustedProxies(nil); err != nil {
-		utils.Warnf("Warning: Failed to set trusted proxies: %v", err)
+		serverLog.Warnf("Failed to set trusted proxies: %v", err)
 	}
 
 	const (
@@ -81,11 +85,11 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 		defaultMaxBatchTotalMB = 500
 		minBatchRequestLimitMB = 100
 		batchRequestLimitRatio = 2
+		apiMaxConcurrency      = 100
+		publicMaxConcurrency   = 200
 	)
 
 	router.MaxMultipartMemory = multipartMemoryMB << 20
-	concurrencyLimiter := middleware.NewConcurrencyLimiter(100)
-	router.Use(concurrencyLimiter.Middleware())
 	requestBodyLimit := int64(defaultMaxBatchTotalMB) * batchRequestLimitRatio << 20
 	if requestBodyLimit < minBatchRequestLimitMB<<20 {
 		requestBodyLimit = minBatchRequestLimitMB << 20
@@ -104,37 +108,29 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 		imageRateLimiter.StopCleanup()
 	}
 
-	var jwtService *auth.JWTService
+	jwtService := deps.JWTService
 	var loginService *auth.LoginService
-
-	if deps.JWTService != nil {
-		jwtService = deps.JWTService
-	} else if deps.Config != nil {
-		var err error
-		jwtService, err = auth.NewJWTService(deps.Config, deps.ConfigManager, deps.Repositories.KeysRepo)
-		if err != nil {
-			utils.Errorf("[Server] Failed to initialize JWT service from app config: %v, using defaults", err)
-		}
-	}
-
 	if jwtService != nil {
 		loginService = auth.NewLoginService(deps.Repositories.AccountsRepo, deps.Repositories.DevicesRepo, jwtService)
-		api.SetJWTService(jwtService)
 	}
 
 	routerDeps := &RouterDependencies{
-		DB:               deps.DB,
-		Repositories:     deps.Repositories,
-		ConfigManager:    deps.ConfigManager,
-		Converter:        deps.Converter,
-		JWTService:       jwtService,
-		LoginService:     loginService,
-		AuthRateLimiter:  authRateLimiter,
-		APIRateLimiter:   apiRateLimiter,
-		ImageRateLimiter: imageRateLimiter,
-		CacheProvider:    deps.CacheProvider,
-		ServerVersion:    deps.ServerVersion,
-		Config:           deps.Config,
+		VariantRepo:       deps.VariantRepo,
+		DashboardRepo:     deps.DashboardRepo,
+		SqlDB:             deps.SqlDB,
+		Repositories:      deps.Repositories,
+		ConfigManager:     deps.ConfigManager,
+		Converter:         deps.Converter,
+		JWTService:        jwtService,
+		LoginService:      loginService,
+		AuthRateLimiter:   authRateLimiter,
+		APIRateLimiter:    apiRateLimiter,
+		ImageRateLimiter:  imageRateLimiter,
+		APIConcurrency:    middleware.NewConcurrencyLimiter(apiMaxConcurrency),
+		PublicConcurrency: middleware.NewConcurrencyLimiter(publicMaxConcurrency),
+		CacheProvider:     deps.CacheProvider,
+		ServerVersion:     deps.ServerVersion,
+		Config:            deps.Config,
 	}
 	RegisterRoutes(router, routerDeps)
 

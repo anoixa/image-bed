@@ -6,10 +6,20 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/anoixa/image-bed/api/common"
+	"github.com/anoixa/image-bed/api/middleware"
+	"github.com/anoixa/image-bed/cache"
+	"github.com/anoixa/image-bed/database/models"
+	repoalbums "github.com/anoixa/image-bed/database/repo/albums"
+	svcalbums "github.com/anoixa/image-bed/internal/albums"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func setupTestRouter(t *testing.T) *gin.Engine {
@@ -287,6 +297,74 @@ func TestAlbumIDParam_Parsing(t *testing.T) {
 			assert.Equal(t, tt.wantStatus, w.Code)
 		})
 	}
+}
+
+func TestUpdateAlbumHandlerReturnsFreshUpdatedAt(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	db, err := gorm.Open(sqlite.Open("file::memory:?cache=private"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.Album{}, &models.Image{}))
+
+	repo := repoalbums.NewRepository(db)
+	svc := svcalbums.NewService(repo)
+
+	provider, err := cache.NewMemoryCache(cache.MemoryConfig{
+		NumCounters: 1_000,
+		MaxCost:     1 << 20,
+		BufferItems: 64,
+	})
+	require.NoError(t, err)
+	prevAsync := albumAsync
+	albumAsync = func(fn func()) { fn() }
+	t.Cleanup(func() {
+		albumAsync = prevAsync
+		_ = provider.Close()
+	})
+
+	handler := NewHandler(svc, provider, "")
+
+	album := &models.Album{
+		Name:        "Old Name",
+		Description: "Old Description",
+		UserID:      1,
+	}
+	require.NoError(t, repo.CreateAlbum(album))
+	originalUpdatedAt := album.UpdatedAt
+
+	router := gin.New()
+	router.PUT("/albums/:id", func(c *gin.Context) {
+		c.Set(middleware.ContextUserIDKey, uint(1))
+		handler.UpdateAlbumHandler(c)
+	})
+
+	body := bytes.NewBufferString(`{"name":"New Name","description":"New Description"}`)
+	req := httptest.NewRequest(http.MethodPut, "/albums/"+json.Number("1").String(), body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var response common.Response
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+
+	payloadBytes, err := json.Marshal(response.Data)
+	require.NoError(t, err)
+
+	var payload UpdateAlbumResponse
+	require.NoError(t, json.Unmarshal(payloadBytes, &payload))
+
+	assert.Equal(t, "New Name", payload.Name)
+	assert.Equal(t, "New Description", payload.Description)
+	assert.GreaterOrEqual(t, payload.UpdatedAt, originalUpdatedAt.Unix())
+
+	updatedAlbum, err := repo.GetAlbumByID(album.ID)
+	require.NoError(t, err)
+	assert.Equal(t, updatedAlbum.UpdatedAt.Unix(), payload.UpdatedAt)
+	assert.WithinDuration(t, time.Unix(payload.UpdatedAt, 0), updatedAlbum.UpdatedAt, time.Second)
 }
 
 // TestImageIDParam_Parsing 测试图片ID参数解析

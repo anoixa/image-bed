@@ -24,6 +24,15 @@ import (
 
 var fileDownloadGroup singleflight.Group
 
+const privateImageCacheControl = "private, no-store"
+
+func cacheControlForImage(isPublic bool) string {
+	if isPublic {
+		return config.CacheControlPublic
+	}
+	return privateImageCacheControl
+}
+
 // checkETag 检查客户端缓存是否有效
 // 如果客户端发送的 If-None-Match 与当前 ETag 匹配，返回 true 并写入 304 响应
 func checkETag(c *gin.Context, etag string) bool {
@@ -125,8 +134,10 @@ func (h *Handler) GetImage(c *gin.Context) {
 	}
 
 	if result.IsOriginal {
+		middleware.RecordImageOriginalResponse()
 		h.serveOriginalImage(c, result.Image)
 	} else {
+		middleware.RecordImageVariantResponse()
 		variantResult := &image.VariantResult{
 			IsOriginal:  false,
 			Variant:     result.Variant,
@@ -141,16 +152,13 @@ func (h *Handler) GetImage(c *gin.Context) {
 // serveOriginalImage 提供原图
 func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 	if h.cacheHelper == nil {
-		utils.LogIfDevf("[DEBUG][serveOriginalImage] h.cacheHelper is nil!")
 		common.RespondError(c, http.StatusInternalServerError, "Cache not initialized")
 		return
 	}
 
-	utils.LogIfDevf("[DEBUG][serveOriginalImage] image.ID=%d, StorageConfigID=%d, Identifier=%s",
-		image.ID, image.StorageConfigID, image.Identifier)
-
 	// 检查是否可以使用直链
 	if directURL := h.getDirectURLIfPossible(c, image); directURL != "" {
+		middleware.RecordImageDirectRedirect()
 		c.Header("Cache-Control", config.CacheControlPublic)
 		c.Redirect(http.StatusFound, directURL)
 		return
@@ -161,13 +169,14 @@ func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 	// 使用图片指定的 StorageConfigID 获取正确的存储 provider
 	provider, err := h.getStorageProvider(image.StorageConfigID)
 	if err != nil {
-		utils.Errorf("[serveOriginalImage] Failed to get storage provider for image %s (StorageConfigID=%d)",
+		imageHandlerLog.Errorf("serveOriginalImage failed to get storage provider for image %s (StorageConfigID=%d)",
 			image.Identifier, image.StorageConfigID)
 		common.RespondError(c, http.StatusInternalServerError, "Storage provider not available")
 		return
 	}
 
 	if imageData, ok := h.getOrPopulateImageDataCache(c.Request.Context(), provider, image.Identifier, storagePath); ok {
+		middleware.RecordImageCacheResponse()
 		h.serveImageData(c, image, imageData)
 		return
 	}
@@ -186,7 +195,7 @@ func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 
 	stream, err := provider.GetWithContext(c.Request.Context(), storagePath)
 	if err != nil {
-		utils.Errorf("[serveOriginal] Failed to get image %s (path: %s): %v", utils.SanitizeLogMessage(image.Identifier), storagePath, err)
+		imageHandlerLog.Errorf("serveOriginal failed to get image %s (path: %s): %v", utils.SanitizeLogMessage(image.Identifier), storagePath, err)
 		common.RespondError(c, http.StatusNotFound, "Image file not found")
 		return
 	}
@@ -196,7 +205,8 @@ func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 		}
 	}()
 
-	h.serveReadSeekerContent(c, image.Identifier, image.MimeType, image.FileHash, stream, false)
+	middleware.RecordImageReaderResponse()
+	h.serveReadSeekerContent(c, image.Identifier, image.MimeType, image.FileHash, stream, false, cacheControlForImage(image.IsPublic))
 }
 
 // getDirectURLIfPossible 尝试获取直链 URL
@@ -208,38 +218,28 @@ func (h *Handler) getDirectURLIfPossible(c *gin.Context, img *models.Image) stri
 func (h *Handler) getVariantDirectURLIfPossible(c *gin.Context, img *models.Image, storagePath string) string {
 	// 私有图片不支持直链
 	if !img.IsPublic {
-		utils.LogIfDevf("[getVariantDirectURLIfPossible] Image %s is not public, skip direct link", img.Identifier)
 		return ""
 	}
 
 	// 获取存储提供者
 	provider, err := h.getStorageProvider(img.StorageConfigID)
 	if err != nil {
-		utils.LogIfDevf("[getVariantDirectURLIfPossible] Failed to get storage provider for image %s (StorageConfigID=%d)",
-			img.Identifier, img.StorageConfigID)
 		return ""
 	}
 
 	directProvider, ok := provider.(storage.DirectURLProvider)
 	if !ok {
-		utils.LogIfDevf("[getVariantDirectURLIfPossible] Provider does not support direct URL for image %s", img.Identifier)
 		return ""
 	}
 
 	globalMode := h.getGlobalTransferMode(c.Request.Context())
 
-	utils.LogIfDevf("[getVariantDirectURLIfPossible] Image %s (path=%s): SupportsDirectLink=%v, globalMode=%s, isPublic=%v",
-		img.Identifier, storagePath, directProvider.SupportsDirectLink(), globalMode, img.IsPublic)
-
 	if directProvider.ShouldProxy(img.IsPublic, globalMode) {
-		utils.LogIfDevf("[getVariantDirectURLIfPossible] Image %s: ShouldProxy returned true, using proxy", img.Identifier)
 		return ""
 	}
 
 	// 获取直链 URL
-	directURL := directProvider.GetDirectURL(storagePath)
-	utils.LogIfDevf("[getVariantDirectURLIfPossible] Image %s: Using direct URL %s", img.Identifier, directURL)
-	return directURL
+	return directProvider.GetDirectURL(storagePath)
 }
 
 // getGlobalTransferMode 获取全局转发模式
@@ -260,7 +260,7 @@ func (h *Handler) serveByStreaming(c *gin.Context, img *models.Image, streamer s
 		return true
 	}
 
-	c.Header("Cache-Control", config.CacheControlPublic)
+	c.Header("Cache-Control", cacheControlForImage(img.IsPublic))
 	c.Header("Content-Type", img.MimeType)
 
 	_, err := streamer.StreamTo(c.Request.Context(), img.StoragePath, c.Writer)
@@ -268,9 +268,10 @@ func (h *Handler) serveByStreaming(c *gin.Context, img *models.Image, streamer s
 		if utils.IsClientDisconnect(err) {
 			return true
 		}
-		utils.Errorf("[serveByStreaming] Failed to stream image %s (path: %s): %v", utils.SanitizeLogMessage(img.Identifier), img.StoragePath, err)
+		imageHandlerLog.Errorf("serveByStreaming failed to stream image %s (path: %s): %v", utils.SanitizeLogMessage(img.Identifier), img.StoragePath, err)
 		return false
 	}
+	middleware.RecordImageStreamResponse()
 	return true
 }
 
@@ -305,10 +306,11 @@ func (h *Handler) serveBySendfile(c *gin.Context, img *models.Image, opener stor
 	}
 	defer func() { _ = file.Close() }()
 
-	c.Header("Cache-Control", config.CacheControlPublic)
+	c.Header("Cache-Control", cacheControlForImage(img.IsPublic))
 	c.Header("Content-Type", img.MimeType)
 
 	http.ServeContent(c.Writer, c.Request, img.Identifier, time.Time{}, file)
+	middleware.RecordImageSendfileResponse()
 	return true
 }
 
@@ -319,7 +321,7 @@ func (h *Handler) serveImageData(c *gin.Context, img *models.Image, data []byte)
 		return
 	}
 
-	c.Header("Cache-Control", config.CacheControlPublic)
+	c.Header("Cache-Control", cacheControlForImage(img.IsPublic))
 	c.Header("Content-Type", img.MimeType)
 	c.Header("Content-Length", strconv.Itoa(len(data)))
 
@@ -328,12 +330,9 @@ func (h *Handler) serveImageData(c *gin.Context, img *models.Image, data []byte)
 
 // serveVariantImage 提供格式变体（支持直链模式）
 func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *image.VariantResult) {
-	// [DEBUG] 记录变体信息
-	utils.LogIfDevf("[DEBUG][serveVariantImage] img.ID=%d, img.StorageConfigID=%d, variant.Identifier=%s, variant.StoragePath=%s",
-		img.ID, img.StorageConfigID, result.Identifier, result.StoragePath)
-
 	// 检查变体是否可以使用直链（使用变体自己的路径）
 	if directURL := h.getVariantDirectURLIfPossible(c, img, result.StoragePath); directURL != "" {
+		middleware.RecordImageDirectRedirect()
 		c.Header("Cache-Control", config.CacheControlPublic)
 		c.Redirect(http.StatusFound, directURL)
 		return
@@ -342,7 +341,7 @@ func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *i
 	// 使用原图指定的 StorageConfigID 获取正确的存储 provider
 	provider, err := h.getStorageProvider(img.StorageConfigID)
 	if err != nil {
-		utils.Errorf("[serveVariantImage] Failed to get storage provider for image %s (StorageConfigID=%d)",
+		imageHandlerLog.Errorf("serveVariantImage failed to get storage provider for image %s (StorageConfigID=%d)",
 			img.Identifier, img.StorageConfigID)
 		// 降级到原图
 		h.serveOriginalImage(c, img)
@@ -350,25 +349,26 @@ func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *i
 	}
 
 	if imageData, ok := h.getOrPopulateImageDataCache(c.Request.Context(), provider, remoteImageDataCacheKey(img.StorageConfigID, result.StoragePath), result.StoragePath); ok {
-		h.serveVariantData(c, result, imageData)
+		middleware.RecordImageCacheResponse()
+		h.serveVariantData(c, result, imageData, img.IsPublic)
 		return
 	}
 
 	if opener, ok := provider.(storage.FileOpener); ok {
-		if h.serveVariantBySendfile(c, result, opener) {
+		if h.serveVariantBySendfile(c, result, opener, img.IsPublic) {
 			return
 		}
 	}
 
 	if streamer, ok := provider.(storage.StreamProvider); ok {
-		if h.serveVariantByStreaming(c, result, streamer) {
+		if h.serveVariantByStreaming(c, result, streamer, img.IsPublic) {
 			return
 		}
 	}
 
 	stream, err := provider.GetWithContext(c.Request.Context(), result.StoragePath)
 	if err != nil {
-		utils.Errorf("[serveVariant] Failed to get variant %s (path: %s): %v", utils.SanitizeLogMessage(result.Identifier), result.StoragePath, err)
+		imageHandlerLog.Errorf("serveVariant failed to get variant %s (path: %s): %v", utils.SanitizeLogMessage(result.Identifier), result.StoragePath, err)
 		// 降级到原图
 		h.serveOriginalImage(c, img)
 		return
@@ -379,17 +379,18 @@ func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *i
 		}
 	}()
 
-	h.serveReadSeekerContent(c, result.Identifier, result.MIMEType, result.Variant.FileHash, stream, true)
+	middleware.RecordImageReaderResponse()
+	h.serveReadSeekerContent(c, result.Identifier, result.MIMEType, result.Variant.FileHash, stream, true, cacheControlForImage(img.IsPublic))
 }
 
 // serveVariantByStreaming 使用流式传输格式变体
-func (h *Handler) serveVariantByStreaming(c *gin.Context, result *image.VariantResult, streamer storage.StreamProvider) bool {
+func (h *Handler) serveVariantByStreaming(c *gin.Context, result *image.VariantResult, streamer storage.StreamProvider, isPublic bool) bool {
 	// 使用 FileHash 作为变体 ETag
 	if checkETag(c, result.Variant.FileHash) {
 		return true
 	}
 
-	c.Header("Cache-Control", config.CacheControlPublic)
+	c.Header("Cache-Control", cacheControlForImage(isPublic))
 	c.Header("Content-Type", result.MIMEType)
 	c.Header("X-Content-Type-Options", "nosniff")
 
@@ -398,11 +399,12 @@ func (h *Handler) serveVariantByStreaming(c *gin.Context, result *image.VariantR
 		// 客户端断开连接是正常情况
 		return utils.IsClientDisconnect(err)
 	}
+	middleware.RecordImageStreamResponse()
 	return true
 }
 
 // serveVariantBySendfile 使用 sendfile 传输格式变体
-func (h *Handler) serveVariantBySendfile(c *gin.Context, result *image.VariantResult, opener storage.FileOpener) bool {
+func (h *Handler) serveVariantBySendfile(c *gin.Context, result *image.VariantResult, opener storage.FileOpener, isPublic bool) bool {
 	// 检查 ETag 缓存（使用 FileHash 作为变体 ETag）
 	if checkETag(c, result.Variant.FileHash) {
 		return true
@@ -419,23 +421,24 @@ func (h *Handler) serveVariantBySendfile(c *gin.Context, result *image.VariantRe
 		return false
 	}
 
-	c.Header("Cache-Control", config.CacheControlPublic)
+	c.Header("Cache-Control", cacheControlForImage(isPublic))
 	c.Header("Content-Type", result.MIMEType)
 	c.Header("Content-Length", strconv.FormatInt(stat.Size(), 10))
 	c.Header("X-Content-Type-Options", "nosniff")
 
 	http.ServeContent(c.Writer, c.Request, result.Identifier, stat.ModTime(), file)
+	middleware.RecordImageSendfileResponse()
 	return true
 }
 
 // serveVariantData 从内存提供格式变体数据
-func (h *Handler) serveVariantData(c *gin.Context, result *image.VariantResult, data []byte) {
+func (h *Handler) serveVariantData(c *gin.Context, result *image.VariantResult, data []byte, isPublic bool) {
 	// 使用 FileHash 作为变体 ETag
 	if checkETag(c, result.Variant.FileHash) {
 		return
 	}
 
-	c.Header("Cache-Control", config.CacheControlPublic)
+	c.Header("Cache-Control", cacheControlForImage(isPublic))
 	c.Header("Content-Type", result.MIMEType)
 	c.Header("Content-Length", strconv.Itoa(len(data)))
 	c.Header("X-Content-Type-Options", "nosniff")
@@ -468,27 +471,46 @@ func (h *Handler) getOrPopulateImageDataCache(ctx context.Context, provider stor
 
 	imageData, err := h.cacheHelper.GetCachedImageData(ctx, cacheKey)
 	if err == nil {
+		middleware.RecordImageDataCacheHit()
 		return imageData, true
 	}
+	middleware.RecordImageDataCacheMiss()
 
 	imageData, ok, err := h.loadCacheableImageData(ctx, provider, storagePath)
 	if err != nil {
-		utils.LogIfDevf("[imageDataCache] Failed to load cacheable image data for %s: %v", storagePath, err)
 		return nil, false
 	}
 	if !ok {
 		return nil, false
 	}
 
-	if err := h.cacheHelper.CacheImageData(ctx, cacheKey, imageData); err != nil {
-		utils.LogIfDevf("[imageDataCache] Failed to cache image data for %s: %v", storagePath, err)
-	}
+	_ = h.cacheHelper.CacheImageData(ctx, cacheKey, imageData)
 
 	return imageData, true
 }
 
 func (h *Handler) loadCacheableImageData(ctx context.Context, provider storage.Provider, storagePath string) ([]byte, bool, error) {
 	if h.cacheHelper == nil {
+		return nil, false, nil
+	}
+
+	maxSize := h.cacheHelper.MaxCacheableImageSize()
+	if maxSize <= 0 {
+		return nil, false, nil
+	}
+
+	infoProvider, ok := provider.(storage.ObjectInfoProvider)
+	if !ok {
+		// Unknown remote size means a cache miss would force a full pre-read
+		// and then a second download for streaming. Skip binary caching instead.
+		return nil, false, nil
+	}
+
+	info, err := infoProvider.GetObjectInfo(ctx, storagePath)
+	if err != nil {
+		return nil, false, err
+	}
+	if info.Size > maxSize {
 		return nil, false, nil
 	}
 
@@ -501,11 +523,6 @@ func (h *Handler) loadCacheableImageData(ctx context.Context, provider storage.P
 			_ = closer.Close()
 		}
 	}()
-
-	maxSize := h.cacheHelper.MaxCacheableImageSize()
-	if maxSize <= 0 {
-		return nil, false, nil
-	}
 
 	if size, err := readRemainingReadSeekerSize(stream); err == nil && size > maxSize {
 		return nil, false, nil
@@ -538,12 +555,12 @@ func readRemainingReadSeekerSize(stream io.ReadSeeker) (int64, error) {
 	return endPos - currentPos, nil
 }
 
-func (h *Handler) serveReadSeekerContent(c *gin.Context, identifier, mimeType, etag string, stream io.ReadSeeker, noSniff bool) {
+func (h *Handler) serveReadSeekerContent(c *gin.Context, identifier, mimeType, etag string, stream io.ReadSeeker, noSniff bool, cacheControl string) {
 	if checkETag(c, etag) {
 		return
 	}
 
-	c.Header("Cache-Control", config.CacheControlPublic)
+	c.Header("Cache-Control", cacheControl)
 	c.Header("Content-Type", mimeType)
 	if noSniff {
 		c.Header("X-Content-Type-Options", "nosniff")
@@ -555,7 +572,7 @@ func (h *Handler) serveReadSeekerContent(c *gin.Context, identifier, mimeType, e
 // handleMetadataError 处理元数据查询错误
 func (h *Handler) handleMetadataError(c *gin.Context, identifier string, err error) {
 	if errors.Is(err, context.DeadlineExceeded) {
-		utils.Errorf("Timeout fetching image metadata for '%s'", utils.SanitizeLogMessage(identifier))
+		imageHandlerLog.Errorf("Timeout fetching image metadata for '%s'", utils.SanitizeLogMessage(identifier))
 		common.RespondError(c, http.StatusGatewayTimeout, "Request timeout")
 		return
 	}
@@ -567,11 +584,11 @@ func (h *Handler) handleMetadataError(c *gin.Context, identifier string, err err
 
 	// 临时错误返回 503
 	if errors.Is(err, image.ErrTemporaryFailure) {
-		utils.Errorf("Temporary failure fetching metadata for '%s': %v", utils.SanitizeLogMessage(identifier), err)
+		imageHandlerLog.Errorf("Temporary failure fetching metadata for '%s': %v", utils.SanitizeLogMessage(identifier), err)
 		common.RespondError(c, http.StatusServiceUnavailable, "Service temporarily unavailable")
 		return
 	}
 
-	utils.Errorf("Failed to fetch image metadata for '%s': %v", utils.SanitizeLogMessage(identifier), err)
+	imageHandlerLog.Errorf("Failed to fetch image metadata for '%s': %v", utils.SanitizeLogMessage(identifier), err)
 	common.RespondError(c, http.StatusNotFound, "Image not found")
 }

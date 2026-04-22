@@ -17,6 +17,16 @@ func TestParseProcStatusRSSBytes(t *testing.T) {
 	assert.Equal(t, uint64(115780*1024), rssBytes)
 }
 
+func TestParseProcStatusMemoryInfo(t *testing.T) {
+	data := "Name:\timage-bed\nVmRSS:\t  115780 kB\nRssAnon:\t   90212 kB\nRssFile:\t   25568 kB\n"
+
+	info, err := parseProcStatusMemoryInfo(data)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(115780*1024), info.RSSBytes)
+	assert.Equal(t, uint64(90212*1024), info.RssAnonBytes)
+	assert.Equal(t, uint64(25568*1024), info.RssFileBytes)
+}
+
 func TestParseProcStatusRSSBytesMissingField(t *testing.T) {
 	_, err := parseProcStatusRSSBytes("Name:\timage-bed\nVmSize:\t4061732 kB\n")
 	require.Error(t, err)

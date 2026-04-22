@@ -104,7 +104,7 @@ func (h *Handler) RandomImage(c *gin.Context) {
 			c.Status(http.StatusNoContent)
 			return
 		}
-		utils.Errorf("[RandomImage] Failed to fetch random image: %v", err)
+		imageHandlerLog.Errorf("Failed to fetch random image: %v", err)
 		common.RespondError(c, http.StatusInternalServerError, "Failed to fetch random image")
 		return
 	}
@@ -134,10 +134,14 @@ func (h *Handler) RandomImage(c *gin.Context) {
 func (h *Handler) respondRandomJSON(c *gin.Context, result *image.ImageResultDTO) {
 	img := result.Image
 	accessURL := utils.BuildImageURL(h.baseURL, img.Identifier)
+	selectedURL := result.URL
+	if selectedURL == "" {
+		selectedURL = accessURL
+	}
 	response := gin.H{
 		"id":           img.ID,
 		"identifier":   img.Identifier,
-		"url":          accessURL,
+		"url":          selectedURL,
 		"original_url": accessURL,
 		"width":        img.Width,
 		"height":       img.Height,
@@ -152,7 +156,7 @@ func (h *Handler) respondRandomJSON(c *gin.Context, result *image.ImageResultDTO
 			"identifier":         result.Variant.Identifier,
 			"request_identifier": img.Identifier,
 			"format":             result.Variant.Format,
-			"url":                accessURL,
+			"url":                selectedURL,
 		}
 		response["mime_type"] = result.MIMEType
 	}

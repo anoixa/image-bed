@@ -1,8 +1,8 @@
 package albums
 
 import (
-	"context"
 	"net/http"
+	"time"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
@@ -46,7 +46,7 @@ func (h *Handler) CreateAlbumHandler(c *gin.Context) {
 	userID := c.GetUint(middleware.ContextUserIDKey)
 	var req createAlbumRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		common.RespondError(c, http.StatusBadRequest, err.Error())
+		common.RespondError(c, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
@@ -62,10 +62,11 @@ func (h *Handler) CreateAlbumHandler(c *gin.Context) {
 	}
 
 	// 清除用户相册列表缓存
-	utils.SafeGo(func() {
-		ctx := context.Background()
+	albumAsync(func() {
+		ctx, cancel := utils.DetachedContext(5 * time.Second)
+		defer cancel()
 		if err := h.cacheHelper.DeleteCachedAlbumList(ctx, userID); err != nil {
-			utils.LogIfDevf("Failed to delete album list cache for user %d: %v", userID, err)
+			albumLog.Debugf("Failed to delete album list cache for user %d: %v", userID, err)
 		}
 	})
 

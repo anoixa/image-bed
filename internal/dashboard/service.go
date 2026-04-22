@@ -11,11 +11,13 @@ import (
 	"github.com/anoixa/image-bed/utils/format"
 )
 
+var dashboardLog = utils.ForModule("Dashboard")
+
 type StatsRepository interface {
-	GetOverviewStats() (*dashboard.OverviewStats, error)
-	GetImageTimeStats() (*dashboard.ImageTimeStats, error)
-	GetStorageStats() ([]dashboard.StorageStat, error)
-	GetDailyStats(days int) ([]dashboard.DailyStat, error)
+	GetOverviewStats(ctx context.Context) (*dashboard.OverviewStats, error)
+	GetImageTimeStats(ctx context.Context) (*dashboard.ImageTimeStats, error)
+	GetStorageStats(ctx context.Context) ([]dashboard.StorageStat, error)
+	GetDailyStats(ctx context.Context, days int) ([]dashboard.DailyStat, error)
 }
 
 type Service struct {
@@ -87,25 +89,25 @@ func (s *Service) GetStats(ctx context.Context) (*StatsResponse, error) {
 	}
 
 	// 查询概览统计
-	overview, err := s.repo.GetOverviewStats()
+	overview, err := s.repo.GetOverviewStats(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	// 查询时间维度统计
-	timeStats, err := s.repo.GetImageTimeStats()
+	timeStats, err := s.repo.GetImageTimeStats(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	// 查询存储统计
-	storageStats, err := s.repo.GetStorageStats()
+	storageStats, err := s.repo.GetStorageStats(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	// 查询趋势数据
-	dailyStats, err := s.repo.GetDailyStats(30)
+	dailyStats, err := s.repo.GetDailyStats(ctx, 30)
 	if err != nil {
 		return nil, err
 	}
@@ -193,21 +195,21 @@ func (s *Service) buildTrendData(stats []dashboard.DailyStat, days int) TrendSta
 
 	// 构建日期到数量的映射
 	statMap := make(map[string]int64)
-	utils.LogIfDevf("[DEBUG][buildTrendData] Received %d stats from DB", len(stats))
+	dashboardLog.Debugf("buildTrendData received %d stats from DB", len(stats))
 	for _, stat := range stats {
 		dateStr := stat.Date.Format("2006-01-02")
 		statMap[dateStr] = stat.Count
-		utils.LogIfDevf("[DEBUG][buildTrendData] DB stat: date=%s, count=%d", dateStr, stat.Count)
+		dashboardLog.Debugf("buildTrendData DB stat: date=%s, count=%d", dateStr, stat.Count)
 	}
 
 	// 填充数据，没有数据的天数补0
 	for i, date := range dates {
 		if count, ok := statMap[date]; ok {
 			data[i] = count
-			utils.LogIfDevf("[DEBUG][buildTrendData] Match: date=%s, count=%d", date, count)
+			dashboardLog.Debugf("buildTrendData match: date=%s, count=%d", date, count)
 		} else {
 			data[i] = 0
-			utils.LogIfDevf("[DEBUG][buildTrendData] No match: date=%s, set to 0", date)
+			dashboardLog.Debugf("buildTrendData no match: date=%s, set to 0", date)
 		}
 	}
 

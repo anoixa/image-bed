@@ -1,10 +1,10 @@
 package albums
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
@@ -58,7 +58,7 @@ func (h *Handler) UpdateAlbumHandler(c *gin.Context) {
 
 	var req UpdateAlbumRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		common.RespondError(c, http.StatusBadRequest, err.Error())
+		common.RespondError(c, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
@@ -77,19 +77,27 @@ func (h *Handler) UpdateAlbumHandler(c *gin.Context) {
 	album.Name = req.Name
 	album.Description = req.Description
 
-	if err := h.svc.UpdateAlbum(album); err != nil {
+	updatedAt := time.Now()
+	updates := map[string]any{
+		"name":        req.Name,
+		"description": req.Description,
+		"updated_at":  updatedAt,
+	}
+	if err := h.svc.UpdateAlbum(album.ID, updates); err != nil {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to update album")
 		return
 	}
+	album.UpdatedAt = updatedAt
 
 	// 清除相册缓存和用户的相册列表缓存
-	utils.SafeGo(func() {
-		ctx := context.Background()
+	albumAsync(func() {
+		ctx, cancel := utils.DetachedContext(5 * time.Second)
+		defer cancel()
 		if err := h.cacheHelper.DeleteCachedAlbum(ctx, uint(albumID)); err != nil {
-			utils.LogIfDevf("Failed to delete album cache for %d: %v", albumID, err)
+			albumLog.Debugf("Failed to delete album cache for %d: %v", albumID, err)
 		}
 		if err := h.cacheHelper.DeleteCachedAlbumList(ctx, userID); err != nil {
-			utils.LogIfDevf("Failed to delete album list cache for user %d: %v", userID, err)
+			albumLog.Debugf("Failed to delete album list cache for user %d: %v", userID, err)
 		}
 	})
 

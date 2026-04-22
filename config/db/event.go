@@ -7,6 +7,8 @@ import (
 	"github.com/anoixa/image-bed/utils"
 )
 
+var eventBusLog = utils.ForModule("EventBus")
+
 // EventType 事件类型
 type EventType string
 
@@ -60,7 +62,7 @@ func (eb *EventBus) Publish(eventType EventType, config *models.SystemConfig) {
 		func(h EventHandler) {
 			defer func() {
 				if r := recover(); r != nil {
-					utils.Errorf("[EventBus] Handler panicked for event %s: %v", eventType, r)
+					eventBusLog.Errorf("Handler panicked for event %s: %v", eventType, r)
 				}
 			}()
 			h(event)

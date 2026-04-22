@@ -7,6 +7,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     pkg-config \
     libvips-dev \
+    libheif-dev \
+    libheif-plugin-aomenc \
+    libheif-plugin-aomdec \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -25,6 +28,9 @@ FROM debian:13-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libvips42 \
+    libheif1 \
+    libheif-plugin-aomenc \
+    libheif-plugin-aomdec \
     ca-certificates \
     tzdata \
     wget \

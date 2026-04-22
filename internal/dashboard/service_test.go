@@ -61,19 +61,19 @@ type mockRepository struct {
 	dailyStats    []dashboardRepo.DailyStat
 }
 
-func (m *mockRepository) GetOverviewStats() (*dashboardRepo.OverviewStats, error) {
+func (m *mockRepository) GetOverviewStats(_ context.Context) (*dashboardRepo.OverviewStats, error) {
 	return m.overviewStats, nil
 }
 
-func (m *mockRepository) GetImageTimeStats() (*dashboardRepo.ImageTimeStats, error) {
+func (m *mockRepository) GetImageTimeStats(_ context.Context) (*dashboardRepo.ImageTimeStats, error) {
 	return m.timeStats, nil
 }
 
-func (m *mockRepository) GetStorageStats() ([]dashboardRepo.StorageStat, error) {
+func (m *mockRepository) GetStorageStats(_ context.Context) ([]dashboardRepo.StorageStat, error) {
 	return m.storageStats, nil
 }
 
-func (m *mockRepository) GetDailyStats(days int) ([]dashboardRepo.DailyStat, error) {
+func (m *mockRepository) GetDailyStats(_ context.Context, days int) ([]dashboardRepo.DailyStat, error) {
 	return m.dailyStats, nil
 }
 

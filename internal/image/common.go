@@ -17,6 +17,7 @@ import (
 var (
 	imageGroup       singleflight.Group
 	metaFetchTimeout = 30 * time.Second
+	imageCommonLog   = utils.ForModule("Image")
 )
 
 var (
@@ -66,21 +67,24 @@ type DeleteResult struct {
 	Error        error
 }
 
-// submitBackgroundTask 提交后台任务到 worker pool，队列满时丢弃并记录警告
-func submitBackgroundTask(task func()) {
+// submitBackgroundTask 提交后台任务到 worker pool，队列满时丢弃并记录警告。
+// 返回值表示任务是否成功进入后台队列。
+func submitBackgroundTask(task func()) bool {
 	pool := worker.GetGlobalPool()
 	if pool == nil {
-		utils.Infof("[Image] Worker pool not initialized, dropping background task")
-		return
+		imageCommonLog.Infof("Worker pool not initialized, dropping background task")
+		return false
 	}
 	if ok := pool.Submit(task); !ok {
-		utils.Warnf("[Image] Worker pool queue full, dropping background task")
+		imageCommonLog.Warnf("Worker pool queue full, dropping background task")
+		return false
 	}
+	return true
 }
 
 // SubmitBackgroundTask 提供给包外构造器复用统一的后台任务提交逻辑。
 func SubmitBackgroundTask(task func()) {
-	submitBackgroundTask(task)
+	_ = submitBackgroundTask(task)
 }
 
 func getStorageProviderByID(storageID uint) (storage.Provider, error) {

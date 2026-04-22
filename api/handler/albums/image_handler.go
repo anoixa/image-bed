@@ -1,7 +1,6 @@
 package albums
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -20,7 +19,7 @@ import (
 
 // AddImagesToAlbumRequest 添加图片到相册请求
 type AddImagesToAlbumRequest struct {
-	Identifiers []string `json:"identifiers" binding:"required,min=1"`
+	Identifiers []string `json:"identifiers" binding:"required,min=1,max=100"`
 }
 
 // AlbumImageHandler 相册图片处理器
@@ -87,7 +86,7 @@ func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 
 	var req AddImagesToAlbumRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		common.RespondError(c, http.StatusBadRequest, err.Error())
+		common.RespondError(c, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
@@ -125,17 +124,18 @@ func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 	}
 
 	// 批量添加到相册
-	addedCount := 0
+	var addedCount int64
 	if len(imageIDsToAdd) > 0 {
-		if err := h.svc.AddImagesToAlbum(uint(albumID), userID, imageIDsToAdd); err != nil {
-			if err.Error() == "album not found or access denied" {
+		inserted, err := h.svc.AddImagesToAlbum(uint(albumID), userID, imageIDsToAdd)
+		if err != nil {
+			if errors.Is(err, svcAlbums.ErrAlbumNotFound) {
 				common.RespondError(c, http.StatusNotFound, "Album not found or access denied")
 				return
 			}
 			common.RespondError(c, http.StatusInternalServerError, "Failed to add imgs to album")
 			return
 		}
-		addedCount = len(imageIDsToAdd)
+		addedCount = inserted
 	}
 
 	common.RespondSuccess(c, gin.H{
@@ -145,13 +145,14 @@ func (h *AlbumImageHandler) AddImagesToAlbumHandler(c *gin.Context) {
 	})
 
 	if addedCount > 0 {
-		utils.SafeGo(func() {
-			ctx := context.Background()
+		albumAsync(func() {
+			ctx, cancel := utils.DetachedContext(5 * time.Second)
+			defer cancel()
 			if err := h.cacheHelper.DeleteCachedAlbum(ctx, uint(albumID)); err != nil {
-				utils.LogIfDevf("Failed to delete album cache for %d: %v", albumID, err)
+				albumLog.Debugf("Failed to delete album cache for %d: %v", albumID, err)
 			}
 			if err := h.cacheHelper.DeleteCachedAlbumList(ctx, userID); err != nil {
-				utils.LogIfDevf("Failed to delete album list cache for user %d: %v", userID, err)
+				albumLog.Debugf("Failed to delete album list cache for user %d: %v", userID, err)
 			}
 		})
 	}
@@ -207,7 +208,7 @@ func (h *AlbumImageHandler) RemoveImageFromAlbumHandler(c *gin.Context) {
 
 	// 从相册移除图片
 	if err := h.svc.RemoveImageFromAlbum(uint(albumID), userID, image); err != nil {
-		if err.Error() == "album not found or access denied" {
+		if errors.Is(err, svcAlbums.ErrAlbumNotFound) {
 			common.RespondError(c, http.StatusNotFound, "Album not found or access denied")
 			return
 		}
@@ -218,20 +219,21 @@ func (h *AlbumImageHandler) RemoveImageFromAlbumHandler(c *gin.Context) {
 	common.RespondSuccessMessage(c, "Image removed from album successfully", nil)
 
 	// 清除相关缓存
-	utils.SafeGo(func() {
-		ctx := context.Background()
+	albumAsync(func() {
+		ctx, cancel := utils.DetachedContext(5 * time.Second)
+		defer cancel()
 		if err := h.cacheHelper.DeleteCachedAlbum(ctx, uint(albumID)); err != nil {
-			utils.LogIfDevf("Failed to delete album cache for %d: %v", albumID, err)
+			albumLog.Debugf("Failed to delete album cache for %d: %v", albumID, err)
 		}
 		if err := h.cacheHelper.DeleteCachedAlbumList(ctx, userID); err != nil {
-			utils.LogIfDevf("Failed to delete album list cache for user %d: %v", userID, err)
+			albumLog.Debugf("Failed to delete album list cache for user %d: %v", userID, err)
 		}
 	})
 }
 
 // RemoveImagesFromAlbumRequest 批量从相册移除图片请求
 type RemoveImagesFromAlbumRequest struct {
-	Identifiers []string `json:"identifiers" binding:"required,min=1"`
+	Identifiers []string `json:"identifiers" binding:"required,min=1,max=100"`
 }
 
 // RemoveImagesFromAlbumHandler 批量从相册移除图片
@@ -265,7 +267,7 @@ func (h *AlbumImageHandler) RemoveImagesFromAlbumHandler(c *gin.Context) {
 
 	var req RemoveImagesFromAlbumRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		common.RespondError(c, http.StatusBadRequest, err.Error())
+		common.RespondError(c, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
@@ -308,7 +310,7 @@ func (h *AlbumImageHandler) RemoveImagesFromAlbumHandler(c *gin.Context) {
 	if len(imageIDsToRemove) > 0 {
 		removedCount, err = h.svc.RemoveImagesFromAlbum(uint(albumID), userID, imageIDsToRemove)
 		if err != nil {
-			if err.Error() == "album not found or access denied" {
+			if errors.Is(err, svcAlbums.ErrAlbumNotFound) {
 				common.RespondError(c, http.StatusNotFound, "Album not found or access denied")
 				return
 			}
@@ -324,13 +326,14 @@ func (h *AlbumImageHandler) RemoveImagesFromAlbumHandler(c *gin.Context) {
 	})
 
 	if removedCount > 0 {
-		utils.SafeGo(func() {
-			ctx := context.Background()
+		albumAsync(func() {
+			ctx, cancel := utils.DetachedContext(5 * time.Second)
+			defer cancel()
 			if err := h.cacheHelper.DeleteCachedAlbum(ctx, uint(albumID)); err != nil {
-				utils.LogIfDevf("Failed to delete album cache for %d: %v", albumID, err)
+				albumLog.Debugf("Failed to delete album cache for %d: %v", albumID, err)
 			}
 			if err := h.cacheHelper.DeleteCachedAlbumList(ctx, userID); err != nil {
-				utils.LogIfDevf("Failed to delete album list cache for user %d: %v", userID, err)
+				albumLog.Debugf("Failed to delete album list cache for user %d: %v", userID, err)
 			}
 		})
 	}

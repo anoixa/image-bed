@@ -14,6 +14,7 @@ import (
 var (
 	globalConfig Config
 	once         sync.Once
+	initErr      error
 )
 
 // Config 扁平化配置结构体
@@ -38,6 +39,7 @@ type Config struct {
 	DBMaxOpenConns    int    `mapstructure:"db_max_open_conns"`
 	DBMaxIdleConns    int    `mapstructure:"db_max_idle_conns"`
 	DBConnMaxLifetime int    `mapstructure:"db_conn_max_lifetime"`
+	DBSSLMode         string `mapstructure:"db_ssl_mode"`
 
 	CacheMaxImageCacheSizeMB   int64 `mapstructure:"cache_max_image_cache_size_mb"`
 	CacheEnableImageCaching    bool  `mapstructure:"cache_enable_image_caching"`
@@ -49,6 +51,8 @@ type Config struct {
 	CacheRedisAddr     string `mapstructure:"cache_redis_addr"`
 	CacheRedisPassword string `mapstructure:"cache_redis_password"`
 	CacheRedisDB       int    `mapstructure:"cache_redis_db"`
+	CacheNumCounters   int64  `mapstructure:"cache_num_counters"`
+	CacheMaxCost       int64  `mapstructure:"cache_max_cost"`
 
 	// 限流配置
 	RateLimitApiRPS     float64       `mapstructure:"rate_limit_api_rps"`
@@ -75,10 +79,11 @@ type Config struct {
 }
 
 // InitConfig Initialize configuration
-func InitConfig() {
+func InitConfig() error {
 	once.Do(func() {
-		loadConfig()
+		initErr = loadConfig()
 	})
+	return initErr
 }
 
 func Get() *Config {
@@ -86,14 +91,14 @@ func Get() *Config {
 }
 
 // loadConfig Core configuration loading
-func loadConfig() {
+func loadConfig() error {
 	setDefaults()
 
 	viper.SetConfigFile(".env")
 	viper.SetConfigType("env")
 
 	if err := viper.ReadInConfig(); err != nil {
-		fmt.Fprintln(os.Stderr, "Info: .env file not found, using defaults and environment variables")
+		fmt.Fprintln(os.Stderr, "Info: .env file not found, falling back to environment variables")
 	} else {
 		fmt.Fprintln(os.Stderr, "Info: Loaded configuration from .env file")
 	}
@@ -104,8 +109,7 @@ func loadConfig() {
 	}
 
 	if err := viper.Unmarshal(&globalConfig); err != nil {
-		fmt.Fprintf(os.Stderr, "Fatal error: Unable to unmarshal config, %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("unable to unmarshal config: %w", err)
 	}
 
 	// WorkerCount: -1 = 使用当前 GOMAXPROCS, 0 = 使用默认值 (max(2, GOMAXPROCS)), >0 = 使用指定值
@@ -115,6 +119,8 @@ func loadConfig() {
 	case globalConfig.WorkerCount == 0:
 		globalConfig.WorkerCount = getCpus()
 	}
+
+	return nil
 }
 
 // setDefaults 设置默认值
@@ -122,7 +128,7 @@ func setDefaults() {
 	// 服务器配置默认值
 	viper.SetDefault("server_host", "127.0.0.1")
 	viper.SetDefault("server_port", 8080)
-	viper.SetDefault("server_domain", "http://localhost:8080")
+	viper.SetDefault("server_domain", "")
 	viper.SetDefault("server_read_timeout", "15s")
 	viper.SetDefault("server_write_timeout", "30s")
 	viper.SetDefault("server_idle_timeout", "120s")
@@ -139,6 +145,7 @@ func setDefaults() {
 	viper.SetDefault("db_max_open_conns", 25)
 	viper.SetDefault("db_max_idle_conns", 5)
 	viper.SetDefault("db_conn_max_lifetime", 3600)
+	viper.SetDefault("db_ssl_mode", "disable")
 
 	viper.SetDefault("cache_max_image_cache_size_mb", 10)
 	viper.SetDefault("cache_enable_image_caching", false)
@@ -149,6 +156,8 @@ func setDefaults() {
 	viper.SetDefault("cache_redis_addr", "localhost:6379")
 	viper.SetDefault("cache_redis_password", "")
 	viper.SetDefault("cache_redis_db", 0)
+	viper.SetDefault("cache_num_counters", 100000)
+	viper.SetDefault("cache_max_cost", 67108864) // 64MB
 
 	// 限流配置默认值
 	viper.SetDefault("rate_limit_api_rps", 30.0)
@@ -191,12 +200,17 @@ func (c *Config) BaseURL() string {
 	if c.ServerDomain != "" {
 		return c.ServerDomain
 	}
-	// 默认使用 localhost
+
 	host := c.ServerHost
-	if host == "0.0.0.0" {
+	if host == "" || host == "0.0.0.0" {
 		host = "localhost"
 	}
-	return fmt.Sprintf("http://%s:%d", host, c.ServerPort)
+	port := c.ServerPort
+	if port == 0 {
+		port = 8080
+	}
+
+	return fmt.Sprintf("http://%s:%d", host, port)
 }
 
 // GetWorkerCount 返回 worker 数量

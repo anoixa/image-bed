@@ -10,7 +10,6 @@ import (
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/internal/image"
 	"github.com/anoixa/image-bed/internal/random"
-	"gorm.io/gorm"
 )
 
 type Handler struct {
@@ -29,12 +28,7 @@ type Handler struct {
 	baseURL          string
 }
 
-func NewHandler(cacheProvider cache.Provider, imagesRepo *images.Repository, db *gorm.DB, converter *image.Converter, configManager *configSvc.Manager, cfg *config.Config, baseURL string, albumsRepo *albums.Repository) *Handler {
-	variantRepo := images.NewVariantRepository(db)
-	variantService := image.NewVariantService(variantRepo, configManager)
-
-	thumbnailService := image.NewThumbnailService(variantRepo)
-
+func NewHandler(cacheProvider cache.Provider, imagesRepo *images.Repository, variantRepo *images.VariantRepository, converter *image.Converter, configManager *configSvc.Manager, cfg *config.Config, baseURL string, albumsRepo *albums.Repository) *Handler {
 	helperCfg := cache.HelperConfig{
 		ImageCacheTTL:         cache.DefaultImageCacheExpiration,
 		ImageDataCacheTTL:     1 * time.Hour,
@@ -53,6 +47,8 @@ func NewHandler(cacheProvider cache.Provider, imagesRepo *images.Repository, db 
 	}
 
 	cacheHelper := cache.NewHelper(cacheProvider, helperCfg)
+	variantService := image.NewVariantService(variantRepo, configManager, cacheHelper)
+	thumbnailService := image.NewThumbnailService(variantRepo)
 	writeService := image.NewWriteService(imagesRepo, albumsRepo, converter, cacheHelper, baseURL)
 	readService := image.NewReadService(imagesRepo, variantService, converter, cacheHelper, baseURL, image.SubmitBackgroundTask)
 	deleteService := image.NewDeleteService(imagesRepo, variantRepo, cacheHelper)

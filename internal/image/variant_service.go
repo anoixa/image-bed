@@ -3,12 +3,15 @@ package image
 import (
 	"context"
 
+	"github.com/anoixa/image-bed/cache"
 	config "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/anoixa/image-bed/utils/format"
 )
+
+var variantNegotiationLog = utils.ForModule("VariantNegotiation")
 
 // VariantResult 变体选择结果
 type VariantResult struct {
@@ -26,13 +29,15 @@ type VariantResult struct {
 type VariantService struct {
 	variantRepo   *images.VariantRepository
 	configManager *config.Manager
+	cacheHelper   *cache.Helper
 }
 
 // NewVariantService 创建服务
-func NewVariantService(repo *images.VariantRepository, cm *config.Manager) *VariantService {
+func NewVariantService(repo *images.VariantRepository, cm *config.Manager, cacheHelper *cache.Helper) *VariantService {
 	return &VariantService{
 		variantRepo:   repo,
 		configManager: cm,
+		cacheHelper:   cacheHelper,
 	}
 }
 
@@ -55,16 +60,16 @@ func (s *VariantService) SelectBestVariant(ctx context.Context, image *models.Im
 		return nil, err
 	}
 
-	// utils.LogIfDevf("[VariantNegotiation] image=%s, variantStatus=%d, acceptHeader=%s", image.Identifier, uint(image.VariantStatus), acceptHeader)
-	// utils.LogIfDevf("[VariantNegotiation] enabledFormats=%v", settings.ConversionEnabledFormats)
+	// variantNegotiationLog.Debugf("image=%s, variantStatus=%d, acceptHeader=%s", image.Identifier, uint(image.VariantStatus), acceptHeader)
+	// variantNegotiationLog.Debugf("enabledFormats=%v", settings.ConversionEnabledFormats)
 
 	switch image.VariantStatus {
 	case models.ImageVariantStatusNone:
-		return s.handleOriginalWithConversion(image, true)
+		return s.handleOriginalWithConversion(image, shouldTriggerVariantConversion(image, settings))
 	case models.ImageVariantStatusProcessing:
 		return s.handleOriginalWithConversion(image, false)
 	case models.ImageVariantStatusFailed:
-		return s.handleOriginalWithConversion(image, true)
+		return s.handleOriginalWithConversion(image, shouldTriggerVariantConversion(image, settings))
 	case models.ImageVariantStatusThumbnailCompleted, models.ImageVariantStatusCompleted:
 
 		return s.handleCompletedVariants(ctx, image, acceptHeader, settings)
@@ -89,11 +94,28 @@ func (s *VariantService) handleOriginalWithConversion(image *models.Image, shoul
 }
 
 // handleCompletedVariants 处理已完成变体的情况
-func (s *VariantService) handleCompletedVariants(_ context.Context, image *models.Image, acceptHeader string, settings *config.ImageProcessingSettings) (*VariantResult, error) {
-	variants, err := s.variantRepo.GetVariantsByImageID(image.ID)
+func (s *VariantService) handleCompletedVariants(ctx context.Context, image *models.Image, acceptHeader string, settings *config.ImageProcessingSettings) (*VariantResult, error) {
+	var variants []models.ImageVariant
+	if s.cacheHelper != nil {
+		if err := s.cacheHelper.GetCachedImageVariants(ctx, image.ID, &variants); err == nil {
+			return s.selectFromVariants(image, acceptHeader, settings, variants), nil
+		}
+	}
+
+	var fetched []models.ImageVariant
+	fetched, err := s.variantRepo.WithContext(ctx).GetVariantsByImageID(image.ID)
 	if err != nil {
 		return nil, err
 	}
+	variants = fetched
+	if s.cacheHelper != nil {
+		_ = s.cacheHelper.CacheImageVariants(ctx, image.ID, variants)
+	}
+
+	return s.selectFromVariants(image, acceptHeader, settings, variants), nil
+}
+
+func (s *VariantService) selectFromVariants(image *models.Image, acceptHeader string, settings *config.ImageProcessingSettings, variants []models.ImageVariant) *VariantResult {
 
 	available := make(map[format.FormatType]bool)
 	variantMap := make(map[format.FormatType]*models.ImageVariant)
@@ -107,13 +129,13 @@ func (s *VariantService) handleCompletedVariants(_ context.Context, image *model
 		}
 	}
 
-	utils.LogIfDevf("[VariantNegotiation] image=%s, variantStatus=%d, acceptHeader=%s", image.Identifier, uint(image.VariantStatus), acceptHeader)
-	utils.LogIfDevf("[VariantNegotiation] availableVariants=%v, enabledFormats=%v", available, settings.ConversionEnabledFormats)
+	variantNegotiationLog.Debugf("image=%s, variantStatus=%d, acceptHeader=%s", image.Identifier, uint(image.VariantStatus), acceptHeader)
+	variantNegotiationLog.Debugf("availableVariants=%v, enabledFormats=%v", available, settings.ConversionEnabledFormats)
 
 	negotiator := format.NewNegotiator(settings.ConversionEnabledFormats)
 	selectedFormat := negotiator.Negotiate(acceptHeader, available)
 
-	utils.LogIfDevf("[VariantNegotiation] selectedFormat=%s", selectedFormat)
+	variantNegotiationLog.Debugf("selectedFormat=%s", selectedFormat)
 
 	result := &VariantResult{
 		Format: selectedFormat,
@@ -136,5 +158,5 @@ func (s *VariantService) handleCompletedVariants(_ context.Context, image *model
 		}
 	}
 
-	return result, nil
+	return result
 }

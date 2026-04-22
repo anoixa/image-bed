@@ -1,10 +1,10 @@
 package albums
 
 import (
-	"context"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
@@ -47,20 +47,21 @@ func (h *Handler) DeleteAlbumHandler(c *gin.Context) {
 		if strings.Contains(err.Error(), "not found or access denied") {
 			common.RespondError(c, http.StatusNotFound, err.Error())
 		} else {
-			utils.Errorf("Error deleting album %d for user %d: %v", albumID, userID, err)
+			albumLog.Errorf("Error deleting album %d for user %d: %v", albumID, userID, err)
 			common.RespondError(c, http.StatusInternalServerError, "Failed to delete album due to an internal error")
 		}
 		return
 	}
 
 	// 清除相册缓存和用户的相册列表缓存
-	utils.SafeGo(func() {
-		ctx := context.Background()
+	albumAsync(func() {
+		ctx, cancel := utils.DetachedContext(5 * time.Second)
+		defer cancel()
 		if err := h.cacheHelper.DeleteCachedAlbum(ctx, uint(albumID)); err != nil {
-			utils.LogIfDevf("Failed to delete album cache for %d: %v", albumID, err)
+			albumLog.Debugf("Failed to delete album cache for %d: %v", albumID, err)
 		}
 		if err := h.cacheHelper.DeleteCachedAlbumList(ctx, userID); err != nil {
-			utils.LogIfDevf("Failed to delete album list cache for user %d: %v", userID, err)
+			albumLog.Debugf("Failed to delete album list cache for user %d: %v", userID, err)
 		}
 	})
 

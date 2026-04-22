@@ -35,6 +35,36 @@ int ib_thumbnail_from_file(
     );
 }
 
+int ib_thumbnail_image(
+    VipsImage *in,
+    int width,
+    int height,
+    int crop,
+    int size,
+    VipsImage **out
+) {
+    if (height <= 0) {
+        return vips_thumbnail_image(
+            in,
+            out,
+            width,
+            "crop", crop,
+            "size", size,
+            NULL
+        );
+    }
+
+    return vips_thumbnail_image(
+        in,
+        out,
+        width,
+        "height", height,
+        "crop", crop,
+        "size", size,
+        NULL
+    );
+}
+
 int ib_save_webp_file(
     VipsImage *in,
     const char *filename,
@@ -64,6 +94,40 @@ int ib_save_webp_file(
     );
 }
 
+int ib_save_avif_file(
+    VipsImage *in,
+    const char *filename,
+    int keep_metadata,
+    int quality,
+    int lossless,
+    int effort,
+    int bitdepth
+) {
+    VipsImage *copy = NULL;
+    int ret = 0;
+
+    /* vips_heifsave may require random access. Materialize the image
+     * in memory to avoid failures when the input is a lazy pipeline. */
+    if (vips_copy(in, &copy, NULL) != 0) {
+        return -1;
+    }
+
+    ret = vips_heifsave(
+        copy,
+        filename,
+        "compression", VIPS_FOREIGN_HEIF_COMPRESSION_AV1,
+        "Q", quality,
+        "lossless", lossless,
+        "effort", effort,
+        "bitdepth", bitdepth,
+        "keep", keep_metadata ? VIPS_FOREIGN_KEEP_ALL : VIPS_FOREIGN_KEEP_NONE,
+        NULL
+    );
+
+    g_object_unref(copy);
+    return ret;
+}
+
 void ib_unref_image(VipsImage *in) {
     if (in != NULL) {
         g_object_unref(in);
@@ -80,4 +144,8 @@ void ib_get_image_info(VipsImage *in, int *width, int *height, int *has_alpha) {
     if (has_alpha != NULL) {
         *has_alpha = vips_image_hasalpha(in);
     }
+}
+
+int ib_supports_heifsave(void) {
+    return vips_type_find("VipsOperation", "heifsave") != 0;
 }

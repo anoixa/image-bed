@@ -9,49 +9,71 @@ import (
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/cache"
 	"github.com/anoixa/image-bed/config"
+	"github.com/anoixa/image-bed/internal/worker"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/gin-gonic/gin"
 )
 
 type StatusResponse struct {
-	Version     string        `json:"version"`
-	CommitHash  string        `json:"commit_hash"`
-	GoVersion   string        `json:"go_version"`
-	Environment string        `json:"environment"`
-	Memory      MemoryStatus  `json:"memory"`
-	Runtime     RuntimeStatus `json:"runtime"`
-	Cache       CacheStatus   `json:"cache"`
-	DataDir     DirStatus     `json:"data_dir"`
+	Version     string              `json:"version"`
+	CommitHash  string              `json:"commit_hash"`
+	GoVersion   string              `json:"go_version"`
+	Environment string              `json:"environment"`
+	Memory      MemoryStatus        `json:"memory"`
+	Runtime     RuntimeStatus       `json:"runtime"`
+	Worker      WorkerStatus        `json:"worker"`
+	Sweeper     worker.SweeperStats `json:"sweeper"`
+	Cache       CacheStatus         `json:"cache"`
+	DataDir     DirStatus           `json:"data_dir"`
 }
 
 type MemoryStatus struct {
-	HeapAllocMB    float64 `json:"heap_alloc_mb"`
-	HeapAllocStr   string  `json:"heap_alloc_str"`
-	HeapSysMB      float64 `json:"heap_sys_mb"`
-	HeapSysStr     string  `json:"heap_sys_str"`
-	HeapInUseMB    float64 `json:"heap_in_use_mb"`
-	HeapInUseStr   string  `json:"heap_in_use_str"`
-	StackSysMB     float64 `json:"stack_sys_mb"`
-	StackSysStr    string  `json:"stack_sys_str"`
-	RSSMB          float64 `json:"rss_mb"`
-	RSSStr         string  `json:"rss_str"`
-	TotalAllocMB   float64 `json:"total_alloc_mb"`
-	TotalAllocStr  string  `json:"total_alloc_str"`
-	GCSysMB        float64 `json:"gc_sys_mb"`
-	GCSysStr       string  `json:"gc_sys_str"`
-	NumGC          uint32  `json:"num_gc"`
-	LastGCTime     int64   `json:"last_gc_time"`
-	Goroutines     int     `json:"goroutines"`
-	VipsMemMB      float64 `json:"vips_mem_mb"`
-	VipsMemStr     string  `json:"vips_mem_str"`
-	VipsMemHighMB  float64 `json:"vips_mem_high_mb"`
-	VipsMemHighStr string  `json:"vips_mem_high_str"`
-	VipsAllocs     int64   `json:"vips_allocs"`
-	VipsOpenFiles  int64   `json:"vips_open_files"`
+	HeapAllocMB     float64 `json:"heap_alloc_mb"`
+	HeapAllocStr    string  `json:"heap_alloc_str"`
+	HeapSysMB       float64 `json:"heap_sys_mb"`
+	HeapSysStr      string  `json:"heap_sys_str"`
+	HeapInUseMB     float64 `json:"heap_in_use_mb"`
+	HeapInUseStr    string  `json:"heap_in_use_str"`
+	HeapIdleMB      float64 `json:"heap_idle_mb"`
+	HeapIdleStr     string  `json:"heap_idle_str"`
+	HeapReleasedMB  float64 `json:"heap_released_mb"`
+	HeapReleasedStr string  `json:"heap_released_str"`
+	StackSysMB      float64 `json:"stack_sys_mb"`
+	StackSysStr     string  `json:"stack_sys_str"`
+	RSSMB           float64 `json:"rss_mb"`
+	RSSStr          string  `json:"rss_str"`
+	RssAnonMB       float64 `json:"rss_anon_mb"`
+	RssAnonStr      string  `json:"rss_anon_str"`
+	RssFileMB       float64 `json:"rss_file_mb"`
+	RssFileStr      string  `json:"rss_file_str"`
+	TotalAllocMB    float64 `json:"total_alloc_mb"`
+	TotalAllocStr   string  `json:"total_alloc_str"`
+	GCSysMB         float64 `json:"gc_sys_mb"`
+	GCSysStr        string  `json:"gc_sys_str"`
+	NumGC           uint32  `json:"num_gc"`
+	LastGCTime      int64   `json:"last_gc_time"`
+	Goroutines      int     `json:"goroutines"`
+	VipsMemMB       float64 `json:"vips_mem_mb"`
+	VipsMemStr      string  `json:"vips_mem_str"`
+	VipsMemHighMB   float64 `json:"vips_mem_high_mb"`
+	VipsMemHighStr  string  `json:"vips_mem_high_str"`
+	VipsAllocs      int64   `json:"vips_allocs"`
+	VipsOpenFiles   int64   `json:"vips_open_files"`
 }
 
 type RuntimeStatus struct {
 	NumCPU int `json:"num_cpu"`
+}
+
+type WorkerStatus struct {
+	Submitted        uint64 `json:"submitted"`
+	Executed         uint64 `json:"executed"`
+	Failed           uint64 `json:"failed"`
+	QueueSize        int    `json:"queue_size"`
+	QueueCap         int    `json:"queue_cap"`
+	WorkerCount      int    `json:"worker_count"`
+	InFlightTasks    int    `json:"in_flight_tasks"`
+	InFlightVariants int    `json:"in_flight_variants"`
 }
 
 type CacheStatus struct {
@@ -95,6 +117,15 @@ func (h *Handler) GetStatus(c *gin.Context) {
 
 	// 获取数据目录信息
 	dataDirInfo := getDataDirInfo()
+	workerStats := worker.PoolStats{}
+	if pool := worker.GetGlobalPool(); pool != nil {
+		workerStats = pool.GetStats()
+	}
+	inFlightTasks := worker.CurrentInFlightTasks()
+	inFlightVariants := 0
+	for _, task := range inFlightTasks {
+		inFlightVariants += len(task.VariantIDs)
+	}
 
 	// 构建响应
 	response := StatusResponse{
@@ -103,33 +134,52 @@ func (h *Handler) GetStatus(c *gin.Context) {
 		GoVersion:   getGoVersion(),
 		Environment: getEnvironment(),
 		Memory: MemoryStatus{
-			HeapAllocMB:    memStats.HeapAllocMB,
-			HeapAllocStr:   formatBytes(uint64(memStats.HeapAllocMB * 1024 * 1024)),
-			HeapSysMB:      memStats.HeapSysMB,
-			HeapSysStr:     formatBytes(uint64(memStats.HeapSysMB * 1024 * 1024)),
-			HeapInUseMB:    memStats.HeapInUseMB,
-			HeapInUseStr:   formatBytes(uint64(memStats.HeapInUseMB * 1024 * 1024)),
-			StackSysMB:     memStats.StackSysMB,
-			StackSysStr:    formatBytes(uint64(memStats.StackSysMB * 1024 * 1024)),
-			RSSMB:          memStats.RSSMB,
-			RSSStr:         formatBytes(uint64(memStats.RSSMB * 1024 * 1024)),
-			TotalAllocMB:   memStats.TotalAllocMB,
-			TotalAllocStr:  formatBytes(uint64(memStats.TotalAllocMB * 1024 * 1024)),
-			GCSysMB:        memStats.GCSysMB,
-			GCSysStr:       formatBytes(uint64(memStats.GCSysMB * 1024 * 1024)),
-			NumGC:          memStats.NumGC,
-			LastGCTime:     memStats.LastGCTime.Unix(),
-			Goroutines:     memStats.Goroutines,
-			VipsMemMB:      memStats.VipsMemMB,
-			VipsMemStr:     formatBytes(uint64(memStats.VipsMemMB * 1024 * 1024)),
-			VipsMemHighMB:  memStats.VipsMemHighMB,
-			VipsMemHighStr: formatBytes(uint64(memStats.VipsMemHighMB * 1024 * 1024)),
-			VipsAllocs:     memStats.VipsAllocs,
-			VipsOpenFiles:  memStats.VipsOpenFiles,
+			HeapAllocMB:     memStats.HeapAllocMB,
+			HeapAllocStr:    formatBytes(uint64(memStats.HeapAllocMB * 1024 * 1024)),
+			HeapSysMB:       memStats.HeapSysMB,
+			HeapSysStr:      formatBytes(uint64(memStats.HeapSysMB * 1024 * 1024)),
+			HeapInUseMB:     memStats.HeapInUseMB,
+			HeapInUseStr:    formatBytes(uint64(memStats.HeapInUseMB * 1024 * 1024)),
+			HeapIdleMB:      memStats.HeapIdleMB,
+			HeapIdleStr:     formatBytes(uint64(memStats.HeapIdleMB * 1024 * 1024)),
+			HeapReleasedMB:  memStats.HeapReleasedMB,
+			HeapReleasedStr: formatBytes(uint64(memStats.HeapReleasedMB * 1024 * 1024)),
+			StackSysMB:      memStats.StackSysMB,
+			StackSysStr:     formatBytes(uint64(memStats.StackSysMB * 1024 * 1024)),
+			RSSMB:           memStats.RSSMB,
+			RSSStr:          formatBytes(uint64(memStats.RSSMB * 1024 * 1024)),
+			RssAnonMB:       memStats.RssAnonMB,
+			RssAnonStr:      formatBytes(uint64(memStats.RssAnonMB * 1024 * 1024)),
+			RssFileMB:       memStats.RssFileMB,
+			RssFileStr:      formatBytes(uint64(memStats.RssFileMB * 1024 * 1024)),
+			TotalAllocMB:    memStats.TotalAllocMB,
+			TotalAllocStr:   formatBytes(uint64(memStats.TotalAllocMB * 1024 * 1024)),
+			GCSysMB:         memStats.GCSysMB,
+			GCSysStr:        formatBytes(uint64(memStats.GCSysMB * 1024 * 1024)),
+			NumGC:           memStats.NumGC,
+			LastGCTime:      memStats.LastGCTime.Unix(),
+			Goroutines:      memStats.Goroutines,
+			VipsMemMB:       memStats.VipsMemMB,
+			VipsMemStr:      formatBytes(uint64(memStats.VipsMemMB * 1024 * 1024)),
+			VipsMemHighMB:   memStats.VipsMemHighMB,
+			VipsMemHighStr:  formatBytes(uint64(memStats.VipsMemHighMB * 1024 * 1024)),
+			VipsAllocs:      memStats.VipsAllocs,
+			VipsOpenFiles:   memStats.VipsOpenFiles,
 		},
 		Runtime: RuntimeStatus{
 			NumCPU: getNumCPU(),
 		},
+		Worker: WorkerStatus{
+			Submitted:        workerStats.Submitted,
+			Executed:         workerStats.Executed,
+			Failed:           workerStats.Failed,
+			QueueSize:        workerStats.QueueSize,
+			QueueCap:         workerStats.QueueCap,
+			WorkerCount:      workerStats.WorkerCount,
+			InFlightTasks:    len(inFlightTasks),
+			InFlightVariants: inFlightVariants,
+		},
+		Sweeper: worker.GetSweeperStats(),
 		Cache: CacheStatus{
 			Provider: cacheName,
 			Type:     cacheType,
@@ -219,9 +269,13 @@ func (h *Handler) GetVersion(c *gin.Context) {
 }
 
 type MetricsResponse struct {
-	RequestCount      int64   `json:"request_count"`
-	RequestDurationMs int64   `json:"request_duration_ms"`
-	AvgDurationMs     float64 `json:"avg_duration_ms"`
+	RequestCount      int64                    `json:"request_count"`
+	RequestDurationMs int64                    `json:"request_duration_ms"`
+	AvgDurationMs     float64                  `json:"avg_duration_ms"`
+	Upload            middleware.UploadMetrics `json:"upload"`
+	ImageDelivery     middleware.ImageMetrics  `json:"image_delivery"`
+	Worker            WorkerStatus             `json:"worker"`
+	Sweeper           worker.SweeperStats      `json:"sweeper"`
 }
 
 // GetMetrics
@@ -233,5 +287,26 @@ type MetricsResponse struct {
 // @Success      200  {object}  MetricsResponse  "Metrics data"
 // @Router       /system/metrics [get]
 func (h *Handler) GetMetrics(c *gin.Context) {
-	c.JSON(200, middleware.GetMetrics())
+	metrics := middleware.GetMetrics()
+	workerStats := worker.PoolStats{}
+	if pool := worker.GetGlobalPool(); pool != nil {
+		workerStats = pool.GetStats()
+	}
+	inFlightTasks := worker.CurrentInFlightTasks()
+	inFlightVariants := 0
+	for _, task := range inFlightTasks {
+		inFlightVariants += len(task.VariantIDs)
+	}
+	metrics["worker"] = WorkerStatus{
+		Submitted:        workerStats.Submitted,
+		Executed:         workerStats.Executed,
+		Failed:           workerStats.Failed,
+		QueueSize:        workerStats.QueueSize,
+		QueueCap:         workerStats.QueueCap,
+		WorkerCount:      workerStats.WorkerCount,
+		InFlightTasks:    len(inFlightTasks),
+		InFlightVariants: inFlightVariants,
+	}
+	metrics["sweeper"] = worker.GetSweeperStats()
+	common.RespondSuccess(c, metrics)
 }

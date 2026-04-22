@@ -1,9 +1,9 @@
 package albums
 
 import (
-	"context"
 	"math"
 	"net/http"
+	"time"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
@@ -98,14 +98,15 @@ func (h *Handler) ListAlbumsHandler(c *gin.Context) {
 	}
 
 	// 异步写入缓存
-	utils.SafeGo(func() {
-		ctx := context.Background()
+	albumAsync(func() {
+		ctx, cancel := utils.DetachedContext(5 * time.Second)
+		defer cancel()
 		cacheData := CachedAlbumList{
 			Albums: albumDTOs,
 			Total:  total,
 		}
 		if err := h.cacheHelper.CacheAlbumList(ctx, userID, req.Page, req.Limit, cacheData); err != nil {
-			utils.Errorf("Failed to cache album list for user %d: %v", userID, err)
+			albumLog.Errorf("Failed to cache album list for user %d: %v", userID, err)
 		}
 	})
 

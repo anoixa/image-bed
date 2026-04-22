@@ -488,7 +488,9 @@ func TestShouldUseImageDataCache(t *testing.T) {
 
 type cacheFillProvider struct {
 	data       []byte
+	size       int64
 	getCalls   atomic.Int32
+	infoCalls  atomic.Int32
 	storageKey string
 }
 
@@ -518,6 +520,15 @@ func (p *cacheFillProvider) Name() string {
 	return "s3"
 }
 
+func (p *cacheFillProvider) GetObjectInfo(ctx context.Context, storagePath string) (storage.ObjectInfo, error) {
+	p.infoCalls.Add(1)
+	size := p.size
+	if size == 0 {
+		size = int64(len(p.data))
+	}
+	return storage.ObjectInfo{Size: size}, nil
+}
+
 func TestGetOrPopulateImageDataCachePopulatesRemoteCache(t *testing.T) {
 	providerCache, err := cache.NewMemoryCache(cache.MemoryConfig{
 		NumCounters: 1000,
@@ -542,11 +553,13 @@ func TestGetOrPopulateImageDataCachePopulatesRemoteCache(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, []byte("hello-image"), data)
 	assert.Equal(t, int32(1), provider.getCalls.Load())
+	assert.Equal(t, int32(1), provider.infoCalls.Load())
 
 	data, ok = handler.getOrPopulateImageDataCache(context.Background(), provider, "image_data:test", "path/test.jpg")
 	require.True(t, ok)
 	assert.Equal(t, []byte("hello-image"), data)
 	assert.Equal(t, int32(1), provider.getCalls.Load())
+	assert.Equal(t, int32(1), provider.infoCalls.Load())
 }
 
 func TestGetOrPopulateImageDataCacheSkipsLocalProvider(t *testing.T) {
@@ -566,4 +579,54 @@ func TestGetOrPopulateImageDataCacheSkipsLocalProvider(t *testing.T) {
 	data, ok := handler.getOrPopulateImageDataCache(context.Background(), &testPathProvider{}, "image_data:test", "path/test.jpg")
 	assert.False(t, ok)
 	assert.Nil(t, data)
+}
+
+func TestGetOrPopulateImageDataCacheSkipsLargeRemoteObjectWithoutDownloading(t *testing.T) {
+	providerCache, err := cache.NewMemoryCache(cache.MemoryConfig{
+		NumCounters: 1000,
+		MaxCost:     1024 * 1024,
+		BufferItems: 64,
+	})
+	require.NoError(t, err)
+	defer func() { _ = providerCache.Close() }()
+
+	handler := &Handler{
+		cacheHelper: cache.NewHelper(providerCache, cache.HelperConfig{
+			ImageCacheTTL:         time.Minute,
+			ImageDataCacheTTL:     time.Minute,
+			MaxCacheableImageSize: 4,
+		}),
+		imageDataCaching: true,
+	}
+
+	provider := &cacheFillProvider{
+		data: []byte("hello-image"),
+		size: int64(len("hello-image")),
+	}
+
+	data, ok := handler.getOrPopulateImageDataCache(context.Background(), provider, "image_data:large", "path/large.jpg")
+	assert.False(t, ok)
+	assert.Nil(t, data)
+	assert.Equal(t, int32(1), provider.infoCalls.Load())
+	assert.Equal(t, int32(0), provider.getCalls.Load())
+}
+
+func TestServeImageDataUsesPrivateCacheControlForPrivateImages(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	h := &Handler{}
+	img := &models.Image{
+		Identifier: "private-image",
+		FileHash:   "private-hash",
+		MimeType:   "image/jpeg",
+		IsPublic:   false,
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/images/private-image", nil)
+
+	h.serveImageData(c, img, []byte("body"))
+
+	assert.Equal(t, privateImageCacheControl, w.Header().Get("Cache-Control"))
 }

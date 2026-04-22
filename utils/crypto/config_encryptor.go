@@ -9,15 +9,16 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/anoixa/image-bed/utils"
 	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
-	"time"
 )
+
+var configLog = utils.ForModule("Config")
 
 const (
 	// EncPrefixV1 AES-256-GCM
@@ -133,8 +134,8 @@ func (m *MasterKeyManager) Initialize(checkDataExists func() (bool, error)) erro
 func (m *MasterKeyManager) printFingerprint() {
 	hash := sha256.Sum256(m.key.Get())
 	fingerprint := hex.EncodeToString(hash[:8])
-	slog.Info("[Config] Master key source: " + m.source)
-	slog.Info("[Config] Master key fingerprint: " + fingerprint)
+	configLog.Infof("Master key source: %s", m.source)
+	configLog.Infof("Master key fingerprint: %s", fingerprint)
 }
 
 // GetKey 获取主密钥
@@ -243,13 +244,10 @@ func IsEncrypted(s string) bool {
 }
 
 // GenerateRandomKey 生成指定字节长度的随机密钥，返回 base64 编码的字符串
-func GenerateRandomKey(length int) string {
+func GenerateRandomKey(length int) (string, error) {
 	key := make([]byte, length)
 	if _, err := io.ReadFull(rand.Reader, key); err != nil {
-		for i := range key {
-			key[i] = byte(time.Now().UnixNano() % 256)
-			time.Sleep(time.Nanosecond)
-		}
+		return "", fmt.Errorf("failed to generate random key: %w", err)
 	}
-	return base64.StdEncoding.EncodeToString(key)
+	return base64.StdEncoding.EncodeToString(key), nil
 }

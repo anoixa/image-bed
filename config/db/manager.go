@@ -11,17 +11,20 @@ import (
 	"github.com/anoixa/image-bed/database/repo/configs"
 	cryptoservice "github.com/anoixa/image-bed/internal/crypto"
 	"github.com/anoixa/image-bed/storage"
+	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 )
 
+var configManagerLog = utils.ForModule("ConfigManager")
+
 // Manager 配置管理器
 type Manager struct {
-	db       *gorm.DB
 	repo     configs.Repository
 	crypto   *CryptoLayer
 	cache    *CacheLayer
 	eventBus *EventBus
 	dataPath string
+	loads    singleflight.Group
 }
 
 // NewManager 创建配置管理器
@@ -30,7 +33,6 @@ func NewManager(db *gorm.DB, dataPath string) *Manager {
 	cryptoSvc := cryptoservice.NewService(dataPath)
 
 	return &Manager{
-		db:       db,
 		repo:     repo,
 		crypto:   NewCryptoLayer(repo, cryptoSvc),
 		cache:    NewCacheLayer(),
@@ -55,7 +57,7 @@ func (m *Manager) Initialize() error {
 		return fmt.Errorf("failed to ensure local storage config: %w", err)
 	}
 
-	utils.Infof("[ConfigManager] Initialized successfully")
+	configManagerLog.Infof("Initialized successfully")
 	return nil
 }
 
@@ -132,8 +134,12 @@ func (m *Manager) UpdateConfig(ctx context.Context, id uint, req *models.SystemC
 		return nil, err
 	}
 
-	config.Name = req.Name
-	config.Description = req.Description
+	if req.Name != "" {
+		config.Name = req.Name
+	}
+	if req.Description != "" {
+		config.Description = req.Description
+	}
 	if req.IsEnabled != nil {
 		config.IsEnabled = *req.IsEnabled
 	}
@@ -213,7 +219,7 @@ func (m *Manager) ListConfigs(ctx context.Context, category models.ConfigCategor
 	for _, config := range configs {
 		resp, err := m.ToResponseWithMask(ctx, &config, maskSensitive)
 		if err != nil {
-			utils.Errorf("[ConfigManager] Failed to decrypt config ID=%d, Key=%s: %v", config.ID, config.Key, err)
+			configManagerLog.Errorf("Failed to decrypt config ID=%d, Key=%s: %v", config.ID, config.Key, err)
 			continue
 		}
 		responses = append(responses, resp)
@@ -277,12 +283,13 @@ func (m *Manager) Enable(ctx context.Context, id uint) error {
 		return err
 	}
 
+	m.cache.InvalidateAll()
+
 	config, err := m.repo.GetByID(ctx, id)
 	if err != nil {
-		utils.Errorf("[ConfigManager] Enable: failed to fetch config %d after update: %v", id, err)
+		configManagerLog.Errorf("Enable: failed to fetch config %d after update: %v", id, err)
 		return nil
 	}
-	m.cache.Invalidate(config.Category)
 	m.eventBus.Publish(EventConfigUpdated, config)
 
 	return nil
@@ -294,12 +301,13 @@ func (m *Manager) Disable(ctx context.Context, id uint) error {
 		return err
 	}
 
+	m.cache.InvalidateAll()
+
 	config, err := m.repo.GetByID(ctx, id)
 	if err != nil {
-		utils.Errorf("[ConfigManager] Disable: failed to fetch config %d after update: %v", id, err)
+		configManagerLog.Errorf("Disable: failed to fetch config %d after update: %v", id, err)
 		return nil
 	}
-	m.cache.Invalidate(config.Category)
 	m.eventBus.Publish(EventConfigUpdated, config)
 
 	return nil
@@ -322,7 +330,7 @@ func (m *Manager) GetStorageConfigs(ctx context.Context) ([]storage.StorageConfi
 	for _, cfg := range configs {
 		configMap, err := m.crypto.Decrypt(cfg.ConfigJSON)
 		if err != nil {
-			utils.Errorf("[ConfigManager] Failed to decrypt storage config ID=%d: %v", cfg.ID, err)
+			configManagerLog.Errorf("Failed to decrypt storage config ID=%d: %v", cfg.ID, err)
 			continue
 		}
 
@@ -422,7 +430,7 @@ func (m *Manager) ensureDefaultLocalStorageConfig(ctx context.Context) error {
 		return fmt.Errorf("failed to create default local storage config: %w", err)
 	}
 
-	utils.Infof("[ConfigManager] Default local storage config created successfully")
+	configManagerLog.Infof("Default local storage config created successfully")
 	return nil
 }
 
@@ -454,23 +462,39 @@ const globalTransferModeKey = "system:transfer_mode"
 
 // GetGlobalTransferMode 获取全局转发模式
 func (m *Manager) GetGlobalTransferMode(ctx context.Context) storage.TransferMode {
-	config, err := m.repo.GetByKey(ctx, globalTransferModeKey)
+	if cached, ok := m.cache.GetTransferMode(); ok {
+		return cached
+	}
+
+	v, err, _ := m.loads.Do(keyTransferMode, func() (any, error) {
+		config, err := m.repo.GetByKey(ctx, globalTransferModeKey)
+		if err != nil {
+			return storage.TransferModeAuto, err
+		}
+
+		configMap, err := m.crypto.Decrypt(config.ConfigJSON)
+		if err != nil {
+			return storage.TransferModeAuto, err
+		}
+
+		mode, ok := configMap["mode"].(string)
+		if !ok {
+			return storage.TransferModeAuto, nil
+		}
+
+		return storage.TransferMode(mode), nil
+	})
 	if err != nil {
+		configManagerLog.Debugf("Falling back to default transfer mode after cache miss load error: %v", err)
 		return storage.TransferModeAuto // 默认 auto
 	}
 
-	configMap, err := m.crypto.Decrypt(config.ConfigJSON)
-	if err != nil {
-		utils.Errorf("[ConfigManager] Failed to decrypt transfer mode: %v", err)
-		return storage.TransferModeAuto
-	}
-
-	mode, ok := configMap["mode"].(string)
+	mode, ok := v.(storage.TransferMode)
 	if !ok {
 		return storage.TransferModeAuto
 	}
-
-	return storage.TransferMode(mode)
+	m.cache.SetTransferMode(mode)
+	return mode
 }
 
 // SetGlobalTransferMode 设置全局转发模式
@@ -488,17 +512,29 @@ func (m *Manager) SetGlobalTransferMode(ctx context.Context, mode storage.Transf
 	existing, err := m.repo.GetByKey(ctx, globalTransferModeKey)
 	if err != nil {
 		// 创建新配置
-		return m.repo.Create(ctx, &models.SystemConfig{
+		if err := m.repo.Create(ctx, &models.SystemConfig{
 			Category:    models.ConfigCategorySystem,
 			Name:        "Global Transfer Mode",
 			Key:         globalTransferModeKey,
 			ConfigJSON:  encryptedJSON,
 			IsEnabled:   true,
 			Description: "全局图片转发模式: auto(自动), always_proxy(总是代理), always_direct(总是直链)",
-		})
+		}); err != nil {
+			return err
+		}
+		m.cache.SetTransferMode(mode)
+		m.cache.Invalidate(models.ConfigCategorySystem)
+		m.eventBus.Publish(EventConfigCreated, nil)
+		return nil
 	}
 
 	// 更新配置
 	existing.ConfigJSON = encryptedJSON
-	return m.repo.Update(ctx, existing)
+	if err := m.repo.Update(ctx, existing); err != nil {
+		return err
+	}
+	m.cache.SetTransferMode(mode)
+	m.cache.Invalidate(models.ConfigCategorySystem)
+	m.eventBus.Publish(EventConfigUpdated, existing)
+	return nil
 }

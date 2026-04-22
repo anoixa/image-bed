@@ -22,6 +22,9 @@ const (
 	// ImageCachePrefix 图片元数据缓存前缀
 	ImageCachePrefix = "image_meta:"
 
+	// ImageVariantsCachePrefix 图片变体列表缓存前缀
+	ImageVariantsCachePrefix = "image_variants:"
+
 	// UserCachePrefix 用户缓存前缀
 	UserCachePrefix = "user:"
 
@@ -87,6 +90,14 @@ func DefaultHelperConfig() HelperConfig {
 	}
 }
 
+func imageCacheKey(identifier string) string {
+	return ImageCachePrefix + identifier
+}
+
+func imageVariantsCacheKey(imageID uint) string {
+	return ImageVariantsCachePrefix + fmt.Sprintf("%d", imageID)
+}
+
 // Helper 缓存辅助工具结构
 type Helper struct {
 	provider Provider
@@ -111,7 +122,10 @@ func (h *Helper) CacheImage(ctx context.Context, image *models.Image) error {
 		return fmt.Errorf("cache provider not initialized")
 	}
 
-	key := ImageCachePrefix + image.Identifier
+	key := imageCacheKey(image.Identifier)
+	if err := h.DeleteEmptyValue(ctx, key); err != nil {
+		return err
+	}
 	return h.provider.Set(ctx, key, image, addJitter(h.config.ImageCacheTTL))
 }
 
@@ -121,7 +135,10 @@ func (h *Helper) GetCachedImage(ctx context.Context, identifier string, image *m
 		return ErrCacheMiss
 	}
 
-	key := ImageCachePrefix + identifier
+	key := imageCacheKey(identifier)
+	if isEmpty, err := h.IsEmptyValue(ctx, key); err == nil && isEmpty {
+		return ErrCacheMiss
+	}
 	return h.provider.Get(ctx, key, image)
 }
 
@@ -181,8 +198,11 @@ func (h *Helper) DeleteCachedImage(ctx context.Context, identifier string) error
 		return nil
 	}
 
-	key := ImageCachePrefix + identifier
-	return h.provider.Delete(ctx, key)
+	key := imageCacheKey(identifier)
+	if err := h.provider.Delete(ctx, key); err != nil {
+		return err
+	}
+	return h.DeleteEmptyValue(ctx, key)
 }
 
 // DeleteCachedUser 删除缓存的用户
@@ -319,6 +339,33 @@ func (h *Helper) DeleteCachedImageData(ctx context.Context, identifier string) e
 // MaxCacheableImageSize 返回可缓存图片二进制的最大字节数
 func (h *Helper) MaxCacheableImageSize() int64 {
 	return h.config.MaxCacheableImageSize
+}
+
+// CacheImageVariants 缓存图片变体列表。
+func (h *Helper) CacheImageVariants(ctx context.Context, imageID uint, variants []models.ImageVariant) error {
+	if h.provider == nil {
+		return fmt.Errorf("cache provider not initialized")
+	}
+
+	return h.provider.Set(ctx, imageVariantsCacheKey(imageID), variants, addJitter(h.config.ImageCacheTTL))
+}
+
+// GetCachedImageVariants 获取缓存的图片变体列表。
+func (h *Helper) GetCachedImageVariants(ctx context.Context, imageID uint, variants *[]models.ImageVariant) error {
+	if h.provider == nil {
+		return ErrCacheMiss
+	}
+
+	return h.provider.Get(ctx, imageVariantsCacheKey(imageID), variants)
+}
+
+// DeleteCachedImageVariants 删除图片变体列表缓存。
+func (h *Helper) DeleteCachedImageVariants(ctx context.Context, imageID uint) error {
+	if h.provider == nil {
+		return nil
+	}
+
+	return h.provider.Delete(ctx, imageVariantsCacheKey(imageID))
 }
 
 // CacheAlbum 缓存相册信息

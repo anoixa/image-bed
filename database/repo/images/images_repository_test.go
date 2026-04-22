@@ -276,15 +276,15 @@ func TestRepository_GetSoftDeletedImageByHash(t *testing.T) {
 	err = repo.DeleteImage(image)
 	require.NoError(t, err)
 
-	// 普通查询找不到
+	// GetImageByHash should not return soft-deleted records.
 	_, err = repo.GetImageByHash("softhash")
-	assert.Error(t, err)
+	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
 
-	// Unscoped 查询能找到
-	found, err := repo.GetSoftDeletedImageByHash("softhash")
+	// GetSoftDeletedImageByHash also works
+	found2, err := repo.GetSoftDeletedImageByHash("softhash")
 	require.NoError(t, err)
-	assert.Equal(t, "soft-del", found.Identifier)
-	assert.NotNil(t, found.DeletedAt)
+	assert.Equal(t, "soft-del", found2.Identifier)
+	assert.NotNil(t, found2.DeletedAt)
 }
 
 func TestRepository_UpdateImageByIdentifier(t *testing.T) {

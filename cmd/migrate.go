@@ -3,16 +3,18 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/anoixa/image-bed/database/models"
+	"github.com/anoixa/image-bed/utils"
 	"github.com/spf13/cobra"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
+
+var migrateLog = utils.ForModule("Migrate")
 
 // migrateCmd 数据库迁移命令
 var migrateCmd = &cobra.Command{
@@ -37,6 +39,10 @@ Examples:
   # Stop on conflict
   image-bed migrate run --from-sqlite ./data.db --to-postgres "..." --on-conflict=error`,
 	Run: func(cmd *cobra.Command, args []string) {
+		if err := initCommandLogger(); err != nil {
+			exitWithErrorf("Failed to initialize config/logger: %v", err)
+		}
+
 		fromType, _ := cmd.Flags().GetString("from-type")
 		toType, _ := cmd.Flags().GetString("to-type")
 		fromDSN, _ := cmd.Flags().GetString("from-dsn")
@@ -48,7 +54,7 @@ Examples:
 		onConflict, _ := cmd.Flags().GetString("on-conflict")
 
 		if err := runMigration(fromType, toType, fromDSN, toDSN, fromSQLite, toPostgres, skipConfirm, batchSize, onConflict); err != nil {
-			log.Fatalf("Migration failed: %v", err)
+			exitWithErrorf("Migration failed: %v", err)
 		}
 	},
 }
@@ -106,10 +112,10 @@ func runMigration(fromType, toType, fromDSN, toDSN, fromSQLite, toPostgres strin
 		return fmt.Errorf("source and target databases are the same")
 	}
 
-	log.Printf("Migrating from %s to %s", fromType, toType)
-	log.Printf("Source: %s", maskDSN(fromDSN))
-	log.Printf("Target: %s", maskDSN(toDSN))
-	log.Printf("Conflict strategy: %s", onConflict)
+	migrateLog.Infof("Migrating from %s to %s", fromType, toType)
+	migrateLog.Infof("Source: %s", maskDSN(fromDSN))
+	migrateLog.Infof("Target: %s", maskDSN(toDSN))
+	migrateLog.Infof("Conflict strategy: %s", onConflict)
 
 	sourceDB, err := openDatabase(fromType, fromDSN)
 	if err != nil {
@@ -142,7 +148,7 @@ func runMigration(fromType, toType, fromDSN, toDSN, fromSQLite, toPostgres strin
 	stats := &migrateStats{}
 
 	// 自动迁移目标数据库结构
-	log.Println("Migrating database schema...")
+	migrateLog.Infof("Migrating database schema")
 	if err := autoMigrate(targetDB); err != nil {
 		return fmt.Errorf("failed to migrate schema: %w", err)
 	}
@@ -150,7 +156,7 @@ func runMigration(fromType, toType, fromDSN, toDSN, fromSQLite, toPostgres strin
 	// 迁移数据
 	ctx := context.Background()
 
-	log.Println("Migrating users...")
+	migrateLog.Infof("Migrating users")
 	if err := migrateUsers(ctx, sourceDB, targetDB, stats, onConflict); err != nil {
 		stats.errors = append(stats.errors, fmt.Sprintf("users migration failed: %v", err))
 		if onConflict == "error" {
@@ -158,7 +164,7 @@ func runMigration(fromType, toType, fromDSN, toDSN, fromSQLite, toPostgres strin
 		}
 	}
 
-	log.Println("Migrating devices...")
+	migrateLog.Infof("Migrating devices")
 	if err := migrateDevices(ctx, sourceDB, targetDB, stats, onConflict); err != nil {
 		stats.errors = append(stats.errors, fmt.Sprintf("devices migration failed: %v", err))
 		if onConflict == "error" {
@@ -166,7 +172,7 @@ func runMigration(fromType, toType, fromDSN, toDSN, fromSQLite, toPostgres strin
 		}
 	}
 
-	log.Println("Migrating images...")
+	migrateLog.Infof("Migrating images")
 	if err := migrateImages(ctx, sourceDB, targetDB, stats, batchSize, onConflict); err != nil {
 		stats.errors = append(stats.errors, fmt.Sprintf("images migration failed: %v", err))
 		if onConflict == "error" {
@@ -174,7 +180,7 @@ func runMigration(fromType, toType, fromDSN, toDSN, fromSQLite, toPostgres strin
 		}
 	}
 
-	log.Println("Migrating albums...")
+	migrateLog.Infof("Migrating albums")
 	if err := migrateAlbums(ctx, sourceDB, targetDB, stats, batchSize, onConflict); err != nil {
 		stats.errors = append(stats.errors, fmt.Sprintf("albums migration failed: %v", err))
 		if onConflict == "error" {
@@ -182,7 +188,7 @@ func runMigration(fromType, toType, fromDSN, toDSN, fromSQLite, toPostgres strin
 		}
 	}
 
-	log.Println("Migrating album_images relationships...")
+	migrateLog.Infof("Migrating album_images relationships")
 	if err := migrateAlbumImages(ctx, sourceDB, targetDB, stats, onConflict); err != nil {
 		stats.errors = append(stats.errors, fmt.Sprintf("album_images migration failed: %v", err))
 		if onConflict == "error" {
@@ -190,7 +196,7 @@ func runMigration(fromType, toType, fromDSN, toDSN, fromSQLite, toPostgres strin
 		}
 	}
 
-	log.Println("Migrating API tokens...")
+	migrateLog.Infof("Migrating API tokens")
 	if err := migrateTokens(ctx, sourceDB, targetDB, stats, onConflict); err != nil {
 		stats.errors = append(stats.errors, fmt.Sprintf("tokens migration failed: %v", err))
 		if onConflict == "error" {
@@ -205,7 +211,7 @@ func runMigration(fromType, toType, fromDSN, toDSN, fromSQLite, toPostgres strin
 		return fmt.Errorf("migration completed with %d errors", len(stats.errors))
 	}
 
-	log.Println("Migration completed successfully!")
+	migrateLog.Infof("Migration completed successfully")
 	return nil
 }
 
@@ -257,9 +263,8 @@ func autoMigrate(db *gorm.DB) error {
 
 // handleConflict 处理冲突
 // 返回值: shouldCreate (是否创建), shouldOverwrite (是否覆盖), error
-func handleConflict(targetDB *gorm.DB, _ any, where string, args []any, onConflict string) (bool, bool, error) {
-	var existing any
-	result := targetDB.Where(where, args...).First(&existing)
+func handleConflict(targetDB *gorm.DB, model any, where string, args []any, onConflict string) (bool, bool, error) {
+	result := targetDB.Model(model).Where(where, args...).First(model)
 
 	if result.Error == gorm.ErrRecordNotFound {
 		// 不存在，可以创建
@@ -328,7 +333,7 @@ func migrateUsers(ctx context.Context, sourceDB, targetDB *gorm.DB, stats *migra
 		}
 	}
 
-	log.Printf("Migrated %d users (skipped: %d, overwritten: %d)", stats.users, stats.skipped, stats.overwritten)
+	migrateLog.Infof("Migrated %d users (skipped: %d, overwritten: %d)", stats.users, stats.skipped, stats.overwritten)
 	return nil
 }
 
@@ -371,7 +376,7 @@ func migrateDevices(ctx context.Context, sourceDB, targetDB *gorm.DB, stats *mig
 		}
 	}
 
-	log.Printf("Migrated %d devices", stats.devices)
+	migrateLog.Infof("Migrated %d devices", stats.devices)
 	return nil
 }
 
@@ -430,11 +435,11 @@ func migrateImages(ctx context.Context, sourceDB, targetDB *gorm.DB, stats *migr
 
 		offset += batchSize
 		if offset%1000 == 0 {
-			log.Printf("Migrated %d/%d images...", stats.images, totalCount)
+			migrateLog.Infof("Migrated %d/%d images", stats.images, totalCount)
 		}
 	}
 
-	log.Printf("Migrated %d images", stats.images)
+	migrateLog.Infof("Migrated %d images", stats.images)
 	return nil
 }
 
@@ -480,7 +485,7 @@ func migrateAlbums(ctx context.Context, sourceDB, targetDB *gorm.DB, stats *migr
 		}
 	}
 
-	log.Printf("Migrated %d albums", stats.albums)
+	migrateLog.Infof("Migrated %d albums", stats.albums)
 	return nil
 }
 
@@ -499,10 +504,13 @@ func migrateAlbumImages(ctx context.Context, sourceDB, targetDB *gorm.DB, stats 
 
 	for _, rel := range relations {
 		var count int64
-		targetDB.WithContext(ctx).Raw(
+		if err := targetDB.WithContext(ctx).Raw(
 			"SELECT COUNT(*) FROM album_images WHERE album_id = ? AND image_id = ?",
 			rel.AlbumID, rel.ImageID,
-		).Scan(&count)
+		).Scan(&count).Error; err != nil {
+			migrateLog.Warnf("Failed to check existing relation (album=%d, image=%d): %v", rel.AlbumID, rel.ImageID, err)
+			continue
+		}
 
 		if count > 0 {
 			if onConflict == "error" {
@@ -513,11 +521,17 @@ func migrateAlbumImages(ctx context.Context, sourceDB, targetDB *gorm.DB, stats 
 		}
 
 		var albumCount, imageCount int64
-		targetDB.WithContext(ctx).Model(&models.Album{}).Where("id = ?", rel.AlbumID).Count(&albumCount)
-		targetDB.WithContext(ctx).Model(&models.Image{}).Where("id = ?", rel.ImageID).Count(&imageCount)
+		if err := targetDB.WithContext(ctx).Model(&models.Album{}).Where("id = ?", rel.AlbumID).Count(&albumCount).Error; err != nil {
+			migrateLog.Warnf("Failed to check album existence (id=%d): %v", rel.AlbumID, err)
+			continue
+		}
+		if err := targetDB.WithContext(ctx).Model(&models.Image{}).Where("id = ?", rel.ImageID).Count(&imageCount).Error; err != nil {
+			migrateLog.Warnf("Failed to check image existence (id=%d): %v", rel.ImageID, err)
+			continue
+		}
 
 		if albumCount == 0 || imageCount == 0 {
-			log.Printf("Skipping album_image relation: album_id=%d, image_id=%d (referenced record not found)",
+			migrateLog.Warnf("Skipping album_image relation: album_id=%d, image_id=%d (referenced record not found)",
 				rel.AlbumID, rel.ImageID)
 			continue
 		}
@@ -533,7 +547,7 @@ func migrateAlbumImages(ctx context.Context, sourceDB, targetDB *gorm.DB, stats 
 		}
 	}
 
-	log.Printf("Migrated %d album_image relations", len(relations))
+	migrateLog.Infof("Migrated %d album_image relations", len(relations))
 	return nil
 }
 
@@ -576,7 +590,7 @@ func migrateTokens(ctx context.Context, sourceDB, targetDB *gorm.DB, stats *migr
 		}
 	}
 
-	log.Printf("Migrated %d API tokens", stats.tokens)
+	migrateLog.Infof("Migrated %d API tokens", stats.tokens)
 	return nil
 }
 

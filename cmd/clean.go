@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 
@@ -16,6 +15,8 @@ import (
 	"gorm.io/gorm"
 )
 
+var cleanLog = utils.ForModule("Clean")
+
 // cleanCmd 清理数据库孤儿记录和临时文件
 var cleanCmd = &cobra.Command{
 	Use:   "clean",
@@ -26,13 +27,17 @@ This includes:
   - Delete storage files without corresponding database records
   - Clean temp folder files`,
 	Run: func(cmd *cobra.Command, args []string) {
+		if err := initCommandLogger(); err != nil {
+			exitWithErrorf("Failed to initialize config/logger: %v", err)
+		}
+
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		tempOnly, _ := cmd.Flags().GetBool("temp-only")
 		dbOnly, _ := cmd.Flags().GetBool("db-only")
 		storageOnly, _ := cmd.Flags().GetBool("storage-only")
 
 		if err := runClean(dryRun, tempOnly, dbOnly, storageOnly); err != nil {
-			log.Fatalf("Clean failed: %v", err)
+			exitWithErrorf("Clean failed: %v", err)
 		}
 	},
 }
@@ -57,7 +62,6 @@ type cleanStats struct {
 
 // runClean 执行清理
 func runClean(dryRun, tempOnly, dbOnly, storageOnly bool) error {
-	config.InitConfig()
 	cfg := config.Get()
 
 	db, err := initDB()
@@ -97,7 +101,7 @@ func runClean(dryRun, tempOnly, dbOnly, storageOnly bool) error {
 
 // cleanOrphanDBRecords 清理数据库中不存在对应文件的记录
 func cleanOrphanDBRecords(db *gorm.DB, stats *cleanStats, dryRun bool) error {
-	log.Println("Checking for orphan database records...")
+	cleanLog.Infof("Checking for orphan database records")
 
 	var images []models.Image
 	if err := db.Find(&images).Error; err != nil {
@@ -105,13 +109,13 @@ func cleanOrphanDBRecords(db *gorm.DB, stats *cleanStats, dryRun bool) error {
 	}
 
 	total := len(images)
-	log.Printf("Checking %d images against storage (this may be slow for remote storage backends)...", total)
+	cleanLog.Infof("Checking %d images against storage (this may be slow for remote storage backends)", total)
 
 	ctx := context.Background()
 	var orphanIDs []uint
 	for i, img := range images {
 		if i > 0 && i%100 == 0 {
-			log.Printf("Progress: %d/%d checked, %d orphans found so far", i, total, len(orphanIDs))
+			cleanLog.Infof("Progress: %d/%d checked, %d orphans found so far", i, total, len(orphanIDs))
 		}
 
 		exists, err := func() (bool, error) {
@@ -120,12 +124,12 @@ func cleanOrphanDBRecords(db *gorm.DB, stats *cleanStats, dryRun bool) error {
 				if provErr == nil {
 					return provider.Exists(ctx, img.StoragePath)
 				}
-				log.Printf("Warning: storage provider for config ID=%d not found, falling back to default: %v", img.StorageConfigID, provErr)
+				cleanLog.Warnf("Storage provider for config ID=%d not found, falling back to default: %v", img.StorageConfigID, provErr)
 			}
 			return storage.GetDefault().Exists(ctx, img.StoragePath)
 		}()
 		if err != nil {
-			log.Printf("Warning: failed to check existence of %s: %v", utils.SanitizeLogMessage(img.Identifier), err)
+			cleanLog.Warnf("Failed to check existence of %s: %v", utils.SanitizeLogMessage(img.Identifier), err)
 			continue
 		}
 
@@ -133,7 +137,7 @@ func cleanOrphanDBRecords(db *gorm.DB, stats *cleanStats, dryRun bool) error {
 			stats.orphanDBRecords++
 			orphanIDs = append(orphanIDs, img.ID)
 			if dryRun {
-				log.Printf("[DRY-RUN] Would delete orphan DB record: ID=%d, Identifier=%s", img.ID, utils.SanitizeLogMessage(img.Identifier))
+				cleanLog.Infof("[DRY-RUN] Would delete orphan DB record: ID=%d, Identifier=%s", img.ID, utils.SanitizeLogMessage(img.Identifier))
 			}
 		}
 	}
@@ -141,7 +145,7 @@ func cleanOrphanDBRecords(db *gorm.DB, stats *cleanStats, dryRun bool) error {
 	if !dryRun && len(orphanIDs) > 0 {
 		// 删除关联的 album_images 记录
 		if err := db.Exec("DELETE FROM album_images WHERE image_id IN ?", orphanIDs).Error; err != nil {
-			log.Printf("Warning: failed to delete album_image associations: %v", err)
+			cleanLog.Warnf("Failed to delete album_image associations: %v", err)
 		}
 
 		result := db.Delete(&models.Image{}, "id IN ?", orphanIDs)
@@ -149,7 +153,7 @@ func cleanOrphanDBRecords(db *gorm.DB, stats *cleanStats, dryRun bool) error {
 			return fmt.Errorf("failed to delete orphan images: %w", result.Error)
 		}
 		stats.deletedDBRecords = int(result.RowsAffected)
-		log.Printf("Deleted %d orphan database records", result.RowsAffected)
+		cleanLog.Infof("Deleted %d orphan database records", result.RowsAffected)
 	}
 
 	return nil
@@ -157,7 +161,7 @@ func cleanOrphanDBRecords(db *gorm.DB, stats *cleanStats, dryRun bool) error {
 
 // cleanOrphanStorageFiles 清理存储中没有对应数据库记录的文件
 func cleanOrphanStorageFiles(db *gorm.DB, stats *cleanStats, dryRun bool) error {
-	log.Println("Checking for orphan storage files...")
+	cleanLog.Infof("Checking for orphan storage files")
 
 	provider := storage.GetDefault()
 	if provider == nil {
@@ -166,18 +170,24 @@ func cleanOrphanStorageFiles(db *gorm.DB, stats *cleanStats, dryRun bool) error 
 
 	localStorage, ok := provider.(*storage.LocalStorage)
 	if !ok {
-		log.Printf("Storage type '%s' does not support orphan file detection yet", provider.Name())
+		cleanLog.Warnf("Storage type '%s' does not support orphan file detection yet", provider.Name())
 		return nil
 	}
 
-	var identifiers []string
-	if err := db.Model(&models.Image{}).Pluck("identifier", &identifiers).Error; err != nil {
-		return fmt.Errorf("failed to fetch image identifiers: %w", err)
+	var storagePaths []string
+	if err := db.Model(&models.Image{}).Where("deleted_at IS NULL").Pluck("storage_path", &storagePaths).Error; err != nil {
+		return fmt.Errorf("failed to fetch image storage paths: %w", err)
 	}
 
+	var variantPaths []string
+	if err := db.Table("image_variants").Pluck("storage_path", &variantPaths).Error; err != nil {
+		cleanLog.Warnf("Could not fetch variant paths: %v", err)
+	}
+	storagePaths = append(storagePaths, variantPaths...)
+
 	identifierMap := make(map[string]bool)
-	for _, id := range identifiers {
-		identifierMap[id] = true
+	for _, p := range storagePaths {
+		identifierMap[filepath.ToSlash(p)] = true
 	}
 
 	basePath := localStorage.BasePath()
@@ -201,13 +211,13 @@ func cleanOrphanStorageFiles(db *gorm.DB, stats *cleanStats, dryRun bool) error 
 		if !identifierMap[relPath] {
 			stats.orphanStorageFiles++
 			if dryRun {
-				log.Printf("[DRY-RUN] Would delete orphan file: %s", path)
+				cleanLog.Infof("[DRY-RUN] Would delete orphan file: %s", path)
 			} else {
 				if err := os.Remove(path); err != nil {
-					log.Printf("Warning: failed to delete orphan file %s: %v", path, err)
+					cleanLog.Warnf("Failed to delete orphan file %s: %v", path, err)
 				} else {
 					stats.deletedStorageFiles++
-					log.Printf("Deleted orphan file: %s", path)
+					cleanLog.Infof("Deleted orphan file: %s", path)
 				}
 			}
 		}
@@ -224,14 +234,14 @@ func cleanOrphanStorageFiles(db *gorm.DB, stats *cleanStats, dryRun bool) error 
 
 // cleanTempFiles 清理临时文件
 func cleanTempFiles(_ *config.Config, stats *cleanStats, dryRun bool) error {
-	log.Println("Checking for temp files...")
+	cleanLog.Infof("Checking for temp files")
 
 	tempDir := config.TempDir
 
 	entries, err := os.ReadDir(tempDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			log.Println("Temp directory does not exist, skipping...")
+			cleanLog.Infof("Temp directory does not exist, skipping")
 			return nil
 		}
 		return fmt.Errorf("failed to read temp directory: %w", err)
@@ -243,14 +253,14 @@ func cleanTempFiles(_ *config.Config, stats *cleanStats, dryRun bool) error {
 		}
 
 		if dryRun {
-			log.Printf("[DRY-RUN] Would check temp file: %s", entry.Name())
+			cleanLog.Infof("[DRY-RUN] Would check temp file: %s", entry.Name())
 		} else {
 			path := filepath.Join(tempDir, entry.Name())
 			if err := os.Remove(path); err != nil {
-				log.Printf("Warning: failed to delete temp file %s: %v", entry.Name(), err)
+				cleanLog.Warnf("Failed to delete temp file %s: %v", entry.Name(), err)
 			} else {
 				stats.deletedTempFiles++
-				log.Printf("Deleted temp file: %s", entry.Name())
+				cleanLog.Infof("Deleted temp file: %s", entry.Name())
 			}
 		}
 	}
