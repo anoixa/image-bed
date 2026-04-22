@@ -171,3 +171,15 @@ func (r *Repository) UpdateToken(token *models.ApiToken) error {
 func (r *Repository) WithContext(ctx context.Context) *Repository {
 	return &Repository{db: r.db.WithContext(ctx)}
 }
+
+// DisableTokensByUser 将用户的全部 API Token 设为禁用
+func (r *Repository) DisableTokensByUser(userID uint) error {
+	return r.db.Model(&models.ApiToken{}).
+		Where("user_id = ?", userID).
+		Update("is_active", false).Error
+}
+
+// DeleteTokensByUser 删除用户的全部 API Token
+func (r *Repository) DeleteTokensByUser(userID uint) error {
+	return r.db.Where("user_id = ?", userID).Delete(&models.ApiToken{}).Error
+}

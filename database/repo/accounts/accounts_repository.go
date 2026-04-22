@@ -136,3 +136,37 @@ func (r *Repository) UpdatePassword(userID uint, hashedPassword string) error {
 func (r *Repository) WithContext(ctx context.Context) *Repository {
 	return &Repository{db: r.db.WithContext(ctx)}
 }
+
+// CountUsers 统计用户总数
+func (r *Repository) CountUsers() (int64, error) {
+	var count int64
+	err := r.db.Model(&models.User{}).Count(&count).Error
+	return count, err
+}
+
+// CountActiveAdmins 统计启用状态的管理员数量
+func (r *Repository) CountActiveAdmins() (int64, error) {
+	var count int64
+	err := r.db.Model(&models.User{}).
+		Where("role = ? AND status = ?", models.RoleAdmin, models.UserStatusActive).
+		Count(&count).Error
+	return count, err
+}
+
+// UpdateUserRole 更新用户角色
+func (r *Repository) UpdateUserRole(userID uint, role string) error {
+	return r.db.Model(&models.User{}).Where("id = ?", userID).Update("role", role).Error
+}
+
+// UpdateUserStatus 更新用户状态
+func (r *Repository) UpdateUserStatus(userID uint, status string) error {
+	return r.db.Model(&models.User{}).Where("id = ?", userID).Update("status", status).Error
+}
+
+// BackfillEmptyUserStatus 将历史空状态用户回填为指定值
+func (r *Repository) BackfillEmptyUserStatus(status string) (int64, error) {
+	result := r.db.Model(&models.User{}).
+		Where("status = '' OR status IS NULL").
+		Update("status", status)
+	return result.RowsAffected, result.Error
+}
