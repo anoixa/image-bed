@@ -91,6 +91,61 @@
                 }
             }
         },
+        "/api/auth/me": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "返回当前 JWT 登录用户的基础资料",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "获取当前用户信息",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/user.CurrentUserResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "未认证",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "用户不存在",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器内部错误",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/api/auth/refresh": {
             "post": {
                 "description": "Refresh access token using refresh_token and device_id cookies",
@@ -1046,6 +1101,500 @@
                 }
             }
         },
+        "/api/v1/admin/users": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Get paginated user list for administration",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "List users",
+                "parameters": [
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "Page number",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "Page size",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "User list",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/admin.ListUsersResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Create a new user. If password is omitted, backend auto-generates one and returns it once.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Create user",
+                "parameters": [
+                    {
+                        "description": "Create user request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.CreateUserRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "User created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/admin.CreateUserResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "409": {
+                        "description": "Username already exists",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/users/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Delete a user when they do not own images or albums",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Delete user",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "User ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "User deleted",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/admin.MessageResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid user ID, delete self, or last admin protection",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "User not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "409": {
+                        "description": "User still owns data",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/users/{id}/reset-password": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Reset a user's password and revoke all of their active sessions",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Reset user password",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "User ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Password reset",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/admin.ResetPasswordResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid user ID",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "User not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/users/{id}/role": {
+            "put": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Change a user's role between admin and user",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Update user role",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "User ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Role update request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.UpdateRoleRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Role updated",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/admin.MessageResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error or last admin protection",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "User not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/users/{id}/status": {
+            "put": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Change a user's status between active and disabled",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Update user status",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "User ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Status update request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.UpdateStatusRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Status updated",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/admin.MessageResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error, disable self, or last admin protection",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "User not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/albums": {
             "get": {
                 "security": [
@@ -1850,7 +2399,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Upload a single image file with optional storage strategy and visibility settings",
+                "description": "Upload one or multiple image files (max 10 per request)",
                 "consumes": [
                     "multipart/form-data"
                 ],
@@ -1860,12 +2409,12 @@
                 "tags": [
                     "images"
                 ],
-                "summary": "Upload single image",
+                "summary": "Upload images",
                 "parameters": [
                     {
                         "type": "file",
-                        "description": "Image file to upload",
-                        "name": "file",
+                        "description": "Image file(s) to upload (max 10)",
+                        "name": "files",
                         "in": "formData",
                         "required": true
                     },
@@ -1877,7 +2426,7 @@
                     },
                     {
                         "type": "boolean",
-                        "description": "Whether the image is public (default: true)",
+                        "description": "Whether images are public (default: true)",
                         "name": "is_public",
                         "in": "formData"
                     }
@@ -1903,83 +2452,6 @@
                     },
                     "413": {
                         "description": "File too large",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/images/uploads": {
-            "post": {
-                "security": [
-                    {
-                        "ApiKeyAuth": []
-                    }
-                ],
-                "description": "Upload up to 10 images in a single batch request",
-                "consumes": [
-                    "multipart/form-data"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "images"
-                ],
-                "summary": "Upload multiple images",
-                "parameters": [
-                    {
-                        "type": "array",
-                        "items": {
-                            "type": "file"
-                        },
-                        "collectionFormat": "csv",
-                        "description": "Image files to upload (max 10)",
-                        "name": "files",
-                        "in": "formData",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Storage strategy ID",
-                        "name": "strategy_id",
-                        "in": "formData"
-                    },
-                    {
-                        "type": "boolean",
-                        "description": "Whether images are public (default: true)",
-                        "name": "is_public",
-                        "in": "formData"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Batch upload completed",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "400": {
-                        "description": "Invalid form data or too many files",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "413": {
-                        "description": "Total file size too large",
                         "schema": {
                             "$ref": "#/definitions/common.Response"
                         }
@@ -2823,6 +3295,79 @@
         }
     },
     "definitions": {
+        "admin.CreateUserRequest": {
+            "type": "object",
+            "required": [
+                "username"
+            ],
+            "properties": {
+                "password": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "admin.CreateUserResponse": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer"
+                },
+                "password": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "admin.ListUsersResponse": {
+            "type": "object",
+            "properties": {
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "users": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/admin.UserSummary"
+                    }
+                }
+            }
+        },
+        "admin.MessageResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "admin.ResetPasswordResponse": {
+            "type": "object",
+            "properties": {
+                "password": {
+                    "type": "string"
+                }
+            }
+        },
         "admin.SetTransferModeRequest": {
             "type": "object",
             "required": [
@@ -2897,6 +3442,59 @@
                 }
             }
         },
+        "admin.UpdateRoleRequest": {
+            "type": "object",
+            "required": [
+                "role"
+            ],
+            "properties": {
+                "role": {
+                    "type": "string",
+                    "enum": [
+                        "admin",
+                        "user"
+                    ]
+                }
+            }
+        },
+        "admin.UpdateStatusRequest": {
+            "type": "object",
+            "required": [
+                "status"
+            ],
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "active",
+                        "disabled"
+                    ]
+                }
+            }
+        },
+        "admin.UserSummary": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
         "albums.AddImagesToAlbumRequest": {
             "type": "object",
             "required": [
@@ -2905,6 +3503,7 @@
             "properties": {
                 "identifiers": {
                     "type": "array",
+                    "maxItems": 100,
                     "minItems": 1,
                     "items": {
                         "type": "string"
@@ -3047,6 +3646,7 @@
             "properties": {
                 "identifiers": {
                     "type": "array",
+                    "maxItems": 100,
                     "minItems": 1,
                     "items": {
                         "type": "string"
@@ -3122,7 +3722,8 @@
             ],
             "properties": {
                 "password": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 1024
                 },
                 "username": {
                     "type": "string"
@@ -3150,6 +3751,7 @@
             "properties": {
                 "new_password": {
                     "type": "string",
+                    "maxLength": 1024,
                     "minLength": 6
                 },
                 "old_password": {
@@ -3165,6 +3767,7 @@
             "properties": {
                 "identifiers": {
                     "type": "array",
+                    "maxItems": 100,
                     "items": {
                         "type": "string"
                     }
@@ -3295,6 +3898,97 @@
             "properties": {
                 "description": {
                     "type": "string"
+                }
+            }
+        },
+        "middleware.ImageMetrics": {
+            "type": "object",
+            "properties": {
+                "cache_responses": {
+                    "type": "integer"
+                },
+                "data_cache_hits": {
+                    "type": "integer"
+                },
+                "data_cache_misses": {
+                    "type": "integer"
+                },
+                "direct_redirects": {
+                    "type": "integer"
+                },
+                "metadata_cache_hits": {
+                    "type": "integer"
+                },
+                "metadata_cache_misses": {
+                    "type": "integer"
+                },
+                "original_responses": {
+                    "type": "integer"
+                },
+                "reader_responses": {
+                    "type": "integer"
+                },
+                "sendfile_responses": {
+                    "type": "integer"
+                },
+                "stream_responses": {
+                    "type": "integer"
+                },
+                "thumbnail_responses": {
+                    "type": "integer"
+                },
+                "variant_responses": {
+                    "type": "integer"
+                }
+            }
+        },
+        "middleware.UploadMetrics": {
+            "type": "object",
+            "properties": {
+                "avg_db_write_duration_ms": {
+                    "type": "number"
+                },
+                "avg_file_process_duration_ms": {
+                    "type": "number"
+                },
+                "avg_hash_duration_ms": {
+                    "type": "number"
+                },
+                "avg_parse_duration_ms": {
+                    "type": "number"
+                },
+                "avg_storage_write_duration_ms": {
+                    "type": "number"
+                },
+                "db_write_duration_ms": {
+                    "type": "integer"
+                },
+                "file_process_duration_ms": {
+                    "type": "integer"
+                },
+                "files_processed": {
+                    "type": "integer"
+                },
+                "hash_duration_ms": {
+                    "type": "integer"
+                },
+                "parse_duration_ms": {
+                    "type": "integer"
+                },
+                "parse_requests": {
+                    "type": "integer"
+                },
+                "storage_write_duration_ms": {
+                    "type": "integer"
+                },
+                "task_submit_accepted": {
+                    "type": "integer"
+                },
+                "task_submit_attempts": {
+                    "type": "integer"
+                },
+                "task_submit_rejected": {
+                    "type": "integer"
                 }
             }
         },
@@ -3435,10 +4129,22 @@
                 "heap_alloc_str": {
                     "type": "string"
                 },
+                "heap_idle_mb": {
+                    "type": "number"
+                },
+                "heap_idle_str": {
+                    "type": "string"
+                },
                 "heap_in_use_mb": {
                     "type": "number"
                 },
                 "heap_in_use_str": {
+                    "type": "string"
+                },
+                "heap_released_mb": {
+                    "type": "number"
+                },
+                "heap_released_str": {
                     "type": "string"
                 },
                 "heap_sys_mb": {
@@ -3453,6 +4159,24 @@
                 "num_gc": {
                     "type": "integer"
                 },
+                "rss_anon_mb": {
+                    "type": "number"
+                },
+                "rss_anon_str": {
+                    "type": "string"
+                },
+                "rss_file_mb": {
+                    "type": "number"
+                },
+                "rss_file_str": {
+                    "type": "string"
+                },
+                "rss_mb": {
+                    "type": "number"
+                },
+                "rss_str": {
+                    "type": "string"
+                },
                 "stack_sys_mb": {
                     "type": "number"
                 },
@@ -3464,6 +4188,24 @@
                 },
                 "total_alloc_str": {
                     "type": "string"
+                },
+                "vips_allocs": {
+                    "type": "integer"
+                },
+                "vips_mem_high_mb": {
+                    "type": "number"
+                },
+                "vips_mem_high_str": {
+                    "type": "string"
+                },
+                "vips_mem_mb": {
+                    "type": "number"
+                },
+                "vips_mem_str": {
+                    "type": "string"
+                },
+                "vips_open_files": {
+                    "type": "integer"
                 }
             }
         },
@@ -3473,11 +4215,23 @@
                 "avg_duration_ms": {
                     "type": "number"
                 },
+                "image_delivery": {
+                    "$ref": "#/definitions/middleware.ImageMetrics"
+                },
                 "request_count": {
                     "type": "integer"
                 },
                 "request_duration_ms": {
                     "type": "integer"
+                },
+                "sweeper": {
+                    "$ref": "#/definitions/worker.SweeperStats"
+                },
+                "upload": {
+                    "$ref": "#/definitions/middleware.UploadMetrics"
+                },
+                "worker": {
+                    "$ref": "#/definitions/system.WorkerStatus"
                 }
             }
         },
@@ -3513,8 +4267,14 @@
                 "runtime": {
                     "$ref": "#/definitions/system.RuntimeStatus"
                 },
+                "sweeper": {
+                    "$ref": "#/definitions/worker.SweeperStats"
+                },
                 "version": {
                     "type": "string"
+                },
+                "worker": {
+                    "$ref": "#/definitions/system.WorkerStatus"
                 }
             }
         },
@@ -3529,11 +4289,95 @@
                 }
             }
         },
+        "system.WorkerStatus": {
+            "type": "object",
+            "properties": {
+                "executed": {
+                    "type": "integer"
+                },
+                "failed": {
+                    "type": "integer"
+                },
+                "in_flight_tasks": {
+                    "type": "integer"
+                },
+                "in_flight_variants": {
+                    "type": "integer"
+                },
+                "queue_cap": {
+                    "type": "integer"
+                },
+                "queue_size": {
+                    "type": "integer"
+                },
+                "submitted": {
+                    "type": "integer"
+                },
+                "worker_count": {
+                    "type": "integer"
+                }
+            }
+        },
         "user.ChangePasswordResponse": {
             "type": "object",
             "properties": {
                 "message": {
                     "type": "string"
+                }
+            }
+        },
+        "user.CurrentUserResponse": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "worker.SweeperStats": {
+            "type": "object",
+            "properties": {
+                "errors": {
+                    "type": "integer"
+                },
+                "failed_images": {
+                    "type": "integer"
+                },
+                "failed_variants": {
+                    "type": "integer"
+                },
+                "last_error_message": {
+                    "type": "string"
+                },
+                "last_error_unix": {
+                    "type": "integer"
+                },
+                "last_run_unix": {
+                    "type": "integer"
+                },
+                "last_success_unix": {
+                    "type": "integer"
+                },
+                "reset_images": {
+                    "type": "integer"
+                },
+                "reset_variants": {
+                    "type": "integer"
+                },
+                "retriggered": {
+                    "type": "integer"
+                },
+                "runs": {
+                    "type": "integer"
                 }
             }
         }

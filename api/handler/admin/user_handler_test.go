@@ -30,7 +30,8 @@ func setupUserHandlerTest(t *testing.T) (*gin.Engine, *admin.UserService, *authp
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.User{}))
+	require.NoError(t, db.AutoMigrate(&models.User{}, &models.Device{}))
+	db.Exec("DELETE FROM devices")
 	db.Exec("DELETE FROM users")
 
 	repo := accounts.NewRepository(db)

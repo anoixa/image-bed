@@ -35,6 +35,32 @@ type ChangePasswordRequest struct {
 	NewPassword string
 }
 
+// CurrentUser 当前用户信息
+type CurrentUser struct {
+	ID       uint
+	Username string
+	Role     string
+	Status   string
+}
+
+// GetCurrentUser 获取当前登录用户的最小资料
+func (s *Service) GetCurrentUser(userID uint) (*CurrentUser, error) {
+	user, err := s.accountsRepo.GetUserByID(userID)
+	if err != nil {
+		if errors.Is(err, accounts.ErrUserNotFound) {
+			return nil, ErrUserNotFound
+		}
+		return nil, fmt.Errorf("failed to get user: %w", err)
+	}
+
+	return &CurrentUser{
+		ID:       user.ID,
+		Username: user.Username,
+		Role:     user.Role,
+		Status:   user.Status,
+	}, nil
+}
+
 // ChangePassword 修改用户密码
 func (s *Service) ChangePassword(req ChangePasswordRequest) error {
 	// 获取用户信息

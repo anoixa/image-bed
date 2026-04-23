@@ -29,6 +29,55 @@ type ChangePasswordResponse struct {
 	Message string `json:"message"`
 }
 
+type CurrentUserResponse struct {
+	ID       uint   `json:"id"`
+	Username string `json:"username"`
+	Role     string `json:"role"`
+	Status   string `json:"status"`
+}
+
+// GetCurrentUser
+// @Summary      获取当前用户信息
+// @Description  返回当前 JWT 登录用户的基础资料
+// @Tags         auth
+// @Produce      json
+// @Success      200  {object}  common.Response{data=CurrentUserResponse}
+// @Failure      401  {object}  common.Response  "未认证"
+// @Failure      404  {object}  common.Response  "用户不存在"
+// @Failure      500  {object}  common.Response  "服务器内部错误"
+// @Security     ApiKeyAuth
+// @Router       /api/auth/me [get]
+func (h *Handler) GetCurrentUser(c *gin.Context) {
+	if h.service == nil {
+		common.RespondError(c, http.StatusInternalServerError, "User service not initialized")
+		return
+	}
+
+	userID := c.GetUint(middleware.ContextUserIDKey)
+	if userID == 0 {
+		common.RespondError(c, http.StatusUnauthorized, "User not authenticated")
+		return
+	}
+
+	currentUser, err := h.service.GetCurrentUser(userID)
+	if err != nil {
+		switch {
+		case errors.Is(err, user.ErrUserNotFound):
+			common.RespondError(c, http.StatusNotFound, "User not found")
+		default:
+			common.RespondError(c, http.StatusInternalServerError, "Failed to get current user")
+		}
+		return
+	}
+
+	common.RespondSuccess(c, CurrentUserResponse{
+		ID:       currentUser.ID,
+		Username: currentUser.Username,
+		Role:     currentUser.Role,
+		Status:   currentUser.Status,
+	})
+}
+
 // ChangePassword
 // @Summary      修改用户密码
 // @Description  验证旧密码并更新为新密码

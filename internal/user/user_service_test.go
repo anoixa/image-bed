@@ -60,3 +60,24 @@ func TestChangePasswordRevokesAllUserSessions(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, ok)
 }
+
+func TestGetCurrentUser(t *testing.T) {
+	db := setupUserServiceTestDB(t)
+	accountsRepo := accounts.NewRepository(db)
+	service := NewService(accountsRepo, nil)
+
+	user := &models.User{
+		Username: "tester",
+		Password: "hashed",
+		Role:     models.RoleAdmin,
+		Status:   models.UserStatusDisabled,
+	}
+	require.NoError(t, accountsRepo.CreateUser(user))
+
+	currentUser, err := service.GetCurrentUser(user.ID)
+	require.NoError(t, err)
+	assert.Equal(t, user.ID, currentUser.ID)
+	assert.Equal(t, "tester", currentUser.Username)
+	assert.Equal(t, models.RoleAdmin, currentUser.Role)
+	assert.Equal(t, models.UserStatusDisabled, currentUser.Status)
+}

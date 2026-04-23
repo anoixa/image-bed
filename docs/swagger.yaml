@@ -1,4 +1,51 @@
 definitions:
+  admin.CreateUserRequest:
+    properties:
+      password:
+        type: string
+      role:
+        type: string
+      username:
+        type: string
+    required:
+    - username
+    type: object
+  admin.CreateUserResponse:
+    properties:
+      id:
+        type: integer
+      password:
+        type: string
+      role:
+        type: string
+      status:
+        type: string
+      username:
+        type: string
+    type: object
+  admin.ListUsersResponse:
+    properties:
+      page:
+        type: integer
+      page_size:
+        type: integer
+      total:
+        type: integer
+      users:
+        items:
+          $ref: '#/definitions/admin.UserSummary'
+        type: array
+    type: object
+  admin.MessageResponse:
+    properties:
+      message:
+        type: string
+    type: object
+  admin.ResetPasswordResponse:
+    properties:
+      password:
+        type: string
+    type: object
   admin.SetTransferModeRequest:
     properties:
       mode:
@@ -48,11 +95,47 @@ definitions:
       webp_quality:
         type: integer
     type: object
+  admin.UpdateRoleRequest:
+    properties:
+      role:
+        enum:
+        - admin
+        - user
+        type: string
+    required:
+    - role
+    type: object
+  admin.UpdateStatusRequest:
+    properties:
+      status:
+        enum:
+        - active
+        - disabled
+        type: string
+    required:
+    - status
+    type: object
+  admin.UserSummary:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: integer
+      role:
+        type: string
+      status:
+        type: string
+      updated_at:
+        type: string
+      username:
+        type: string
+    type: object
   albums.AddImagesToAlbumRequest:
     properties:
       identifiers:
         items:
           type: string
+        maxItems: 100
         minItems: 1
         type: array
     required:
@@ -146,6 +229,7 @@ definitions:
       identifiers:
         items:
           type: string
+        maxItems: 100
         minItems: 1
         type: array
     required:
@@ -194,6 +278,7 @@ definitions:
   api.userAuthRequestBody:
     properties:
       password:
+        maxLength: 1024
         type: string
       username:
         type: string
@@ -212,6 +297,7 @@ definitions:
   github_com_anoixa_image-bed_api_handler_user.ChangePasswordRequest:
     properties:
       new_password:
+        maxLength: 1024
         minLength: 6
         type: string
       old_password:
@@ -225,6 +311,7 @@ definitions:
       identifiers:
         items:
           type: string
+        maxItems: 100
         type: array
     required:
     - identifiers
@@ -312,6 +399,66 @@ definitions:
     properties:
       description:
         type: string
+    type: object
+  middleware.ImageMetrics:
+    properties:
+      cache_responses:
+        type: integer
+      data_cache_hits:
+        type: integer
+      data_cache_misses:
+        type: integer
+      direct_redirects:
+        type: integer
+      metadata_cache_hits:
+        type: integer
+      metadata_cache_misses:
+        type: integer
+      original_responses:
+        type: integer
+      reader_responses:
+        type: integer
+      sendfile_responses:
+        type: integer
+      stream_responses:
+        type: integer
+      thumbnail_responses:
+        type: integer
+      variant_responses:
+        type: integer
+    type: object
+  middleware.UploadMetrics:
+    properties:
+      avg_db_write_duration_ms:
+        type: number
+      avg_file_process_duration_ms:
+        type: number
+      avg_hash_duration_ms:
+        type: number
+      avg_parse_duration_ms:
+        type: number
+      avg_storage_write_duration_ms:
+        type: number
+      db_write_duration_ms:
+        type: integer
+      file_process_duration_ms:
+        type: integer
+      files_processed:
+        type: integer
+      hash_duration_ms:
+        type: integer
+      parse_duration_ms:
+        type: integer
+      parse_requests:
+        type: integer
+      storage_write_duration_ms:
+        type: integer
+      task_submit_accepted:
+        type: integer
+      task_submit_attempts:
+        type: integer
+      task_submit_rejected:
+        type: integer
     type: object
   models.ConfigCategory:
     enum:
@@ -407,9 +554,17 @@ definitions:
         type: number
       heap_alloc_str:
         type: string
+      heap_idle_mb:
+        type: number
+      heap_idle_str:
+        type: string
       heap_in_use_mb:
         type: number
       heap_in_use_str:
+        type: string
+      heap_released_mb:
+        type: number
+      heap_released_str:
         type: string
       heap_sys_mb:
         type: number
@@ -419,6 +574,18 @@ definitions:
         type: integer
       num_gc:
         type: integer
+      rss_anon_mb:
+        type: number
+      rss_anon_str:
+        type: string
+      rss_file_mb:
+        type: number
+      rss_file_str:
+        type: string
+      rss_mb:
+        type: number
+      rss_str:
+        type: string
       stack_sys_mb:
         type: number
       stack_sys_str:
@@ -427,15 +594,35 @@ definitions:
         type: number
       total_alloc_str:
         type: string
+      vips_allocs:
+        type: integer
+      vips_mem_high_mb:
+        type: number
+      vips_mem_high_str:
+        type: string
+      vips_mem_mb:
+        type: number
+      vips_mem_str:
+        type: string
+      vips_open_files:
+        type: integer
     type: object
   system.MetricsResponse:
     properties:
       avg_duration_ms:
         type: number
+      image_delivery:
+        $ref: '#/definitions/middleware.ImageMetrics'
       request_count:
         type: integer
       request_duration_ms:
         type: integer
+      sweeper:
+        $ref: '#/definitions/worker.SweeperStats'
+      upload:
+        $ref: '#/definitions/middleware.UploadMetrics'
+      worker:
+        $ref: '#/definitions/system.WorkerStatus'
     type: object
   system.RuntimeStatus:
     properties:
@@ -458,8 +645,12 @@ definitions:
         $ref: '#/definitions/system.MemoryStatus'
       runtime:
         $ref: '#/definitions/system.RuntimeStatus'
+      sweeper:
+        $ref: '#/definitions/worker.SweeperStats'
       version:
         type: string
+      worker:
+        $ref: '#/definitions/system.WorkerStatus'
     type: object
   system.VersionResponse:
     properties:
@@ -468,10 +659,65 @@ definitions:
       version:
         type: string
     type: object
+  system.WorkerStatus:
+    properties:
+      executed:
+        type: integer
+      failed:
+        type: integer
+      in_flight_tasks:
+        type: integer
+      in_flight_variants:
+        type: integer
+      queue_cap:
+        type: integer
+      queue_size:
+        type: integer
+      submitted:
+        type: integer
+      worker_count:
+        type: integer
+    type: object
   user.ChangePasswordResponse:
     properties:
       message:
         type: string
+    type: object
+  user.CurrentUserResponse:
+    properties:
+      id:
+        type: integer
+      role:
+        type: string
+      status:
+        type: string
+      username:
+        type: string
+    type: object
+  worker.SweeperStats:
+    properties:
+      errors:
+        type: integer
+      failed_images:
+        type: integer
+      failed_variants:
+        type: integer
+      last_error_message:
+        type: string
+      last_error_unix:
+        type: integer
+      last_run_unix:
+        type: integer
+      last_success_unix:
+        type: integer
+      reset_images:
+        type: integer
+      reset_variants:
+        type: integer
+      retriggered:
+        type: integer
+      runs:
+        type: integer
     type: object
 info:
   contact: {}
@@ -531,6 +777,38 @@ paths:
           schema:
             $ref: '#/definitions/common.Response'
       summary: User logout
+      tags:
+      - auth
+  /api/auth/me:
+    get:
+      description: 返回当前 JWT 登录用户的基础资料
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/user.CurrentUserResponse'
+              type: object
+        "401":
+          description: 未认证
+          schema:
+            $ref: '#/definitions/common.Response'
+        "404":
+          description: 用户不存在
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: 服务器内部错误
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: 获取当前用户信息
       tags:
       - auth
   /api/auth/refresh:
@@ -1142,6 +1420,309 @@ paths:
       summary: Set global transfer mode
       tags:
       - admin
+  /api/v1/admin/users:
+    get:
+      consumes:
+      - application/json
+      description: Get paginated user list for administration
+      parameters:
+      - description: Page number
+        in: query
+        minimum: 1
+        name: page
+        type: integer
+      - description: Page size
+        in: query
+        maximum: 100
+        minimum: 1
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: User list
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/admin.ListUsersResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: List users
+      tags:
+      - admin
+    post:
+      consumes:
+      - application/json
+      description: Create a new user. If password is omitted, backend auto-generates
+        one and returns it once.
+      parameters:
+      - description: Create user request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/admin.CreateUserRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: User created
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/admin.CreateUserResponse'
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/common.Response'
+        "409":
+          description: Username already exists
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Create user
+      tags:
+      - admin
+  /api/v1/admin/users/{id}:
+    delete:
+      consumes:
+      - application/json
+      description: Delete a user when they do not own images or albums
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: User deleted
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/admin.MessageResponse'
+              type: object
+        "400":
+          description: Invalid user ID, delete self, or last admin protection
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/common.Response'
+        "404":
+          description: User not found
+          schema:
+            $ref: '#/definitions/common.Response'
+        "409":
+          description: User still owns data
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Delete user
+      tags:
+      - admin
+  /api/v1/admin/users/{id}/reset-password:
+    post:
+      consumes:
+      - application/json
+      description: Reset a user's password and revoke all of their active sessions
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Password reset
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/admin.ResetPasswordResponse'
+              type: object
+        "400":
+          description: Invalid user ID
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/common.Response'
+        "404":
+          description: User not found
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Reset user password
+      tags:
+      - admin
+  /api/v1/admin/users/{id}/role:
+    put:
+      consumes:
+      - application/json
+      description: Change a user's role between admin and user
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Role update request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/admin.UpdateRoleRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Role updated
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/admin.MessageResponse'
+              type: object
+        "400":
+          description: Validation error or last admin protection
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/common.Response'
+        "404":
+          description: User not found
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Update user role
+      tags:
+      - admin
+  /api/v1/admin/users/{id}/status:
+    put:
+      consumes:
+      - application/json
+      description: Change a user's status between active and disabled
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Status update request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/admin.UpdateStatusRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Status updated
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/admin.MessageResponse'
+              type: object
+        "400":
+          description: Validation error, disable self, or last admin protection
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/common.Response'
+        "404":
+          description: User not found
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Update user status
+      tags:
+      - admin
   /api/v1/albums:
     get:
       consumes:
@@ -1734,19 +2315,18 @@ paths:
     post:
       consumes:
       - multipart/form-data
-      description: Upload a single image file with optional storage strategy and visibility
-        settings
+      description: Upload one or multiple image files (max 10 per request)
       parameters:
-      - description: Image file to upload
+      - description: Image file(s) to upload (max 10)
         in: formData
-        name: file
+        name: files
         required: true
         type: file
       - description: Storage strategy ID
         in: formData
         name: strategy_id
         type: string
-      - description: 'Whether the image is public (default: true)'
+      - description: 'Whether images are public (default: true)'
         in: formData
         name: is_public
         type: boolean
@@ -1775,57 +2355,7 @@ paths:
             $ref: '#/definitions/common.Response'
       security:
       - ApiKeyAuth: []
-      summary: Upload single image
-      tags:
-      - images
-  /api/v1/images/uploads:
-    post:
-      consumes:
-      - multipart/form-data
-      description: Upload up to 10 images in a single batch request
-      parameters:
-      - collectionFormat: csv
-        description: Image files to upload (max 10)
-        in: formData
-        items:
-          type: file
-        name: files
-        required: true
-        type: array
-      - description: Storage strategy ID
-        in: formData
-        name: strategy_id
-        type: string
-      - description: 'Whether images are public (default: true)'
-        in: formData
-        name: is_public
-        type: boolean
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Batch upload completed
-          schema:
-            $ref: '#/definitions/common.Response'
-        "400":
-          description: Invalid form data or too many files
-          schema:
-            $ref: '#/definitions/common.Response'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/common.Response'
-        "413":
-          description: Total file size too large
-          schema:
-            $ref: '#/definitions/common.Response'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/common.Response'
-      security:
-      - ApiKeyAuth: []
-      summary: Upload multiple images
+      summary: Upload images
       tags:
       - images
   /api/v1/token:

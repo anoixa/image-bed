@@ -179,6 +179,11 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies, imageHandle
 			authGroup.POST("/login", loginHandler.LoginHandlerFunc)
 			authGroup.POST("/refresh", loginHandler.RefreshTokenHandlerFunc)
 			authGroup.POST("/logout", loginHandler.LogoutHandlerFunc)
+
+			authMeGroup := authGroup.Group("")
+			authMeGroup.Use(middleware.CombinedAuth(deps.JWTService))
+			authMeGroup.Use(middleware.Authorize(middleware.AllowJWTOnly...))
+			authMeGroup.GET("/me", userHandler.GetCurrentUser)
 		}
 
 		v1 := apiGroup.Group("/v1")

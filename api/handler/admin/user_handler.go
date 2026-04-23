@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
@@ -39,6 +40,52 @@ type UpdateStatusRequest struct {
 	Status string `json:"status" binding:"required,oneof=active disabled"`
 }
 
+type UserSummary struct {
+	ID        uint      `json:"id"`
+	Username  string    `json:"username"`
+	Role      string    `json:"role"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type ListUsersResponse struct {
+	Users    []UserSummary `json:"users"`
+	Total    int64         `json:"total"`
+	Page     int           `json:"page"`
+	PageSize int           `json:"page_size"`
+}
+
+type CreateUserResponse struct {
+	ID       uint   `json:"id"`
+	Username string `json:"username"`
+	Role     string `json:"role"`
+	Status   string `json:"status"`
+	Password string `json:"password,omitempty"`
+}
+
+type MessageResponse struct {
+	Message string `json:"message"`
+}
+
+type ResetPasswordResponse struct {
+	Password string `json:"password"`
+}
+
+// ListUsers
+// @Summary      List users
+// @Description  Get paginated user list for administration
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        page       query     int  false  "Page number"       minimum(1)
+// @Param        page_size  query     int  false  "Page size"         minimum(1) maximum(100)
+// @Success      200        {object}  common.Response{data=ListUsersResponse}  "User list"
+// @Failure      401        {object}  common.Response                              "Unauthorized"
+// @Failure      403        {object}  common.Response                              "Forbidden"
+// @Failure      500        {object}  common.Response                              "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /api/v1/admin/users [get]
 // ListUsers 获取用户列表
 func (h *UserHandler) ListUsers(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -65,6 +112,21 @@ func (h *UserHandler) ListUsers(c *gin.Context) {
 	})
 }
 
+// CreateUser
+// @Summary      Create user
+// @Description  Create a new user. If password is omitted, backend auto-generates one and returns it once.
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        request  body      CreateUserRequest                           true  "Create user request"
+// @Success      200      {object}  common.Response{data=CreateUserResponse}   "User created"
+// @Failure      400      {object}  common.Response                            "Validation error"
+// @Failure      401      {object}  common.Response                            "Unauthorized"
+// @Failure      403      {object}  common.Response                            "Forbidden"
+// @Failure      409      {object}  common.Response                            "Username already exists"
+// @Failure      500      {object}  common.Response                            "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /api/v1/admin/users [post]
 // CreateUser 创建用户
 func (h *UserHandler) CreateUser(c *gin.Context) {
 	var req CreateUserRequest
@@ -101,6 +163,22 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 	common.RespondSuccess(c, data)
 }
 
+// UpdateRole
+// @Summary      Update user role
+// @Description  Change a user's role between admin and user
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        id       path      int                true  "User ID"
+// @Param        request  body      UpdateRoleRequest  true  "Role update request"
+// @Success      200      {object}  common.Response{data=MessageResponse}  "Role updated"
+// @Failure      400      {object}  common.Response                         "Validation error or last admin protection"
+// @Failure      401      {object}  common.Response                         "Unauthorized"
+// @Failure      403      {object}  common.Response                         "Forbidden"
+// @Failure      404      {object}  common.Response                         "User not found"
+// @Failure      500      {object}  common.Response                         "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /api/v1/admin/users/{id}/role [put]
 // UpdateRole 更新用户角色
 func (h *UserHandler) UpdateRole(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
@@ -130,6 +208,22 @@ func (h *UserHandler) UpdateRole(c *gin.Context) {
 	common.RespondSuccess(c, gin.H{"message": "Role updated successfully"})
 }
 
+// UpdateStatus
+// @Summary      Update user status
+// @Description  Change a user's status between active and disabled
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        id       path      int                  true  "User ID"
+// @Param        request  body      UpdateStatusRequest  true  "Status update request"
+// @Success      200      {object}  common.Response{data=MessageResponse}  "Status updated"
+// @Failure      400      {object}  common.Response                         "Validation error, disable self, or last admin protection"
+// @Failure      401      {object}  common.Response                         "Unauthorized"
+// @Failure      403      {object}  common.Response                         "Forbidden"
+// @Failure      404      {object}  common.Response                         "User not found"
+// @Failure      500      {object}  common.Response                         "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /api/v1/admin/users/{id}/status [put]
 // UpdateStatus 更新用户状态
 func (h *UserHandler) UpdateStatus(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
@@ -166,6 +260,21 @@ func (h *UserHandler) UpdateStatus(c *gin.Context) {
 	common.RespondSuccess(c, gin.H{"message": "Status updated successfully"})
 }
 
+// ResetPassword
+// @Summary      Reset user password
+// @Description  Reset a user's password and revoke all of their active sessions
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        id   path      int  true  "User ID"
+// @Success      200  {object}  common.Response{data=ResetPasswordResponse}  "Password reset"
+// @Failure      400  {object}  common.Response                               "Invalid user ID"
+// @Failure      401  {object}  common.Response                               "Unauthorized"
+// @Failure      403  {object}  common.Response                               "Forbidden"
+// @Failure      404  {object}  common.Response                               "User not found"
+// @Failure      500  {object}  common.Response                               "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /api/v1/admin/users/{id}/reset-password [post]
 // ResetPassword 重置用户密码
 func (h *UserHandler) ResetPassword(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
@@ -189,6 +298,22 @@ func (h *UserHandler) ResetPassword(c *gin.Context) {
 	})
 }
 
+// DeleteUser
+// @Summary      Delete user
+// @Description  Delete a user when they do not own images or albums
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        id   path      int  true  "User ID"
+// @Success      200  {object}  common.Response{data=MessageResponse}  "User deleted"
+// @Failure      400  {object}  common.Response                         "Invalid user ID, delete self, or last admin protection"
+// @Failure      401  {object}  common.Response                         "Unauthorized"
+// @Failure      403  {object}  common.Response                         "Forbidden"
+// @Failure      404  {object}  common.Response                         "User not found"
+// @Failure      409  {object}  common.Response                         "User still owns data"
+// @Failure      500  {object}  common.Response                         "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /api/v1/admin/users/{id} [delete]
 // DeleteUser 删除用户
 func (h *UserHandler) DeleteUser(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
