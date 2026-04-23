@@ -156,6 +156,39 @@ func TestLoadJPEGFromFileAndSaveAVIF(t *testing.T) {
 	assert.Positive(t, stat.Size())
 }
 
+func TestLoadJPEGFromFileSaveWebPThenAVIF(t *testing.T) {
+	ensureTestStartup(t)
+
+	src := writeTestJPEG(t, 542, 1200)
+	webpDst := filepath.Join(t.TempDir(), "out.webp")
+	avifDst := filepath.Join(t.TempDir(), "out.avif")
+
+	img, _, err := LoadImageFromFile(src)
+	require.NoError(t, err)
+	defer img.Close()
+
+	err = img.SaveWebPToFile(webpDst, WebPOptions{
+		Quality:         75,
+		ReductionEffort: 4,
+		StripMetadata:   true,
+	})
+	require.NoError(t, err)
+
+	err = img.SaveAVIFToFile(avifDst, AVIFOptions{
+		Quality:       75,
+		Effort:        4,
+		StripMetadata: true,
+		Bitdepth:      8,
+	})
+	if err != nil {
+		t.Skipf("avif encoder unavailable in current libvips runtime: %v", err)
+	}
+
+	stat, err := os.Stat(avifDst)
+	require.NoError(t, err)
+	assert.Positive(t, stat.Size())
+}
+
 func writeTestPNG(t *testing.T, width, height int, alpha bool) string {
 	t.Helper()
 

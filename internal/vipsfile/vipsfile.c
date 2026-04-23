@@ -106,9 +106,12 @@ int ib_save_avif_file(
     VipsImage *copy = NULL;
     int ret = 0;
 
-    /* vips_heifsave may require random access. Materialize the image
-     * in memory to avoid failures when the input is a lazy pipeline. */
-    if (vips_copy(in, &copy, NULL) != 0) {
+    /* vips_heifsave may request random-access reads. vips_copy() only clones
+     * the pipeline graph and keeps sequential upstream sources intact, which
+     * still trips "out of order read" on tall JPEG inputs. Force a real
+     * in-memory image here so AVIF export can read freely. */
+    copy = vips_image_copy_memory(in);
+    if (copy == NULL) {
         return -1;
     }
 

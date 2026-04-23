@@ -255,24 +255,6 @@ func (s *UserService) ListUsers(page, pageSize int) ([]*models.User, int64, erro
 	return s.accountsRepo.GetAllUsers(page, pageSize)
 }
 
-// isLastAdmin 检查指定用户是否是最后一个管理员
-func (s *UserService) isLastAdmin(userID uint) (bool, error) {
-	user, err := s.accountsRepo.GetUserByID(userID)
-	if err != nil {
-		return false, err
-	}
-	if user.Role != models.RoleAdmin {
-		return false, nil
-	}
-
-	adminCount, err := s.accountsRepo.CountActiveAdmins()
-	if err != nil {
-		return false, err
-	}
-
-	return adminCount <= 1, nil
-}
-
 func (s *UserService) withTx(fn func(tx *gorm.DB) error) error {
 	if s.accountsRepo == nil || s.accountsRepo.DB() == nil {
 		return fmt.Errorf("accounts repository not initialized")
