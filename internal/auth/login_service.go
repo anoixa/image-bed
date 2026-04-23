@@ -86,6 +86,10 @@ func (s *LoginService) Login(username, password string) (*LoginResult, error) {
 		return nil, fmt.Errorf("invalid credentials")
 	}
 
+	if !user.IsActive() {
+		return nil, fmt.Errorf("account disabled")
+	}
+
 	// 生成 tokens
 	tokenPair, err := s.jwtService.GenerateTokens(user.Username, user.ID, user.Role)
 	if err != nil {
@@ -124,6 +128,10 @@ func (s *LoginService) RefreshToken(refreshToken, deviceID string) (*RefreshResu
 	}
 	if user == nil {
 		return nil, fmt.Errorf("user not found")
+	}
+
+	if !user.IsActive() {
+		return nil, fmt.Errorf("account disabled")
 	}
 
 	newRefreshToken, newRefreshTokenExpiry, err := s.jwtService.GenerateRefreshToken()
