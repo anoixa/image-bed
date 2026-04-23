@@ -419,7 +419,15 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context, acquiredVariants *[
 	needLoad := t.WebPVariantID > 0 || t.AVIFVariantID > 0
 	if needLoad {
 		var err error
-		originImg, imgInfo, err = vipsfile.LoadImageFromFile(filePath)
+		importOpts := vipsfile.DefaultImportOptions()
+		if t.AVIFVariantID > 0 {
+			// AVIF export can require random-access reads from the decoded source.
+			// Reusing a sequential JPEG loader for WebP and then AVIF still trips
+			// "out of order read" on tall images, so switch the shared decode to
+			// random access whenever AVIF is in play.
+			importOpts.Access = "random"
+		}
+		originImg, imgInfo, err = vipsfile.LoadImageFromFileWithOptions(filePath, importOpts)
 		if err != nil {
 			if t.WebPVariantID > 0 {
 				t.markVariantFailed(acquiredVariants, t.WebPVariantID, fmt.Sprintf("load image: %v", err))
@@ -583,7 +591,9 @@ func (t *ImagePipelineTask) generateWebPWithSettings(ctx context.Context, filePa
 	var width, height int
 	if originImg == nil {
 		var err error
-		originImg, info, err = vipsfile.LoadImageFromFile(filePath)
+		importOpts := vipsfile.DefaultImportOptions()
+		importOpts.Access = "random"
+		originImg, info, err = vipsfile.LoadImageFromFileWithOptions(filePath, importOpts)
 		if err != nil {
 			return nil, fmt.Errorf("load image from file: %w", err)
 		}

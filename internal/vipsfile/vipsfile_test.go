@@ -80,6 +80,7 @@ func TestThumbnailFileToWebP(t *testing.T) {
 
 func TestBuildFileOption(t *testing.T) {
 	assert.Equal(t, "image.png[access=sequential,fail=TRUE]", buildFileOption("image.png", DefaultImportOptions()))
+	assert.Equal(t, "image.png[access=random,fail=TRUE]", buildFileOption("image.png", ImportOptions{Access: "random", FailOnError: true}))
 	assert.Equal(t, "image.png", buildFileOption("image.png", ImportOptions{}))
 }
 
