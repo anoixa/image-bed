@@ -120,6 +120,10 @@ func (h *LoginHandler) LoginHandlerFunc(context *gin.Context) {
 			common.RespondError(context, http.StatusUnauthorized, "Invalid credentials")
 			return
 		}
+		if strings.Contains(err.Error(), "account disabled") {
+			common.RespondError(context, http.StatusForbidden, "Account disabled")
+			return
+		}
 		common.RespondError(context, http.StatusInternalServerError, "Login failed")
 		return
 	}
@@ -165,6 +169,10 @@ func (h *LoginHandler) RefreshTokenHandlerFunc(context *gin.Context) {
 	// 刷新令牌
 	result, err := h.loginService.RefreshToken(refreshToken, deviceID)
 	if err != nil {
+		if strings.Contains(err.Error(), "account disabled") {
+			common.RespondError(context, http.StatusForbidden, "Account disabled")
+			return
+		}
 		common.RespondError(context, http.StatusUnauthorized, "Invalid refresh token")
 		return
 	}

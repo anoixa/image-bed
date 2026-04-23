@@ -154,7 +154,7 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies, imageHandle
 	albumService := svcAlbums.NewService(deps.Repositories.AlbumsRepo)
 	albumHandler := handlerAlbums.NewHandler(albumService, deps.CacheProvider, baseURL)
 	albumImageHandler := handlerAlbums.NewAlbumImageHandler(albumService, deps.Repositories.ImagesRepo, deps.CacheProvider, cfg)
-	keyService := auth.NewKeyService(deps.Repositories.KeysRepo)
+	keyService := auth.NewKeyService(deps.Repositories.KeysRepo, deps.Repositories.AccountsRepo)
 	keyHandler := key.NewHandler(keyService)
 	loginHandler := api.NewLoginHandlerWithService(deps.LoginService, cfg)
 

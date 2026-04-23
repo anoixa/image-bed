@@ -11,6 +11,8 @@ import (
 	"github.com/anoixa/image-bed/database/repo/keys"
 	"github.com/anoixa/image-bed/utils"
 	cryptopackage "github.com/anoixa/image-bed/utils/crypto"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var adminLog = utils.ForModule("AdminUser")
@@ -111,35 +113,15 @@ func (s *UserService) CreateUser(username, password, role string) (*models.User,
 
 // UpdateRole 更新用户角色
 func (s *UserService) UpdateRole(userID uint, role string) error {
-	user, err := s.accountsRepo.GetUserByID(userID)
-	if err != nil {
-		return ErrUserNotFound
-	}
-
-	// Demoting the last active admin to user must be blocked
-	if user.Role == models.RoleAdmin && role != models.RoleAdmin {
-		isLast, err := s.isLastAdmin(userID)
+	return s.withTx(func(tx *gorm.DB) error {
+		user, err := loadUserForUpdate(tx, userID)
 		if err != nil {
 			return err
 		}
-		if isLast {
-			return ErrLastAdmin
-		}
-	}
 
-	return s.accountsRepo.UpdateUserRole(userID, role)
-}
-
-// UpdateStatus 更新用户状态
-func (s *UserService) UpdateStatus(userID uint, status string) error {
-	user, err := s.accountsRepo.GetUserByID(userID)
-	if err != nil {
-		return ErrUserNotFound
-	}
-
-	if status == models.UserStatusDisabled {
-		if user.Role == models.RoleAdmin {
-			isLast, err := s.isLastAdmin(userID)
+		// Demoting the last active admin to user must be blocked.
+		if user.Role == models.RoleAdmin && user.IsActive() && role != models.RoleAdmin {
+			isLast, err := isLastActiveAdminTx(tx, user)
 			if err != nil {
 				return err
 			}
@@ -147,15 +129,44 @@ func (s *UserService) UpdateStatus(userID uint, status string) error {
 				return ErrLastAdmin
 			}
 		}
-		if s.devicesRepo != nil {
-			_ = s.devicesRepo.DeleteDevicesByUser(userID)
-		}
-		if s.keysRepo != nil {
-			_ = s.keysRepo.DisableTokensByUser(userID)
-		}
-	}
 
-	return s.accountsRepo.UpdateUserStatus(userID, status)
+		return tx.Model(&models.User{}).Where("id = ?", userID).Update("role", role).Error
+	})
+}
+
+// UpdateStatus 更新用户状态
+func (s *UserService) UpdateStatus(userID uint, status string) error {
+	return s.withTx(func(tx *gorm.DB) error {
+		user, err := loadUserForUpdate(tx, userID)
+		if err != nil {
+			return err
+		}
+
+		if status == models.UserStatusDisabled && user.Role == models.RoleAdmin && user.IsActive() {
+			isLast, err := isLastActiveAdminTx(tx, user)
+			if err != nil {
+				return err
+			}
+			if isLast {
+				return ErrLastAdmin
+			}
+		}
+
+		if status == models.UserStatusDisabled {
+			if s.devicesRepo != nil {
+				if err := accounts.NewDeviceRepository(tx).DeleteDevicesByUser(userID); err != nil {
+					return err
+				}
+			}
+			if s.keysRepo != nil {
+				if err := keys.NewRepository(tx).DisableTokensByUser(userID); err != nil {
+					return err
+				}
+			}
+		}
+
+		return tx.Model(&models.User{}).Where("id = ?", userID).Update("status", status).Error
+	})
 }
 
 // ResetPassword 重置用户密码，返回新密码
@@ -190,47 +201,53 @@ func (s *UserService) ResetPassword(userID uint) (string, error) {
 
 // DeleteUser 删除用户
 func (s *UserService) DeleteUser(userID uint) error {
-	user, err := s.accountsRepo.GetUserByID(userID)
-	if err != nil {
-		return ErrUserNotFound
-	}
+	return s.withTx(func(tx *gorm.DB) error {
+		user, err := loadUserForUpdate(tx, userID)
+		if err != nil {
+			return err
+		}
 
-	if user.Role == models.RoleAdmin {
-		isLast, err := s.isLastAdmin(userID)
-		if err != nil {
-			return err
+		if user.Role == models.RoleAdmin && user.IsActive() {
+			isLast, err := isLastActiveAdminTx(tx, user)
+			if err != nil {
+				return err
+			}
+			if isLast {
+				return ErrLastAdmin
+			}
 		}
-		if isLast {
-			return ErrLastAdmin
-		}
-	}
 
-	// Refuse deletion if the user still owns content
-	if s.imagesRepo != nil {
-		count, err := s.imagesRepo.CountImagesByUser(userID)
-		if err != nil {
-			return err
+		// Refuse deletion if the user still owns content.
+		if s.imagesRepo != nil {
+			count, err := images.NewRepository(tx).CountImagesByUser(userID)
+			if err != nil {
+				return err
+			}
+			if count > 0 {
+				return ErrUserHasOwnedData
+			}
 		}
-		if count > 0 {
-			return ErrUserHasOwnedData
+		if s.albumsRepo != nil {
+			count, err := albumRepo.NewRepository(tx).CountAlbumsByUser(userID)
+			if err != nil {
+				return err
+			}
+			if count > 0 {
+				return ErrUserHasOwnedData
+			}
 		}
-	}
-	if s.albumsRepo != nil {
-		count, err := s.albumsRepo.CountAlbumsByUser(userID)
-		if err != nil {
-			return err
+		if s.devicesRepo != nil {
+			if err := accounts.NewDeviceRepository(tx).DeleteDevicesByUser(userID); err != nil {
+				return err
+			}
 		}
-		if count > 0 {
-			return ErrUserHasOwnedData
+		if s.keysRepo != nil {
+			if err := keys.NewRepository(tx).DeleteTokensByUser(userID); err != nil {
+				return err
+			}
 		}
-	}
-	if s.devicesRepo != nil {
-		_ = s.devicesRepo.DeleteDevicesByUser(userID)
-	}
-	if s.keysRepo != nil {
-		_ = s.keysRepo.DeleteTokensByUser(userID)
-	}
-	return s.accountsRepo.DeleteUser(userID)
+		return tx.Delete(&models.User{}, userID).Error
+	})
 }
 
 // ListUsers 获取用户列表
@@ -254,4 +271,44 @@ func (s *UserService) isLastAdmin(userID uint) (bool, error) {
 	}
 
 	return adminCount <= 1, nil
+}
+
+func (s *UserService) withTx(fn func(tx *gorm.DB) error) error {
+	if s.accountsRepo == nil || s.accountsRepo.DB() == nil {
+		return fmt.Errorf("accounts repository not initialized")
+	}
+
+	return s.accountsRepo.DB().Transaction(func(tx *gorm.DB) error {
+		return fn(tx)
+	})
+}
+
+func loadUserForUpdate(tx *gorm.DB, userID uint) (*models.User, error) {
+	var user models.User
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ?", userID).
+		First(&user).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrUserNotFound
+		}
+		return nil, err
+	}
+	return &user, nil
+}
+
+func isLastActiveAdminTx(tx *gorm.DB, user *models.User) (bool, error) {
+	if user == nil || user.Role != models.RoleAdmin || !user.IsActive() {
+		return false, nil
+	}
+
+	var admins []models.User
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Select("id").
+		Where("role = ? AND status = ?", models.RoleAdmin, models.UserStatusActive).
+		Find(&admins).Error; err != nil {
+		return false, err
+	}
+
+	return len(admins) <= 1, nil
 }

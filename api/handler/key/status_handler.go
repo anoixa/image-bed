@@ -8,6 +8,7 @@ import (
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
+	"github.com/anoixa/image-bed/internal/auth"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -45,6 +46,10 @@ func (h *Handler) executeTokenAction(c *gin.Context, action TokenAction, actionV
 	}
 
 	if err := action(tokenID, userID); err != nil {
+		if errors.Is(err, auth.ErrUserDisabled) {
+			common.RespondError(c, http.StatusForbidden, "User account is disabled")
+			return
+		}
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			common.RespondError(c, http.StatusNotFound,
 				fmt.Sprintf("API token not found or you do not have permission to %s it.", actionVerb))
