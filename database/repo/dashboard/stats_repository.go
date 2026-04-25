@@ -227,7 +227,7 @@ func (r *Repository) GetDailyStats(ctx context.Context, days int, userID *uint) 
 }
 
 func dailyDateExpr(db *gorm.DB) string {
-	if db != nil && db.Dialector != nil && db.Dialector.Name() == "postgres" {
+	if db != nil && db.Dialector != nil && db.Name() == "postgres" {
 		return "TO_CHAR(created_at, 'YYYY-MM-DD')"
 	}
 	return "DATE(created_at)"
