@@ -178,9 +178,14 @@ type DailyStat struct {
 	Count int64
 }
 
+type dailyStatRow struct {
+	Date  string `gorm:"column:date"`
+	Count int64  `gorm:"column:count"`
+}
+
 // GetDailyStats 获取近 N 天每日统计
 func (r *Repository) GetDailyStats(ctx context.Context, days int, userID *uint) ([]DailyStat, error) {
-	var stats []DailyStat
+	var rows []dailyStatRow
 
 	// 计算起始时间（N天前的零点）
 	now := time.Now()
@@ -189,26 +194,61 @@ func (r *Repository) GetDailyStats(ctx context.Context, days int, userID *uint) 
 
 	statsRepoLog.Debugf("Querying from %s, days=%d", startDate.Format("2006-01-02"), days)
 
+	dateExpr := dailyDateExpr(r.db)
 	query := r.db.WithContext(ctx).Table("images").
-		Select("DATE(created_at) as date, COUNT(*) as count").
+		Select(dateExpr+" as date, COUNT(*) as count").
 		Where("created_at >= ? AND deleted_at IS NULL", startDate)
 	if userID != nil {
 		query = query.Where("user_id = ?", *userID)
 	}
 
 	err := query.
-		Group("DATE(created_at)").
+		Group(dateExpr).
 		Order("date").
-		Scan(&stats).Error
+		Scan(&rows).Error
 
 	if err != nil {
 		statsRepoLog.Debugf("Error: %v", err)
-	} else {
-		statsRepoLog.Debugf("Found %d records", len(stats))
-		for _, s := range stats {
-			statsRepoLog.Debugf("Result: date=%s, count=%d", s.Date.Format("2006-01-02"), s.Count)
-		}
+		return nil, err
 	}
 
-	return stats, err
+	stats, err := parseDailyStatRows(rows, now.Location())
+	if err != nil {
+		statsRepoLog.Debugf("Error parsing daily stats: %v", err)
+		return nil, err
+	}
+
+	statsRepoLog.Debugf("Found %d records", len(stats))
+	for _, s := range stats {
+		statsRepoLog.Debugf("Result: date=%s, count=%d", s.Date.Format("2006-01-02"), s.Count)
+	}
+
+	return stats, nil
+}
+
+func dailyDateExpr(db *gorm.DB) string {
+	if db != nil && db.Dialector != nil && db.Dialector.Name() == "postgres" {
+		return "TO_CHAR(created_at, 'YYYY-MM-DD')"
+	}
+	return "DATE(created_at)"
+}
+
+func parseDailyStatRows(rows []dailyStatRow, loc *time.Location) ([]DailyStat, error) {
+	if loc == nil {
+		loc = time.Local
+	}
+
+	stats := make([]DailyStat, 0, len(rows))
+	for _, row := range rows {
+		date, err := time.ParseInLocation("2006-01-02", row.Date, loc)
+		if err != nil {
+			return nil, fmt.Errorf("parse daily stat date %q: %w", row.Date, err)
+		}
+		stats = append(stats, DailyStat{
+			Date:  date,
+			Count: row.Count,
+		})
+	}
+
+	return stats, nil
 }
