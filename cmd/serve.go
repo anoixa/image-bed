@@ -170,17 +170,18 @@ func RunServer() {
 		exitWithErrorf("Failed to create temp directory: %v", err)
 	}
 
+	vipsCache := cfg.GetVipsCacheConfig()
 	if err := vipsfile.Startup(&vips.Config{
-		MaxCacheMem:      1,
-		MaxCacheSize:     1,
-		MaxCacheFiles:    0,
+		MaxCacheMem:      vipsCache.MaxCacheMem,
+		MaxCacheSize:     vipsCache.MaxCacheSize,
+		MaxCacheFiles:    vipsCache.MaxCacheFiles,
 		ConcurrencyLevel: 2,
 	}); err != nil {
 		exitWithErrorf("Failed to initialize govips: %v", err)
 	}
 	defer vipsfile.Shutdown()
 
-	vipsLog.Infof("Govips initialized with cache limited to 1 byte / 1 entry")
+	vipsLog.Infof("Govips initialized with %s", vipsCache.String())
 	if config.IsDevelopment() {
 		utils.LogMemoryStats("VIPS_INIT")
 	}

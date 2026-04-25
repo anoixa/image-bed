@@ -74,6 +74,11 @@ type Config struct {
 	WorkerCount         int `mapstructure:"worker_count"`
 	WorkerMemoryLimitMB int `mapstructure:"worker_memory_limit_mb"`
 
+	// VIPS 配置
+	VipsCacheMemMB int `mapstructure:"vips_cache_mem_mb"`
+	VipsCacheSize  int `mapstructure:"vips_cache_size"`
+	VipsCacheFiles int `mapstructure:"vips_cache_files"`
+
 	// 前端配置
 	ServeFrontend bool `mapstructure:"serve_frontend"` // 是否提供前端静态文件服务，默认 true
 }
@@ -177,6 +182,11 @@ func setDefaults() {
 	// Worker 配置默认值
 	viper.SetDefault("worker_count", 0)             // 0 表示使用默认值
 	viper.SetDefault("worker_memory_limit_mb", 512) // Worker 内存限制，默认 512MB
+
+	// VIPS 配置默认值。0 表示启动时按 cgroup / 系统内存自动感知。
+	viper.SetDefault("vips_cache_mem_mb", 0)
+	viper.SetDefault("vips_cache_size", 0)
+	viper.SetDefault("vips_cache_files", 0)
 
 	// 前端配置默认值
 	viper.SetDefault("serve_frontend", true) // 默认启用前端服务
