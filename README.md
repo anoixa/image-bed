@@ -5,7 +5,7 @@
 ## 功能特性
 
 - **多存储后端支持**：本地磁盘、MinIO/S3、WebDAV
-- **图片处理**：基于 libvips 的 WebP 自动转换、缩略图生成
+- **图片处理**：基于 libvips 的 WebP/AVIF 自动转换、缩略图生成
 - **相册管理**：创建相册、批量管理图片
 - **多种认证方式**：JWT 认证、API Token、Refresh Token
 - **缓存支持**：内存缓存 (Ristretto) 或 Redis
@@ -120,6 +120,10 @@ SERVE_FRONTEND=true
 ## API 文档
 
 启动服务后访问：`http://localhost:8080/swagger/index.html`
+
+## 图片格式自动协商
+
+图片访问接口会根据客户端 `Accept` 头自动选择原图、WebP 或 AVIF 变体，客户端无需拼接不同格式的图片地址。
 
 ## 配置
 
