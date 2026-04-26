@@ -17,7 +17,7 @@ func TestAutoVipsCacheMemMB(t *testing.T) {
 	}{
 		{name: "unknown uses default", limitBytes: 0, want: defaultVipsCacheMemMB},
 		{name: "small memory clamps to minimum", limitBytes: 512 * bytesPerMB, want: minAutoVipsCacheMemMB},
-		{name: "two gigabytes", limitBytes: 2 * 1024 * bytesPerMB, want: 163},
+		{name: "two gigabytes", limitBytes: 2 * 1024 * bytesPerMB, want: 40},
 		{name: "large memory clamps to maximum", limitBytes: 16 * 1024 * bytesPerMB, want: maxAutoVipsCacheMemMB},
 	}
 
@@ -37,8 +37,8 @@ func TestGetVipsCacheConfigAuto(t *testing.T) {
 
 	cfg := (&Config{}).GetVipsCacheConfig()
 
-	assert.Equal(t, 327, cfg.MaxCacheMemMB)
-	assert.Equal(t, 327*bytesPerMB, cfg.MaxCacheMem)
+	assert.Equal(t, 81, cfg.MaxCacheMemMB)
+	assert.Equal(t, 81*bytesPerMB, cfg.MaxCacheMem)
 	assert.Equal(t, defaultVipsCacheSize, cfg.MaxCacheSize)
 	assert.Equal(t, defaultVipsCacheFiles, cfg.MaxCacheFiles)
 	assert.Equal(t, "cgroup", cfg.MemorySource)

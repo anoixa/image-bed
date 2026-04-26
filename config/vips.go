@@ -10,12 +10,12 @@ import (
 const (
 	bytesPerMB = 1024 * 1024
 
-	defaultVipsCacheMemMB   = 256
-	minAutoVipsCacheMemMB   = 64
-	maxAutoVipsCacheMemMB   = 512
-	autoVipsCachePercent    = 8
-	defaultVipsCacheSize    = 200
-	defaultVipsCacheFiles   = 50
+	defaultVipsCacheMemMB   = 64
+	minAutoVipsCacheMemMB   = 32
+	maxAutoVipsCacheMemMB   = 128
+	autoVipsCachePercent    = 2
+	defaultVipsCacheSize    = 50
+	defaultVipsCacheFiles   = 0
 	maxSaneMemoryLimitBytes = int64(1 << 60)
 )
 
