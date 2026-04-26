@@ -67,7 +67,15 @@ func (m *stubConfigManager) GetGlobalTransferMode(ctx context.Context) storage.T
 	return storage.TransferModeAuto
 }
 
+func (m *stubConfigManager) GetAutoDirectThresholdBytes(ctx context.Context) int64 {
+	return 1 << 20
+}
+
 func (m *stubConfigManager) SetGlobalTransferMode(ctx context.Context, mode storage.TransferMode) error {
+	return nil
+}
+
+func (m *stubConfigManager) SetGlobalTransferSettings(ctx context.Context, mode storage.TransferMode, autoDirectThresholdBytes int64) error {
 	return nil
 }
 

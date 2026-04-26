@@ -133,6 +133,24 @@ func TestCacheLayerTransferMode(t *testing.T) {
 	assert.Empty(t, mode)
 }
 
+func TestCacheLayerAutoDirectThresholdBytes(t *testing.T) {
+	cache := NewCacheLayer()
+
+	threshold, ok := cache.GetAutoDirectThresholdBytes()
+	assert.False(t, ok)
+	assert.Empty(t, threshold)
+
+	cache.SetAutoDirectThresholdBytes(2 << 20)
+	threshold, ok = cache.GetAutoDirectThresholdBytes()
+	assert.True(t, ok)
+	assert.Equal(t, int64(2<<20), threshold)
+
+	cache.Invalidate(models.ConfigCategorySystem)
+	threshold, ok = cache.GetAutoDirectThresholdBytes()
+	assert.False(t, ok)
+	assert.Empty(t, threshold)
+}
+
 func TestGetStringFromMap(t *testing.T) {
 	tests := []struct {
 		name         string

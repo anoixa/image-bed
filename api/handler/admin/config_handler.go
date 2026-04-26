@@ -29,7 +29,9 @@ type configManager interface {
 	Enable(ctx context.Context, id uint) error
 	Disable(ctx context.Context, id uint) error
 	GetGlobalTransferMode(ctx context.Context) storage.TransferMode
+	GetAutoDirectThresholdBytes(ctx context.Context) int64
 	SetGlobalTransferMode(ctx context.Context, mode storage.TransferMode) error
+	SetGlobalTransferSettings(ctx context.Context, mode storage.TransferMode, autoDirectThresholdBytes int64) error
 	ClearCache()
 }
 
@@ -877,16 +879,18 @@ func getBool(m map[string]any, key string) bool {
 // @Tags         admin
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  common.Response{data=map[string]string}  "Transfer mode"
+// @Success      200  {object}  common.Response{data=map[string]any}  "Transfer mode"
 // @Failure      401  {object}  common.Response  "Unauthorized"
 // @Security     ApiKeyAuth
 // @Router       /api/v1/admin/transfer-mode [get]
 func (h *ConfigHandler) GetGlobalTransferMode(c *gin.Context) {
 	ctx := c.Request.Context()
 	mode := h.manager.GetGlobalTransferMode(ctx)
+	thresholdBytes := h.manager.GetAutoDirectThresholdBytes(ctx)
 
-	common.RespondSuccess(c, map[string]string{
-		"mode": string(mode),
+	common.RespondSuccess(c, map[string]any{
+		"mode":                        string(mode),
+		"auto_direct_threshold_bytes": thresholdBytes,
 	})
 }
 
@@ -921,7 +925,16 @@ func (h *ConfigHandler) SetGlobalTransferMode(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	if err := h.manager.SetGlobalTransferMode(ctx, mode); err != nil {
+	thresholdBytes := h.manager.GetAutoDirectThresholdBytes(ctx)
+	if req.AutoDirectThresholdBytes != nil {
+		if *req.AutoDirectThresholdBytes <= 0 {
+			common.RespondError(c, http.StatusBadRequest, "auto_direct_threshold_bytes must be greater than 0")
+			return
+		}
+		thresholdBytes = *req.AutoDirectThresholdBytes
+	}
+
+	if err := h.manager.SetGlobalTransferSettings(ctx, mode, thresholdBytes); err != nil {
 		adminConfigLog.Errorf("Failed to set transfer mode: %v", err)
 		common.RespondError(c, http.StatusInternalServerError, "Failed to set transfer mode")
 		return
@@ -930,12 +943,14 @@ func (h *ConfigHandler) SetGlobalTransferMode(c *gin.Context) {
 	// 清除配置缓存，使新配置立即生效
 	h.manager.ClearCache()
 
-	common.RespondSuccess(c, map[string]string{
-		"mode": req.Mode,
+	common.RespondSuccess(c, map[string]any{
+		"mode":                        req.Mode,
+		"auto_direct_threshold_bytes": thresholdBytes,
 	})
 }
 
 // SetTransferModeRequest 设置转发模式请求
 type SetTransferModeRequest struct {
-	Mode string `json:"mode" binding:"required"` // auto, always_proxy, always_direct
+	Mode                     string `json:"mode" binding:"required"`               // auto, always_proxy, always_direct
+	AutoDirectThresholdBytes *int64 `json:"auto_direct_threshold_bytes,omitempty"` // auto 模式下启用直链的最小文件大小
 }

@@ -1039,9 +1039,7 @@ const docTemplate = `{
                                     "properties": {
                                         "data": {
                                             "type": "object",
-                                            "additionalProperties": {
-                                                "type": "string"
-                                            }
+                                            "additionalProperties": true
                                         }
                                     }
                                 }
@@ -3385,6 +3383,10 @@ const docTemplate = `{
                 "mode"
             ],
             "properties": {
+                "auto_direct_threshold_bytes": {
+                    "description": "auto 模式下启用直链的最小文件大小",
+                    "type": "integer"
+                },
                 "mode": {
                     "description": "auto, always_proxy, always_direct",
                     "type": "string"

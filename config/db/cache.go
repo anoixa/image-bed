@@ -32,6 +32,7 @@ func (c *CacheLayer) Invalidate(category models.ConfigCategory) {
 		delete(c.localCache, keyImageProcessing)
 	case models.ConfigCategorySystem:
 		delete(c.localCache, keyTransferMode)
+		delete(c.localCache, keyAutoDirectThresholdBytes)
 	}
 }
 
@@ -84,10 +85,26 @@ func (c *CacheLayer) SetTransferMode(mode storage.TransferMode) {
 	c.localCache[keyTransferMode] = mode
 }
 
+func (c *CacheLayer) GetAutoDirectThresholdBytes() (int64, bool) {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+	if val, ok := c.localCache[keyAutoDirectThresholdBytes]; ok {
+		return val.(int64), true
+	}
+	return 0, false
+}
+
+func (c *CacheLayer) SetAutoDirectThresholdBytes(thresholdBytes int64) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.localCache[keyAutoDirectThresholdBytes] = thresholdBytes
+}
+
 const (
-	keyStorage         = "config:storage"
-	keyImageProcessing = "config:image_processing"
-	keyTransferMode    = "config:transfer_mode"
+	keyStorage                  = "config:storage"
+	keyImageProcessing          = "config:image_processing"
+	keyTransferMode             = "config:transfer_mode"
+	keyAutoDirectThresholdBytes = "config:auto_direct_threshold_bytes"
 )
 
 // InvalidateAll 清除所有缓存

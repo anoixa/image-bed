@@ -14,6 +14,7 @@ import (
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/config"
+	configSvc "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/internal/image"
 	"github.com/anoixa/image-bed/storage"
@@ -211,11 +212,11 @@ func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 
 // getDirectURLIfPossible 尝试获取直链 URL
 func (h *Handler) getDirectURLIfPossible(c *gin.Context, img *models.Image) string {
-	return h.getVariantDirectURLIfPossible(c, img, img.StoragePath)
+	return h.getVariantDirectURLIfPossible(c, img, img.StoragePath, img.FileSize)
 }
 
 // getVariantDirectURLIfPossible 尝试获取变体的直链 URL
-func (h *Handler) getVariantDirectURLIfPossible(c *gin.Context, img *models.Image, storagePath string) string {
+func (h *Handler) getVariantDirectURLIfPossible(c *gin.Context, img *models.Image, storagePath string, fileSize int64) string {
 	// 私有图片不支持直链
 	if !img.IsPublic {
 		return ""
@@ -238,12 +239,31 @@ func (h *Handler) getVariantDirectURLIfPossible(c *gin.Context, img *models.Imag
 		return ""
 	}
 
+	if globalMode == storage.TransferModeAuto || globalMode == "" {
+		if shouldProxyByAutoSize(globalMode, fileSize, h.getAutoDirectThresholdBytes(c.Request.Context())) {
+			return ""
+		}
+	}
+
 	// 获取直链 URL
 	return directProvider.GetDirectURL(storagePath)
 }
 
+func shouldProxyByAutoSize(globalMode storage.TransferMode, fileSize, thresholdBytes int64) bool {
+	if globalMode != storage.TransferModeAuto && globalMode != "" {
+		return false
+	}
+	if thresholdBytes <= 0 {
+		thresholdBytes = configSvc.DefaultAutoDirectThresholdBytes
+	}
+	return fileSize <= thresholdBytes
+}
+
 // getGlobalTransferMode 获取全局转发模式
 func (h *Handler) getGlobalTransferMode(ctx context.Context) storage.TransferMode {
+	if h.configManager == nil {
+		return storage.TransferModeAuto
+	}
 	v, err, _ := fileDownloadGroup.Do("global_transfer_mode", func() (any, error) {
 		mode := h.configManager.GetGlobalTransferMode(ctx)
 		return mode, nil
@@ -252,6 +272,24 @@ func (h *Handler) getGlobalTransferMode(ctx context.Context) storage.TransferMod
 		return storage.TransferModeAuto
 	}
 	return v.(storage.TransferMode)
+}
+
+func (h *Handler) getAutoDirectThresholdBytes(ctx context.Context) int64 {
+	if h.configManager == nil {
+		return configSvc.DefaultAutoDirectThresholdBytes
+	}
+	v, err, _ := fileDownloadGroup.Do("auto_direct_threshold_bytes", func() (any, error) {
+		thresholdBytes := h.configManager.GetAutoDirectThresholdBytes(ctx)
+		return thresholdBytes, nil
+	})
+	if err != nil {
+		return configSvc.DefaultAutoDirectThresholdBytes
+	}
+	thresholdBytes, ok := v.(int64)
+	if !ok || thresholdBytes <= 0 {
+		return configSvc.DefaultAutoDirectThresholdBytes
+	}
+	return thresholdBytes
 }
 
 func (h *Handler) serveByStreaming(c *gin.Context, img *models.Image, streamer storage.StreamProvider) bool {
@@ -331,7 +369,7 @@ func (h *Handler) serveImageData(c *gin.Context, img *models.Image, data []byte)
 // serveVariantImage 提供格式变体（支持直链模式）
 func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *image.VariantResult) {
 	// 检查变体是否可以使用直链（使用变体自己的路径）
-	if directURL := h.getVariantDirectURLIfPossible(c, img, result.StoragePath); directURL != "" {
+	if directURL := h.getVariantDirectURLIfPossible(c, img, result.StoragePath, result.Variant.FileSize); directURL != "" {
 		middleware.RecordImageDirectRedirect()
 		c.Header("Cache-Control", config.CacheControlPublic)
 		c.Redirect(http.StatusFound, directURL)

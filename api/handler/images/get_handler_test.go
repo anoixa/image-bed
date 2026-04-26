@@ -226,6 +226,68 @@ func TestShouldProxy_WithDifferentModes(t *testing.T) {
 	}
 }
 
+func TestShouldProxyByAutoSize(t *testing.T) {
+	const threshold = int64(1 << 20)
+
+	tests := []struct {
+		name      string
+		mode      storage.TransferMode
+		fileSize  int64
+		threshold int64
+		wantProxy bool
+	}{
+		{
+			name:      "auto_small_file_proxies",
+			mode:      storage.TransferModeAuto,
+			fileSize:  threshold - 1,
+			threshold: threshold,
+			wantProxy: true,
+		},
+		{
+			name:      "auto_equal_threshold_proxies",
+			mode:      storage.TransferModeAuto,
+			fileSize:  threshold,
+			threshold: threshold,
+			wantProxy: true,
+		},
+		{
+			name:      "auto_large_file_directs",
+			mode:      storage.TransferModeAuto,
+			fileSize:  threshold + 1,
+			threshold: threshold,
+			wantProxy: false,
+		},
+		{
+			name:      "always_direct_ignores_size_threshold",
+			mode:      storage.TransferModeAlwaysDirect,
+			fileSize:  1,
+			threshold: threshold,
+			wantProxy: false,
+		},
+		{
+			name:      "unknown_auto_size_proxies",
+			mode:      storage.TransferModeAuto,
+			fileSize:  0,
+			threshold: threshold,
+			wantProxy: true,
+		},
+		{
+			name:      "empty_mode_uses_auto_policy",
+			mode:      "",
+			fileSize:  threshold - 1,
+			threshold: threshold,
+			wantProxy: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shouldProxyByAutoSize(tt.mode, tt.fileSize, tt.threshold)
+			assert.Equal(t, tt.wantProxy, got)
+		})
+	}
+}
+
 // simulateShouldProxy 模拟 ShouldProxy 的逻辑
 func simulateShouldProxy(imageIsPublic bool, globalMode storage.TransferMode, enableDirect, isPublicBucket, forceProxy bool) bool {
 	// ForceProxy 强制走代理
