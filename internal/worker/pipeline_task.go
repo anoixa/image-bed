@@ -362,6 +362,17 @@ func (t *ImagePipelineTask) Execute() {
 		return
 	}
 	defer semaphore.Release()
+
+	if err := waitForMemory(); err != nil {
+		pipelineLog.Warnf("Processing delayed too long by memory backpressure for image %s: %v", t.ImageIdentifier, err)
+		for _, id := range append([]uint(nil), acquiredVariants...) {
+			t.markVariantFailed(&acquiredVariants, id, fmt.Sprintf("memory backpressure: %v", err))
+		}
+		_ = t.ImageRepo.UpdateVariantStatus(t.ImageID, models.ImageVariantStatusFailed)
+		t.deleteCacheOnTerminalState("failed")
+		return
+	}
+
 	stopHeartbeat := t.startProcessingHeartbeat(ctx, acquiredVariants)
 	defer stopHeartbeat()
 

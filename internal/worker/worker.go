@@ -269,10 +269,6 @@ func (p *Pool) Submit(task func()) (ok bool) {
 	if p.isClosed.Load() {
 		return false
 	}
-	if err := p.waitForMemory(); err != nil {
-		workerPoolLog.Warnf("Rejecting task submission after backpressure wait: %v", err)
-		return false
-	}
 	defer func() {
 		if r := recover(); r != nil {
 			ok = false
@@ -292,7 +288,7 @@ var backpressureTimeout = 30 * time.Second
 var backpressureInterval = 2 * time.Second
 
 // waitForMemory waits up to 30s for memory to drop below the worker limit.
-func (p *Pool) waitForMemory() error {
+func waitForMemory() error {
 	// Fast path: memory is fine.
 	if err := workerMemoryCheck(); err == nil {
 		return nil

@@ -71,9 +71,16 @@ func (m *mockVariantRepo) ResetStaleProcessing(olderThan time.Duration) (int64, 
 
 type mockImageRepo struct {
 	touchedImageIDs []uint
+	statusUpdates   []imageStatusUpdate
+}
+
+type imageStatusUpdate struct {
+	imageID uint
+	status  models.ImageVariantStatus
 }
 
 func (m *mockImageRepo) UpdateVariantStatus(imageID uint, status models.ImageVariantStatus) error {
+	m.statusUpdates = append(m.statusUpdates, imageStatusUpdate{imageID: imageID, status: status})
 	return nil
 }
 
@@ -219,4 +226,46 @@ func TestFinalizeOnlyRollsBackStillTrackedVariants(t *testing.T) {
 		newStatus: models.VariantStatusPending,
 		errMsg:    "",
 	}, repo.statusCASCalls[0])
+}
+
+func TestExecuteMemoryBackpressureFailureAfterSemaphore(t *testing.T) {
+	previousCheck := workerMemoryCheck
+	workerMemoryCheck = func() error {
+		return errors.New("memory limit exceeded")
+	}
+	defer func() {
+		workerMemoryCheck = previousCheck
+	}()
+
+	origTimeout := backpressureTimeout
+	origInterval := backpressureInterval
+	backpressureTimeout = 20 * time.Millisecond
+	backpressureInterval = 5 * time.Millisecond
+	defer func() {
+		backpressureTimeout = origTimeout
+		backpressureInterval = origInterval
+	}()
+
+	variantRepo := &mockVariantRepo{}
+	imageRepo := &mockImageRepo{}
+	task := &ImagePipelineTask{
+		ImageID:         42,
+		ImageIdentifier: "memory-test",
+		WebPVariantID:   7,
+		VariantRepo:     variantRepo,
+		ImageRepo:       imageRepo,
+	}
+
+	task.Execute()
+
+	require.Contains(t, variantRepo.updateFailedCalls, uint(7))
+	require.Contains(t, imageRepo.statusUpdates, imageStatusUpdate{
+		imageID: 42,
+		status:  models.ImageVariantStatusFailed,
+	})
+	assert.Empty(t, CurrentInFlightTasks())
+
+	for _, call := range variantRepo.statusCASCalls {
+		assert.False(t, call.expected == models.VariantStatusProcessing && call.newStatus == models.VariantStatusPending, "memory failure must not roll variant back to pending")
+	}
 }

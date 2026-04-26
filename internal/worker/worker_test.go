@@ -3,7 +3,6 @@ package worker
 import (
 	"context"
 	"errors"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSubmitRejectsTaskAfterBackpressureTimeout(t *testing.T) {
+func TestSubmitDoesNotWaitForMemoryBackpressure(t *testing.T) {
 	callCount := 0
 	previousCheck := workerMemoryCheck
 	workerMemoryCheck = func() error {
@@ -36,14 +35,18 @@ func TestSubmitRejectsTaskAfterBackpressureTimeout(t *testing.T) {
 	pool := NewPool(1, 1)
 	defer pool.Stop()
 
-	var executed atomic.Bool
+	executed := make(chan struct{})
 	ok := pool.Submit(func() {
-		executed.Store(true)
+		close(executed)
 	})
 
-	assert.False(t, ok)
-	assert.False(t, executed.Load())
-	assert.True(t, callCount > 1, "should have retried memory check")
+	require.True(t, ok)
+	select {
+	case <-executed:
+	case <-time.After(time.Second):
+		t.Fatal("submitted task was not executed")
+	}
+	assert.Equal(t, 0, callCount, "Submit must not run memory checks")
 }
 
 func TestEffectiveWorkerMemoryMB(t *testing.T) {
