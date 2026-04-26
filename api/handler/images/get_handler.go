@@ -34,6 +34,29 @@ func cacheControlForImage(isPublic bool) string {
 	return privateImageCacheControl
 }
 
+func varyOnAccept(c *gin.Context) {
+	appendVaryHeader(c, "Accept")
+}
+
+func appendVaryHeader(c *gin.Context, value string) {
+	header := c.Writer.Header()
+	existingValues := header.Values("Vary")
+	for _, existing := range existingValues {
+		for _, part := range strings.Split(existing, ",") {
+			part = strings.TrimSpace(part)
+			if part == "*" || strings.EqualFold(part, value) {
+				return
+			}
+		}
+	}
+
+	if len(existingValues) == 0 {
+		header.Set("Vary", value)
+		return
+	}
+	header.Set("Vary", strings.Join(existingValues, ", ")+", "+value)
+}
+
 // checkETag 检查客户端缓存是否有效
 // 如果客户端发送的 If-None-Match 与当前 ETag 匹配，返回 true 并写入 304 响应
 func checkETag(c *gin.Context, etag string) bool {
@@ -120,6 +143,8 @@ func (h *Handler) GetImage(c *gin.Context) {
 		common.RespondError(c, http.StatusBadRequest, "Invalid image identifier")
 		return
 	}
+
+	varyOnAccept(c)
 
 	userID := c.GetUint(middleware.ContextUserIDKey)
 	acceptHeader := c.GetHeader("Accept")

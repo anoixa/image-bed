@@ -58,6 +58,37 @@ func TestCheckETagSupportsWeakAndMultiValueIfNoneMatch(t *testing.T) {
 	}
 }
 
+func TestAppendVaryHeaderAddsAcceptWithoutClobberingExistingValues(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	c.Header("Vary", "Accept-Encoding")
+	appendVaryHeader(c, "Accept")
+	appendVaryHeader(c, "accept")
+
+	assert.Equal(t, "Accept-Encoding, Accept", w.Header().Get("Vary"))
+}
+
+func TestCheckETagPreservesVaryAcceptOnNotModified(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	req := httptest.NewRequest(http.MethodGet, "/images/test", nil)
+	req.Header.Set("If-None-Match", `"abc"`)
+	c.Request = req
+
+	varyOnAccept(c)
+	matched := checkETag(c, "abc")
+
+	require.True(t, matched)
+	assert.Equal(t, http.StatusNotModified, c.Writer.Status())
+	assert.Equal(t, "Accept", w.Header().Get("Vary"))
+	assert.Equal(t, `"abc"`, w.Header().Get("ETag"))
+}
+
 // MockConfigManager 用于测试的配置管理器 mock
 type MockConfigManager struct {
 	mock.Mock
