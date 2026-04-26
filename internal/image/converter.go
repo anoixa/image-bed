@@ -1,6 +1,7 @@
 package image
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/anoixa/image-bed/internal/worker"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
+	"gorm.io/gorm"
 )
 
 var converterLog = utils.ForModule("Converter")
@@ -81,65 +83,44 @@ func (c *Converter) triggerConversion(image *models.Image, ignoreRetryWindow boo
 		return
 	}
 
+	if !shouldTriggerVariantConversion(image, settings) {
+		return
+	}
+
 	thumbnailEnabled := settings.ThumbnailEnabled && len(settings.ThumbnailSizes) > 0
 	webpEnabled := settings.IsFormatEnabled(models.FormatWebP)
 	avifEnabled := settings.IsFormatEnabled(models.FormatAVIF) && vipsfile.SupportsAVIFEncoding()
-	if !shouldStartVariantPipeline(thumbnailEnabled, webpEnabled, avifEnabled) {
-		return
-	}
-
-	// 跳过 GIF 格式
-	if image.MimeType == "image/gif" {
-		return
-	}
-
-	// 跳过小于阈值的图片
-	if settings.SkipSmallerThan > 0 {
-		minSize := int64(settings.SkipSmallerThan * 1024)
-		if image.FileSize < minSize {
-			return
-		}
-	}
 
 	// 创建缩略图变体记录（如果启用）
 	var thumbVariant *models.ImageVariant
 	if thumbnailEnabled {
 		size := settings.ThumbnailSizes[0]
 		thumbFormat := models.FormatThumbnailSize(size.Width)
-		thumbVariant, err = variantRepo.UpsertPending(image.ID, thumbFormat)
+		thumbVariant, err = prepareVariantForSubmit(variantRepo, image.ID, thumbFormat, now, ignoreRetryWindow)
 		if err != nil {
 			converterLog.Warnf("Failed to prepare thumbnail variant for image %s: %v", image.Identifier, err)
 			return
-		}
-		if !variantReadyForSubmit(thumbVariant, now, ignoreRetryWindow) {
-			thumbVariant = nil
 		}
 	}
 
 	// 创建 WebP 变体记录（如果启用）
 	var webpVariant *models.ImageVariant
 	if webpEnabled {
-		webpVariant, err = variantRepo.UpsertPending(image.ID, models.FormatWebP)
+		webpVariant, err = prepareVariantForSubmit(variantRepo, image.ID, models.FormatWebP, now, ignoreRetryWindow)
 		if err != nil {
 			converterLog.Warnf("Failed to prepare WebP variant for image %s: %v", image.Identifier, err)
 			c.failPendingVariantsOnSubmitFailure(imageRepo, variantRepo, image, fmt.Sprintf("submit aborted during webp preparation: %v", err), thumbVariant)
 			return
 		}
-		if !variantReadyForSubmit(webpVariant, now, ignoreRetryWindow) {
-			webpVariant = nil
-		}
 	}
 
 	var avifVariant *models.ImageVariant
 	if avifEnabled {
-		avifVariant, err = variantRepo.UpsertPending(image.ID, models.FormatAVIF)
+		avifVariant, err = prepareVariantForSubmit(variantRepo, image.ID, models.FormatAVIF, now, ignoreRetryWindow)
 		if err != nil {
 			converterLog.Warnf("Failed to prepare AVIF variant for image %s: %v", image.Identifier, err)
 			c.failPendingVariantsOnSubmitFailure(imageRepo, variantRepo, image, fmt.Sprintf("submit aborted during avif preparation: %v", err), thumbVariant, webpVariant)
 			return
-		}
-		if !variantReadyForSubmit(avifVariant, now, ignoreRetryWindow) {
-			avifVariant = nil
 		}
 	}
 
@@ -250,6 +231,28 @@ func shouldTriggerVariantConversion(image *models.Image, settings *config.ImageP
 	}
 
 	return true
+}
+
+func prepareVariantForSubmit(variantRepo *images.VariantRepository, imageID uint, format string, now time.Time, ignoreRetryWindow bool) (*models.ImageVariant, error) {
+	variant, err := variantRepo.GetVariantByImageIDAndFormat(imageID, format)
+	if err == nil {
+		if variantReadyForSubmit(variant, now, ignoreRetryWindow) {
+			return variant, nil
+		}
+		return nil, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	variant, err = variantRepo.UpsertPending(imageID, format)
+	if err != nil {
+		return nil, err
+	}
+	if !variantReadyForSubmit(variant, now, ignoreRetryWindow) {
+		return nil, nil
+	}
+	return variant, nil
 }
 
 func shouldStartVariantPipeline(thumbnailEnabled, webpEnabled, avifEnabled bool) bool {
