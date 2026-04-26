@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -190,10 +189,10 @@ func (s *WriteService) processAndSaveImage(ctx context.Context, userID uint, sou
 	// Ensure temp file is cleaned up on any exit path (panic, error, dedup)
 	// unless ownership is explicitly transferred to the converter.
 	tempFileConsumed := false
-	if source.TempFilePath != "" {
+	if source.tempFilePath != "" {
 		defer func() {
 			if !tempFileConsumed {
-				cleanupOwnedTempFile(source.TempFilePath)
+				source.CleanupRequestTempFile()
 			}
 		}()
 	}
@@ -350,12 +349,17 @@ func (s *WriteService) processAndSaveImage(ctx context.Context, userID uint, sou
 
 	submitBackgroundTask(func() { s.warmCache(newImg) })
 	if s.converter != nil {
-		if source.TempFilePath != "" {
-			accepted := submitBackgroundTask(func() { s.converter.TriggerConversionWithLocalFile(newImg, source.TempFilePath) })
+		if source.tempFilePath != "" {
+			localFile := source.TransferTempFile()
+			accepted := false
+			if localFile != nil {
+				accepted = submitBackgroundTask(func() { s.converter.TriggerConversionWithLocalFile(newImg, localFile) })
+			}
 			middleware.RecordUploadTaskSubmit(accepted)
 			if accepted {
 				tempFileConsumed = true
-				source.ReleaseRequestCleanup()
+			} else if localFile != nil {
+				localFile.CleanupTransferred()
 			}
 		} else {
 			middleware.RecordUploadTaskSubmit(submitBackgroundTask(func() { s.converter.TriggerConversion(newImg) }))
@@ -442,12 +446,4 @@ func (s *WriteService) warmCache(image *models.Image) {
 	ctx, cancel := utils.DetachedContext(5 * time.Second)
 	defer cancel()
 	_ = s.cacheHelper.CacheImage(ctx, image)
-}
-
-// cleanupOwnedTempFile removes a temp file whose ownership was transferred
-// from the upload handler. Safe to call with empty string (no-op).
-func cleanupOwnedTempFile(path string) {
-	if path != "" {
-		_ = os.Remove(path)
-	}
 }

@@ -182,7 +182,7 @@ type ImagePipelineTask struct {
 	VariantRepo     VariantRepository
 	ImageRepo       ImageRepository
 	CacheHelper     *cache.Helper
-	LocalFilePath   string // optional: pre-staged local file, skip download from remote
+	LocalFile       *LocalFileLease // optional: pre-staged local file, skip download from remote
 	inFlightLease   *inFlightTaskLease
 }
 
@@ -197,15 +197,15 @@ var processingHeartbeatInterval = 4 * time.Minute
 func (t *ImagePipelineTask) getProcessingFilePath(ctx context.Context) (path string, cleanup func(), err error) {
 	noop := func() {}
 
-	// Pre-staged local file (e.g. from upload handler) — skip download entirely.
-	if t.LocalFilePath != "" {
-		if _, statErr := os.Stat(t.LocalFilePath); statErr == nil {
-			path := t.LocalFilePath
-			t.LocalFilePath = "" // mark consumed — Execute's defer won't double-clean
-			return path, func() { _ = os.Remove(path) }, nil
+	if t.LocalFile != nil {
+		path, cleanup, ok := t.LocalFile.Consume()
+		t.LocalFile = nil
+		if ok {
+			if _, statErr := os.Stat(path); statErr == nil {
+				return path, cleanup, nil
+			}
+			cleanup()
 		}
-		// File already gone (e.g. cleaned up by timeout); fall through to normal path.
-		t.LocalFilePath = ""
 	}
 
 	// Local storage: return path directly, no temp file needed
@@ -272,14 +272,10 @@ func (t *ImagePipelineTask) Execute() {
 	var acquiredVariants []uint
 	defer t.finalize(&acquiredVariants)
 
-	// Ensure LocalFilePath is cleaned up on any exit path (panic, early
-	// return before runPipeline, or failed acquisition). On the happy path,
-	// getProcessingFilePath consumes it by setting the field to "" and
-	// returns its own cleanup func — this defer sees the empty string and skips.
-	if t.LocalFilePath != "" {
+	if t.LocalFile != nil {
 		defer func() {
-			if t.LocalFilePath != "" {
-				_ = os.Remove(t.LocalFilePath)
+			if t.LocalFile != nil {
+				t.LocalFile.CleanupTransferred()
 			}
 		}()
 	}

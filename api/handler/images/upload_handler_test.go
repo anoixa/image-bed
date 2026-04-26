@@ -5,7 +5,6 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
-	"os"
 	"testing"
 
 	dbconfig "github.com/anoixa/image-bed/config/db"
@@ -103,15 +102,15 @@ func TestParseMultipartUploadRequestCleanupRemovesUnreleasedTempFile(t *testing.
 	require.NoError(t, err)
 	require.Len(t, parsed.files, 1)
 
-	path := parsed.files[0].TempFilePath
-	_, err = os.Stat(path)
+	file, err := parsed.files[0].Open()
 	require.NoError(t, err)
+	require.NoError(t, file.Close())
 
 	cleanup()
 
-	_, err = os.Stat(path)
+	_, err = parsed.files[0].Open()
 	require.Error(t, err)
-	assert.True(t, os.IsNotExist(err))
+	assert.Contains(t, err.Error(), "open temp upload")
 }
 
 func TestParseMultipartUploadRequestCleanupSkipsReleasedTempFile(t *testing.T) {
@@ -135,11 +134,16 @@ func TestParseMultipartUploadRequestCleanupSkipsReleasedTempFile(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, parsed.files, 1)
 
-	path := parsed.files[0].TempFilePath
-	parsed.files[0].ReleaseRequestCleanup()
+	lease := parsed.files[0].TransferTempFile()
+	require.NotNil(t, lease)
 	cleanup()
 
-	_, err = os.Stat(path)
+	file, err := parsed.files[0].Open()
 	require.NoError(t, err)
-	require.NoError(t, os.Remove(path))
+	require.NoError(t, file.Close())
+
+	lease.CleanupTransferred()
+	_, err = parsed.files[0].Open()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "open temp upload")
 }

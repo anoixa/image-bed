@@ -119,6 +119,24 @@ func TestGetProcessingFilePath_LocalStorage(t *testing.T) {
 	assert.NoError(t, statErr, "local storage file must not be deleted by cleanup")
 }
 
+func TestGetProcessingFilePathConsumesLocalFileLease(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "upload.tmp")
+	require.NoError(t, os.WriteFile(path, []byte("body"), 0o600))
+	lease := NewLocalFileLease(path)
+	require.True(t, lease.Transfer())
+
+	task := &ImagePipelineTask{LocalFile: lease}
+	gotPath, cleanup, err := task.getProcessingFilePath(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, path, gotPath)
+	assert.Nil(t, task.LocalFile)
+
+	cleanup()
+	_, statErr := os.Stat(path)
+	require.Error(t, statErr)
+	assert.True(t, os.IsNotExist(statErr))
+}
+
 func TestSaveVariantResults_UpdateCompletedError_CallsUpdateFailed(t *testing.T) {
 	repo := &mockVariantRepo{updateCompletedErr: errors.New("db down")}
 	task := &ImagePipelineTask{

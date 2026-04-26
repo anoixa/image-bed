@@ -280,7 +280,6 @@ func parseMultipartUploadRequest(r *http.Request, settings *dbconfig.ImageProces
 
 		// Transfer temp file ownership to WriteService/Pipeline — do NOT add to tempFiles.
 		src := imagesvc.NewTempUploadSource(fileName, tempFile.path, size)
-		src.TempFilePath = tempFile.path
 		src.PrecomputedHash = fileHash
 		request.files = append(request.files, src)
 	}
