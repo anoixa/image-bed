@@ -211,6 +211,12 @@ func TestShouldKeepAVIF(t *testing.T) {
 	assert.True(t, shouldKeepAVIF(90, 0))
 }
 
+func TestAVIFFailureShouldFailPipeline(t *testing.T) {
+	assert.False(t, avifFailureShouldFailPipeline(0, nil))
+	assert.True(t, avifFailureShouldFailPipeline(8, nil), "AVIF failure is fatal when no WebP was produced")
+	assert.False(t, avifFailureShouldFailPipeline(8, &pipelineResult{StoragePath: "webp/out.webp"}))
+}
+
 func TestFinalizeOnlyRollsBackStillTrackedVariants(t *testing.T) {
 	repo := &mockVariantRepo{}
 	task := &ImagePipelineTask{VariantRepo: repo}

@@ -467,7 +467,7 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context, acquiredVariants *[
 		}
 	}
 
-	avifRequired := t.AVIFVariantID > 0 && t.WebPVariantID == 0
+	avifRequired := avifFailureShouldFailPipeline(t.AVIFVariantID, webpResult)
 	if t.AVIFVariantID > 0 {
 		result, err := t.generateAVIF(ctx, filePath, webpResult, originImg, imgInfo)
 		switch {
@@ -509,6 +509,10 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context, acquiredVariants *[
 	))
 	t.deleteCacheOnTerminalState("success")
 	return nil
+}
+
+func avifFailureShouldFailPipeline(avifVariantID uint, webpResult *pipelineResult) bool {
+	return avifVariantID > 0 && webpResult == nil
 }
 
 // generateThumbnail 生成缩略图
