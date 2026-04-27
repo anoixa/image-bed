@@ -55,6 +55,10 @@ func TestGetStatusReturnsRuntimeAndVipsMemoryFields(t *testing.T) {
 	assert.GreaterOrEqual(t, payload.Worker.InFlightVariants, 0)
 	assert.GreaterOrEqual(t, payload.Sweeper.Runs, uint64(0))
 	assert.GreaterOrEqual(t, payload.Sweeper.Errors, uint64(0))
+	assert.Equal(t, "./data", payload.DataDir.Path)
+	assert.Equal(t, "./data/temp", payload.TempDir.Path)
+	assert.GreaterOrEqual(t, payload.TempDir.FileCount, 0)
+	assert.GreaterOrEqual(t, payload.TempDir.TotalSize, int64(0))
 }
 
 func TestGetMetricsIncludesWorkerAndSweeperSections(t *testing.T) {

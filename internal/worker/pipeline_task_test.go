@@ -119,6 +119,10 @@ func TestGetProcessingFilePath_LocalStorage(t *testing.T) {
 	assert.NoError(t, statErr, "local storage file must not be deleted by cleanup")
 }
 
+func TestProcessingHeartbeatIntervalStaysBelowStaleThresholdThird(t *testing.T) {
+	assert.Less(t, processingHeartbeatInterval, staleThreshold/3)
+}
+
 func TestGetProcessingFilePathConsumesLocalFileLease(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "upload.tmp")
 	require.NoError(t, os.WriteFile(path, []byte("body"), 0o600))

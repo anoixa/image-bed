@@ -24,6 +24,7 @@ import (
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/database/repo/keys"
 	imageSvc "github.com/anoixa/image-bed/internal/image"
+	"github.com/anoixa/image-bed/internal/tempfiles"
 	"github.com/anoixa/image-bed/internal/vipsfile"
 	"github.com/anoixa/image-bed/internal/worker"
 	"github.com/anoixa/image-bed/storage"
@@ -201,6 +202,7 @@ func RunServer() {
 	sweeperCtx, sweeperCancel := context.WithCancel(context.Background())
 	defer sweeperCancel()
 	worker.StartVariantSweeper(sweeperCtx, deps.VariantRepo, deps.Repositories.ImagesRepo, deps.Converter.TriggerConversionFromSweeper)
+	tempfiles.StartSweeper(sweeperCtx)
 
 	jwtService, err := api.NewJWTServiceFromConfig(cfg, deps.ConfigManager, deps.Repositories.KeysRepo)
 	if err != nil {

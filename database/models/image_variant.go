@@ -11,7 +11,7 @@ import (
 type ImageVariant struct {
 	ID           uint           `gorm:"primarykey" json:"id"`
 	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
+	UpdatedAt    time.Time      `gorm:"index:idx_variant_status_updated_at,priority:2" json:"updated_at"`
 	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
 	ImageID      uint           `gorm:"not null;index:idx_image_format,unique" json:"image_id"`
 	Format       string         `gorm:"not null;size:20;index:idx_image_format,unique" json:"format"` // webp, avif, thumbnail_150
@@ -21,7 +21,7 @@ type ImageVariant struct {
 	FileHash     string         `gorm:"not null;size:64;index:idx_variant_filehash" json:"file_hash"` // 文件哈希，用于 ETag 和缓存验证
 	Width        int            `json:"width"`
 	Height       int            `json:"height"`
-	Status       string         `gorm:"default:pending;size:20;index" json:"status"`
+	Status       string         `gorm:"default:pending;size:20;index;index:idx_variant_status_updated_at,priority:1" json:"status"`
 	ErrorMessage string         `gorm:"type:text" json:"error_message,omitempty"`
 	RetryCount   int            `gorm:"default:0" json:"retry_count"`
 	NextRetryAt  *time.Time     `gorm:"index" json:"next_retry_at,omitempty"`

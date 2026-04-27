@@ -366,3 +366,49 @@ func TestUploadSingleSourceCleansTempFileWhenConversionTaskIsDropped(t *testing.
 	require.Error(t, statErr)
 	assert.True(t, os.IsNotExist(statErr))
 }
+
+func TestStorageSaveReaderKeepsTempUploadFileForLocalStorage(t *testing.T) {
+	baseDir := t.TempDir()
+	store, err := storage.NewLocalStorage(baseDir)
+	require.NoError(t, err)
+
+	uploadPath := filepath.Join(baseDir, "upload-stream-source.png")
+	require.NoError(t, os.WriteFile(uploadPath, tinyPNG, 0o600))
+
+	source := NewTempUploadSource("upload.png", uploadPath, int64(len(tinyPNG)))
+	src, err := source.Open()
+	require.NoError(t, err)
+	defer func() { _ = src.Close() }()
+
+	err = store.SaveWithContext(context.Background(), "original/final.png", storageSaveReader(src, source))
+	require.NoError(t, err)
+
+	_, statErr := os.Stat(uploadPath)
+	assert.NoError(t, statErr, "temp upload file must remain available for queued conversion")
+
+	stored, err := os.ReadFile(filepath.Join(baseDir, "original", "final.png"))
+	require.NoError(t, err)
+	assert.Equal(t, tinyPNG, stored)
+}
+
+func TestCleanupSavedUploadUsesTimeoutContext(t *testing.T) {
+	provider := &cleanupTrackingProvider{}
+
+	cleanupSavedUpload(provider, "original/final.png")
+
+	require.Equal(t, []string{"original/final.png"}, provider.deleted)
+	assert.True(t, provider.sawDeadline)
+}
+
+type cleanupTrackingProvider struct {
+	testStorageProvider
+	deleted     []string
+	sawDeadline bool
+}
+
+func (p *cleanupTrackingProvider) DeleteWithContext(ctx context.Context, storagePath string) error {
+	_, ok := ctx.Deadline()
+	p.sawDeadline = ok
+	p.deleted = append(p.deleted, storagePath)
+	return nil
+}

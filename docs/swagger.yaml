@@ -650,6 +650,8 @@ definitions:
         $ref: '#/definitions/system.RuntimeStatus'
       sweeper:
         $ref: '#/definitions/worker.SweeperStats'
+      temp_dir:
+        $ref: '#/definitions/system.DirStatus'
       version:
         type: string
       worker:

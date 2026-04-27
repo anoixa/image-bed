@@ -188,7 +188,7 @@ type ImagePipelineTask struct {
 
 const avifMinSavingsPercent int64 = 5
 
-var processingHeartbeatInterval = 4 * time.Minute
+var processingHeartbeatInterval = staleThreshold / 4
 
 // getProcessingFilePath returns an OS file path suitable for vips file-based APIs.
 // For local storage it returns the stored file path directly (no I/O).

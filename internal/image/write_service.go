@@ -28,6 +28,8 @@ import (
 
 var writeServiceLog = utils.ForModule("WriteService")
 
+const storageCleanupTimeout = 5 * time.Second
+
 // WriteService 负责图片上传与写入相关用例
 type WriteService struct {
 	repo          *images.Repository
@@ -310,7 +312,7 @@ func (s *WriteService) processAndSaveImage(ctx context.Context, userID uint, sou
 	identifier := ids.Identifier
 	storagePath := ids.StoragePath
 	storageWriteStart := time.Now()
-	if err := storageProvider.SaveWithContext(ctx, storagePath, src); err != nil {
+	if err := storageProvider.SaveWithContext(ctx, storagePath, storageSaveReader(src, source)); err != nil {
 		return nil, false, errors.New("failed to save uploaded file")
 	}
 	middleware.RecordUploadStorageWriteDuration(time.Since(storageWriteStart))
@@ -336,7 +338,7 @@ func (s *WriteService) processAndSaveImage(ctx context.Context, userID uint, sou
 
 	dbWriteStart := time.Now()
 	if err := s.repo.WithContext(ctx).SaveImage(newImg); err != nil {
-		_ = storageProvider.DeleteWithContext(ctx, storagePath)
+		cleanupSavedUpload(storageProvider, storagePath)
 		return nil, false, errors.New("failed to save image metadata")
 	}
 	middleware.RecordUploadDBWriteDuration(time.Since(dbWriteStart))
@@ -412,6 +414,29 @@ func getUploadSourceSize(src io.Seeker, hintedSize int64) (int64, error) {
 		return 0, err
 	}
 	return endPos, nil
+}
+
+type copyOnlyReader struct {
+	io.Reader
+}
+
+func storageSaveReader(src io.Reader, source UploadSource) io.Reader {
+	if source.tempFilePath == "" {
+		return src
+	}
+	return copyOnlyReader{Reader: src}
+}
+
+func cleanupSavedUpload(provider storage.Provider, storagePath string) {
+	if provider == nil || storagePath == "" {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), storageCleanupTimeout)
+	defer cancel()
+	if err := provider.DeleteWithContext(ctx, storagePath); err != nil {
+		writeServiceLog.Warnf("Failed to cleanup uploaded file %s after metadata save failure: %v", storagePath, err)
+	}
 }
 
 // createDedupedImageRecord 为不同用户创建去重后的新图片记录

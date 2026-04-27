@@ -4283,6 +4283,9 @@ const docTemplate = `{
                 "sweeper": {
                     "$ref": "#/definitions/worker.SweeperStats"
                 },
+                "temp_dir": {
+                    "$ref": "#/definitions/system.DirStatus"
+                },
                 "version": {
                     "type": "string"
                 },

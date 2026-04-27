@@ -29,7 +29,7 @@ func (s ImageVariantStatus) HasPendingVariants() bool {
 type Image struct {
 	ID        uint `gorm:"primarykey"`
 	CreatedAt time.Time
-	UpdatedAt time.Time
+	UpdatedAt time.Time      `gorm:"index:idx_image_variant_status_updated_at,priority:2"`
 	DeletedAt gorm.DeletedAt `gorm:"uniqueIndex:idx_filehash_deleted;index"`
 
 	Identifier      string `gorm:"index:idx_identifier;not null"`
@@ -44,7 +44,7 @@ type Image struct {
 	Height   int
 	IsPublic bool `gorm:"default:true;not null"`
 
-	VariantStatus ImageVariantStatus `gorm:"default:0;not null"`
+	VariantStatus ImageVariantStatus `gorm:"default:0;not null;index:idx_image_variant_status_updated_at,priority:1"`
 
 	UserID uint `gorm:"index:idx_user_created_at,priority:1"`
 	User   User `gorm:"foreignKey:UserID"`
