@@ -120,7 +120,7 @@ func (m *Manager) CreateConfig(ctx context.Context, req *models.SystemConfigStor
 	m.cache.Invalidate(req.Category)
 	m.eventBus.Publish(EventConfigCreated, config)
 
-	return m.ToResponse(ctx, config)
+	return m.ToResponseWithMask(ctx, config, true)
 }
 
 // UpdateConfig 更新配置
@@ -154,7 +154,7 @@ func (m *Manager) UpdateConfig(ctx context.Context, id uint, req *models.SystemC
 	m.cache.Invalidate(config.Category)
 	m.eventBus.Publish(EventConfigUpdated, config)
 
-	return m.ToResponse(ctx, config)
+	return m.ToResponseWithMask(ctx, config, true)
 }
 
 // mergeConfig 合并配置

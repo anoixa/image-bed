@@ -295,21 +295,9 @@ func (m *Manager) InitializeImageProcessingConfig(ctx context.Context) error {
 
 // MaskSensitiveData 脱敏敏感数据
 func MaskSensitiveData(config map[string]any) map[string]any {
-	sensitiveFields := []string{
-		"secret", "secret_access_key", "access_key_id", "password",
-	}
-
 	result := make(map[string]any)
 	for k, v := range config {
-		isSensitive := false
-		for _, sf := range sensitiveFields {
-			if strings.EqualFold(k, sf) {
-				isSensitive = true
-				break
-			}
-		}
-
-		if isSensitive {
+		if isSensitiveConfigKey(k) {
 			result[k] = "******"
 		} else {
 			result[k] = v
@@ -317,6 +305,17 @@ func MaskSensitiveData(config map[string]any) map[string]any {
 	}
 
 	return result
+}
+
+func isSensitiveConfigKey(key string) bool {
+	key = strings.ToLower(key)
+	switch key {
+	case "secret", "access_key_id", "secret_access_key", "client_secret", "private_key":
+		return true
+	}
+	return strings.Contains(key, "password") ||
+		strings.Contains(key, "secret") ||
+		strings.Contains(key, "token")
 }
 
 // BoolPtr 返回 bool 指针
