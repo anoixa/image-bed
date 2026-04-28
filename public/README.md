@@ -79,9 +79,7 @@ router.NoRoute(public.Handler())
 - `/api/*` - API 接口
 - `/images/*` - 图片访问
 - `/thumbnails/*` - 缩略图
-- `/health` - 健康检查
-- `/version` - 版本信息
-- `/metrics` - 监控指标
+- `/system/*` - 系统健康检查、版本信息、监控指标
 - `/swagger/*` - API 文档
 
 其他所有路径都会尝试从 `dist/` 目录提供文件，找不到时回退到 `index.html`（SPA 支持）。

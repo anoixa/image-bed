@@ -57,9 +57,7 @@ func isAPIPath(p string) bool {
 		"/api/",
 		"/images/",
 		"/thumbnails/",
-		"/health",
-		"/version",
-		"/metrics",
+		"/system/",
 		"/swagger/",
 	}
 	for _, prefix := range apiPaths {

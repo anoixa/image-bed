@@ -14,11 +14,11 @@ func TestHealthCheck(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	router := gin.New()
-	router.GET("/health", func(c *gin.Context) {
+	router.GET("/system/health", func(c *gin.Context) {
 		c.String(http.StatusOK, "OK")
 	})
 
-	req, _ := http.NewRequest("GET", "/health", nil)
+	req, _ := http.NewRequest("GET", "/system/health", nil)
 	w := httptest.NewRecorder()
 
 	router.ServeHTTP(w, req)
