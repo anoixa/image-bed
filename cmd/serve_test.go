@@ -1,9 +1,12 @@
 package cmd
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/anoixa/image-bed/api/core"
+	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/accounts"
 	repoimages "github.com/anoixa/image-bed/database/repo/images"
@@ -105,6 +108,42 @@ func TestInitDatabaseBackfillsLegacyUserStatusAndCreatesActiveAdmin(t *testing.T
 	require.NoError(t, err)
 	assert.Equal(t, models.RoleAdmin, adminUser.Role)
 	assert.Equal(t, models.UserStatusActive, adminUser.Status)
+}
+
+func TestEnsureJWTSecretKeepsConfiguredSecret(t *testing.T) {
+	dataDir := t.TempDir()
+	cfg := &config.Config{JWTSecret: "configured-secret-at-least-32-chars"}
+
+	require.NoError(t, ensureJWTSecret(cfg, dataDir))
+
+	assert.Equal(t, "configured-secret-at-least-32-chars", cfg.JWTSecret)
+	assert.NoFileExists(t, filepath.Join(dataDir, jwtSecretFileName))
+}
+
+func TestEnsureJWTSecretGeneratesPersistentSecret(t *testing.T) {
+	dataDir := t.TempDir()
+	cfg := &config.Config{}
+
+	require.NoError(t, ensureJWTSecret(cfg, dataDir))
+	assert.Len(t, []rune(cfg.JWTSecret), 43)
+
+	secretPath := filepath.Join(dataDir, jwtSecretFileName)
+	stat, err := os.Stat(secretPath)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), stat.Mode().Perm())
+
+	secondCfg := &config.Config{}
+	require.NoError(t, ensureJWTSecret(secondCfg, dataDir))
+	assert.Equal(t, cfg.JWTSecret, secondCfg.JWTSecret)
+}
+
+func TestEnsureJWTSecretRejectsInvalidStoredSecret(t *testing.T) {
+	dataDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dataDir, jwtSecretFileName), []byte("short"), 0o600))
+
+	err := ensureJWTSecret(&config.Config{}, dataDir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "at least 32 characters")
 }
 
 func setupServeTestDB(t *testing.T) *gorm.DB {

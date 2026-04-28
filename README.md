@@ -69,7 +69,27 @@ CGO_ENABLED=1 go build -ldflags="-s -w \
 ### Docker 构建
 
 ```bash
-docker-compose up -d
+docker compose up -d --build
+```
+
+默认使用 SQLite 和 Docker named volume，未提供 `.env` 也可以启动。首次启动会自动创建管理员账号，密码查看容器日志。
+
+如使用已发布镜像，可直接运行：
+
+```bash
+docker run -d \
+  --name image-bed \
+  -p 8080:8080 \
+  -v image-bed:/app/data \
+  <image-name>:<tag>
+```
+
+如果改用宿主机目录 bind mount，需确保目录 owner 可写，而不是使用 `chmod 777`：
+
+```bash
+mkdir -p ./data
+sudo chown -R "$(id -u):$(id -g)" ./data
+PUID="$(id -u)" PGID="$(id -g)" docker compose up -d --build
 ```
 
 ## 前端集成

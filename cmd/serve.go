@@ -2,13 +2,16 @@ package cmd
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/anoixa/image-bed/api"
@@ -39,6 +42,8 @@ var (
 	dependenciesLog = utils.ForModule("Dependencies")
 	vipsLog         = utils.ForModule("VIPS")
 )
+
+const jwtSecretFileName = "jwt.secret"
 
 // serveCmd represents the serve command
 var serveCmd = &cobra.Command{
@@ -164,11 +169,14 @@ func RunServer() {
 
 	dataDir := utils.GetDataDir()
 
-	if err := os.MkdirAll(dataDir, os.ModePerm); err != nil {
+	if err := os.MkdirAll(dataDir, 0o750); err != nil {
 		exitWithErrorf("Failed to create data directory: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(dataDir, "temp"), os.ModePerm); err != nil {
+	if err := os.MkdirAll(filepath.Join(dataDir, "temp"), 0o700); err != nil {
 		exitWithErrorf("Failed to create temp directory: %v", err)
+	}
+	if err := ensureJWTSecret(cfg, dataDir); err != nil {
+		exitWithErrorf("Failed to initialize JWT secret: %v", err)
 	}
 
 	vipsCache := cfg.GetVipsCacheConfig()
@@ -268,6 +276,79 @@ func RunServer() {
 
 	cleanup()
 	serveLog.Infof("Server exited")
+}
+
+func ensureJWTSecret(cfg *config.Config, dataDir string) error {
+	if cfg == nil {
+		return errors.New("config is nil")
+	}
+	if strings.TrimSpace(cfg.JWTSecret) != "" {
+		return nil
+	}
+
+	secretPath := filepath.Join(dataDir, jwtSecretFileName)
+	secret, err := readJWTSecret(secretPath)
+	if err == nil {
+		cfg.JWTSecret = secret
+		serveLog.Infof("Loaded JWT secret from %s", secretPath)
+		return nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
+	secret, err = generateJWTSecret()
+	if err != nil {
+		return err
+	}
+	if err := writeJWTSecret(secretPath, secret); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			secret, readErr := readJWTSecret(secretPath)
+			if readErr != nil {
+				return readErr
+			}
+			cfg.JWTSecret = secret
+			return nil
+		}
+		return err
+	}
+
+	cfg.JWTSecret = secret
+	serveLog.Warnf("JWT_SECRET is not set; generated persistent secret at %s", secretPath)
+	return nil
+}
+
+func readJWTSecret(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	secret := strings.TrimSpace(string(data))
+	if len([]rune(secret)) < 32 {
+		return "", fmt.Errorf("stored JWT secret in %s must be at least 32 characters long", path)
+	}
+	return secret, nil
+}
+
+func writeJWTSecret(path, secret string) error {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = file.Close() }()
+
+	if _, err := file.WriteString(secret + "\n"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func generateJWTSecret() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("failed to generate JWT secret: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
 // InitDatabase 初始化数据库

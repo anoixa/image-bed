@@ -33,6 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libheif-plugin-aomdec \
     ca-certificates \
     tzdata \
+    gosu \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
@@ -41,10 +42,13 @@ RUN useradd -m -u 10001 -s /usr/sbin/nologin appuser
 WORKDIR /app
 
 COPY --from=builder /app/image-bed .
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
-RUN mkdir -p /app/data && chown -R appuser:appuser /app/data
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
+    && mkdir -p /app/data \
+    && chown -R appuser:appuser /app/data
 
-USER appuser
+USER root
 
 EXPOSE 8080
 
@@ -58,5 +62,5 @@ ENV SERVER_HOST=0.0.0.0 \
 
 VOLUME ["/app/data"]
 
-ENTRYPOINT ["./image-bed"]
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["serve"]

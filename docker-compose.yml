@@ -6,11 +6,14 @@ services:
       - "${SERVER_PORT:-8080}:${SERVER_PORT:-8080}"
     volumes:
       - image-bed:/app/data
-    # 从 .env 文件加载环境变量
+    # 从 .env 文件加载环境变量；不存在时使用镜像内默认配置
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       - SERVER_HOST=0.0.0.0
+      - PUID=${PUID:-}
+      - PGID=${PGID:-}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:${SERVER_PORT:-8080}/system/health"]
