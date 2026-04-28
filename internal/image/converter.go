@@ -232,6 +232,12 @@ func shouldTriggerVariantConversion(image *models.Image, settings *config.ImageP
 func prepareVariantForSubmit(variantRepo *images.VariantRepository, imageID uint, format string, now time.Time, ignoreRetryWindow bool) (*models.ImageVariant, error) {
 	variant, err := variantRepo.GetVariantByImageIDAndFormat(imageID, format)
 	if err == nil {
+		if variant.Status == models.VariantStatusCanceled {
+			variant, err = variantRepo.ResetCanceledToPending(variant.ID)
+			if err != nil {
+				return nil, err
+			}
+		}
 		if variantReadyForSubmit(variant, now, ignoreRetryWindow) {
 			return variant, nil
 		}

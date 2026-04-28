@@ -141,7 +141,17 @@ func (s *DeleteService) deleteVariantsForImage(ctx context.Context, img *models.
 	}
 
 	for _, variant := range variants {
+		if variant.Status == models.VariantStatusProcessing {
+			if _, err := s.variantRepo.WithContext(ctx).CancelProcessingVariant(variant.ID, "image deleted during processing"); err != nil {
+				deleteLog.Errorf("Failed to cancel processing variant %d for image %d: %v", variant.ID, img.ID, err)
+			}
+			continue
+		}
+
 		if variant.StoragePath == "" {
+			if err := s.variantRepo.WithContext(ctx).DeleteVariant(variant.ID); err != nil {
+				deleteLog.Errorf("Failed to delete variant record %d for image %d: %v", variant.ID, img.ID, err)
+			}
 			continue
 		}
 
@@ -154,10 +164,10 @@ func (s *DeleteService) deleteVariantsForImage(ctx context.Context, img *models.
 				deleteLog.Warnf("Failed to delete cache for variant %s: %v", utils.SanitizeLogMessage(variant.Identifier), err)
 			}
 		}
-	}
 
-	if err := s.variantRepo.WithContext(ctx).DeleteByImageID(img.ID); err != nil {
-		deleteLog.Errorf("Failed to delete variant records for image %d: %v", img.ID, err)
+		if err := s.variantRepo.WithContext(ctx).DeleteVariant(variant.ID); err != nil {
+			deleteLog.Errorf("Failed to delete variant record %d for image %d: %v", variant.ID, img.ID, err)
+		}
 	}
 
 	if s.cacheHelper != nil {

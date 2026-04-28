@@ -142,19 +142,30 @@ func TestGetProcessingFilePathConsumesLocalFileLease(t *testing.T) {
 }
 
 func TestSaveVariantResults_UpdateCompletedError_CallsUpdateFailed(t *testing.T) {
+	dir := t.TempDir()
+	ls, err := storage.NewLocalStorage(dir)
+	require.NoError(t, err)
+	variantPath := "webp/foo.webp"
+	fullPath := filepath.Join(dir, variantPath)
+	require.NoError(t, os.MkdirAll(filepath.Dir(fullPath), 0o755))
+	require.NoError(t, os.WriteFile(fullPath, []byte("orphan"), 0o600))
+
 	repo := &mockVariantRepo{updateCompletedErr: errors.New("db down")}
 	task := &ImagePipelineTask{
 		WebPVariantID: 7,
 		VariantRepo:   repo,
+		Storage:       ls,
 	}
-	result := &pipelineResult{StoragePath: "webp/foo.webp", Width: 100, Height: 100, FileSize: 1000, FileHash: "abc"}
+	result := &pipelineResult{StoragePath: variantPath, Width: 100, Height: 100, FileSize: 1000, FileHash: "abc"}
 	acquiredVariants := []uint{7}
 
-	err := task.saveVariantResults(&acquiredVariants, nil, result, nil)
+	err = task.saveVariantResults(&acquiredVariants, nil, result, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "db down")
 	assert.Contains(t, repo.updateFailedCalls, uint(7), "UpdateFailed must be called for the variant")
+	_, statErr := os.Stat(fullPath)
+	assert.True(t, os.IsNotExist(statErr), "orphan variant file should be cleaned up when DB completion fails")
 }
 
 func TestTouchProcessingStateRefreshesImageAndVariants(t *testing.T) {

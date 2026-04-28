@@ -37,6 +37,7 @@ const (
 	VariantStatusProcessing = "processing"
 	VariantStatusCompleted  = "completed"
 	VariantStatusFailed     = "failed"
+	VariantStatusCanceled   = "canceled"
 )
 
 // Format 常量
