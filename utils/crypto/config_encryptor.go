@@ -3,6 +3,7 @@ package cryptopackage
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hkdf"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -29,6 +30,9 @@ const (
 	MasterKeyFile = "master.key"
 	// KeyDir 密钥存储目录
 	KeyDir = "config"
+
+	configEncryptionHKDFSalt = "github.com/anoixa/image-bed/config-encryption/v1"
+	configEncryptionHKDFInfo = "system-config/aes-256-gcm"
 )
 
 // SecureKey 安全密钥封装
@@ -146,19 +150,62 @@ func (m *MasterKeyManager) GetKey() []byte {
 	return m.key.Get()
 }
 
+// GetConfigEncryptionKey 获取配置加密专用密钥。
+// CONFIG_ENCRYPTION_KEY 被视为最终加密密钥；文件 master.key 则通过 HKDF 派生用途专属密钥。
+func (m *MasterKeyManager) GetConfigEncryptionKey() ([]byte, error) {
+	key := m.GetKey()
+	if key == nil {
+		return nil, errors.New("master key not available")
+	}
+	if m.source == "env" {
+		return key, nil
+	}
+	return deriveConfigEncryptionKey(key)
+}
+
+// GetLegacyConfigEncryptionKeys 返回仅用于解密历史密文的旧密钥。
+func (m *MasterKeyManager) GetLegacyConfigEncryptionKeys() [][]byte {
+	if m.source == "env" {
+		return nil
+	}
+	key := m.GetKey()
+	if key == nil {
+		return nil
+	}
+	return [][]byte{key}
+}
+
 // GetSource 获取密钥来源
 func (m *MasterKeyManager) GetSource() string {
 	return m.source
 }
 
+func deriveConfigEncryptionKey(masterKey []byte) ([]byte, error) {
+	return hkdf.Key(sha256.New, masterKey, []byte(configEncryptionHKDFSalt), configEncryptionHKDFInfo, 32)
+}
+
 // ConfigEncryptor 配置加密器
 type ConfigEncryptor struct {
-	masterKey []byte
+	primaryKey   []byte
+	fallbackKeys [][]byte
 }
 
 // NewConfigEncryptor 创建配置加密器
-func NewConfigEncryptor(masterKey []byte) *ConfigEncryptor {
-	return &ConfigEncryptor{masterKey: masterKey}
+func NewConfigEncryptor(key []byte) *ConfigEncryptor {
+	return NewConfigEncryptorWithFallback(key)
+}
+
+// NewConfigEncryptorWithFallback 创建带历史解密密钥的配置加密器。
+func NewConfigEncryptorWithFallback(primaryKey []byte, fallbackKeys ...[]byte) *ConfigEncryptor {
+	encryptor := &ConfigEncryptor{
+		primaryKey: append([]byte(nil), primaryKey...),
+	}
+	for _, key := range fallbackKeys {
+		if len(key) > 0 {
+			encryptor.fallbackKeys = append(encryptor.fallbackKeys, append([]byte(nil), key...))
+		}
+	}
+	return encryptor
 }
 
 // Encrypt 加密字符串，返回带版本前缀的密文
@@ -167,15 +214,15 @@ func (e *ConfigEncryptor) Encrypt(plaintext string) (string, error) {
 		return plaintext, nil
 	}
 
-	if e.masterKey == nil {
-		return "", errors.New("master key not available")
+	if e.primaryKey == nil {
+		return "", errors.New("encryption key not available")
 	}
 
 	if strings.HasPrefix(plaintext, EncPrefixV1) || strings.HasPrefix(plaintext, EncPrefixV2) {
 		return plaintext, nil
 	}
 
-	block, err := aes.NewCipher(e.masterKey)
+	block, err := aes.NewCipher(e.primaryKey)
 	if err != nil {
 		return "", fmt.Errorf("failed to create cipher: %w", err)
 	}
@@ -200,8 +247,8 @@ func (e *ConfigEncryptor) Decrypt(ciphertext string) (string, error) {
 		return ciphertext, nil // 未加密，直接返回
 	}
 
-	if e.masterKey == nil {
-		return "", errors.New("master key not available")
+	if e.primaryKey == nil {
+		return "", errors.New("encryption key not available")
 	}
 
 	// 当前只支持 v1
@@ -214,7 +261,31 @@ func (e *ConfigEncryptor) Decrypt(ciphertext string) (string, error) {
 		return "", fmt.Errorf("decode error: %w", err)
 	}
 
-	block, err := aes.NewCipher(e.masterKey)
+	nonceSize, err := nonceSizeForKey(e.primaryKey)
+	if err != nil {
+		return "", err
+	}
+	if len(data) < nonceSize {
+		return "", errors.New("ciphertext too short")
+	}
+
+	nonce, cipherdata := data[:nonceSize], data[nonceSize:]
+	plaintext, err := decryptWithKey(e.primaryKey, nonce, cipherdata)
+	if err == nil {
+		return plaintext, nil
+	}
+
+	for _, key := range e.fallbackKeys {
+		if plaintext, fallbackErr := decryptWithKey(key, nonce, cipherdata); fallbackErr == nil {
+			return plaintext, nil
+		}
+	}
+
+	return "", fmt.Errorf("decrypt error: %w", err)
+}
+
+func decryptWithKey(key, nonce, cipherdata []byte) (string, error) {
+	block, err := aes.NewCipher(key)
 	if err != nil {
 		return "", fmt.Errorf("failed to create cipher: %w", err)
 	}
@@ -224,18 +295,24 @@ func (e *ConfigEncryptor) Decrypt(ciphertext string) (string, error) {
 		return "", fmt.Errorf("failed to create GCM: %w", err)
 	}
 
-	nonceSize := gcm.NonceSize()
-	if len(data) < nonceSize {
-		return "", errors.New("ciphertext too short")
-	}
-
-	nonce, cipherdata := data[:nonceSize], data[nonceSize:]
 	plaintext, err := gcm.Open(nil, nonce, cipherdata, nil)
 	if err != nil {
-		return "", fmt.Errorf("decrypt error: %w", err)
+		return "", err
+	}
+	return string(plaintext), nil
+}
+
+func nonceSizeForKey(key []byte) (int, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create cipher: %w", err)
 	}
 
-	return string(plaintext), nil
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create GCM: %w", err)
+	}
+	return gcm.NonceSize(), nil
 }
 
 // IsEncrypted 检查字符串是否已加密
