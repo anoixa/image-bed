@@ -75,9 +75,7 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 		OptionsResponseStatusCode: 204,
 	}))
 
-	if err := router.SetTrustedProxies(nil); err != nil {
-		serverLog.Warnf("Failed to set trusted proxies: %v", err)
-	}
+	configureClientIPTrust(router, cfg)
 
 	const (
 		defaultMaxUploadSizeMB = 50
@@ -135,6 +133,28 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	RegisterRoutes(router, routerDeps)
 
 	return router, cleanup
+}
+
+func configureClientIPTrust(router *gin.Engine, cfg *config.Config) {
+	if cfg == nil {
+		if err := router.SetTrustedProxies(nil); err != nil {
+			serverLog.Warnf("Failed to disable trusted proxies: %v", err)
+		}
+		return
+	}
+
+	router.RemoteIPHeaders = cfg.GetRealIPHeaders()
+	trustedProxies := cfg.GetTrustedProxies()
+	if len(trustedProxies) == 0 {
+		if err := router.SetTrustedProxies(nil); err != nil {
+			serverLog.Warnf("Failed to disable trusted proxies: %v", err)
+		}
+		return
+	}
+
+	if err := router.SetTrustedProxies(trustedProxies); err != nil {
+		serverLog.Warnf("Failed to set trusted proxies %v: %v", trustedProxies, err)
+	}
 }
 
 // StartServer 创建 http.Server

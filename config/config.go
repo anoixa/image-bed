@@ -26,6 +26,8 @@ type Config struct {
 	ServerReadTimeout  time.Duration `mapstructure:"server_read_timeout"`
 	ServerWriteTimeout time.Duration `mapstructure:"server_write_timeout"`
 	ServerIdleTimeout  time.Duration `mapstructure:"server_idle_timeout"`
+	TrustedProxies     string        `mapstructure:"trusted_proxies"`
+	RealIPHeaders      string        `mapstructure:"real_ip_headers"`
 
 	CorsOrigins string `mapstructure:"cors_origins"`
 
@@ -137,6 +139,8 @@ func setDefaults() {
 	viper.SetDefault("server_read_timeout", "15s")
 	viper.SetDefault("server_write_timeout", "30s")
 	viper.SetDefault("server_idle_timeout", "120s")
+	viper.SetDefault("trusted_proxies", "")
+	viper.SetDefault("real_ip_headers", "X-Forwarded-For,X-Real-IP")
 
 	viper.SetDefault("cors_origins", "http://localhost:5173,http://127.0.0.1:5173")
 
@@ -237,14 +241,36 @@ func (c *Config) GetCorsOrigins() []string {
 		return []string{"http://localhost:5173", "http://127.0.0.1:5173"}
 	}
 
-	parts := strings.Split(c.CorsOrigins, ",")
-	origins := make([]string, 0, len(parts))
-	for _, origin := range parts {
-		if trimmed := strings.TrimSpace(origin); trimmed != "" {
-			origins = append(origins, trimmed)
+	return splitCommaSeparated(c.CorsOrigins)
+}
+
+// GetTrustedProxies 返回允许提供真实客户端 IP 头的反向代理 IP/CIDR 列表。
+func (c *Config) GetTrustedProxies() []string {
+	return splitCommaSeparated(c.TrustedProxies)
+}
+
+// GetRealIPHeaders 返回从可信代理请求中解析客户端 IP 的 header 列表。
+func (c *Config) GetRealIPHeaders() []string {
+	headers := splitCommaSeparated(c.RealIPHeaders)
+	if len(headers) == 0 {
+		return []string{"X-Forwarded-For", "X-Real-IP"}
+	}
+	return headers
+}
+
+func splitCommaSeparated(value string) []string {
+	if value == "" {
+		return nil
+	}
+
+	parts := strings.Split(value, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			values = append(values, trimmed)
 		}
 	}
-	return origins
+	return values
 }
 
 // getCpus 获取默认线程数量

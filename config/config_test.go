@@ -18,6 +18,28 @@ func TestGetCorsOriginsTrimsAndDropsEmptyEntries(t *testing.T) {
 	}, cfg.GetCorsOrigins())
 }
 
+func TestGetTrustedProxiesTrimsAndDropsEmptyEntries(t *testing.T) {
+	cfg := &Config{
+		TrustedProxies: " 172.22.0.0/16 , , 127.0.0.1 ",
+	}
+
+	assert.Equal(t, []string{"172.22.0.0/16", "127.0.0.1"}, cfg.GetTrustedProxies())
+}
+
+func TestGetRealIPHeadersFallsBackToSafeDefaults(t *testing.T) {
+	cfg := &Config{}
+
+	assert.Equal(t, []string{"X-Forwarded-For", "X-Real-IP"}, cfg.GetRealIPHeaders())
+}
+
+func TestGetRealIPHeadersTrimsAndDropsEmptyEntries(t *testing.T) {
+	cfg := &Config{
+		RealIPHeaders: " CF-Connecting-IP , X-Forwarded-For , ",
+	}
+
+	assert.Equal(t, []string{"CF-Connecting-IP", "X-Forwarded-For"}, cfg.GetRealIPHeaders())
+}
+
 func TestBaseURLFallsBackToHostAndPort(t *testing.T) {
 	cfg := &Config{
 		ServerHost:   "192.168.1.10",
