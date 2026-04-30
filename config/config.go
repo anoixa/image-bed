@@ -75,11 +75,13 @@ type Config struct {
 	// Worker 配置
 	WorkerCount         int `mapstructure:"worker_count"`
 	WorkerMemoryLimitMB int `mapstructure:"worker_memory_limit_mb"`
+	AVIFConcurrency     int `mapstructure:"avif_concurrency"`
 
 	// VIPS 配置
-	VipsCacheMemMB int `mapstructure:"vips_cache_mem_mb"`
-	VipsCacheSize  int `mapstructure:"vips_cache_size"`
-	VipsCacheFiles int `mapstructure:"vips_cache_files"`
+	VipsCacheEnabled bool `mapstructure:"vips_cache_enabled"`
+	VipsCacheMemMB   int  `mapstructure:"vips_cache_mem_mb"`
+	VipsCacheSize    int  `mapstructure:"vips_cache_size"`
+	VipsCacheFiles   int  `mapstructure:"vips_cache_files"`
 
 	// 前端配置
 	ServeFrontend bool `mapstructure:"serve_frontend"` // 是否提供前端静态文件服务，默认 true
@@ -186,8 +188,10 @@ func setDefaults() {
 	// Worker 配置默认值
 	viper.SetDefault("worker_count", 0)             // 0 表示使用默认值
 	viper.SetDefault("worker_memory_limit_mb", 512) // Worker 内存限制，默认 512MB
+	viper.SetDefault("avif_concurrency", 1)         // AVIF 编码较重，默认串行
 
-	// VIPS 配置默认值。0 表示启动时按 cgroup / 系统内存自动感知。
+	// VIPS 配置默认值。图床上传链路对 libvips operation cache 命中率低，默认关闭。
+	viper.SetDefault("vips_cache_enabled", false)
 	viper.SetDefault("vips_cache_mem_mb", 0)
 	viper.SetDefault("vips_cache_size", 0)
 	viper.SetDefault("vips_cache_files", 0)
@@ -233,6 +237,14 @@ func (c *Config) GetWorkerCount() int {
 		return getCpus()
 	}
 	return c.WorkerCount
+}
+
+// GetAVIFConcurrency 返回 AVIF 编码并发数，默认 1。
+func (c *Config) GetAVIFConcurrency() int {
+	if c.AVIFConcurrency <= 0 {
+		return 1
+	}
+	return c.AVIFConcurrency
 }
 
 // GetCorsOrigins 返回 CORS 允许的源地址列表

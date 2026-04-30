@@ -205,6 +205,9 @@ func RunServer() {
 		exitWithErrorf("Failed to initialize database: %v", err)
 	}
 
+	processingConfig := worker.DefaultImageProcessingConfig()
+	processingConfig.MaxConcurrentAVIF = cfg.GetAVIFConcurrency()
+	worker.InitGlobalSemaphore(processingConfig)
 	worker.InitGlobalPool(cfg.WorkerCount, 1000)
 
 	sweeperCtx, sweeperCancel := context.WithCancel(context.Background())

@@ -738,6 +738,13 @@ func (t *ImagePipelineTask) generateAVIF(ctx context.Context, filePath string, w
 	if settings.AVIFExperimental {
 		bitdepth = 10
 	}
+
+	avifSemaphore := GetGlobalSemaphore()
+	if err := avifSemaphore.AcquireAVIF(ctx); err != nil {
+		return nil, fmt.Errorf("avif semaphore: %w", err)
+	}
+	defer avifSemaphore.ReleaseAVIF()
+
 	if err := originImg.SaveAVIFToFile(tmpPath, vipsfile.AVIFOptions{
 		Quality:       settings.AVIFQuality,
 		Effort:        settings.AVIFSpeed,

@@ -28,6 +28,7 @@ var (
 )
 
 type VipsCacheConfig struct {
+	Enabled          bool
 	MaxCacheMem      int
 	MaxCacheMemMB    int
 	MaxCacheSize     int
@@ -37,6 +38,13 @@ type VipsCacheConfig struct {
 }
 
 func (c *Config) GetVipsCacheConfig() VipsCacheConfig {
+	if !c.VipsCacheEnabled {
+		return VipsCacheConfig{
+			Enabled:      false,
+			MemorySource: "disabled",
+		}
+	}
+
 	limitBytes, source := detectMemoryLimitSourceFunc()
 	cacheMemMB := autoVipsCacheMemMB(limitBytes)
 	if c.VipsCacheMemMB > 0 {
@@ -55,6 +63,7 @@ func (c *Config) GetVipsCacheConfig() VipsCacheConfig {
 	}
 
 	return VipsCacheConfig{
+		Enabled:          true,
 		MaxCacheMem:      cacheMemMB * bytesPerMB,
 		MaxCacheMemMB:    cacheMemMB,
 		MaxCacheSize:     cacheSize,
@@ -141,12 +150,16 @@ func readSystemMemoryBytes(path string) int64 {
 }
 
 func (v VipsCacheConfig) String() string {
+	if !v.Enabled {
+		return "cache_enabled=false cache_mem=0MB cache_size=0 cache_files=0"
+	}
+
 	memoryLimit := "unknown"
 	if v.MemoryLimitBytes > 0 {
 		memoryLimit = fmt.Sprintf("%dMB", v.MemoryLimitBytes/bytesPerMB)
 	}
 	return fmt.Sprintf(
-		"cache_mem=%dMB cache_size=%d cache_files=%d memory_source=%s memory_limit=%s",
+		"cache_enabled=true cache_mem=%dMB cache_size=%d cache_files=%d memory_source=%s memory_limit=%s",
 		v.MaxCacheMemMB,
 		v.MaxCacheSize,
 		v.MaxCacheFiles,

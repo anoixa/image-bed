@@ -28,15 +28,28 @@ func TestAutoVipsCacheMemMB(t *testing.T) {
 	}
 }
 
-func TestGetVipsCacheConfigAuto(t *testing.T) {
+func TestGetVipsCacheConfigDisabledByDefault(t *testing.T) {
+	cfg := (&Config{}).GetVipsCacheConfig()
+
+	assert.False(t, cfg.Enabled)
+	assert.Equal(t, 0, cfg.MaxCacheMemMB)
+	assert.Equal(t, 0, cfg.MaxCacheMem)
+	assert.Equal(t, 0, cfg.MaxCacheSize)
+	assert.Equal(t, 0, cfg.MaxCacheFiles)
+	assert.Equal(t, "disabled", cfg.MemorySource)
+	assert.Contains(t, cfg.String(), "cache_enabled=false")
+}
+
+func TestGetVipsCacheConfigAutoWhenEnabled(t *testing.T) {
 	old := detectMemoryLimitSourceFunc
 	detectMemoryLimitSourceFunc = func() (int64, string) {
 		return 4 * 1024 * bytesPerMB, "cgroup"
 	}
 	t.Cleanup(func() { detectMemoryLimitSourceFunc = old })
 
-	cfg := (&Config{}).GetVipsCacheConfig()
+	cfg := (&Config{VipsCacheEnabled: true}).GetVipsCacheConfig()
 
+	assert.True(t, cfg.Enabled)
 	assert.Equal(t, 81, cfg.MaxCacheMemMB)
 	assert.Equal(t, 81*bytesPerMB, cfg.MaxCacheMem)
 	assert.Equal(t, defaultVipsCacheSize, cfg.MaxCacheSize)
@@ -52,11 +65,13 @@ func TestGetVipsCacheConfigOverrides(t *testing.T) {
 	t.Cleanup(func() { detectMemoryLimitSourceFunc = old })
 
 	cfg := (&Config{
-		VipsCacheMemMB: 128,
-		VipsCacheSize:  64,
-		VipsCacheFiles: 16,
+		VipsCacheEnabled: true,
+		VipsCacheMemMB:   128,
+		VipsCacheSize:    64,
+		VipsCacheFiles:   16,
 	}).GetVipsCacheConfig()
 
+	assert.True(t, cfg.Enabled)
 	assert.Equal(t, 128, cfg.MaxCacheMemMB)
 	assert.Equal(t, 128*bytesPerMB, cfg.MaxCacheMem)
 	assert.Equal(t, 64, cfg.MaxCacheSize)

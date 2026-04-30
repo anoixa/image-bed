@@ -72,6 +72,21 @@ func TestEffectiveWorkerMemoryMB(t *testing.T) {
 	}))
 }
 
+func TestAVIFSemaphoreHonorsLimit(t *testing.T) {
+	sem := &ImageProcessingSemaphore{
+		avifSemaphore: make(chan struct{}, 1),
+	}
+
+	require.NoError(t, sem.AcquireAVIF(context.Background()))
+	defer sem.ReleaseAVIF()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+
+	err := sem.AcquireAVIF(ctx)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
 func TestShutdownContextTimesOutWhenWorkerIsStillRunning(t *testing.T) {
 	pool := NewPool(1, 1)
 

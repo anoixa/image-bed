@@ -91,14 +91,16 @@ func effectiveWorkerMemoryMB(stats utils.MemoryStats) float64 {
 // ImageProcessingConfig 图片处理配置
 type ImageProcessingConfig struct {
 	MaxConcurrentImages int   // 同时处理的最大图片数
+	MaxConcurrentAVIF   int   // 同时执行 AVIF 编码的最大数量
 	MaxImageSizeMB      int   // 最大图片大小(MB)
 	GCTriggerThreshold  int64 // 触发GC的内存阈值(字节)
 }
 
 // ImageProcessingSemaphore 图片处理信号量
 type ImageProcessingSemaphore struct {
-	semaphore chan struct{}
-	config    *ImageProcessingConfig
+	semaphore     chan struct{}
+	avifSemaphore chan struct{}
+	config        *ImageProcessingConfig
 }
 
 // PoolStats 任务池统计信息
@@ -129,6 +131,7 @@ type Pool struct {
 func DefaultImageProcessingConfig() *ImageProcessingConfig {
 	return &ImageProcessingConfig{
 		MaxConcurrentImages: 2,                 // 最多同时处理2张图片
+		MaxConcurrentAVIF:   1,                 // AVIF 编码较重，默认串行
 		MaxImageSizeMB:      50,                // 50MB
 		GCTriggerThreshold:  200 * 1024 * 1024, // 200MB
 	}
@@ -137,11 +140,22 @@ func DefaultImageProcessingConfig() *ImageProcessingConfig {
 // InitGlobalSemaphore 初始化全局信号量
 func InitGlobalSemaphore(config *ImageProcessingConfig) {
 	globalSemaphoreOnce.Do(func() {
-		globalSemaphore = &ImageProcessingSemaphore{
-			semaphore: make(chan struct{}, config.MaxConcurrentImages),
-			config:    config,
+		if config.MaxConcurrentImages <= 0 {
+			config.MaxConcurrentImages = DefaultImageProcessingConfig().MaxConcurrentImages
 		}
-		workerPoolLog.Infof("Image processing semaphore initialized, max concurrent: %d", config.MaxConcurrentImages)
+		if config.MaxConcurrentAVIF <= 0 {
+			config.MaxConcurrentAVIF = DefaultImageProcessingConfig().MaxConcurrentAVIF
+		}
+		globalSemaphore = &ImageProcessingSemaphore{
+			semaphore:     make(chan struct{}, config.MaxConcurrentImages),
+			avifSemaphore: make(chan struct{}, config.MaxConcurrentAVIF),
+			config:        config,
+		}
+		workerPoolLog.Infof(
+			"Image processing semaphore initialized, max concurrent: %d, avif concurrent: %d",
+			config.MaxConcurrentImages,
+			config.MaxConcurrentAVIF,
+		)
 	})
 }
 
@@ -169,6 +183,25 @@ func (s *ImageProcessingSemaphore) Release() {
 	case <-s.semaphore:
 	default:
 		workerPoolLog.Warnf("Releasing unacquired semaphore")
+	}
+}
+
+// AcquireAVIF 获取 AVIF 编码许可。
+func (s *ImageProcessingSemaphore) AcquireAVIF(ctx context.Context) error {
+	select {
+	case s.avifSemaphore <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// ReleaseAVIF 释放 AVIF 编码许可。
+func (s *ImageProcessingSemaphore) ReleaseAVIF() {
+	select {
+	case <-s.avifSemaphore:
+	default:
+		workerPoolLog.Warnf("Releasing unacquired AVIF semaphore")
 	}
 }
 

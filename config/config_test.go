@@ -72,3 +72,9 @@ func TestSetDefaultsLeavesServerDomainEmpty(t *testing.T) {
 
 	assert.Equal(t, "", viper.GetString("server_domain"))
 }
+
+func TestGetAVIFConcurrencyFallsBackToDefault(t *testing.T) {
+	assert.Equal(t, 1, (&Config{}).GetAVIFConcurrency())
+	assert.Equal(t, 1, (&Config{AVIFConcurrency: -1}).GetAVIFConcurrency())
+	assert.Equal(t, 3, (&Config{AVIFConcurrency: 3}).GetAVIFConcurrency())
+}
