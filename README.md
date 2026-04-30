@@ -162,7 +162,7 @@ DB_TYPE=sqlite
 CACHE_TYPE=memory
 
 # JWT
-JWT_SECRET=change-this-to-a-strong-secret-with-at-least-32-chars
+JWT_SECRET=
 JWT_ACCESS_TOKEN_TTL=15m
 JWT_REFRESH_TOKEN_TTL=168h
 
@@ -170,6 +170,8 @@ JWT_REFRESH_TOKEN_TTL=168h
 WORKER_COUNT=-1
 WORKER_MEMORY_LIMIT_MB=512
 ```
+
+`JWT_SECRET` 留空时会在首次启动自动生成并持久化到 `data/jwt.secret`；生产环境也可以手动指定至少 32 字符的强密钥。`CORS_ORIGINS` 主要用于纯 API / 前后端分离部署，嵌入前端同源访问通常无需配置。
 
 完整配置见 `.env.example`
 
