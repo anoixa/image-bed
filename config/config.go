@@ -67,6 +67,9 @@ type Config struct {
 
 	UploadMaxBatchTotalMB int `mapstructure:"upload_max_batch_total_mb"`
 
+	// 存储配置
+	StorageAllowPrivateEndpoints bool `mapstructure:"storage_allow_private_endpoints"`
+
 	// JWT 配置
 	JWTSecret          string `mapstructure:"jwt_secret"`
 	JWTAccessTokenTTL  string `mapstructure:"jwt_access_token_ttl"`
@@ -180,6 +183,7 @@ func setDefaults() {
 	viper.SetDefault("rate_limit_expire_time", "10m")
 
 	viper.SetDefault("upload_max_batch_total_mb", 500)
+	viper.SetDefault("storage_allow_private_endpoints", false)
 
 	viper.SetDefault("jwt_secret", "")
 	viper.SetDefault("jwt_access_token_ttl", "15m")

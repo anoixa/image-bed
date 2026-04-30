@@ -150,7 +150,7 @@ func TestValidateRemoteStorageTestTarget(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			err := validateRemoteStorageTestTarget(tc.target)
+			err := validateRemoteStorageTestTarget(tc.target, false)
 			if tc.wantError {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), "refusing to test")
@@ -161,6 +161,23 @@ func TestValidateRemoteStorageTestTarget(t *testing.T) {
 				t.Skip("skipping public DNS resolution in sandboxed environment")
 			}
 			require.NoError(t, err)
+		})
+	}
+}
+
+func TestValidateRemoteStorageTestTargetAllowsPrivateWhenExplicitlyEnabled(t *testing.T) {
+	t.Parallel()
+
+	for _, target := range []string{
+		"http://127.0.0.1:9000",
+		"http://localhost:9000",
+		"http://rustfs:9000",
+		"http://10.0.0.5:9000",
+	} {
+		target := target
+		t.Run(target, func(t *testing.T) {
+			t.Parallel()
+			require.NoError(t, validateRemoteStorageTestTarget(target, true))
 		})
 	}
 }

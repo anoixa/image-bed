@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anoixa/image-bed/api/common"
+	appconfig "github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 	imagesRepo "github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/storage"
@@ -37,9 +38,10 @@ type configManager interface {
 
 // ConfigHandler 配置管理处理器
 type ConfigHandler struct {
-	manager             configManager
-	imagesRepo          *imagesRepo.Repository
-	reloadStorageConfig func(id uint, config map[string]any, isDefault bool) error
+	manager                      configManager
+	imagesRepo                   *imagesRepo.Repository
+	reloadStorageConfig          func(id uint, config map[string]any, isDefault bool) error
+	allowPrivateStorageEndpoints bool
 }
 
 var hiddenExternalConfigCategories = map[models.ConfigCategory]struct{}{
@@ -50,8 +52,9 @@ var hiddenExternalConfigCategories = map[models.ConfigCategory]struct{}{
 // NewConfigHandler 创建配置处理器
 func NewConfigHandler(manager configManager, imagesRepo *imagesRepo.Repository) *ConfigHandler {
 	handler := &ConfigHandler{
-		manager:    manager,
-		imagesRepo: imagesRepo,
+		manager:                      manager,
+		imagesRepo:                   imagesRepo,
+		allowPrivateStorageEndpoints: appconfig.Get().StorageAllowPrivateEndpoints,
 	}
 	handler.reloadStorageConfig = handler.hotReloadStorageConfig
 	return handler
@@ -629,7 +632,7 @@ func (h *ConfigHandler) testStorageConfig(ctx context.Context, config map[string
 				Message: "Endpoint, access_key_id, secret_access_key and bucket_name are required",
 			}
 		}
-		if err := validateRemoteStorageTestTarget(s3Cfg.Endpoint); err != nil {
+		if err := validateRemoteStorageTestTarget(s3Cfg.Endpoint, h.allowPrivateStorageEndpoints); err != nil {
 			return &models.TestConfigResponse{
 				Success: false,
 				Message: err.Error(),
@@ -667,7 +670,7 @@ func (h *ConfigHandler) testStorageConfig(ctx context.Context, config map[string
 				Message: "WebDAV URL is required",
 			}
 		}
-		if err := validateRemoteStorageTestTarget(webdavCfg.URL); err != nil {
+		if err := validateRemoteStorageTestTarget(webdavCfg.URL, h.allowPrivateStorageEndpoints); err != nil {
 			return &models.TestConfigResponse{
 				Success: false,
 				Message: err.Error(),
@@ -699,7 +702,7 @@ func (h *ConfigHandler) testStorageConfig(ctx context.Context, config map[string
 	}
 }
 
-func validateRemoteStorageTestTarget(rawTarget string) error {
+func validateRemoteStorageTestTarget(rawTarget string, allowPrivate bool) error {
 	targetURL, err := parseRemoteStorageTestTarget(rawTarget)
 	if err != nil {
 		return fmt.Errorf("invalid remote storage address: %w", err)
@@ -708,6 +711,9 @@ func validateRemoteStorageTestTarget(rawTarget string) error {
 	host := strings.TrimSuffix(strings.ToLower(targetURL.Hostname()), ".")
 	if host == "" {
 		return fmt.Errorf("invalid remote storage address: missing host")
+	}
+	if allowPrivate {
+		return nil
 	}
 
 	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
