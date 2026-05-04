@@ -13,6 +13,7 @@ import (
 
 	"github.com/anoixa/image-bed/api/common"
 	appconfig "github.com/anoixa/image-bed/config"
+	configsvc "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
 	imagesRepo "github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/storage"
@@ -62,11 +63,11 @@ func NewConfigHandler(manager configManager, imagesRepo *imagesRepo.Repository) 
 
 // ListConfigs 列出配置列表
 // @Summary      List system configurations
-// @Description  Get list of system configurations including storage and image processing settings
+// @Description  Get list of system configurations including storage, image processing, and OAuth settings
 // @Tags         admin
 // @Accept       json
 // @Produce      json
-// @Param        category        query     string  false  "Filter by category: storage, image_processing"
+// @Param        category        query     string  false  "Filter by category: storage, image_processing, oauth"
 // @Param        enabled_only    query     bool    false  "Only show enabled configs"
 // @Param        mask_sensitive  query     bool    false  "Mask sensitive information (default: true)"
 // @Success      200  {object}  common.Response  "Configuration list"
@@ -148,7 +149,7 @@ func (h *ConfigHandler) GetConfig(c *gin.Context) {
 
 // CreateConfig 创建新配置
 // @Summary      Create configuration
-// @Description  Create a new system configuration (storage or image processing)
+// @Description  Create a new system configuration (storage, image processing, or OAuth provider)
 // @Tags         admin
 // @Accept       json
 // @Produce      json
@@ -189,6 +190,10 @@ func (h *ConfigHandler) CreateConfig(c *gin.Context) {
 	config, err := h.manager.CreateConfig(ctx, &req, userID)
 	if err != nil {
 		adminConfigLog.Errorf("Failed to create config: %v", err)
+		if errors.Is(err, configsvc.ErrInvalidOAuthConfig) {
+			common.RespondError(c, http.StatusBadRequest, err.Error())
+			return
+		}
 		common.RespondError(c, http.StatusInternalServerError, "Failed to create config")
 		return
 	}
@@ -255,6 +260,10 @@ func (h *ConfigHandler) UpdateConfig(c *gin.Context) {
 	config, err := h.manager.UpdateConfig(ctx, uint(id), &req)
 	if err != nil {
 		adminConfigLog.Errorf("Failed to update config: %v", err)
+		if errors.Is(err, configsvc.ErrInvalidOAuthConfig) {
+			common.RespondError(c, http.StatusBadRequest, err.Error())
+			return
+		}
 		common.RespondError(c, http.StatusInternalServerError, "Failed to update config")
 		return
 	}
@@ -558,6 +567,18 @@ func filterVisibleConfigs(configs []*models.ConfigResponse) []*models.ConfigResp
 // testConfig 测试配置
 func (h *ConfigHandler) testConfig(ctx context.Context, req *models.TestConfigRequest) *models.TestConfigResponse {
 	switch req.Category {
+	case models.ConfigCategoryOAuth:
+		if err := configsvc.ValidateOAuthConfigMap(req.Config); err != nil {
+			return &models.TestConfigResponse{
+				Success: false,
+				Message: err.Error(),
+			}
+		}
+		return &models.TestConfigResponse{
+			Success: true,
+			Message: "OAuth provider configuration is valid",
+		}
+
 	case models.ConfigCategoryStorage:
 		return h.testStorageConfig(ctx, req.Config)
 	case models.ConfigCategoryImageProcessing:

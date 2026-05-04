@@ -50,6 +50,7 @@ type RouterDependencies struct {
 	Converter         *imageSvc.Converter
 	JWTService        *auth.JWTService
 	LoginService      *auth.LoginService
+	OAuthService      *auth.OAuthService
 	AuthRateLimiter   *middleware.IPRateLimiter
 	APIRateLimiter    *middleware.IPRateLimiter
 	ImageRateLimiter  *middleware.IPRateLimiter
@@ -184,6 +185,31 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies, imageHandle
 			authMeGroup.Use(middleware.CombinedAuth(deps.JWTService))
 			authMeGroup.Use(middleware.Authorize(middleware.AllowJWTOnly...))
 			authMeGroup.GET("/me", userHandler.GetCurrentUser)
+
+			// OAuth routes
+			if deps.OAuthService != nil {
+				oauthHandler := api.NewOAuthHandler(deps.OAuthService, deps.LoginService, cfg)
+
+				oauthGroup := authGroup.Group("/oauth")
+				{
+					oauthGroup.GET("/providers", oauthHandler.ListProviders)
+					oauthGroup.GET("/:provider/start", oauthHandler.StartLogin)
+					// Callback handles both login and link flows (mode detected from signed state).
+					oauthGroup.GET("/:provider/callback", oauthHandler.Callback)
+				}
+
+				// Authenticated OAuth routes (require active JWT session)
+				oauthAuthGroup := authGroup.Group("/oauth")
+				oauthAuthGroup.Use(middleware.CombinedAuth(deps.JWTService))
+				oauthAuthGroup.Use(middleware.Authorize(middleware.AllowJWTOnly...))
+				{
+					oauthAuthGroup.GET("/identities", oauthHandler.GetIdentities)
+					oauthAuthGroup.POST("/:provider/link/start", oauthHandler.StartLink)
+					oauthAuthGroup.DELETE("/identities/:provider", oauthHandler.UnlinkIdentity)
+				}
+
+				authGroup.GET("/capabilities", oauthHandler.Capabilities)
+			}
 		}
 
 		v1 := apiGroup.Group("/v1")
@@ -292,6 +318,17 @@ func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies, imageHan
 			deps.Repositories.ImagesRepo,
 			deps.Repositories.AlbumsRepo,
 		)
+		if deps.Repositories.IdentityRepo != nil && deps.Repositories.InviteRepo != nil {
+			userSvc = svcAdmin.NewUserServiceWithOAuth(
+				deps.Repositories.AccountsRepo,
+				deps.Repositories.DevicesRepo,
+				deps.Repositories.KeysRepo,
+				deps.Repositories.ImagesRepo,
+				deps.Repositories.AlbumsRepo,
+				deps.Repositories.IdentityRepo,
+				deps.Repositories.InviteRepo,
+			)
+		}
 		userHandler := admin.NewUserHandler(userSvc)
 		adminGroup.GET("/users", userHandler.ListUsers)
 		adminGroup.POST("/users", userHandler.CreateUser)
@@ -299,6 +336,9 @@ func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies, imageHan
 		adminGroup.PUT("/users/:id/status", userHandler.UpdateStatus)
 		adminGroup.POST("/users/:id/reset-password", userHandler.ResetPassword)
 		adminGroup.DELETE("/users/:id", userHandler.DeleteUser)
+		adminGroup.GET("/users/:id/oauth-identities", userHandler.GetOAuthIdentities)
+		adminGroup.POST("/users/:id/oauth-invites", userHandler.CreateOAuthInvite)
+		adminGroup.DELETE("/users/:id/oauth-invites/:invite_id", userHandler.DeleteOAuthInvite)
 	}
 }
 

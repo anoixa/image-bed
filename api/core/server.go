@@ -28,6 +28,8 @@ var serverLog = utils.ForModule("Server")
 type Repositories struct {
 	AccountsRepo *accounts.Repository
 	DevicesRepo  *accounts.DeviceRepository
+	IdentityRepo *accounts.IdentityRepository
+	InviteRepo   *accounts.OAuthInviteRepository
 	ImagesRepo   *images.Repository
 	AlbumsRepo   *albums.Repository
 	KeysRepo     *keys.Repository
@@ -48,6 +50,7 @@ type ServerDependencies struct {
 	ConfigManager *configSvc.Manager
 	Converter     *imageSvc.Converter
 	JWTService    *auth.JWTService
+	OAuthService  *auth.OAuthService
 	Config        *config.Config
 	CacheProvider cache.Provider
 	ServerVersion ServerVersion
@@ -121,6 +124,7 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 		Converter:         deps.Converter,
 		JWTService:        jwtService,
 		LoginService:      loginService,
+		OAuthService:      deps.OAuthService,
 		AuthRateLimiter:   authRateLimiter,
 		APIRateLimiter:    apiRateLimiter,
 		ImageRateLimiter:  imageRateLimiter,

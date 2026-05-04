@@ -79,10 +79,17 @@ func (m *Manager) Subscribe(eventType EventType, handler EventHandler) {
 // ClearCache 清除配置缓存
 func (m *Manager) ClearCache() {
 	m.cache.Invalidate(models.ConfigCategoryStorage)
+	m.cache.Invalidate(models.ConfigCategoryOAuth)
 }
 
 // CreateConfig 创建配置
 func (m *Manager) CreateConfig(ctx context.Context, req *models.SystemConfigStoreRequest, userID uint) (*models.ConfigResponse, error) {
+	if req.Category == models.ConfigCategoryOAuth {
+		if err := ValidateOAuthConfigMap(req.Config); err != nil {
+			return nil, err
+		}
+	}
+
 	baseKey := fmt.Sprintf("%s:%s", req.Category, req.Name)
 	key, err := m.repo.EnsureKeyUnique(ctx, baseKey)
 	if err != nil {
@@ -170,6 +177,12 @@ func (m *Manager) mergeConfig(config *models.SystemConfig, newConfig map[string]
 			continue
 		}
 		existingConfig[key] = value
+	}
+
+	if config.Category == models.ConfigCategoryOAuth {
+		if err := ValidateOAuthConfigMap(existingConfig); err != nil {
+			return err
+		}
 	}
 
 	encrypted, err := m.crypto.Encrypt(existingConfig)

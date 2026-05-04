@@ -4,6 +4,38 @@
         "contact": {}
     },
     "paths": {
+        "/api/auth/capabilities": {
+            "get": {
+                "description": "Get password-login and OAuth-login availability for frontend login-page rendering.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Get auth capabilities",
+                "responses": {
+                    "200": {
+                        "description": "Authentication capabilities",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/api.authCapabilitiesResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
         "/api/auth/login": {
             "post": {
                 "description": "Authenticate user with username and password, returns access token and sets refresh token cookie",
@@ -146,6 +178,295 @@
                 }
             }
         },
+        "/api/auth/oauth/identities": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Get OAuth identities linked to the current user.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "List linked OAuth identities",
+                "responses": {
+                    "200": {
+                        "description": "Linked identities",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/api.oauthIdentitiesResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to get identities",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/oauth/identities/{provider}": {
+            "delete": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Remove a linked OAuth identity from the current user. Refuses to remove the last usable login method.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Unlink OAuth identity",
+                "parameters": [
+                    {
+                        "enum": [
+                            "github",
+                            "google",
+                            "gitee"
+                        ],
+                        "type": "string",
+                        "description": "OAuth provider",
+                        "name": "provider",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Identity unlinked",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Identity not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "409": {
+                        "description": "Cannot unlink the last login method",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to unlink identity",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/oauth/providers": {
+            "get": {
+                "description": "Get enabled OAuth providers for login-page rendering.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "List OAuth providers",
+                "responses": {
+                    "200": {
+                        "description": "OAuth provider list",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/api.oauthProvidersResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/oauth/{provider}/callback": {
+            "get": {
+                "description": "Complete an OAuth login or account-link flow. On login success it sets auth cookies and redirects to return_to; on failure it redirects with oauth_error.",
+                "tags": [
+                    "auth"
+                ],
+                "summary": "OAuth callback",
+                "parameters": [
+                    {
+                        "enum": [
+                            "github",
+                            "google",
+                            "gitee"
+                        ],
+                        "type": "string",
+                        "description": "OAuth provider",
+                        "name": "provider",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Authorization code",
+                        "name": "code",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Signed OAuth state",
+                        "name": "state",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "302": {
+                        "description": "Redirect to return_to, /login, or /settings/account"
+                    }
+                }
+            }
+        },
+        "/api/auth/oauth/{provider}/link/start": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Start linking an OAuth provider to the current authenticated user. Redirects to the provider authorization page.",
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Start OAuth account link",
+                "parameters": [
+                    {
+                        "enum": [
+                            "github",
+                            "google",
+                            "gitee"
+                        ],
+                        "type": "string",
+                        "description": "OAuth provider",
+                        "name": "provider",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Same-site relative return path",
+                        "name": "return_to",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "302": {
+                        "description": "Redirect to OAuth provider"
+                    },
+                    "400": {
+                        "description": "Provider not enabled or invalid return_to",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to start link flow",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/oauth/{provider}/start": {
+            "get": {
+                "description": "Start an OAuth login flow. Redirects to the provider authorization page.",
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Start OAuth login",
+                "parameters": [
+                    {
+                        "enum": [
+                            "github",
+                            "google",
+                            "gitee"
+                        ],
+                        "type": "string",
+                        "description": "OAuth provider",
+                        "name": "provider",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Same-site relative return path",
+                        "name": "return_to",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "302": {
+                        "description": "Redirect to OAuth provider"
+                    },
+                    "400": {
+                        "description": "Provider not enabled or invalid return_to",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to start OAuth flow",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/api/auth/refresh": {
             "post": {
                 "description": "Refresh access token using refresh_token and device_id cookies",
@@ -200,7 +521,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Get list of system configurations including storage and image processing settings",
+                "description": "Get list of system configurations including storage, image processing, and OAuth settings",
                 "consumes": [
                     "application/json"
                 ],
@@ -214,7 +535,7 @@
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Filter by category: storage, image_processing",
+                        "description": "Filter by category: storage, image_processing, oauth",
                         "name": "category",
                         "in": "query"
                     },
@@ -258,7 +579,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Create a new system configuration (storage or image processing)",
+                "description": "Create a new system configuration (storage, image processing, or OAuth provider)",
                 "consumes": [
                     "application/json"
                 ],
@@ -1331,6 +1652,211 @@
                     },
                     "500": {
                         "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/users/{id}/oauth-identities": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Get linked OAuth identities and pending/used OAuth invites for a user.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get user OAuth identities and invites",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "User ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OAuth identity and invite list",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/admin.oauthUserIdentitiesResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid user ID",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to get identities or invites",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/users/{id}/oauth-invites": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Create an invite that allows a specific OAuth subject or verified email to log in as the target user.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Create OAuth invite",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "User ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "OAuth invite",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.CreateOAuthInviteRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OAuth invite created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/admin.createOAuthInviteResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "User not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/users/{id}/oauth-invites/{invite_id}": {
+            "delete": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Delete an OAuth invite by invite ID.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Delete OAuth invite",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "User ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "OAuth invite ID",
+                        "name": "invite_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Invite deleted",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid invite ID",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Invite not found",
                         "schema": {
                             "$ref": "#/definitions/common.Response"
                         }
@@ -3293,6 +3819,26 @@
         }
     },
     "definitions": {
+        "admin.CreateOAuthInviteRequest": {
+            "type": "object",
+            "required": [
+                "provider"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "subject": {
+                    "type": "string"
+                }
+            }
+        },
         "admin.CreateUserRequest": {
             "type": "object",
             "required": [
@@ -3494,6 +4040,50 @@
                 },
                 "username": {
                     "type": "string"
+                }
+            }
+        },
+        "admin.createOAuthInviteResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string",
+                    "example": "user@example.com"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "provider": {
+                    "type": "string",
+                    "example": "github"
+                },
+                "subject": {
+                    "type": "string",
+                    "example": "123456"
+                }
+            }
+        },
+        "admin.oauthUserIdentitiesResponse": {
+            "type": "object",
+            "properties": {
+                "identities": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.UserIdentity"
+                    }
+                },
+                "invites": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.OAuthInvite"
+                    }
                 }
             }
         },
@@ -3705,6 +4295,25 @@
                 }
             }
         },
+        "api.authCapabilitiesResponse": {
+            "type": "object",
+            "properties": {
+                "oauth_login_enabled": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "password_login_enabled": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "providers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.oauthProviderInfo"
+                    }
+                }
+            }
+        },
         "api.loginResponse": {
             "type": "object",
             "properties": {
@@ -3713,6 +4322,49 @@
                 },
                 "access_token_expiry": {
                     "type": "integer"
+                }
+            }
+        },
+        "api.oauthIdentitiesResponse": {
+            "type": "object",
+            "properties": {
+                "identities": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.UserIdentity"
+                    }
+                }
+            }
+        },
+        "api.oauthProviderInfo": {
+            "type": "object",
+            "properties": {
+                "display_name": {
+                    "type": "string",
+                    "example": "GitHub"
+                },
+                "enabled": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "icon": {
+                    "type": "string",
+                    "example": "github"
+                },
+                "provider": {
+                    "type": "string",
+                    "example": "github"
+                }
+            }
+        },
+        "api.oauthProvidersResponse": {
+            "type": "object",
+            "properties": {
+                "providers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.oauthProviderInfo"
+                    }
                 }
             }
         },
@@ -3758,6 +4410,18 @@
                 },
                 "old_password": {
                     "type": "string"
+                }
+            }
+        },
+        "gorm.DeletedAt": {
+            "type": "object",
+            "properties": {
+                "time": {
+                    "type": "string"
+                },
+                "valid": {
+                    "description": "Valid is true if Time is not NULL",
+                    "type": "boolean"
                 }
             }
         },
@@ -4001,15 +4665,55 @@
                 "jwt",
                 "system",
                 "image_processing",
-                "security"
+                "security",
+                "oauth"
             ],
             "x-enum-varnames": [
                 "ConfigCategoryStorage",
                 "ConfigCategoryJWT",
                 "ConfigCategorySystem",
                 "ConfigCategoryImageProcessing",
-                "ConfigCategorySecurity"
+                "ConfigCategorySecurity",
+                "ConfigCategoryOAuth"
             ]
+        },
+        "models.OAuthInvite": {
+            "type": "object",
+            "properties": {
+                "createdAt": {
+                    "type": "string"
+                },
+                "created_by": {
+                    "type": "integer"
+                },
+                "deletedAt": {
+                    "$ref": "#/definitions/gorm.DeletedAt"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "subject": {
+                    "type": "string"
+                },
+                "updatedAt": {
+                    "type": "string"
+                },
+                "used_at": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "integer"
+                }
+            }
         },
         "models.SystemConfigStoreRequest": {
             "type": "object",
@@ -4082,6 +4786,44 @@
                 },
                 "width": {
                     "type": "integer"
+                }
+            }
+        },
+        "models.UserIdentity": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "deletedAt": {
+                    "$ref": "#/definitions/gorm.DeletedAt"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "email_verified": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "subject": {
+                    "type": "string"
+                },
+                "updatedAt": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "integer"
+                },
+                "username": {
+                    "type": "string"
                 }
             }
         },

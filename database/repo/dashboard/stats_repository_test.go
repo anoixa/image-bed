@@ -28,11 +28,14 @@ func TestGetDailyStatsScansSQLiteDateString(t *testing.T) {
 	db := setupDashboardTestDB(t)
 	repo := NewRepository(db)
 
-	today := time.Now()
-	yesterday := today.AddDate(0, 0, -1)
+	// Use noon UTC so the date is unambiguous regardless of timezone conversion
+	now := time.Now()
+	yesterday := now.AddDate(0, 0, -1)
+	yesterdayNoon := time.Date(yesterday.Year(), yesterday.Month(), yesterday.Day(), 12, 0, 0, 0, time.UTC)
+
 	require.NoError(t, db.Create(&models.Image{
-		CreatedAt:       yesterday,
-		UpdatedAt:       yesterday,
+		CreatedAt:       yesterdayNoon,
+		UpdatedAt:       yesterdayNoon,
 		Identifier:      "img-1",
 		StoragePath:     "original/img-1.jpg",
 		OriginalName:    "img-1.jpg",
@@ -43,8 +46,8 @@ func TestGetDailyStatsScansSQLiteDateString(t *testing.T) {
 		UserID:          1,
 	}).Error)
 	require.NoError(t, db.Create(&models.Image{
-		CreatedAt:       yesterday.Add(2 * time.Hour),
-		UpdatedAt:       yesterday.Add(2 * time.Hour),
+		CreatedAt:       yesterdayNoon.Add(2 * time.Hour),
+		UpdatedAt:       yesterdayNoon.Add(2 * time.Hour),
 		Identifier:      "img-2",
 		StoragePath:     "original/img-2.jpg",
 		OriginalName:    "img-2.jpg",
@@ -58,7 +61,7 @@ func TestGetDailyStatsScansSQLiteDateString(t *testing.T) {
 	stats, err := repo.GetDailyStats(context.Background(), 30, nil)
 	require.NoError(t, err)
 	require.Len(t, stats, 1)
-	assert.Equal(t, yesterday.Format("2006-01-02"), stats[0].Date.Format("2006-01-02"))
+	assert.Equal(t, yesterdayNoon.Format("2006-01-02"), stats[0].Date.Format("2006-01-02"))
 	assert.Equal(t, int64(2), stats[0].Count)
 }
 

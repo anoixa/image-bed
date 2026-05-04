@@ -74,6 +74,45 @@ func TestUpdateConfigReturnsMaskedSensitiveValues(t *testing.T) {
 	assert.Equal(t, "new-secret", unmasked.Config["webdav_password"])
 }
 
+func TestOAuthConfigStoredMaskedAndLoaded(t *testing.T) {
+	manager := newTestManager(t)
+
+	resp, err := manager.CreateConfig(context.Background(), &models.SystemConfigStoreRequest{
+		Category: models.ConfigCategoryOAuth,
+		Name:     "GitHub",
+		Config: map[string]any{
+			"provider":      "github",
+			"client_id":     "client-id",
+			"client_secret": "client-secret",
+		},
+	}, 7)
+	require.NoError(t, err)
+	assert.Equal(t, "******", resp.Config["client_secret"])
+
+	providers, total, err := manager.GetOAuthProviderConfigs(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 1, total)
+	require.Len(t, providers, 1)
+	assert.Equal(t, "github", providers[0].Provider)
+	assert.Equal(t, "client-id", providers[0].ClientID)
+	assert.Equal(t, "client-secret", providers[0].ClientSecret)
+}
+
+func TestOAuthConfigRejectsInvalidProvider(t *testing.T) {
+	manager := newTestManager(t)
+
+	_, err := manager.CreateConfig(context.Background(), &models.SystemConfigStoreRequest{
+		Category: models.ConfigCategoryOAuth,
+		Name:     "Invalid",
+		Config: map[string]any{
+			"provider":      "unknown",
+			"client_id":     "client-id",
+			"client_secret": "client-secret",
+		},
+	}, 7)
+	assert.ErrorIs(t, err, ErrInvalidOAuthConfig)
+}
+
 func newTestManager(t *testing.T) *Manager {
 	t.Helper()
 

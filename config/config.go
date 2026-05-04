@@ -80,6 +80,17 @@ type Config struct {
 	WorkerMemoryLimitMB int `mapstructure:"worker_memory_limit_mb"`
 	AVIFConcurrency     int `mapstructure:"avif_concurrency"`
 
+	// Auth 配置
+	AuthPasswordLoginEnabled bool `mapstructure:"auth_password_login_enabled"`
+
+	// OAuth 配置
+	OAuthGitHubClientID     string `mapstructure:"oauth_github_client_id"`
+	OAuthGitHubClientSecret string `mapstructure:"oauth_github_client_secret"`
+	OAuthGoogleClientID     string `mapstructure:"oauth_google_client_id"`
+	OAuthGoogleClientSecret string `mapstructure:"oauth_google_client_secret"`
+	OAuthGiteeClientID      string `mapstructure:"oauth_gitee_client_id"`
+	OAuthGiteeClientSecret  string `mapstructure:"oauth_gitee_client_secret"`
+
 	// VIPS 配置
 	VipsCacheEnabled bool `mapstructure:"vips_cache_enabled"`
 	VipsCacheMemMB   int  `mapstructure:"vips_cache_mem_mb"`
@@ -202,6 +213,17 @@ func setDefaults() {
 
 	// 前端配置默认值
 	viper.SetDefault("serve_frontend", true) // 默认启用前端服务
+
+	// Auth 配置默认值
+	viper.SetDefault("auth_password_login_enabled", true)
+
+	// OAuth 配置默认值 (空字符串 = 未配置)
+	viper.SetDefault("oauth_github_client_id", "")
+	viper.SetDefault("oauth_github_client_secret", "")
+	viper.SetDefault("oauth_google_client_id", "")
+	viper.SetDefault("oauth_google_client_secret", "")
+	viper.SetDefault("oauth_gitee_client_id", "")
+	viper.SetDefault("oauth_gitee_client_secret", "")
 }
 
 // Addr 返回监听地址，格式为 "host:port"

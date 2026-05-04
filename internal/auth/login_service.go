@@ -86,6 +86,12 @@ func (s *LoginService) Login(username, password string) (*LoginResult, error) {
 		return nil, fmt.Errorf("invalid credentials")
 	}
 
+	return s.IssueSessionForUser(user)
+}
+
+// IssueSessionForUser creates a new session (tokens + device) for an active user.
+// It rejects disabled users and can be used by both password login and OAuth login.
+func (s *LoginService) IssueSessionForUser(user *models.User) (*LoginResult, error) {
 	if !user.IsActive() {
 		return nil, fmt.Errorf("account disabled")
 	}

@@ -108,6 +108,12 @@ func (h *LoginHandler) LoginHandlerFunc(context *gin.Context) {
 		return
 	}
 
+	// Check if password login is enabled
+	if h.cfg != nil && !h.cfg.AuthPasswordLoginEnabled {
+		common.RespondError(context, http.StatusForbidden, "password_login_disabled")
+		return
+	}
+
 	var req userAuthRequestBody
 	if err := context.ShouldBindJSON(&req); err != nil {
 		common.RespondError(context, http.StatusBadRequest, "Invalid request body")

@@ -1,4 +1,17 @@
 definitions:
+  admin.CreateOAuthInviteRequest:
+    properties:
+      email:
+        type: string
+      expires_at:
+        type: string
+      provider:
+        type: string
+      subject:
+        type: string
+    required:
+    - provider
+    type: object
   admin.CreateUserRequest:
     properties:
       password:
@@ -132,6 +145,36 @@ definitions:
         type: string
       username:
         type: string
+    type: object
+  admin.createOAuthInviteResponse:
+    properties:
+      created_at:
+        type: string
+      email:
+        example: user@example.com
+        type: string
+      expires_at:
+        type: string
+      id:
+        example: 1
+        type: integer
+      provider:
+        example: github
+        type: string
+      subject:
+        example: "123456"
+        type: string
+    type: object
+  admin.oauthUserIdentitiesResponse:
+    properties:
+      identities:
+        items:
+          $ref: '#/definitions/models.UserIdentity'
+        type: array
+      invites:
+        items:
+          $ref: '#/definitions/models.OAuthInvite'
+        type: array
     type: object
   albums.AddImagesToAlbumRequest:
     properties:
@@ -271,12 +314,54 @@ definitions:
     required:
     - name
     type: object
+  api.authCapabilitiesResponse:
+    properties:
+      oauth_login_enabled:
+        example: true
+        type: boolean
+      password_login_enabled:
+        example: true
+        type: boolean
+      providers:
+        items:
+          $ref: '#/definitions/api.oauthProviderInfo'
+        type: array
+    type: object
   api.loginResponse:
     properties:
       access_token:
         type: string
       access_token_expiry:
         type: integer
+    type: object
+  api.oauthIdentitiesResponse:
+    properties:
+      identities:
+        items:
+          $ref: '#/definitions/models.UserIdentity'
+        type: array
+    type: object
+  api.oauthProviderInfo:
+    properties:
+      display_name:
+        example: GitHub
+        type: string
+      enabled:
+        example: true
+        type: boolean
+      icon:
+        example: github
+        type: string
+      provider:
+        example: github
+        type: string
+    type: object
+  api.oauthProvidersResponse:
+    properties:
+      providers:
+        items:
+          $ref: '#/definitions/api.oauthProviderInfo'
+        type: array
     type: object
   api.userAuthRequestBody:
     properties:
@@ -308,6 +393,14 @@ definitions:
     required:
     - new_password
     - old_password
+    type: object
+  gorm.DeletedAt:
+    properties:
+      time:
+        type: string
+      valid:
+        description: Valid is true if Time is not NULL
+        type: boolean
     type: object
   images.DeleteRequestBody:
     properties:
@@ -470,6 +563,7 @@ definitions:
     - system
     - image_processing
     - security
+    - oauth
     type: string
     x-enum-varnames:
     - ConfigCategoryStorage
@@ -477,6 +571,32 @@ definitions:
     - ConfigCategorySystem
     - ConfigCategoryImageProcessing
     - ConfigCategorySecurity
+    - ConfigCategoryOAuth
+  models.OAuthInvite:
+    properties:
+      created_by:
+        type: integer
+      createdAt:
+        type: string
+      deletedAt:
+        $ref: '#/definitions/gorm.DeletedAt'
+      email:
+        type: string
+      expires_at:
+        type: string
+      id:
+        type: integer
+      provider:
+        type: string
+      subject:
+        type: string
+      updatedAt:
+        type: string
+      used_at:
+        type: string
+      user_id:
+        type: integer
+    type: object
   models.SystemConfigStoreRequest:
     properties:
       category:
@@ -526,6 +646,31 @@ definitions:
         type: string
       width:
         type: integer
+    type: object
+  models.UserIdentity:
+    properties:
+      avatar_url:
+        type: string
+      createdAt:
+        type: string
+      deletedAt:
+        $ref: '#/definitions/gorm.DeletedAt'
+      email:
+        type: string
+      email_verified:
+        type: boolean
+      id:
+        type: integer
+      provider:
+        type: string
+      subject:
+        type: string
+      updatedAt:
+        type: string
+      user_id:
+        type: integer
+      username:
+        type: string
     type: object
   system.CacheStatus:
     properties:
@@ -727,6 +872,25 @@ definitions:
 info:
   contact: {}
 paths:
+  /api/auth/capabilities:
+    get:
+      description: Get password-login and OAuth-login availability for frontend login-page
+        rendering.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Authentication capabilities
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/api.authCapabilitiesResponse'
+              type: object
+      summary: Get auth capabilities
+      tags:
+      - auth
   /api/auth/login:
     post:
       consumes:
@@ -816,6 +980,195 @@ paths:
       summary: 获取当前用户信息
       tags:
       - auth
+  /api/auth/oauth/{provider}/callback:
+    get:
+      description: Complete an OAuth login or account-link flow. On login success
+        it sets auth cookies and redirects to return_to; on failure it redirects with
+        oauth_error.
+      parameters:
+      - description: OAuth provider
+        enum:
+        - github
+        - google
+        - gitee
+        in: path
+        name: provider
+        required: true
+        type: string
+      - description: Authorization code
+        in: query
+        name: code
+        required: true
+        type: string
+      - description: Signed OAuth state
+        in: query
+        name: state
+        required: true
+        type: string
+      responses:
+        "302":
+          description: Redirect to return_to, /login, or /settings/account
+      summary: OAuth callback
+      tags:
+      - auth
+  /api/auth/oauth/{provider}/link/start:
+    post:
+      description: Start linking an OAuth provider to the current authenticated user.
+        Redirects to the provider authorization page.
+      parameters:
+      - description: OAuth provider
+        enum:
+        - github
+        - google
+        - gitee
+        in: path
+        name: provider
+        required: true
+        type: string
+      - description: Same-site relative return path
+        in: query
+        name: return_to
+        type: string
+      responses:
+        "302":
+          description: Redirect to OAuth provider
+        "400":
+          description: Provider not enabled or invalid return_to
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Failed to start link flow
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Start OAuth account link
+      tags:
+      - auth
+  /api/auth/oauth/{provider}/start:
+    get:
+      description: Start an OAuth login flow. Redirects to the provider authorization
+        page.
+      parameters:
+      - description: OAuth provider
+        enum:
+        - github
+        - google
+        - gitee
+        in: path
+        name: provider
+        required: true
+        type: string
+      - description: Same-site relative return path
+        in: query
+        name: return_to
+        type: string
+      responses:
+        "302":
+          description: Redirect to OAuth provider
+        "400":
+          description: Provider not enabled or invalid return_to
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Failed to start OAuth flow
+          schema:
+            $ref: '#/definitions/common.Response'
+      summary: Start OAuth login
+      tags:
+      - auth
+  /api/auth/oauth/identities:
+    get:
+      description: Get OAuth identities linked to the current user.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Linked identities
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/api.oauthIdentitiesResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Failed to get identities
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: List linked OAuth identities
+      tags:
+      - auth
+  /api/auth/oauth/identities/{provider}:
+    delete:
+      description: Remove a linked OAuth identity from the current user. Refuses to
+        remove the last usable login method.
+      parameters:
+      - description: OAuth provider
+        enum:
+        - github
+        - google
+        - gitee
+        in: path
+        name: provider
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Identity unlinked
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "404":
+          description: Identity not found
+          schema:
+            $ref: '#/definitions/common.Response'
+        "409":
+          description: Cannot unlink the last login method
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Failed to unlink identity
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Unlink OAuth identity
+      tags:
+      - auth
+  /api/auth/oauth/providers:
+    get:
+      description: Get enabled OAuth providers for login-page rendering.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OAuth provider list
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/api.oauthProvidersResponse'
+              type: object
+      summary: List OAuth providers
+      tags:
+      - auth
   /api/auth/refresh:
     post:
       consumes:
@@ -848,10 +1201,10 @@ paths:
     get:
       consumes:
       - application/json
-      description: Get list of system configurations including storage and image processing
-        settings
+      description: Get list of system configurations including storage, image processing,
+        and OAuth settings
       parameters:
-      - description: 'Filter by category: storage, image_processing'
+      - description: 'Filter by category: storage, image_processing, oauth'
         in: query
         name: category
         type: string
@@ -886,7 +1239,8 @@ paths:
     post:
       consumes:
       - application/json
-      description: Create a new system configuration (storage or image processing)
+      description: Create a new system configuration (storage, image processing, or
+        OAuth provider)
       parameters:
       - description: Configuration data
         in: body
@@ -1569,6 +1923,134 @@ paths:
       security:
       - ApiKeyAuth: []
       summary: Delete user
+      tags:
+      - admin
+  /api/v1/admin/users/{id}/oauth-identities:
+    get:
+      consumes:
+      - application/json
+      description: Get linked OAuth identities and pending/used OAuth invites for
+        a user.
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OAuth identity and invite list
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/admin.oauthUserIdentitiesResponse'
+              type: object
+        "400":
+          description: Invalid user ID
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Failed to get identities or invites
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Get user OAuth identities and invites
+      tags:
+      - admin
+  /api/v1/admin/users/{id}/oauth-invites:
+    post:
+      consumes:
+      - application/json
+      description: Create an invite that allows a specific OAuth subject or verified
+        email to log in as the target user.
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: OAuth invite
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/admin.CreateOAuthInviteRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OAuth invite created
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/admin.createOAuthInviteResponse'
+              type: object
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "404":
+          description: User not found
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Create OAuth invite
+      tags:
+      - admin
+  /api/v1/admin/users/{id}/oauth-invites/{invite_id}:
+    delete:
+      consumes:
+      - application/json
+      description: Delete an OAuth invite by invite ID.
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: OAuth invite ID
+        in: path
+        name: invite_id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Invite deleted
+          schema:
+            $ref: '#/definitions/common.Response'
+        "400":
+          description: Invalid invite ID
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "404":
+          description: Invite not found
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Delete OAuth invite
       tags:
       - admin
   /api/v1/admin/users/{id}/reset-password:

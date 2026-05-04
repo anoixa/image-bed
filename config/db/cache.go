@@ -33,6 +33,8 @@ func (c *CacheLayer) Invalidate(category models.ConfigCategory) {
 	case models.ConfigCategorySystem:
 		delete(c.localCache, keyTransferMode)
 		delete(c.localCache, keyAutoDirectThresholdBytes)
+	case models.ConfigCategoryOAuth:
+		delete(c.localCache, keyOAuth)
 	}
 }
 
@@ -105,6 +107,7 @@ const (
 	keyImageProcessing          = "config:image_processing"
 	keyTransferMode             = "config:transfer_mode"
 	keyAutoDirectThresholdBytes = "config:auto_direct_threshold_bytes"
+	keyOAuth                    = "config:oauth"
 )
 
 // InvalidateAll 清除所有缓存

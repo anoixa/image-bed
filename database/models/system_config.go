@@ -20,6 +20,8 @@ const (
 	ConfigCategoryImageProcessing ConfigCategory = "image_processing"
 	// ConfigCategorySecurity 安全配置
 	ConfigCategorySecurity ConfigCategory = "security"
+	// ConfigCategoryOAuth OAuth provider configuration
+	ConfigCategoryOAuth ConfigCategory = "oauth"
 )
 
 // SystemConfig 通用系统配置表

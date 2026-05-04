@@ -7,7 +7,7 @@
 - **多存储后端支持**：本地磁盘、MinIO/S3、WebDAV
 - **图片处理**：基于 libvips 的 WebP/AVIF 自动转换、缩略图生成
 - **相册管理**：创建相册、批量管理图片
-- **多种认证方式**：JWT 认证、API Token、Refresh Token
+- **多种认证方式**：JWT 认证、API Token、Refresh Token、OAuth 登录（GitHub / Google / Gitee）
 - **缓存支持**：内存缓存 (Ristretto) 或 Redis
 - **限流保护**：基于令牌桶的 API 和图片访问限流
 - **数据统计**：Dashboard 统计面板
@@ -141,6 +141,51 @@ SERVE_FRONTEND=true
 
 启动服务后访问：`http://localhost:8080/swagger/index.html`
 
+## OAuth 登录
+
+OAuth 登录采用私有邀请制：外部 OAuth 账号只有在已绑定或被管理员邀请后才能登录，不提供公开注册。
+
+支持 GitHub、Google、Gitee。Provider 凭据推荐在后台配置页创建，配置分类为 `oauth`。
+
+启用 OAuth 时必须配置 `SERVER_DOMAIN` 为浏览器可访问的公网地址，否则 provider 回调可能会指向 `127.0.0.1` 或容器内地址。
+
+Provider 控制台中的 callback URL 格式：
+
+```text
+<SERVER_DOMAIN>/api/auth/oauth/<provider>/callback
+```
+
+示例：
+
+```text
+https://img.example.com/api/auth/oauth/github/callback
+```
+
+如需只允许 OAuth 登录，可设置：
+
+```env
+AUTH_PASSWORD_LOGIN_ENABLED=false
+```
+
+禁用密码登录前，应确保至少配置一个 OAuth provider，并已为管理员账号创建 OAuth invite 或绑定 identity，避免锁定账号。
+
+OAuth provider 配置示例：
+
+```json
+{
+  "category": "oauth",
+  "name": "GitHub",
+  "is_enabled": true,
+  "config": {
+    "provider": "github",
+    "client_id": "xxx",
+    "client_secret": "yyy"
+  }
+}
+```
+
+`provider` 可选值：`github`、`google`、`gitee`。`client_secret` 会按系统配置加密机制存储，配置响应默认脱敏。配置创建、更新、启用、禁用、删除后会自动热重载 OAuth provider。
+
 ## 图片格式自动协商
 
 图片访问接口会根据客户端 `Accept` 头自动选择原图、WebP 或 AVIF 变体，客户端无需拼接不同格式的图片地址。
@@ -166,12 +211,15 @@ JWT_SECRET=
 JWT_ACCESS_TOKEN_TTL=15m
 JWT_REFRESH_TOKEN_TTL=168h
 
+# 认证 / OAuth
+AUTH_PASSWORD_LOGIN_ENABLED=true
+
 # Worker
 WORKER_COUNT=-1
 WORKER_MEMORY_LIMIT_MB=512
 ```
 
-`JWT_SECRET` 留空时会在首次启动自动生成并持久化到 `data/jwt.secret`；生产环境也可以手动指定至少 32 字符的强密钥。`CORS_ORIGINS` 主要用于纯 API / 前后端分离部署，嵌入前端同源访问通常无需配置。
+`JWT_SECRET` 留空时会在首次启动自动生成并持久化到 `data/jwt.secret`；生产环境也可以手动指定至少 32 字符的强密钥。`SERVER_DOMAIN` 会影响图片链接和 OAuth callback URL。`CORS_ORIGINS` 主要用于纯 API / 前后端分离部署，嵌入前端同源访问通常无需配置。
 
 完整配置见 `.env.example`
 

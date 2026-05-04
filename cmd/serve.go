@@ -26,6 +26,7 @@ import (
 	dashboardRepo "github.com/anoixa/image-bed/database/repo/dashboard"
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/database/repo/keys"
+	"github.com/anoixa/image-bed/internal/auth"
 	imageSvc "github.com/anoixa/image-bed/internal/image"
 	"github.com/anoixa/image-bed/internal/tempfiles"
 	"github.com/anoixa/image-bed/internal/vipsfile"
@@ -98,6 +99,8 @@ func InitDependencies(cfg *config.Config) (*Dependencies, error) {
 		ImagesRepo:   images.NewRepository(db),
 		AlbumsRepo:   albums.NewRepository(db),
 		KeysRepo:     keys.NewRepository(db),
+		IdentityRepo: accounts.NewIdentityRepository(db),
+		InviteRepo:   accounts.NewOAuthInviteRepository(db),
 	}
 
 	// 从配置文件初始化缓存
@@ -220,6 +223,33 @@ func RunServer() {
 		exitWithErrorf("Failed to initialize JWT: %v", err)
 	}
 
+	// Initialize OAuth service (providers registered from config)
+	var oauthService *auth.OAuthService
+	if jwtService != nil && deps.Repositories.IdentityRepo != nil {
+		loginSvc := auth.NewLoginService(deps.Repositories.AccountsRepo, deps.Repositories.DevicesRepo, jwtService)
+		oauthService = auth.NewOAuthService(
+			[]byte(cfg.JWTSecret),
+			loginSvc,
+			deps.Repositories.IdentityRepo,
+			deps.Repositories.InviteRepo,
+			deps.Repositories.AccountsRepo,
+			cfg.AuthPasswordLoginEnabled,
+		)
+		if err := reloadOAuthProviders(context.Background(), oauthService, deps.ConfigManager, cfg); err != nil {
+			serveLog.Warnf("Failed to load OAuth providers: %v", err)
+		}
+		subscribeOAuthConfigReload(deps.ConfigManager, oauthService, cfg)
+	}
+
+	// Warn if no login method is available
+	if !cfg.AuthPasswordLoginEnabled && (oauthService == nil || len(oauthService.ListProviders()) == 0) {
+		serveLog.Warnf("========================================")
+		serveLog.Warnf("WARNING: Password login is disabled and no OAuth provider is configured!")
+		serveLog.Warnf("Users can only continue via existing sessions/API tokens until they expire.")
+		serveLog.Warnf("Set AUTH_PASSWORD_LOGIN_ENABLED=true or configure an OAuth provider.")
+		serveLog.Warnf("========================================")
+	}
+
 	serverDeps := &core.ServerDependencies{
 		SqlDB:         deps.SqlDB,
 		Repositories:  deps.Repositories,
@@ -228,6 +258,7 @@ func RunServer() {
 		ConfigManager: deps.ConfigManager,
 		Converter:     deps.Converter,
 		JWTService:    jwtService,
+		OAuthService:  oauthService,
 		Config:        cfg,
 		CacheProvider: cache.GetDefault(),
 		ServerVersion: core.ServerVersion{
@@ -459,5 +490,107 @@ func buildCacheConfig(cfg *config.Config) cache.Config {
 			BufferItems: 64,
 			Metrics:     true,
 		}
+	}
+}
+
+// OAuthCallbackPath returns the callback path for the given provider.
+const oauthCallbackPath = "/api/auth/oauth/%s/callback"
+
+func subscribeOAuthConfigReload(manager *configSvc.Manager, svc *auth.OAuthService, cfg *config.Config) {
+	if manager == nil || svc == nil {
+		return
+	}
+
+	reload := func(event *configSvc.Event) {
+		if event == nil || event.Config == nil || event.Config.Category != models.ConfigCategoryOAuth {
+			return
+		}
+		if err := reloadOAuthProviders(context.Background(), svc, manager, cfg); err != nil {
+			serveLog.Warnf("Failed to reload OAuth providers: %v", err)
+		}
+	}
+
+	manager.Subscribe(configSvc.EventConfigCreated, reload)
+	manager.Subscribe(configSvc.EventConfigUpdated, reload)
+	manager.Subscribe(configSvc.EventConfigDeleted, reload)
+}
+
+func reloadOAuthProviders(ctx context.Context, svc *auth.OAuthService, manager *configSvc.Manager, cfg *config.Config) error {
+	providers, source, err := buildOAuthProviders(ctx, manager, cfg)
+	if err != nil {
+		return err
+	}
+	svc.ReplaceProviders(providers)
+	serveLog.Infof("OAuth providers loaded from %s: %d enabled", source, len(providers))
+	return nil
+}
+
+func buildOAuthProviders(ctx context.Context, manager *configSvc.Manager, cfg *config.Config) ([]auth.OAuthProvider, string, error) {
+	if manager != nil {
+		dbConfigs, total, err := manager.GetOAuthProviderConfigs(ctx)
+		if err != nil {
+			return nil, "database", err
+		}
+		if total > 0 {
+			return oauthProvidersFromDBConfig(dbConfigs, cfg), "database", nil
+		}
+	}
+
+	return oauthProvidersFromEnv(cfg), "environment", nil
+}
+
+func oauthProvidersFromDBConfig(configs []configSvc.OAuthProviderConfig, cfg *config.Config) []auth.OAuthProvider {
+	providers := make([]auth.OAuthProvider, 0, len(configs))
+	for _, oauthConfig := range configs {
+		if provider := newOAuthProvider(oauthConfig.Provider, oauthConfig.ClientID, oauthConfig.ClientSecret, cfg); provider != nil {
+			providers = append(providers, provider)
+		}
+	}
+	return providers
+}
+
+func oauthProvidersFromEnv(cfg *config.Config) []auth.OAuthProvider {
+	if cfg == nil {
+		return nil
+	}
+
+	type envProvider struct {
+		provider     string
+		clientID     string
+		clientSecret string
+	}
+	configs := []envProvider{
+		{provider: "github", clientID: cfg.OAuthGitHubClientID, clientSecret: cfg.OAuthGitHubClientSecret},
+		{provider: "google", clientID: cfg.OAuthGoogleClientID, clientSecret: cfg.OAuthGoogleClientSecret},
+		{provider: "gitee", clientID: cfg.OAuthGiteeClientID, clientSecret: cfg.OAuthGiteeClientSecret},
+	}
+
+	providers := make([]auth.OAuthProvider, 0, len(configs))
+	for _, oauthConfig := range configs {
+		if oauthConfig.clientID == "" || oauthConfig.clientSecret == "" {
+			continue
+		}
+		if provider := newOAuthProvider(oauthConfig.provider, oauthConfig.clientID, oauthConfig.clientSecret, cfg); provider != nil {
+			providers = append(providers, provider)
+		}
+	}
+	return providers
+}
+
+func newOAuthProvider(provider, clientID, clientSecret string, cfg *config.Config) auth.OAuthProvider {
+	if cfg == nil || clientID == "" || clientSecret == "" {
+		return nil
+	}
+
+	redirectURL := strings.TrimRight(cfg.BaseURL(), "/") + fmt.Sprintf(oauthCallbackPath, provider)
+	switch provider {
+	case "github":
+		return auth.NewGitHubProvider(clientID, clientSecret, redirectURL)
+	case "google":
+		return auth.NewGoogleProvider(clientID, clientSecret, redirectURL)
+	case "gitee":
+		return auth.NewGiteeProvider(clientID, clientSecret, redirectURL)
+	default:
+		return nil
 	}
 }
