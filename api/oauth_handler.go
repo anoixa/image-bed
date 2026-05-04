@@ -22,21 +22,14 @@ type OAuthHandler struct {
 	cfg          *config.Config
 }
 
-type oauthProviderInfo struct {
-	Provider    string `json:"provider" example:"github"`
-	DisplayName string `json:"display_name" example:"GitHub"`
-	Icon        string `json:"icon" example:"github"`
-	Enabled     bool   `json:"enabled" example:"true"`
-}
-
 type oauthProvidersResponse struct {
-	Providers []oauthProviderInfo `json:"providers"`
+	Providers []auth.ProviderInfo `json:"providers"`
 }
 
 type authCapabilitiesResponse struct {
 	PasswordLoginEnabled bool                `json:"password_login_enabled" example:"true"`
 	OAuthLoginEnabled    bool                `json:"oauth_login_enabled" example:"true"`
-	Providers            []oauthProviderInfo `json:"providers"`
+	Providers            []auth.ProviderInfo `json:"providers"`
 }
 
 type oauthIdentitiesResponse struct {
@@ -61,7 +54,7 @@ func NewOAuthHandler(oauthService *auth.OAuthService, loginService *auth.LoginSe
 // @Router       /api/auth/oauth/providers [get]
 func (h *OAuthHandler) ListProviders(c *gin.Context) {
 	providers := h.oauthService.ListProviders()
-	common.RespondSuccess(c, gin.H{"providers": providers})
+	common.RespondSuccess(c, oauthProvidersResponse{Providers: providers})
 }
 
 // StartLogin initiates an OAuth login flow.
@@ -200,7 +193,7 @@ func (h *OAuthHandler) GetIdentities(c *gin.Context) {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to get identities")
 		return
 	}
-	common.RespondSuccess(c, gin.H{"identities": identities})
+	common.RespondSuccess(c, oauthIdentitiesResponse{Identities: identities})
 }
 
 // StartLink initiates an OAuth link flow for an authenticated user.
@@ -291,10 +284,10 @@ func (h *OAuthHandler) Capabilities(c *gin.Context) {
 		passwordEnabled = h.cfg.AuthPasswordLoginEnabled
 	}
 
-	common.RespondSuccess(c, gin.H{
-		"password_login_enabled": passwordEnabled,
-		"oauth_login_enabled":    oauthEnabled,
-		"providers":              providers,
+	common.RespondSuccess(c, authCapabilitiesResponse{
+		PasswordLoginEnabled: passwordEnabled,
+		OAuthLoginEnabled:    oauthEnabled,
+		Providers:            providers,
 	})
 }
 

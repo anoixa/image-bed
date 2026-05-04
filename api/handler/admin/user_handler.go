@@ -400,9 +400,9 @@ func (h *UserHandler) GetOAuthIdentities(c *gin.Context) {
 		return
 	}
 
-	common.RespondSuccess(c, gin.H{
-		"identities": identities,
-		"invites":    invites,
+	common.RespondSuccess(c, oauthUserIdentitiesResponse{
+		Identities: identities,
+		Invites:    invites,
 	})
 }
 
@@ -455,13 +455,13 @@ func (h *UserHandler) CreateOAuthInvite(c *gin.Context) {
 		return
 	}
 
-	common.RespondSuccess(c, gin.H{
-		"id":         invite.ID,
-		"provider":   invite.Provider,
-		"subject":    invite.Subject,
-		"email":      invite.Email,
-		"expires_at": invite.ExpiresAt,
-		"created_at": invite.CreatedAt,
+	common.RespondSuccess(c, createOAuthInviteResponse{
+		ID:        invite.ID,
+		Provider:  invite.Provider,
+		Subject:   invite.Subject,
+		Email:     invite.Email,
+		ExpiresAt: invite.ExpiresAt,
+		CreatedAt: invite.CreatedAt,
 	})
 }
 
