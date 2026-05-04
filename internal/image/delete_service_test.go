@@ -154,3 +154,87 @@ func TestDeleteSingleCancelsProcessingVariantsAndDeletesCompletedVariants(t *tes
 	assert.Equal(t, models.VariantStatusCanceled, canceledVariant.Status)
 	assert.Contains(t, canceledVariant.ErrorMessage, "image deleted")
 }
+
+func TestDeleteSingleKeepsSharedVariantFile(t *testing.T) {
+	tempDir := t.TempDir()
+	require.NoError(t, storage.InitStorage([]storage.StorageConfig{{
+		ID:        1,
+		Name:      "local",
+		Type:      "local",
+		IsDefault: true,
+		LocalPath: tempDir,
+	}}))
+
+	originalPath := "original/shared.jpg"
+	variantPath := "converted/shared.webp"
+	require.NoError(t, os.MkdirAll(filepath.Join(tempDir, "original"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(tempDir, "converted"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, originalPath), []byte("image-bytes"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, variantPath), []byte("webp-bytes"), 0o600))
+
+	db := setupDeleteServiceTestDB(t)
+	imageRepo := repoimages.NewRepository(db)
+	variantRepo := repoimages.NewVariantRepository(db)
+	service := NewDeleteService(imageRepo, variantRepo, cache.NewHelper(nil))
+
+	imageOne := &models.Image{
+		Identifier:      "shared-1",
+		OriginalName:    "one.jpg",
+		FileHash:        "hash-shared-1",
+		FileSize:        100,
+		MimeType:        "image/jpeg",
+		StoragePath:     originalPath,
+		StorageConfigID: 1,
+		UserID:          1,
+		VariantStatus:   models.ImageVariantStatusCompleted,
+	}
+	imageTwo := &models.Image{
+		Identifier:      "shared-2",
+		OriginalName:    "two.jpg",
+		FileHash:        "hash-shared-2",
+		FileSize:        100,
+		MimeType:        "image/jpeg",
+		StoragePath:     originalPath,
+		StorageConfigID: 1,
+		UserID:          2,
+		VariantStatus:   models.ImageVariantStatusCompleted,
+	}
+	require.NoError(t, imageRepo.SaveImage(imageOne))
+	require.NoError(t, imageRepo.SaveImage(imageTwo))
+
+	variantOne := &models.ImageVariant{
+		ImageID:     imageOne.ID,
+		Format:      models.FormatWebP,
+		Status:      models.VariantStatusCompleted,
+		Identifier:  "shared-1.webp",
+		StoragePath: variantPath,
+		FileHash:    "hash-webp-1",
+		FileSize:    10,
+	}
+	variantTwo := &models.ImageVariant{
+		ImageID:     imageTwo.ID,
+		Format:      models.FormatWebP,
+		Status:      models.VariantStatusCompleted,
+		Identifier:  "shared-2.webp",
+		StoragePath: variantPath,
+		FileHash:    "hash-webp-2",
+		FileSize:    10,
+	}
+	require.NoError(t, db.Create(variantOne).Error)
+	require.NoError(t, db.Create(variantTwo).Error)
+
+	result, err := service.DeleteSingle(context.Background(), imageOne.Identifier, imageOne.UserID)
+	require.NoError(t, err)
+	require.True(t, result.Success)
+
+	_, err = variantRepo.GetByID(variantOne.ID)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+
+	remainingVariant, err := variantRepo.GetByID(variantTwo.ID)
+	require.NoError(t, err)
+	assert.Equal(t, variantPath, remainingVariant.StoragePath)
+
+	_, statErr := os.Stat(filepath.Join(tempDir, variantPath))
+	assert.NoError(t, statErr, "shared variant file must not be deleted while another image still references it")
+}

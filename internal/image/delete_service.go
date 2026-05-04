@@ -155,8 +155,15 @@ func (s *DeleteService) deleteVariantsForImage(ctx context.Context, img *models.
 			continue
 		}
 
-		if err := provider.DeleteWithContext(ctx, variant.StoragePath); err != nil {
-			deleteLog.Errorf("Failed to delete variant file %s: %v", variant.StoragePath, err)
+		shouldDeleteFile, err := s.shouldDeleteVariantFile(ctx, img, variant)
+		if err != nil {
+			deleteLog.Errorf("Failed to check variant references for %s: %v", variant.StoragePath, err)
+		} else if shouldDeleteFile {
+			if err := provider.DeleteWithContext(ctx, variant.StoragePath); err != nil {
+				deleteLog.Errorf("Failed to delete variant file %s: %v", variant.StoragePath, err)
+			}
+		} else {
+			deleteLog.Debugf("Skipping physical variant deletion for %s, still referenced by another image", variant.StoragePath)
 		}
 
 		if s.cacheHelper != nil {
@@ -175,6 +182,18 @@ func (s *DeleteService) deleteVariantsForImage(ctx context.Context, img *models.
 			deleteLog.Warnf("Failed to delete variant cache for image %d: %v", img.ID, err)
 		}
 	}
+}
+
+func (s *DeleteService) shouldDeleteVariantFile(ctx context.Context, img *models.Image, variant models.ImageVariant) (bool, error) {
+	if variant.StoragePath == "" {
+		return false, nil
+	}
+
+	refCount, err := s.variantRepo.WithContext(ctx).CountActiveVariantsByStoragePath(variant.StoragePath, img.StorageConfigID, variant.ID)
+	if err != nil {
+		return false, err
+	}
+	return refCount == 0, nil
 }
 
 func (s *DeleteService) clearImageCache(ctx context.Context, identifier string) {

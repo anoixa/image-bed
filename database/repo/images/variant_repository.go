@@ -185,6 +185,30 @@ func (r *VariantRepository) DeleteVariant(id uint) error {
 	return r.db.Delete(&models.ImageVariant{}, id).Error
 }
 
+// CountActiveVariantsByStoragePath counts non-deleted variants from active
+// images that still reference the same physical variant object.
+func (r *VariantRepository) CountActiveVariantsByStoragePath(storagePath string, storageConfigID uint, excludeID uint) (int64, error) {
+	if storagePath == "" {
+		return 0, nil
+	}
+
+	query := r.db.Model(&models.ImageVariant{}).
+		Joins("JOIN images ON images.id = image_variants.image_id").
+		Where("image_variants.storage_path = ?", storagePath).
+		Where("images.storage_config_id = ?", storageConfigID).
+		Where("images.deleted_at IS NULL")
+
+	if excludeID > 0 {
+		query = query.Where("image_variants.id <> ?", excludeID)
+	}
+
+	var count int64
+	if err := query.Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 // ResetStaleProcessing resets processing variants older than the given
 // duration back to pending so they can be retried. Returns the number of
 // affected rows.
