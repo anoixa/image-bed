@@ -13,50 +13,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// LoginRequest 登录请求
-// swagger:model
-// @Description Login request body
-type LoginRequest struct {
-	// Username
-	// required: true
-	// example: admin
-	Username string `json:"username" binding:"required"`
-	// Password
-	// required: true
-	// example: password123
-	Password string `json:"password" binding:"required,max=1024"`
-}
-
-// LoginResponse 登录响应
-// swagger:model
-// @Description Login response
-type LoginResponse struct {
-	// Access token for API calls
-	// example: Bearer eyJhbGciOiJIUzI1NiIs...
-	AccessToken string `json:"access_token"`
-	// Access token expiry timestamp (Unix)
-	// example: 1704067200
-	AccessTokenExpiry int64 `json:"access_token_expiry"`
-}
-
-// LogoutResponse 登出响应
-// swagger:model
-// @Description Logout response
-type LogoutResponse struct {
-	// Device ID that was logged out
-	// example: 550e8400-e29b-41d4-a716-446655440000
-	DeviceID string `json:"device_id"`
-}
-
-// ErrorResponse 错误响应
-// swagger:model
-// @Description Error response
-type ErrorResponse struct {
-	// Error message
-	// example: Invalid credentials
-	Message string `json:"message"`
-}
-
 // LoginHandler 登录处理器
 type LoginHandler struct {
 	loginService *auth.LoginService
@@ -71,11 +27,6 @@ func NewLoginHandlerWithService(loginService *auth.LoginService, cfg *config.Con
 	}
 }
 
-// SetLoginService 设置登录服务
-func (h *LoginHandler) SetLoginService(loginService *auth.LoginService) {
-	h.loginService = loginService
-}
-
 type userAuthRequestBody struct {
 	Username string `json:"username" binding:"required"`
 	Password string `json:"password" binding:"required,max=1024"`
@@ -84,10 +35,6 @@ type userAuthRequestBody struct {
 type loginResponse struct {
 	AccessToken       string `json:"access_token"`
 	AccessTokenExpiry int64  `json:"access_token_expiry"`
-}
-
-type logoutResponse struct {
-	DeviceID string `json:"device_id"`
 }
 
 // LoginHandlerFunc user login

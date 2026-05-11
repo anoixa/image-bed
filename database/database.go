@@ -1,7 +1,6 @@
 package database
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"os"
@@ -21,9 +20,6 @@ var (
 	databaseLog    = utils.ForModule("Database")
 	dbMigrationLog = utils.ForModule("DBMigration")
 )
-
-// TxFunc 事务函数类型
-type TxFunc func(tx *gorm.DB) error
 
 // New 创建数据库连接
 func New(cfg *config.Config) (*gorm.DB, error) {
@@ -248,16 +244,6 @@ func fixImageIdentifierIndexes(db *gorm.DB) error {
 	}
 
 	return nil
-}
-
-// Transaction 执行事务
-func Transaction(db *gorm.DB, fn TxFunc) error {
-	return db.Transaction(fn)
-}
-
-// TransactionWithContext 带上下文的事务
-func TransactionWithContext(ctx context.Context, db *gorm.DB, fn TxFunc) error {
-	return db.WithContext(ctx).Transaction(fn)
 }
 
 // Close 关闭数据库连接
