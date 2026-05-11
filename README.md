@@ -143,48 +143,15 @@ SERVE_FRONTEND=true
 
 ## OAuth 登录
 
-OAuth 登录采用私有账号模式：管理员先创建本地账号，用户登录后可在账号设置中自行绑定 GitHub / Google / Gitee。未绑定的外部 OAuth 账号不能直接登录，也不会自动注册。
+支持 GitHub、Google、Gitee OAuth2 登录。
 
-支持 GitHub、Google、Gitee。Provider 凭据推荐在后台配置页创建，配置分类为 `oauth`。
+项目不提供公开注册。账号只能由管理员手动创建；用户登录后可在账号设置中自行绑定 OAuth2 账号。未绑定的 OAuth2 账号不能直接登录，也不会自动创建用户。
 
-启用 OAuth 时必须配置 `SERVER_DOMAIN` 为浏览器可访问的公网地址，否则 provider 回调可能会指向 `127.0.0.1` 或容器内地址。
-
-Provider 控制台中的 callback URL 格式：
+启用 OAuth2 时需将 `SERVER_DOMAIN` 配置为浏览器可访问的公网地址，并在 provider 控制台配置 callback URL：
 
 ```text
 <SERVER_DOMAIN>/api/auth/oauth/<provider>/callback
 ```
-
-示例：
-
-```text
-https://img.example.com/api/auth/oauth/github/callback
-```
-
-如需只允许 OAuth 登录，可设置：
-
-```env
-AUTH_PASSWORD_LOGIN_ENABLED=false
-```
-
-禁用密码登录前，应确保至少配置一个 OAuth provider，并且管理员账号已经完成 OAuth 绑定，避免锁定账号。
-
-OAuth provider 配置示例：
-
-```json
-{
-  "category": "oauth",
-  "name": "GitHub",
-  "is_enabled": true,
-  "config": {
-    "provider": "github",
-    "client_id": "xxx",
-    "client_secret": "yyy"
-  }
-}
-```
-
-`provider` 可选值：`github`、`google`、`gitee`。`client_secret` 会按系统配置加密机制存储，配置响应默认脱敏。配置创建、更新、启用、禁用、删除后会自动热重载 OAuth provider。
 
 ## 图片格式自动协商
 
