@@ -20,10 +20,15 @@ type OAuthHandler struct {
 	oauthService *auth.OAuthService
 	loginService *auth.LoginService
 	cfg          *config.Config
+	authSettings PasswordLoginSettingsProvider
 }
 
 type oauthProvidersResponse struct {
 	Providers []auth.ProviderInfo `json:"providers"`
+}
+
+type oauthStartResponse struct {
+	AuthURL string `json:"auth_url"`
 }
 
 type authCapabilitiesResponse struct {
@@ -55,6 +60,15 @@ func NewOAuthHandler(oauthService *auth.OAuthService, loginService *auth.LoginSe
 	}
 }
 
+func NewOAuthHandlerWithAuthSettings(oauthService *auth.OAuthService, loginService *auth.LoginService, cfg *config.Config, authSettings PasswordLoginSettingsProvider) *OAuthHandler {
+	return &OAuthHandler{
+		oauthService: oauthService,
+		loginService: loginService,
+		cfg:          cfg,
+		authSettings: authSettings,
+	}
+}
+
 // ListProviders returns enabled OAuth providers.
 // @Summary      List OAuth providers
 // @Description  Get enabled OAuth providers for login-page rendering.
@@ -73,6 +87,8 @@ func (h *OAuthHandler) ListProviders(c *gin.Context) {
 // @Tags         auth
 // @Param        provider   path   string  true   "OAuth provider"  Enums(github, google, gitee)
 // @Param        return_to  query  string  false  "Same-site relative return path"
+// @Param        response   query  string  false  "Set to json to receive auth_url instead of redirect"
+// @Success      200       {object}  common.Response{data=oauthStartResponse}  "OAuth authorization URL"
 // @Success      302       "Redirect to OAuth provider"
 // @Failure      400       {object}  common.Response  "Provider not enabled or invalid return_to"
 // @Failure      500       {object}  common.Response  "Failed to start OAuth flow"
@@ -99,6 +115,10 @@ func (h *OAuthHandler) StartLogin(c *gin.Context) {
 
 	for _, cookie := range cookies {
 		http.SetCookie(c.Writer, cookie)
+	}
+	if c.Query("response") == "json" {
+		common.RespondSuccess(c, oauthStartResponse{AuthURL: authURL})
+		return
 	}
 	c.Redirect(http.StatusFound, authURL)
 }
@@ -212,6 +232,8 @@ func (h *OAuthHandler) GetIdentities(c *gin.Context) {
 // @Tags         auth
 // @Param        provider   path   string  true   "OAuth provider"  Enums(github, google, gitee)
 // @Param        return_to  query  string  false  "Same-site relative return path"
+// @Param        response   query  string  false  "Set to json to receive auth_url instead of redirect"
+// @Success      200       {object}  common.Response{data=oauthStartResponse}  "OAuth authorization URL"
 // @Success      302       "Redirect to OAuth provider"
 // @Failure      400       {object}  common.Response  "Provider not enabled or invalid return_to"
 // @Failure      401       {object}  common.Response  "Unauthorized"
@@ -241,6 +263,10 @@ func (h *OAuthHandler) StartLink(c *gin.Context) {
 
 	for _, cookie := range cookies {
 		http.SetCookie(c.Writer, cookie)
+	}
+	if c.Query("response") == "json" {
+		common.RespondSuccess(c, oauthStartResponse{AuthURL: authURL})
+		return
 	}
 	c.Redirect(http.StatusFound, authURL)
 }
@@ -290,7 +316,13 @@ func (h *OAuthHandler) Capabilities(c *gin.Context) {
 	oauthEnabled := len(providers) > 0
 
 	passwordEnabled := true
-	if h.cfg != nil {
+	if h.authSettings != nil {
+		fallback := true
+		if h.cfg != nil {
+			fallback = h.cfg.AuthPasswordLoginEnabled
+		}
+		passwordEnabled = h.authSettings.IsPasswordLoginEnabled(c.Request.Context(), fallback)
+	} else if h.cfg != nil {
 		passwordEnabled = h.cfg.AuthPasswordLoginEnabled
 	}
 

@@ -31,6 +31,7 @@ type OAuthService struct {
 	passwordLoginEnabled bool
 	providers            map[string]OAuthProvider
 	providersMu          sync.RWMutex
+	settingsMu           sync.RWMutex
 }
 
 // NewOAuthService creates a new OAuthService.
@@ -71,6 +72,21 @@ func (s *OAuthService) ReplaceProviders(providers []OAuthProvider) {
 	s.providersMu.Lock()
 	defer s.providersMu.Unlock()
 	s.providers = next
+}
+
+// SetPasswordLoginEnabled updates the runtime password-login switch used by
+// unlink safety checks.
+func (s *OAuthService) SetPasswordLoginEnabled(enabled bool) {
+	s.settingsMu.Lock()
+	defer s.settingsMu.Unlock()
+	s.passwordLoginEnabled = enabled
+}
+
+// IsPasswordLoginEnabled returns the runtime password-login switch.
+func (s *OAuthService) IsPasswordLoginEnabled() bool {
+	s.settingsMu.RLock()
+	defer s.settingsMu.RUnlock()
+	return s.passwordLoginEnabled
 }
 
 // GetProvider returns a registered provider by name.
@@ -371,7 +387,7 @@ func (s *OAuthService) UnlinkIdentity(ctx context.Context, userID uint, provider
 	if err != nil {
 		return fmt.Errorf("failed to get user: %w", err)
 	}
-	hasPassword := s.passwordLoginEnabled && user.Password != ""
+	hasPassword := s.IsPasswordLoginEnabled() && user.Password != ""
 
 	// If only one identity and no password, refuse
 	if len(identities) <= 1 && !hasPassword {

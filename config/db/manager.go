@@ -80,6 +80,7 @@ func (m *Manager) Subscribe(eventType EventType, handler EventHandler) {
 func (m *Manager) ClearCache() {
 	m.cache.Invalidate(models.ConfigCategoryStorage)
 	m.cache.Invalidate(models.ConfigCategoryOAuth)
+	m.cache.Invalidate(models.ConfigCategorySecurity)
 }
 
 // CreateConfig 创建配置

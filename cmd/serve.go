@@ -222,6 +222,8 @@ func RunServer() {
 		exitWithErrorf("Failed to initialize JWT: %v", err)
 	}
 
+	passwordLoginEnabled := deps.ConfigManager.IsPasswordLoginEnabled(context.Background(), cfg.AuthPasswordLoginEnabled)
+
 	// Initialize OAuth service (providers registered from config)
 	var oauthService *auth.OAuthService
 	if jwtService != nil && deps.Repositories.IdentityRepo != nil {
@@ -231,7 +233,7 @@ func RunServer() {
 			loginSvc,
 			deps.Repositories.IdentityRepo,
 			deps.Repositories.AccountsRepo,
-			cfg.AuthPasswordLoginEnabled,
+			passwordLoginEnabled,
 		)
 		if err := reloadOAuthProviders(context.Background(), oauthService, deps.ConfigManager, cfg); err != nil {
 			serveLog.Warnf("Failed to load OAuth providers: %v", err)
@@ -240,7 +242,7 @@ func RunServer() {
 	}
 
 	// Warn if no login method is available
-	if !cfg.AuthPasswordLoginEnabled && (oauthService == nil || len(oauthService.ListProviders()) == 0) {
+	if !passwordLoginEnabled && (oauthService == nil || len(oauthService.ListProviders()) == 0) {
 		serveLog.Warnf("========================================")
 		serveLog.Warnf("WARNING: Password login is disabled and no OAuth provider is configured!")
 		serveLog.Warnf("Users can only continue via existing sessions/API tokens until they expire.")

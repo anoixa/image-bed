@@ -1,4 +1,19 @@
 definitions:
+  admin.AuthSettingsResponse:
+    properties:
+      callback_urls:
+        additionalProperties:
+          type: string
+        type: object
+      oauth_login_enabled:
+        type: boolean
+      password_login_enabled:
+        type: boolean
+      providers:
+        items:
+          $ref: '#/definitions/auth.ProviderInfo'
+        type: array
+    type: object
   admin.CreateUserRequest:
     properties:
       password:
@@ -56,6 +71,13 @@ definitions:
         type: string
     required:
     - mode
+    type: object
+  admin.UpdateAuthSettingsRequest:
+    properties:
+      password_login_enabled:
+        type: boolean
+    required:
+    - password_login_enabled
     type: object
   admin.UpdateConfigRequest:
     properties:
@@ -347,6 +369,11 @@ definitions:
         items:
           $ref: '#/definitions/auth.ProviderInfo'
         type: array
+    type: object
+  api.oauthStartResponse:
+    properties:
+      auth_url:
+        type: string
     type: object
   api.userAuthRequestBody:
     properties:
@@ -967,7 +994,20 @@ paths:
         in: query
         name: return_to
         type: string
+      - description: Set to json to receive auth_url instead of redirect
+        in: query
+        name: response
+        type: string
       responses:
+        "200":
+          description: OAuth authorization URL
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/api.oauthStartResponse'
+              type: object
         "302":
           description: Redirect to OAuth provider
         "400":
@@ -1005,7 +1045,20 @@ paths:
         in: query
         name: return_to
         type: string
+      - description: Set to json to receive auth_url instead of redirect
+        in: query
+        name: response
+        type: string
       responses:
+        "200":
+          description: OAuth authorization URL
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/api.oauthStartResponse'
+              type: object
         "302":
           description: Redirect to OAuth provider
         "400":
@@ -1135,6 +1188,85 @@ paths:
       summary: Refresh access token
       tags:
       - auth
+  /api/v1/admin/auth/settings:
+    get:
+      description: Get password login switch, enabled OAuth providers, and callback
+        URLs.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Login settings
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/admin.AuthSettingsResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Get login settings
+      tags:
+      - admin
+    put:
+      consumes:
+      - application/json
+      description: Update password login availability. Disabling password login requires
+        at least one enabled OAuth provider and a linked OAuth identity for the current
+        admin.
+      parameters:
+      - description: Login settings
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/admin.UpdateAuthSettingsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Login settings
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/admin.AuthSettingsResponse'
+              type: object
+        "400":
+          description: Invalid request or unsafe lockout risk
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Update login settings
+      tags:
+      - admin
   /api/v1/admin/configs:
     get:
       consumes:

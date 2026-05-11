@@ -405,9 +405,33 @@ const docTemplate = `{
                         "description": "Same-site relative return path",
                         "name": "return_to",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Set to json to receive auth_url instead of redirect",
+                        "name": "response",
+                        "in": "query"
                     }
                 ],
                 "responses": {
+                    "200": {
+                        "description": "OAuth authorization URL",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/api.oauthStartResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
                     "302": {
                         "description": "Redirect to OAuth provider"
                     },
@@ -457,9 +481,33 @@ const docTemplate = `{
                         "description": "Same-site relative return path",
                         "name": "return_to",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Set to json to receive auth_url instead of redirect",
+                        "name": "response",
+                        "in": "query"
                     }
                 ],
                 "responses": {
+                    "200": {
+                        "description": "OAuth authorization URL",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/api.oauthStartResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
                     "302": {
                         "description": "Redirect to OAuth provider"
                     },
@@ -512,6 +560,134 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Refresh token or device ID not found / invalid",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/auth/settings": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Get password login switch, enabled OAuth providers, and callback URLs.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get login settings",
+                "responses": {
+                    "200": {
+                        "description": "Login settings",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/admin.AuthSettingsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Update password login availability. Disabling password login requires at least one enabled OAuth provider and a linked OAuth identity for the current admin.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Update login settings",
+                "parameters": [
+                    {
+                        "description": "Login settings",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.UpdateAuthSettingsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Login settings",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/admin.AuthSettingsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request or unsafe lockout risk",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/common.Response"
                         }
@@ -3692,6 +3868,29 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "admin.AuthSettingsResponse": {
+            "type": "object",
+            "properties": {
+                "callback_urls": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "oauth_login_enabled": {
+                    "type": "boolean"
+                },
+                "password_login_enabled": {
+                    "type": "boolean"
+                },
+                "providers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/auth.ProviderInfo"
+                    }
+                }
+            }
+        },
         "admin.CreateUserRequest": {
             "type": "object",
             "required": [
@@ -3778,6 +3977,17 @@ const docTemplate = `{
                 "mode": {
                     "description": "auto, always_proxy, always_direct",
                     "type": "string"
+                }
+            }
+        },
+        "admin.UpdateAuthSettingsRequest": {
+            "type": "object",
+            "required": [
+                "password_login_enabled"
+            ],
+            "properties": {
+                "password_login_enabled": {
+                    "type": "boolean"
                 }
             }
         },
@@ -4218,6 +4428,14 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/auth.ProviderInfo"
                     }
+                }
+            }
+        },
+        "api.oauthStartResponse": {
+            "type": "object",
+            "properties": {
+                "auth_url": {
+                    "type": "string"
                 }
             }
         },

@@ -157,7 +157,7 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies, imageHandle
 	albumImageHandler := handlerAlbums.NewAlbumImageHandler(albumService, deps.Repositories.ImagesRepo, deps.CacheProvider, cfg)
 	keyService := auth.NewKeyService(deps.Repositories.KeysRepo, deps.Repositories.AccountsRepo)
 	keyHandler := key.NewHandler(keyService)
-	loginHandler := api.NewLoginHandlerWithService(deps.LoginService, cfg)
+	loginHandler := api.NewLoginHandlerWithAuthSettings(deps.LoginService, cfg, deps.ConfigManager)
 
 	dashboardService := svcDashboard.NewService(deps.DashboardRepo, deps.CacheProvider)
 	dashboardHandler := handlerDashboard.NewHandler(dashboardService)
@@ -188,7 +188,7 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies, imageHandle
 
 			// OAuth routes
 			if deps.OAuthService != nil {
-				oauthHandler := api.NewOAuthHandler(deps.OAuthService, deps.LoginService, cfg)
+				oauthHandler := api.NewOAuthHandlerWithAuthSettings(deps.OAuthService, deps.LoginService, cfg, deps.ConfigManager)
 
 				oauthGroup := authGroup.Group("/oauth")
 				{
@@ -277,6 +277,7 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies, imageHandle
 // registerAdminRoutes 注册管理员路由
 func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies, imageHandler *handlerImages.Handler) {
 	configHandler := admin.NewConfigHandler(deps.ConfigManager, deps.Repositories.ImagesRepo)
+	authSettingsHandler := admin.NewAuthSettingsHandler(deps.ConfigManager, deps.OAuthService, deps.Config)
 	adminGroup := v1.Group("/admin")
 	adminGroup.Use(middleware.Authorize(middleware.AllowJWTOnly...))
 	adminGroup.Use(middleware.RequireRole(middleware.RoleAdmin))
@@ -294,6 +295,9 @@ func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies, imageHan
 			configsGroup.PUT("/:id", configHandler.UpdateConfig)
 			configsGroup.DELETE("/:id", configHandler.DeleteConfig)
 		}
+
+		adminGroup.GET("/auth/settings", authSettingsHandler.GetSettings)
+		adminGroup.PUT("/auth/settings", authSettingsHandler.UpdateSettings)
 
 		adminGroup.GET("/storage/providers", configHandler.ListStorageProviders)
 		adminGroup.POST("/storage/reload/:id", configHandler.ReloadStorageConfig)

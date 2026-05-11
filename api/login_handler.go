@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"time"
@@ -17,6 +18,12 @@ import (
 type LoginHandler struct {
 	loginService *auth.LoginService
 	cfg          *config.Config
+	authSettings PasswordLoginSettingsProvider
+}
+
+// PasswordLoginSettingsProvider resolves the runtime password-login switch.
+type PasswordLoginSettingsProvider interface {
+	IsPasswordLoginEnabled(ctx context.Context, fallbackPasswordLoginEnabled bool) bool
 }
 
 // NewLoginHandlerWithService 使用 LoginService 创建登录处理器
@@ -24,6 +31,14 @@ func NewLoginHandlerWithService(loginService *auth.LoginService, cfg *config.Con
 	return &LoginHandler{
 		loginService: loginService,
 		cfg:          cfg,
+	}
+}
+
+func NewLoginHandlerWithAuthSettings(loginService *auth.LoginService, cfg *config.Config, authSettings PasswordLoginSettingsProvider) *LoginHandler {
+	return &LoginHandler{
+		loginService: loginService,
+		cfg:          cfg,
+		authSettings: authSettings,
 	}
 }
 
@@ -56,7 +71,7 @@ func (h *LoginHandler) LoginHandlerFunc(context *gin.Context) {
 	}
 
 	// Check if password login is enabled
-	if h.cfg != nil && !h.cfg.AuthPasswordLoginEnabled {
+	if !h.passwordLoginEnabled(context.Request.Context()) {
 		common.RespondError(context, http.StatusForbidden, "password_login_disabled")
 		return
 	}
@@ -89,6 +104,17 @@ func (h *LoginHandler) LoginHandlerFunc(context *gin.Context) {
 		AccessToken:       "Bearer " + result.AccessToken,
 		AccessTokenExpiry: result.AccessTokenExpiry.Unix(),
 	})
+}
+
+func (h *LoginHandler) passwordLoginEnabled(ctx context.Context) bool {
+	fallback := true
+	if h.cfg != nil {
+		fallback = h.cfg.AuthPasswordLoginEnabled
+	}
+	if h.authSettings != nil {
+		return h.authSettings.IsPasswordLoginEnabled(ctx, fallback)
+	}
+	return fallback
 }
 
 // RefreshTokenHandlerFunc Refresh token authentication

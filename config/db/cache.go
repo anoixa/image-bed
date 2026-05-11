@@ -35,6 +35,8 @@ func (c *CacheLayer) Invalidate(category models.ConfigCategory) {
 		delete(c.localCache, keyAutoDirectThresholdBytes)
 	case models.ConfigCategoryOAuth:
 		delete(c.localCache, keyOAuth)
+	case models.ConfigCategorySecurity:
+		delete(c.localCache, keyAuthSettings)
 	}
 }
 
@@ -102,12 +104,28 @@ func (c *CacheLayer) SetAutoDirectThresholdBytes(thresholdBytes int64) {
 	c.localCache[keyAutoDirectThresholdBytes] = thresholdBytes
 }
 
+func (c *CacheLayer) GetAuthSettings() (*AuthSettings, bool) {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+	if val, ok := c.localCache[keyAuthSettings]; ok {
+		return val.(*AuthSettings), true
+	}
+	return nil, false
+}
+
+func (c *CacheLayer) SetAuthSettings(settings *AuthSettings) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.localCache[keyAuthSettings] = settings
+}
+
 const (
 	keyStorage                  = "config:storage"
 	keyImageProcessing          = "config:image_processing"
 	keyTransferMode             = "config:transfer_mode"
 	keyAutoDirectThresholdBytes = "config:auto_direct_threshold_bytes"
 	keyOAuth                    = "config:oauth"
+	keyAuthSettings             = "config:auth_settings"
 )
 
 // InvalidateAll 清除所有缓存
