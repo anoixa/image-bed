@@ -19,9 +19,8 @@ func setupOAuthServiceTestDB(t *testing.T) *gorm.DB {
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.User{}, &models.UserIdentity{}, &models.OAuthInvite{}))
+	require.NoError(t, db.AutoMigrate(&models.User{}, &models.UserIdentity{}))
 	cleanup := db.Session(&gorm.Session{AllowGlobalUpdate: true})
-	require.NoError(t, cleanup.Unscoped().Delete(&models.OAuthInvite{}).Error)
 	require.NoError(t, cleanup.Unscoped().Delete(&models.UserIdentity{}).Error)
 	require.NoError(t, cleanup.Unscoped().Delete(&models.User{}).Error)
 	return db
@@ -32,7 +31,6 @@ func TestUnlinkIdentityRefusesLastOAuthMethodWhenPasswordLoginDisabled(t *testin
 	ctx := context.Background()
 	accountsRepo := accounts.NewRepository(db)
 	identityRepo := accounts.NewIdentityRepository(db)
-	inviteRepo := accounts.NewOAuthInviteRepository(db)
 
 	user := &models.User{
 		Username: "oauth-only",
@@ -47,7 +45,7 @@ func TestUnlinkIdentityRefusesLastOAuthMethodWhenPasswordLoginDisabled(t *testin
 		Subject:  "12345",
 	}))
 
-	svc := NewOAuthService([]byte("test-secret"), nil, identityRepo, inviteRepo, accountsRepo, false)
+	svc := NewOAuthService([]byte("test-secret"), nil, identityRepo, accountsRepo, false)
 	err := svc.UnlinkIdentity(ctx, user.ID, "github")
 	assert.ErrorIs(t, err, ErrLastLoginMethod)
 
@@ -60,7 +58,6 @@ func TestUnlinkIdentityAllowsPasswordFallbackWhenPasswordLoginEnabled(t *testing
 	ctx := context.Background()
 	accountsRepo := accounts.NewRepository(db)
 	identityRepo := accounts.NewIdentityRepository(db)
-	inviteRepo := accounts.NewOAuthInviteRepository(db)
 
 	user := &models.User{
 		Username: "password-fallback",
@@ -75,9 +72,37 @@ func TestUnlinkIdentityAllowsPasswordFallbackWhenPasswordLoginEnabled(t *testing
 		Subject:  "12345",
 	}))
 
-	svc := NewOAuthService([]byte("test-secret"), nil, identityRepo, inviteRepo, accountsRepo, true)
+	svc := NewOAuthService([]byte("test-secret"), nil, identityRepo, accountsRepo, true)
 	require.NoError(t, svc.UnlinkIdentity(ctx, user.ID, "github"))
 
 	_, err := identityRepo.FindByUserProvider(ctx, user.ID, "github")
 	assert.ErrorIs(t, err, accounts.ErrIdentityNotFound)
+}
+
+func TestOAuthLoginRequiresExistingIdentityBinding(t *testing.T) {
+	db := setupOAuthServiceTestDB(t)
+	ctx := context.Background()
+	accountsRepo := accounts.NewRepository(db)
+	identityRepo := accounts.NewIdentityRepository(db)
+
+	user := &models.User{
+		Username: "manual-user",
+		Password: "existing-password-hash",
+		Role:     models.RoleUser,
+		Status:   models.UserStatusActive,
+	}
+	require.NoError(t, accountsRepo.CreateUser(user))
+
+	svc := NewOAuthService([]byte("test-secret"), nil, identityRepo, accountsRepo, true)
+	_, _, err := svc.handleLogin(ctx, "github", &ExternalIdentity{
+		Subject:       "unlinked-subject",
+		Username:      "github-user",
+		Email:         "user@example.com",
+		EmailVerified: true,
+	}, "/")
+	assert.ErrorIs(t, err, ErrIdentityNotLinked)
+
+	identities, err := identityRepo.FindByUser(ctx, user.ID)
+	require.NoError(t, err)
+	assert.Empty(t, identities)
 }

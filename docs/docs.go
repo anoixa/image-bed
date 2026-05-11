@@ -1677,7 +1677,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Get linked OAuth identities and pending/used OAuth invites for a user.",
+                "description": "Get linked OAuth identities for a user. Users bind OAuth identities from their own account settings.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1687,7 +1687,7 @@ const docTemplate = `{
                 "tags": [
                     "admin"
                 ],
-                "summary": "Get user OAuth identities and invites",
+                "summary": "Get user OAuth identities",
                 "parameters": [
                     {
                         "type": "integer",
@@ -1699,7 +1699,7 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "OAuth identity and invite list",
+                        "description": "OAuth identity list",
                         "schema": {
                             "allOf": [
                                 {
@@ -1729,145 +1729,7 @@ const docTemplate = `{
                         }
                     },
                     "500": {
-                        "description": "Failed to get identities or invites",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/admin/users/{id}/oauth-invites": {
-            "post": {
-                "security": [
-                    {
-                        "ApiKeyAuth": []
-                    }
-                ],
-                "description": "Create an invite that allows a specific OAuth subject or verified email to log in as the target user.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "Create OAuth invite",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "User ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "OAuth invite",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/admin.CreateOAuthInviteRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OAuth invite created",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/common.Response"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "data": {
-                                            "$ref": "#/definitions/admin.createOAuthInviteResponse"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "400": {
-                        "description": "Invalid request",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "404": {
-                        "description": "User not found",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/admin/users/{id}/oauth-invites/{invite_id}": {
-            "delete": {
-                "security": [
-                    {
-                        "ApiKeyAuth": []
-                    }
-                ],
-                "description": "Delete an OAuth invite by invite ID.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "Delete OAuth invite",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "User ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "integer",
-                        "description": "OAuth invite ID",
-                        "name": "invite_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Invite deleted",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "400": {
-                        "description": "Invalid invite ID",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "404": {
-                        "description": "Invite not found",
+                        "description": "Failed to get identities",
                         "schema": {
                             "$ref": "#/definitions/common.Response"
                         }
@@ -3830,26 +3692,6 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "admin.CreateOAuthInviteRequest": {
-            "type": "object",
-            "required": [
-                "provider"
-            ],
-            "properties": {
-                "email": {
-                    "type": "string"
-                },
-                "expires_at": {
-                    "type": "string"
-                },
-                "provider": {
-                    "type": "string"
-                },
-                "subject": {
-                    "type": "string"
-                }
-            }
-        },
         "admin.CreateUserRequest": {
             "type": "object",
             "required": [
@@ -4054,47 +3896,41 @@ const docTemplate = `{
                 }
             }
         },
-        "admin.createOAuthInviteResponse": {
-            "type": "object",
-            "properties": {
-                "created_at": {
-                    "type": "string"
-                },
-                "email": {
-                    "type": "string",
-                    "example": "user@example.com"
-                },
-                "expires_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "integer",
-                    "example": 1
-                },
-                "provider": {
-                    "type": "string",
-                    "example": "github"
-                },
-                "subject": {
-                    "type": "string",
-                    "example": "123456"
-                }
-            }
-        },
         "admin.oauthUserIdentitiesResponse": {
             "type": "object",
             "properties": {
                 "identities": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/models.UserIdentity"
+                        "$ref": "#/definitions/admin.oauthUserIdentitySummary"
                     }
+                }
+            }
+        },
+        "admin.oauthUserIdentitySummary": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string"
                 },
-                "invites": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/models.OAuthInvite"
-                    }
+                "created_at": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "email_verified": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "provider": {
+                    "type": "string",
+                    "example": "github"
+                },
+                "username": {
+                    "type": "string"
                 }
             }
         },
@@ -4320,7 +4156,7 @@ const docTemplate = `{
                 "providers": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.oauthProviderInfo"
+                        "$ref": "#/definitions/auth.ProviderInfo"
                     }
                 }
             }
@@ -4342,29 +4178,35 @@ const docTemplate = `{
                 "identities": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/models.UserIdentity"
+                        "$ref": "#/definitions/api.oauthIdentityResponse"
                     }
                 }
             }
         },
-        "api.oauthProviderInfo": {
+        "api.oauthIdentityResponse": {
             "type": "object",
             "properties": {
-                "display_name": {
-                    "type": "string",
-                    "example": "GitHub"
+                "avatar_url": {
+                    "type": "string"
                 },
-                "enabled": {
-                    "type": "boolean",
-                    "example": true
+                "created_at": {
+                    "type": "string"
                 },
-                "icon": {
-                    "type": "string",
-                    "example": "github"
+                "email": {
+                    "type": "string"
+                },
+                "email_verified": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "integer"
                 },
                 "provider": {
                     "type": "string",
                     "example": "github"
+                },
+                "username": {
+                    "type": "string"
                 }
             }
         },
@@ -4374,7 +4216,7 @@ const docTemplate = `{
                 "providers": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/api.oauthProviderInfo"
+                        "$ref": "#/definitions/auth.ProviderInfo"
                     }
                 }
             }
@@ -4391,6 +4233,23 @@ const docTemplate = `{
                     "maxLength": 1024
                 },
                 "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "auth.ProviderInfo": {
+            "type": "object",
+            "properties": {
+                "display_name": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "icon": {
+                    "type": "string"
+                },
+                "provider": {
                     "type": "string"
                 }
             }
@@ -4421,18 +4280,6 @@ const docTemplate = `{
                 },
                 "old_password": {
                     "type": "string"
-                }
-            }
-        },
-        "gorm.DeletedAt": {
-            "type": "object",
-            "properties": {
-                "time": {
-                    "type": "string"
-                },
-                "valid": {
-                    "description": "Valid is true if Time is not NULL",
-                    "type": "boolean"
                 }
             }
         },
@@ -4688,44 +4535,6 @@ const docTemplate = `{
                 "ConfigCategoryOAuth"
             ]
         },
-        "models.OAuthInvite": {
-            "type": "object",
-            "properties": {
-                "createdAt": {
-                    "type": "string"
-                },
-                "created_by": {
-                    "type": "integer"
-                },
-                "deletedAt": {
-                    "$ref": "#/definitions/gorm.DeletedAt"
-                },
-                "email": {
-                    "type": "string"
-                },
-                "expires_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "integer"
-                },
-                "provider": {
-                    "type": "string"
-                },
-                "subject": {
-                    "type": "string"
-                },
-                "updatedAt": {
-                    "type": "string"
-                },
-                "used_at": {
-                    "type": "string"
-                },
-                "user_id": {
-                    "type": "integer"
-                }
-            }
-        },
         "models.SystemConfigStoreRequest": {
             "type": "object",
             "required": [
@@ -4797,44 +4606,6 @@ const docTemplate = `{
                 },
                 "width": {
                     "type": "integer"
-                }
-            }
-        },
-        "models.UserIdentity": {
-            "type": "object",
-            "properties": {
-                "avatar_url": {
-                    "type": "string"
-                },
-                "createdAt": {
-                    "type": "string"
-                },
-                "deletedAt": {
-                    "$ref": "#/definitions/gorm.DeletedAt"
-                },
-                "email": {
-                    "type": "string"
-                },
-                "email_verified": {
-                    "type": "boolean"
-                },
-                "id": {
-                    "type": "integer"
-                },
-                "provider": {
-                    "type": "string"
-                },
-                "subject": {
-                    "type": "string"
-                },
-                "updatedAt": {
-                    "type": "string"
-                },
-                "user_id": {
-                    "type": "integer"
-                },
-                "username": {
-                    "type": "string"
                 }
             }
         },

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/accounts"
@@ -40,7 +39,6 @@ type UserService struct {
 	imagesRepo   *images.Repository
 	albumsRepo   *albumRepo.Repository
 	identityRepo *accounts.IdentityRepository
-	inviteRepo   *accounts.OAuthInviteRepository
 }
 
 // NewUserService 创建用户管理服务
@@ -60,7 +58,7 @@ func NewUserService(
 	}
 }
 
-// NewUserServiceWithOAuth creates a UserService with OAuth invite support.
+// NewUserServiceWithOAuth creates a UserService with OAuth identity lookup support.
 func NewUserServiceWithOAuth(
 	accountsRepo *accounts.Repository,
 	devicesRepo *accounts.DeviceRepository,
@@ -68,7 +66,6 @@ func NewUserServiceWithOAuth(
 	imagesRepo *images.Repository,
 	albumsRepo *albumRepo.Repository,
 	identityRepo *accounts.IdentityRepository,
-	inviteRepo *accounts.OAuthInviteRepository,
 ) *UserService {
 	return &UserService{
 		accountsRepo: accountsRepo,
@@ -77,7 +74,6 @@ func NewUserServiceWithOAuth(
 		imagesRepo:   imagesRepo,
 		albumsRepo:   albumsRepo,
 		identityRepo: identityRepo,
-		inviteRepo:   inviteRepo,
 	}
 }
 
@@ -286,71 +282,6 @@ func (s *UserService) GetUserIdentities(ctx context.Context, userID uint) ([]*mo
 		return nil, nil
 	}
 	return s.identityRepo.FindByUser(ctx, userID)
-}
-
-// GetUserInvites returns the OAuth invites for a user.
-func (s *UserService) GetUserInvites(ctx context.Context, userID uint) ([]*models.OAuthInvite, error) {
-	if s.inviteRepo == nil {
-		return nil, nil
-	}
-	return s.inviteRepo.FindByUser(ctx, userID)
-}
-
-// CreateOAuthInvite creates an OAuth invite for a user.
-func (s *UserService) CreateOAuthInvite(ctx context.Context, userID uint, provider, subject, email string, expiresAt *time.Time, adminID uint) (*models.OAuthInvite, error) {
-	if s.inviteRepo == nil {
-		return nil, errors.New("oauth invite support not configured")
-	}
-
-	if provider == "" {
-		return nil, errors.New("provider is required")
-	}
-	if subject == "" && email == "" {
-		return nil, errors.New("at least one of subject or email is required")
-	}
-
-	// Verify target user exists and is active
-	user, err := s.accountsRepo.GetUserByID(userID)
-	if err != nil {
-		return nil, ErrUserNotFound
-	}
-	if !user.IsActive() {
-		return nil, errors.New("target user is not active")
-	}
-
-	// If subject is provided, check it's not already linked to another user
-	if subject != "" && s.identityRepo != nil {
-		existing, err := s.identityRepo.FindByProviderSubject(ctx, provider, subject)
-		if err != nil && !errors.Is(err, accounts.ErrIdentityNotFound) {
-			return nil, fmt.Errorf("failed to check existing identity: %w", err)
-		}
-		if existing != nil {
-			return nil, errors.New("subject already linked to another user")
-		}
-	}
-
-	invite := &models.OAuthInvite{
-		UserID:    userID,
-		Provider:  provider,
-		Subject:   subject,
-		Email:     email,
-		CreatedBy: adminID,
-		ExpiresAt: expiresAt,
-	}
-	if err := s.inviteRepo.Create(ctx, invite); err != nil {
-		return nil, fmt.Errorf("failed to create invite: %w", err)
-	}
-
-	adminLog.Infof("Admin %d created OAuth invite for user %d (provider: %s)", adminID, userID, provider)
-	return invite, nil
-}
-
-// DeleteOAuthInvite deletes an OAuth invite.
-func (s *UserService) DeleteOAuthInvite(ctx context.Context, inviteID uint) error {
-	if s.inviteRepo == nil {
-		return errors.New("oauth invite support not configured")
-	}
-	return s.inviteRepo.Delete(ctx, inviteID)
 }
 
 func (s *UserService) withTx(fn func(tx *gorm.DB) error) error {

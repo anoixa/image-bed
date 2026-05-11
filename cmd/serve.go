@@ -100,7 +100,6 @@ func InitDependencies(cfg *config.Config) (*Dependencies, error) {
 		AlbumsRepo:   albums.NewRepository(db),
 		KeysRepo:     keys.NewRepository(db),
 		IdentityRepo: accounts.NewIdentityRepository(db),
-		InviteRepo:   accounts.NewOAuthInviteRepository(db),
 	}
 
 	// 从配置文件初始化缓存
@@ -231,7 +230,6 @@ func RunServer() {
 			[]byte(cfg.JWTSecret),
 			loginSvc,
 			deps.Repositories.IdentityRepo,
-			deps.Repositories.InviteRepo,
 			deps.Repositories.AccountsRepo,
 			cfg.AuthPasswordLoginEnabled,
 		)

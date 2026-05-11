@@ -143,7 +143,7 @@ SERVE_FRONTEND=true
 
 ## OAuth 登录
 
-OAuth 登录采用私有邀请制：外部 OAuth 账号只有在已绑定或被管理员邀请后才能登录，不提供公开注册。
+OAuth 登录采用私有账号模式：管理员先创建本地账号，用户登录后可在账号设置中自行绑定 GitHub / Google / Gitee。未绑定的外部 OAuth 账号不能直接登录，也不会自动注册。
 
 支持 GitHub、Google、Gitee。Provider 凭据推荐在后台配置页创建，配置分类为 `oauth`。
 
@@ -167,7 +167,7 @@ https://img.example.com/api/auth/oauth/github/callback
 AUTH_PASSWORD_LOGIN_ENABLED=false
 ```
 
-禁用密码登录前，应确保至少配置一个 OAuth provider，并已为管理员账号创建 OAuth invite 或绑定 identity，避免锁定账号。
+禁用密码登录前，应确保至少配置一个 OAuth provider，并且管理员账号已经完成 OAuth 绑定，避免锁定账号。
 
 OAuth provider 配置示例：
 

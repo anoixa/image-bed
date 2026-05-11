@@ -6,12 +6,10 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/accounts"
-	"gorm.io/gorm"
 )
 
 var (
@@ -29,7 +27,6 @@ type OAuthService struct {
 	stateManager         *StateManager
 	loginService         *LoginService
 	identityRepo         *accounts.IdentityRepository
-	inviteRepo           *accounts.OAuthInviteRepository
 	accountsRepo         *accounts.Repository
 	passwordLoginEnabled bool
 	providers            map[string]OAuthProvider
@@ -41,7 +38,6 @@ func NewOAuthService(
 	jwtSecret []byte,
 	loginService *LoginService,
 	identityRepo *accounts.IdentityRepository,
-	inviteRepo *accounts.OAuthInviteRepository,
 	accountsRepo *accounts.Repository,
 	passwordLoginEnabled bool,
 ) *OAuthService {
@@ -49,7 +45,6 @@ func NewOAuthService(
 		stateManager:         NewStateManager(jwtSecret),
 		loginService:         loginService,
 		identityRepo:         identityRepo,
-		inviteRepo:           inviteRepo,
 		accountsRepo:         accountsRepo,
 		passwordLoginEnabled: passwordLoginEnabled,
 		providers:            make(map[string]OAuthProvider),
@@ -285,47 +280,7 @@ func (s *OAuthService) handleLogin(ctx context.Context, providerName string, ext
 			return nil, "", fmt.Errorf("failed to get user: %w", err)
 		}
 	} else {
-		// 2. Check for invite by subject
-		invite, err := s.inviteRepo.FindActiveByProviderSubject(ctx, providerName, extID.Subject)
-		if err != nil && !errors.Is(err, accounts.ErrInviteNotFound) && !errors.Is(err, accounts.ErrInviteExpired) {
-			return nil, "", fmt.Errorf("failed to lookup invite by subject: %w", err)
-		}
-
-		if invite == nil && extID.EmailVerified {
-			// 3. Check for invite by verified email
-			invite, err = s.inviteRepo.FindActiveByProviderEmail(ctx, providerName, extID.Email)
-			if err != nil && !errors.Is(err, accounts.ErrInviteNotFound) && !errors.Is(err, accounts.ErrInviteExpired) {
-				return nil, "", fmt.Errorf("failed to lookup invite by email: %w", err)
-			}
-		}
-
-		if invite == nil {
-			return nil, "", ErrIdentityNotLinked
-		}
-
-		// Look up invited user and verify active before consuming the invite
-		user, err = s.accountsRepo.GetUserByID(invite.UserID)
-		if err != nil {
-			return nil, "", fmt.Errorf("failed to get invited user: %w", err)
-		}
-		if !user.IsActive() {
-			return nil, "", ErrUserDisabled
-		}
-
-		// Consume invite and create identity atomically
-		newIdentity := &models.UserIdentity{
-			UserID:        user.ID,
-			Provider:      providerName,
-			Subject:       extID.Subject,
-			Username:      extID.Username,
-			Email:         extID.Email,
-			EmailVerified: extID.EmailVerified,
-			AvatarURL:     extID.AvatarURL,
-		}
-
-		if err := s.consumeInviteAndCreateIdentity(ctx, invite.ID, newIdentity); err != nil {
-			return nil, "", fmt.Errorf("failed to consume invite and create identity: %w", err)
-		}
+		return nil, "", ErrIdentityNotLinked
 	}
 
 	if !user.IsActive() {
@@ -429,25 +384,4 @@ func (s *OAuthService) UnlinkIdentity(ctx context.Context, userID uint, provider
 // StateManager returns the state manager for cookie validation.
 func (s *OAuthService) StateManager() *StateManager {
 	return s.stateManager
-}
-
-// consumeInviteAndCreateIdentity atomically consumes an invite and creates the
-// identity binding within a single database transaction.
-func (s *OAuthService) consumeInviteAndCreateIdentity(ctx context.Context, inviteID uint, identity *models.UserIdentity) error {
-	return s.identityRepo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Consume invite within the transaction
-		now := time.Now()
-		result := tx.Model(&models.OAuthInvite{}).
-			Where("id = ? AND used_at IS NULL", inviteID).
-			Update("used_at", now)
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return accounts.ErrInviteConsumed
-		}
-
-		// Create identity binding within the same transaction
-		return tx.Create(identity).Error
-	})
 }

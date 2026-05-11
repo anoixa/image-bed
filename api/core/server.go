@@ -29,7 +29,6 @@ type Repositories struct {
 	AccountsRepo *accounts.Repository
 	DevicesRepo  *accounts.DeviceRepository
 	IdentityRepo *accounts.IdentityRepository
-	InviteRepo   *accounts.OAuthInviteRepository
 	ImagesRepo   *images.Repository
 	AlbumsRepo   *albums.Repository
 	KeysRepo     *keys.Repository

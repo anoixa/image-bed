@@ -32,8 +32,18 @@ type authCapabilitiesResponse struct {
 	Providers            []auth.ProviderInfo `json:"providers"`
 }
 
+type oauthIdentityResponse struct {
+	ID            uint      `json:"id"`
+	Provider      string    `json:"provider" example:"github"`
+	Username      string    `json:"username,omitempty"`
+	Email         string    `json:"email,omitempty"`
+	EmailVerified bool      `json:"email_verified"`
+	AvatarURL     string    `json:"avatar_url,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
 type oauthIdentitiesResponse struct {
-	Identities []*models.UserIdentity `json:"identities"`
+	Identities []oauthIdentityResponse `json:"identities"`
 }
 
 // NewOAuthHandler creates a new OAuthHandler.
@@ -193,7 +203,7 @@ func (h *OAuthHandler) GetIdentities(c *gin.Context) {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to get identities")
 		return
 	}
-	common.RespondSuccess(c, oauthIdentitiesResponse{Identities: identities})
+	common.RespondSuccess(c, oauthIdentitiesResponse{Identities: buildOAuthIdentityResponses(identities)})
 }
 
 // StartLink initiates an OAuth link flow for an authenticated user.
@@ -296,4 +306,23 @@ func clearOAuthCookies(c *gin.Context) {
 	for _, name := range []string{auth.StateCookieName(), auth.PKCECookieName(), auth.NonceCookieName()} {
 		c.SetCookie(name, "", -1, "/api/auth/oauth/", "", false, true)
 	}
+}
+
+func buildOAuthIdentityResponses(identities []*models.UserIdentity) []oauthIdentityResponse {
+	result := make([]oauthIdentityResponse, 0, len(identities))
+	for _, identity := range identities {
+		if identity == nil {
+			continue
+		}
+		result = append(result, oauthIdentityResponse{
+			ID:            identity.ID,
+			Provider:      identity.Provider,
+			Username:      identity.Username,
+			Email:         identity.Email,
+			EmailVerified: identity.EmailVerified,
+			AvatarURL:     identity.AvatarURL,
+			CreatedAt:     identity.CreatedAt,
+		})
+	}
+	return result
 }

@@ -80,7 +80,7 @@ func (p *GiteeProvider) FetchIdentity(ctx context.Context, token *OAuthToken, _ 
 	}
 
 	// Gitee does not reliably indicate email verification status via the user API.
-	// Set EmailVerified to false; email-based invites will require manual admin verification.
+	// Keep EmailVerified false; OAuth login relies on explicit account linking.
 	identity.EmailVerified = false
 
 	return identity, nil

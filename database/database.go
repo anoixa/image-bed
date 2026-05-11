@@ -148,7 +148,6 @@ func AutoMigrate(db *gorm.DB) error {
 		&models.SystemConfig{},
 		&models.ImageVariant{},
 		&models.UserIdentity{},
-		&models.OAuthInvite{},
 	); err != nil {
 		return err
 	}

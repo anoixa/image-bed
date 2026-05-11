@@ -318,7 +318,7 @@ func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies, imageHan
 			deps.Repositories.ImagesRepo,
 			deps.Repositories.AlbumsRepo,
 		)
-		if deps.Repositories.IdentityRepo != nil && deps.Repositories.InviteRepo != nil {
+		if deps.Repositories.IdentityRepo != nil {
 			userSvc = svcAdmin.NewUserServiceWithOAuth(
 				deps.Repositories.AccountsRepo,
 				deps.Repositories.DevicesRepo,
@@ -326,7 +326,6 @@ func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies, imageHan
 				deps.Repositories.ImagesRepo,
 				deps.Repositories.AlbumsRepo,
 				deps.Repositories.IdentityRepo,
-				deps.Repositories.InviteRepo,
 			)
 		}
 		userHandler := admin.NewUserHandler(userSvc)
@@ -337,8 +336,6 @@ func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies, imageHan
 		adminGroup.POST("/users/:id/reset-password", userHandler.ResetPassword)
 		adminGroup.DELETE("/users/:id", userHandler.DeleteUser)
 		adminGroup.GET("/users/:id/oauth-identities", userHandler.GetOAuthIdentities)
-		adminGroup.POST("/users/:id/oauth-invites", userHandler.CreateOAuthInvite)
-		adminGroup.DELETE("/users/:id/oauth-invites/:invite_id", userHandler.DeleteOAuthInvite)
 	}
 }
 

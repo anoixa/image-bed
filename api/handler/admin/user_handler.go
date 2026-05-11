@@ -346,39 +346,31 @@ func (h *UserHandler) DeleteUser(c *gin.Context) {
 	common.RespondSuccess(c, gin.H{"message": "User deleted successfully"})
 }
 
-// CreateOAuthInviteRequest is the request body for creating an OAuth invite.
-type CreateOAuthInviteRequest struct {
-	Provider  string  `json:"provider" binding:"required"`
-	Subject   string  `json:"subject"`
-	Email     string  `json:"email"`
-	ExpiresAt *string `json:"expires_at"`
-}
-
 type oauthUserIdentitiesResponse struct {
-	Identities []*models.UserIdentity `json:"identities"`
-	Invites    []*models.OAuthInvite  `json:"invites"`
+	Identities []oauthUserIdentitySummary `json:"identities"`
 }
 
-type createOAuthInviteResponse struct {
-	ID        uint       `json:"id" example:"1"`
-	Provider  string     `json:"provider" example:"github"`
-	Subject   string     `json:"subject,omitempty" example:"123456"`
-	Email     string     `json:"email,omitempty" example:"user@example.com"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
+type oauthUserIdentitySummary struct {
+	ID            uint      `json:"id"`
+	Provider      string    `json:"provider" example:"github"`
+	Username      string    `json:"username,omitempty"`
+	Email         string    `json:"email,omitempty"`
+	EmailVerified bool      `json:"email_verified"`
+	AvatarURL     string    `json:"avatar_url,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // GetOAuthIdentities returns linked OAuth identities for a user.
-// @Summary      Get user OAuth identities and invites
-// @Description  Get linked OAuth identities and pending/used OAuth invites for a user.
+// @Summary      Get user OAuth identities
+// @Description  Get linked OAuth identities for a user. Users bind OAuth identities from their own account settings.
 // @Tags         admin
 // @Accept       json
 // @Produce      json
 // @Param        id   path      int  true  "User ID"
-// @Success      200  {object}  common.Response{data=oauthUserIdentitiesResponse}  "OAuth identity and invite list"
+// @Success      200  {object}  common.Response{data=oauthUserIdentitiesResponse}  "OAuth identity list"
 // @Failure      400  {object}  common.Response  "Invalid user ID"
 // @Failure      401  {object}  common.Response  "Unauthorized"
-// @Failure      500  {object}  common.Response  "Failed to get identities or invites"
+// @Failure      500  {object}  common.Response  "Failed to get identities"
 // @Security     ApiKeyAuth
 // @Router       /api/v1/admin/users/{id}/oauth-identities [get]
 func (h *UserHandler) GetOAuthIdentities(c *gin.Context) {
@@ -394,102 +386,26 @@ func (h *UserHandler) GetOAuthIdentities(c *gin.Context) {
 		return
 	}
 
-	invites, err := h.svc.GetUserInvites(c.Request.Context(), uint(id))
-	if err != nil {
-		common.RespondError(c, http.StatusInternalServerError, "Failed to get invites")
-		return
-	}
-
 	common.RespondSuccess(c, oauthUserIdentitiesResponse{
-		Identities: identities,
-		Invites:    invites,
+		Identities: buildOAuthUserIdentitySummaries(identities),
 	})
 }
 
-// CreateOAuthInvite creates an OAuth invite for a user.
-// @Summary      Create OAuth invite
-// @Description  Create an invite that allows a specific OAuth subject or verified email to log in as the target user.
-// @Tags         admin
-// @Accept       json
-// @Produce      json
-// @Param        id       path      int                       true  "User ID"
-// @Param        request  body      CreateOAuthInviteRequest  true  "OAuth invite"
-// @Success      200      {object}  common.Response{data=createOAuthInviteResponse}  "OAuth invite created"
-// @Failure      400      {object}  common.Response  "Invalid request"
-// @Failure      401      {object}  common.Response  "Unauthorized"
-// @Failure      404      {object}  common.Response  "User not found"
-// @Security     ApiKeyAuth
-// @Router       /api/v1/admin/users/{id}/oauth-invites [post]
-func (h *UserHandler) CreateOAuthInvite(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		common.RespondError(c, http.StatusBadRequest, "Invalid user ID")
-		return
-	}
-
-	var req CreateOAuthInviteRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		common.RespondError(c, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	var expiresAt *time.Time
-	if req.ExpiresAt != nil {
-		t, err := time.Parse(time.RFC3339, *req.ExpiresAt)
-		if err != nil {
-			common.RespondError(c, http.StatusBadRequest, "Invalid expires_at format, use RFC3339")
-			return
+func buildOAuthUserIdentitySummaries(identities []*models.UserIdentity) []oauthUserIdentitySummary {
+	result := make([]oauthUserIdentitySummary, 0, len(identities))
+	for _, identity := range identities {
+		if identity == nil {
+			continue
 		}
-		expiresAt = &t
+		result = append(result, oauthUserIdentitySummary{
+			ID:            identity.ID,
+			Provider:      identity.Provider,
+			Username:      identity.Username,
+			Email:         identity.Email,
+			EmailVerified: identity.EmailVerified,
+			AvatarURL:     identity.AvatarURL,
+			CreatedAt:     identity.CreatedAt,
+		})
 	}
-
-	adminID := c.GetUint(middleware.ContextUserIDKey)
-	invite, err := h.svc.CreateOAuthInvite(c.Request.Context(), uint(id), req.Provider, req.Subject, req.Email, expiresAt, adminID)
-	if err != nil {
-		switch {
-		case errors.Is(err, admin.ErrUserNotFound):
-			common.RespondError(c, http.StatusNotFound, err.Error())
-		default:
-			common.RespondError(c, http.StatusBadRequest, err.Error())
-		}
-		return
-	}
-
-	common.RespondSuccess(c, createOAuthInviteResponse{
-		ID:        invite.ID,
-		Provider:  invite.Provider,
-		Subject:   invite.Subject,
-		Email:     invite.Email,
-		ExpiresAt: invite.ExpiresAt,
-		CreatedAt: invite.CreatedAt,
-	})
-}
-
-// DeleteOAuthInvite deletes an OAuth invite.
-// @Summary      Delete OAuth invite
-// @Description  Delete an OAuth invite by invite ID.
-// @Tags         admin
-// @Accept       json
-// @Produce      json
-// @Param        id         path      int  true  "User ID"
-// @Param        invite_id  path      int  true  "OAuth invite ID"
-// @Success      200        {object}  common.Response  "Invite deleted"
-// @Failure      400        {object}  common.Response  "Invalid invite ID"
-// @Failure      401        {object}  common.Response  "Unauthorized"
-// @Failure      404        {object}  common.Response  "Invite not found"
-// @Security     ApiKeyAuth
-// @Router       /api/v1/admin/users/{id}/oauth-invites/{invite_id} [delete]
-func (h *UserHandler) DeleteOAuthInvite(c *gin.Context) {
-	inviteID, err := strconv.ParseUint(c.Param("invite_id"), 10, 32)
-	if err != nil {
-		common.RespondError(c, http.StatusBadRequest, "Invalid invite ID")
-		return
-	}
-
-	if err := h.svc.DeleteOAuthInvite(c.Request.Context(), uint(inviteID)); err != nil {
-		common.RespondError(c, http.StatusNotFound, "Invite not found")
-		return
-	}
-
-	common.RespondSuccess(c, gin.H{"message": "Invite deleted successfully"})
+	return result
 }

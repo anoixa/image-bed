@@ -1,17 +1,4 @@
 definitions:
-  admin.CreateOAuthInviteRequest:
-    properties:
-      email:
-        type: string
-      expires_at:
-        type: string
-      provider:
-        type: string
-      subject:
-        type: string
-    required:
-    - provider
-    type: object
   admin.CreateUserRequest:
     properties:
       password:
@@ -146,35 +133,30 @@ definitions:
       username:
         type: string
     type: object
-  admin.createOAuthInviteResponse:
-    properties:
-      created_at:
-        type: string
-      email:
-        example: user@example.com
-        type: string
-      expires_at:
-        type: string
-      id:
-        example: 1
-        type: integer
-      provider:
-        example: github
-        type: string
-      subject:
-        example: "123456"
-        type: string
-    type: object
   admin.oauthUserIdentitiesResponse:
     properties:
       identities:
         items:
-          $ref: '#/definitions/models.UserIdentity'
+          $ref: '#/definitions/admin.oauthUserIdentitySummary'
         type: array
-      invites:
-        items:
-          $ref: '#/definitions/models.OAuthInvite'
-        type: array
+    type: object
+  admin.oauthUserIdentitySummary:
+    properties:
+      avatar_url:
+        type: string
+      created_at:
+        type: string
+      email:
+        type: string
+      email_verified:
+        type: boolean
+      id:
+        type: integer
+      provider:
+        example: github
+        type: string
+      username:
+        type: string
     type: object
   albums.AddImagesToAlbumRequest:
     properties:
@@ -324,7 +306,7 @@ definitions:
         type: boolean
       providers:
         items:
-          $ref: '#/definitions/api.oauthProviderInfo'
+          $ref: '#/definitions/auth.ProviderInfo'
         type: array
     type: object
   api.loginResponse:
@@ -338,29 +320,32 @@ definitions:
     properties:
       identities:
         items:
-          $ref: '#/definitions/models.UserIdentity'
+          $ref: '#/definitions/api.oauthIdentityResponse'
         type: array
     type: object
-  api.oauthProviderInfo:
+  api.oauthIdentityResponse:
     properties:
-      display_name:
-        example: GitHub
+      avatar_url:
         type: string
-      enabled:
-        example: true
+      created_at:
+        type: string
+      email:
+        type: string
+      email_verified:
         type: boolean
-      icon:
-        example: github
-        type: string
+      id:
+        type: integer
       provider:
         example: github
+        type: string
+      username:
         type: string
     type: object
   api.oauthProvidersResponse:
     properties:
       providers:
         items:
-          $ref: '#/definitions/api.oauthProviderInfo'
+          $ref: '#/definitions/auth.ProviderInfo'
         type: array
     type: object
   api.userAuthRequestBody:
@@ -373,6 +358,17 @@ definitions:
     required:
     - password
     - username
+    type: object
+  auth.ProviderInfo:
+    properties:
+      display_name:
+        type: string
+      enabled:
+        type: boolean
+      icon:
+        type: string
+      provider:
+        type: string
     type: object
   common.Response:
     properties:
@@ -393,14 +389,6 @@ definitions:
     required:
     - new_password
     - old_password
-    type: object
-  gorm.DeletedAt:
-    properties:
-      time:
-        type: string
-      valid:
-        description: Valid is true if Time is not NULL
-        type: boolean
     type: object
   images.DeleteRequestBody:
     properties:
@@ -572,31 +560,6 @@ definitions:
     - ConfigCategoryImageProcessing
     - ConfigCategorySecurity
     - ConfigCategoryOAuth
-  models.OAuthInvite:
-    properties:
-      created_by:
-        type: integer
-      createdAt:
-        type: string
-      deletedAt:
-        $ref: '#/definitions/gorm.DeletedAt'
-      email:
-        type: string
-      expires_at:
-        type: string
-      id:
-        type: integer
-      provider:
-        type: string
-      subject:
-        type: string
-      updatedAt:
-        type: string
-      used_at:
-        type: string
-      user_id:
-        type: integer
-    type: object
   models.SystemConfigStoreRequest:
     properties:
       category:
@@ -646,31 +609,6 @@ definitions:
         type: string
       width:
         type: integer
-    type: object
-  models.UserIdentity:
-    properties:
-      avatar_url:
-        type: string
-      createdAt:
-        type: string
-      deletedAt:
-        $ref: '#/definitions/gorm.DeletedAt'
-      email:
-        type: string
-      email_verified:
-        type: boolean
-      id:
-        type: integer
-      provider:
-        type: string
-      subject:
-        type: string
-      updatedAt:
-        type: string
-      user_id:
-        type: integer
-      username:
-        type: string
     type: object
   system.CacheStatus:
     properties:
@@ -1929,8 +1867,8 @@ paths:
     get:
       consumes:
       - application/json
-      description: Get linked OAuth identities and pending/used OAuth invites for
-        a user.
+      description: Get linked OAuth identities for a user. Users bind OAuth identities
+        from their own account settings.
       parameters:
       - description: User ID
         in: path
@@ -1941,7 +1879,7 @@ paths:
       - application/json
       responses:
         "200":
-          description: OAuth identity and invite list
+          description: OAuth identity list
           schema:
             allOf:
             - $ref: '#/definitions/common.Response'
@@ -1958,99 +1896,12 @@ paths:
           schema:
             $ref: '#/definitions/common.Response'
         "500":
-          description: Failed to get identities or invites
+          description: Failed to get identities
           schema:
             $ref: '#/definitions/common.Response'
       security:
       - ApiKeyAuth: []
-      summary: Get user OAuth identities and invites
-      tags:
-      - admin
-  /api/v1/admin/users/{id}/oauth-invites:
-    post:
-      consumes:
-      - application/json
-      description: Create an invite that allows a specific OAuth subject or verified
-        email to log in as the target user.
-      parameters:
-      - description: User ID
-        in: path
-        name: id
-        required: true
-        type: integer
-      - description: OAuth invite
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/admin.CreateOAuthInviteRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OAuth invite created
-          schema:
-            allOf:
-            - $ref: '#/definitions/common.Response'
-            - properties:
-                data:
-                  $ref: '#/definitions/admin.createOAuthInviteResponse'
-              type: object
-        "400":
-          description: Invalid request
-          schema:
-            $ref: '#/definitions/common.Response'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/common.Response'
-        "404":
-          description: User not found
-          schema:
-            $ref: '#/definitions/common.Response'
-      security:
-      - ApiKeyAuth: []
-      summary: Create OAuth invite
-      tags:
-      - admin
-  /api/v1/admin/users/{id}/oauth-invites/{invite_id}:
-    delete:
-      consumes:
-      - application/json
-      description: Delete an OAuth invite by invite ID.
-      parameters:
-      - description: User ID
-        in: path
-        name: id
-        required: true
-        type: integer
-      - description: OAuth invite ID
-        in: path
-        name: invite_id
-        required: true
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Invite deleted
-          schema:
-            $ref: '#/definitions/common.Response'
-        "400":
-          description: Invalid invite ID
-          schema:
-            $ref: '#/definitions/common.Response'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/common.Response'
-        "404":
-          description: Invite not found
-          schema:
-            $ref: '#/definitions/common.Response'
-      security:
-      - ApiKeyAuth: []
-      summary: Delete OAuth invite
+      summary: Get user OAuth identities
       tags:
       - admin
   /api/v1/admin/users/{id}/reset-password:
