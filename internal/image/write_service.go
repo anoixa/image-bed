@@ -9,7 +9,6 @@ import (
 	"io"
 	"mime/multipart"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/anoixa/image-bed/api/middleware"
@@ -136,7 +135,6 @@ func (s *WriteService) UploadBatchSources(ctx context.Context, userID uint, file
 	}
 
 	results := make([]*UploadResult, len(files))
-	var resultsMutex sync.Mutex
 
 	g, ctx := errgroup.WithContext(ctx)
 	sem := make(chan struct{}, concurrentLimit)
@@ -166,9 +164,7 @@ func (s *WriteService) UploadBatchSources(ctx context.Context, userID uint, file
 					result.Links = utils.BuildLinkFormats(s.baseURL, image.Identifier)
 				}
 
-				resultsMutex.Lock()
 				results[i] = result
-				resultsMutex.Unlock()
 				return nil
 			}
 		})
