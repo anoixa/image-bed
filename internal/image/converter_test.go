@@ -163,6 +163,37 @@ func TestGetStorageForImageDoesNotFallbackForMissingSpecificProvider(t *testing.
 	assert.Nil(t, converter.getStorageForImage(image))
 }
 
+func TestTriggerConversionDoesNotCreateVariantsWhenStorageMissing(t *testing.T) {
+	db := setupConverterTestDB(t)
+	imageRepo := repoimages.NewRepository(db)
+	variantRepo := repoimages.NewVariantRepository(db)
+	manager := setupConverterConfigManager(t, db)
+
+	image := &models.Image{
+		Identifier:      "img-missing-storage",
+		OriginalName:    "test.jpg",
+		FileHash:        "hash-missing-storage",
+		FileSize:        32 * 1024,
+		MimeType:        "image/jpeg",
+		StoragePath:     "original/test.jpg",
+		StorageConfigID: 999999,
+		UserID:          1,
+		VariantStatus:   models.ImageVariantStatusNone,
+	}
+	require.NoError(t, imageRepo.SaveImage(image))
+
+	converter := NewConverter(manager, variantRepo, imageRepo, &testStorageProvider{}, nil)
+	converter.TriggerConversion(image)
+
+	var count int64
+	require.NoError(t, db.Model(&models.ImageVariant{}).Where("image_id = ?", image.ID).Count(&count).Error)
+	assert.Equal(t, int64(0), count)
+
+	updatedImage, err := imageRepo.GetImageByIdentifier(image.Identifier)
+	require.NoError(t, err)
+	assert.Equal(t, models.ImageVariantStatusFailed, updatedImage.VariantStatus)
+}
+
 func TestFailPendingVariantsOnSubmitFailureMarksVariantsAndImageFailed(t *testing.T) {
 	db := setupConverterTestDB(t)
 	imageRepo := repoimages.NewRepository(db)
@@ -216,6 +247,14 @@ func setupConverterTestDB(t *testing.T) *gorm.DB {
 	})
 	require.NoError(t, err)
 
-	require.NoError(t, db.AutoMigrate(&models.Image{}, &models.ImageVariant{}))
+	require.NoError(t, db.AutoMigrate(&models.Image{}, &models.ImageVariant{}, &models.SystemConfig{}))
 	return db
+}
+
+func setupConverterConfigManager(t *testing.T, db *gorm.DB) *configdb.Manager {
+	t.Helper()
+
+	manager := configdb.NewManager(db, t.TempDir())
+	require.NoError(t, manager.Initialize())
+	return manager
 }

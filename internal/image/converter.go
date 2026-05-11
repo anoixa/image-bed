@@ -87,6 +87,24 @@ func (c *Converter) triggerConversion(image *models.Image, ignoreRetryWindow boo
 	webpEnabled := settings.IsFormatEnabled(models.FormatWebP)
 	avifEnabled := settings.IsFormatEnabled(models.FormatAVIF) && vipsfile.SupportsAVIFEncoding()
 
+	// Check runtime dependencies before creating variant rows. If storage or the
+	// worker pool is unavailable, creating pending variants only to mark them
+	// failed creates noisy writes and makes recovery harder.
+	storageProvider := c.getStorageForImage(image)
+	if storageProvider == nil {
+		converterLog.Warnf("Storage provider unavailable for image %s (StorageConfigID=%d)",
+			image.Identifier, image.StorageConfigID)
+		c.markImageConversionUnavailable(imageRepo, image, "storage provider unavailable")
+		return
+	}
+
+	pool := worker.GetGlobalPool()
+	if pool == nil {
+		converterLog.Warnf("Worker pool unavailable for image %s", image.Identifier)
+		c.markImageConversionUnavailable(imageRepo, image, "worker pool not initialized")
+		return
+	}
+
 	// 创建缩略图变体记录（如果启用）
 	var thumbVariant *models.ImageVariant
 	if thumbnailEnabled {
@@ -125,22 +143,6 @@ func (c *Converter) triggerConversion(image *models.Image, ignoreRetryWindow boo
 		return
 	}
 
-	pool := worker.GetGlobalPool()
-	if pool == nil {
-		converterLog.Warnf("Worker pool unavailable for image %s", image.Identifier)
-		c.failPendingVariantsOnSubmitFailure(imageRepo, variantRepo, image, "worker pool not initialized", thumbVariant, webpVariant, avifVariant)
-		return
-	}
-
-	// 获取图片对应的存储提供者
-	storageProvider := c.getStorageForImage(image)
-	if storageProvider == nil {
-		converterLog.Warnf("Storage provider unavailable for image %s (StorageConfigID=%d)",
-			image.Identifier, image.StorageConfigID)
-		c.failPendingVariantsOnSubmitFailure(imageRepo, variantRepo, image, "storage provider unavailable", thumbVariant, webpVariant, avifVariant)
-		return
-	}
-
 	// 提交统一流水线任务
 	ok := pool.Submit(func() {
 		task := &worker.ImagePipelineTask{
@@ -171,6 +173,24 @@ func (c *Converter) triggerConversion(image *models.Image, ignoreRetryWindow boo
 
 	if err := c.markImageProcessing(imageRepo, image); err != nil {
 		converterLog.Warnf("Failed to update image %s status after submit: %v", image.Identifier, err)
+	}
+}
+
+func (c *Converter) markImageConversionUnavailable(imageRepo *images.Repository, image *models.Image, reason string) {
+	if image == nil || imageRepo == nil {
+		return
+	}
+
+	if err := imageRepo.UpdateVariantStatus(image.ID, models.ImageVariantStatusFailed); err != nil {
+		converterLog.Warnf("Failed to mark image %s failed after conversion unavailable (%s): %v", image.Identifier, reason, err)
+		return
+	}
+	image.VariantStatus = models.ImageVariantStatusFailed
+	if c.cacheHelper != nil {
+		ctx, cancel := utils.DetachedContext(5 * time.Second)
+		defer cancel()
+		_ = c.cacheHelper.DeleteCachedImage(ctx, image.Identifier)
+		_ = c.cacheHelper.DeleteCachedImageVariants(ctx, image.ID)
 	}
 }
 
