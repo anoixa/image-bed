@@ -166,6 +166,7 @@ SERVE_FRONTEND=true
 SERVER_HOST=127.0.0.1
 SERVER_PORT=8080
 SERVER_DOMAIN=http://localhost:8080
+APP_TIMEZONE=Asia/Shanghai
 
 # 数据库 (sqlite 或 postgresql)
 DB_TYPE=sqlite
@@ -186,7 +187,7 @@ WORKER_COUNT=-1
 WORKER_MEMORY_LIMIT_MB=512
 ```
 
-`JWT_SECRET` 留空时会在首次启动自动生成并持久化到 `data/jwt.secret`；生产环境也可以手动指定至少 32 字符的强密钥。`SERVER_DOMAIN` 会影响图片链接和 OAuth callback URL。`CORS_ORIGINS` 主要用于纯 API / 前后端分离部署，嵌入前端同源访问通常无需配置。
+`JWT_SECRET` 留空会在首次启动自动生成；`SERVER_DOMAIN` 用于图片链接和 OAuth callback；`APP_TIMEZONE` 为项目时区设置。
 
 完整配置见 `.env.example`
 

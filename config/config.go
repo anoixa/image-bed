@@ -28,6 +28,7 @@ type Config struct {
 	ServerIdleTimeout  time.Duration `mapstructure:"server_idle_timeout"`
 	TrustedProxies     string        `mapstructure:"trusted_proxies"`
 	RealIPHeaders      string        `mapstructure:"real_ip_headers"`
+	AppTimezone        string        `mapstructure:"app_timezone"`
 
 	CorsOrigins string `mapstructure:"cors_origins"`
 
@@ -134,6 +135,9 @@ func loadConfig() error {
 	if err := viper.Unmarshal(&globalConfig); err != nil {
 		return fmt.Errorf("unable to unmarshal config: %w", err)
 	}
+	if err := ApplyTimezone(globalConfig.AppTimezone); err != nil {
+		return err
+	}
 
 	// WorkerCount: -1 = 使用当前 GOMAXPROCS, 0 = 使用默认值 (max(2, GOMAXPROCS)), >0 = 使用指定值
 	switch {
@@ -157,6 +161,7 @@ func setDefaults() {
 	viper.SetDefault("server_idle_timeout", "120s")
 	viper.SetDefault("trusted_proxies", "")
 	viper.SetDefault("real_ip_headers", "X-Forwarded-For,X-Real-IP")
+	viper.SetDefault("app_timezone", "Asia/Shanghai")
 
 	viper.SetDefault("cors_origins", "http://localhost:5173,http://127.0.0.1:5173")
 

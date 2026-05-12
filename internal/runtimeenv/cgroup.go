@@ -1,4 +1,4 @@
-package pool
+package runtimeenv
 
 import (
 	"math"
@@ -11,6 +11,8 @@ import (
 
 const reservedForNonGo = 64 * 1024 * 1024
 
+// InitProcessEnv applies process-wide runtime settings derived from cgroup
+// limits. It should run before configuration reads GOMAXPROCS-derived defaults.
 func InitProcessEnv() {
 	setMemoryLimit()
 	setCPUCount()

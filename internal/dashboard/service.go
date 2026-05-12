@@ -194,7 +194,7 @@ func (s *Service) buildTrendData(stats []dashboard.DailyStat, days int) TrendSta
 	dates := make([]string, days)
 	data := make([]int64, days)
 
-	now := time.Now()
+	now := time.Now().In(time.Local)
 	for i := 0; i < days; i++ {
 		date := now.AddDate(0, 0, -(days - 1 - i)).Format("2006-01-02")
 		dates[i] = date
@@ -204,7 +204,7 @@ func (s *Service) buildTrendData(stats []dashboard.DailyStat, days int) TrendSta
 	statMap := make(map[string]int64)
 	dashboardLog.Debugf("buildTrendData received %d stats from DB", len(stats))
 	for _, stat := range stats {
-		dateStr := stat.Date.Format("2006-01-02")
+		dateStr := stat.Date.In(time.Local).Format("2006-01-02")
 		statMap[dateStr] = stat.Count
 		dashboardLog.Debugf("buildTrendData DB stat: date=%s, count=%d", dateStr, stat.Count)
 	}
