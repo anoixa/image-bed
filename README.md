@@ -1,6 +1,6 @@
 # image-bed
 
-一个基于 Go + Gin 的轻量级图床服务，支持多种存储后端、图片转换和相册管理。
+一个基于 Go + Gin 的个人 / 小团队自托管图片托管系统，支持多存储后端、图片格式自动协商、异步转换、相册管理和基础多用户能力。
 
 ## 功能特性
 
@@ -94,7 +94,7 @@ PUID="$(id -u)" PGID="$(id -g)" docker compose up -d --build
 
 ## 前端集成
 
-本项目为纯后端 API 服务，前端需单独部署。
+后端可以托管前端构建产物，也可以作为纯 API 服务独立部署。
 
 ### 前端项目
 
@@ -135,7 +135,7 @@ SERVE_FRONTEND=true
 
 ### 仅使用 API
 
-如不需要前端界面，设置 `SERVE_FRONTEND=false`，后端仅提供 API 服务。
+如不需要后端托管前端界面，设置 `SERVE_FRONTEND=false`，后端仅提供 API 服务。
 
 ## API 文档
 
