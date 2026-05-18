@@ -298,6 +298,40 @@ func (h *UserHandler) ResetPassword(c *gin.Context) {
 	})
 }
 
+// ResetTwoFactor
+// @Summary      Reset user 2FA
+// @Description  Clear a user's TOTP 2FA settings. This does not change password or revoke sessions.
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        id   path      int  true  "User ID"
+// @Success      200  {object}  common.Response{data=MessageResponse}  "2FA reset"
+// @Failure      400  {object}  common.Response                         "Invalid user ID"
+// @Failure      401  {object}  common.Response                         "Unauthorized"
+// @Failure      403  {object}  common.Response                         "Forbidden"
+// @Failure      404  {object}  common.Response                         "User not found"
+// @Failure      500  {object}  common.Response                         "Internal server error"
+// @Security     ApiKeyAuth
+// @Router       /api/v1/admin/users/{id}/2fa/reset [post]
+func (h *UserHandler) ResetTwoFactor(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		common.RespondError(c, http.StatusBadRequest, "Invalid user ID")
+		return
+	}
+
+	if err := h.svc.ResetTwoFactor(c.Request.Context(), uint(id)); err != nil {
+		if errors.Is(err, admin.ErrUserNotFound) {
+			common.RespondError(c, http.StatusNotFound, err.Error())
+		} else {
+			common.RespondError(c, http.StatusInternalServerError, "Failed to reset 2FA")
+		}
+		return
+	}
+
+	common.RespondSuccess(c, gin.H{"message": "2FA reset successfully"})
+}
+
 // DeleteUser
 // @Summary      Delete user
 // @Description  Delete a user when they do not own images or albums

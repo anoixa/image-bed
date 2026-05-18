@@ -1,12 +1,14 @@
 package user
 
 import (
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/database/repo/accounts"
 	cryptopackage "github.com/anoixa/image-bed/utils/crypto"
+	"github.com/pquerna/otp/totp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
@@ -21,8 +23,21 @@ func setupUserServiceTestDB(t *testing.T) *gorm.DB {
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.User{}, &models.Device{}))
+	require.NoError(t, db.AutoMigrate(&models.User{}, &models.Device{}, &models.UserTOTPSetting{}))
 	return db
+}
+
+type testSecretCrypto struct{}
+
+func (testSecretCrypto) EncryptString(plaintext string) (string, error) {
+	return "enc:" + plaintext, nil
+}
+
+func (testSecretCrypto) DecryptString(ciphertext string) (string, error) {
+	if len(ciphertext) >= 4 && ciphertext[:4] == "enc:" {
+		return ciphertext[4:], nil
+	}
+	return ciphertext, nil
 }
 
 func TestChangePasswordRevokesAllUserSessions(t *testing.T) {
@@ -80,4 +95,45 @@ func TestGetCurrentUser(t *testing.T) {
 	assert.Equal(t, "tester", currentUser.Username)
 	assert.Equal(t, models.RoleAdmin, currentUser.Role)
 	assert.Equal(t, models.UserStatusDisabled, currentUser.Status)
+}
+
+func TestSetupAndEnable2FA(t *testing.T) {
+	db := setupUserServiceTestDB(t)
+	accountsRepo := accounts.NewRepository(db)
+	twoFactorRepo := accounts.NewTwoFactorRepository(db)
+	crypto := testSecretCrypto{}
+	service := NewServiceWith2FA(accountsRepo, nil, twoFactorRepo, crypto)
+
+	hashedPassword, err := cryptopackage.GenerateFromPassword("password123")
+	require.NoError(t, err)
+	user := &models.User{
+		Username: "totp-user",
+		Password: hashedPassword,
+		Role:     models.RoleUser,
+		Status:   models.UserStatusActive,
+	}
+	require.NoError(t, accountsRepo.CreateUser(user))
+
+	_, err = service.Setup2FA(Setup2FARequest{UserID: user.ID, CurrentPassword: "wrong"})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrInvalidOldPassword))
+
+	setup, err := service.Setup2FA(Setup2FARequest{UserID: user.ID, CurrentPassword: "password123"})
+	require.NoError(t, err)
+	require.NotEmpty(t, setup.URI)
+	require.NotEmpty(t, setup.Secret)
+
+	setting, err := twoFactorRepo.GetTOTPSetting(t.Context(), user.ID)
+	require.NoError(t, err)
+	assert.False(t, setting.Enabled)
+	assert.NotEqual(t, setup.Secret, setting.PendingSecretEncrypted)
+	assert.NotEmpty(t, setting.PendingSecretEncrypted)
+
+	code, err := totp.GenerateCode(setup.Secret, time.Now())
+	require.NoError(t, err)
+	require.NoError(t, service.Enable2FA(user.ID, code))
+
+	enabled, err := service.Get2FAStatus(user.ID)
+	require.NoError(t, err)
+	assert.True(t, enabled)
 }

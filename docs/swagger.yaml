@@ -337,6 +337,12 @@ definitions:
         type: string
       access_token_expiry:
         type: integer
+      expires_in:
+        type: integer
+      requires_2fa:
+        type: boolean
+      ticket:
+        type: string
     type: object
   api.oauthIdentitiesResponse:
     properties:
@@ -385,6 +391,16 @@ definitions:
     required:
     - password
     - username
+    type: object
+  api.verify2FARequestBody:
+    properties:
+      code:
+        type: string
+      ticket:
+        type: string
+    required:
+    - code
+    - ticket
     type: object
   auth.ProviderInfo:
     properties:
@@ -809,6 +825,34 @@ definitions:
       username:
         type: string
     type: object
+  user.twoFACodeRequest:
+    properties:
+      code:
+        type: string
+    required:
+    - code
+    type: object
+  user.twoFASetupRequest:
+    properties:
+      current_code:
+        type: string
+      current_password:
+        type: string
+    type: object
+  user.twoFASetupResponse:
+    properties:
+      enabled:
+        type: boolean
+      secret:
+        type: string
+      uri:
+        type: string
+    type: object
+  user.twoFAStatusResponse:
+    properties:
+      enabled:
+        type: boolean
+    type: object
   worker.SweeperStats:
     properties:
       errors:
@@ -894,6 +938,41 @@ paths:
           schema:
             $ref: '#/definitions/common.Response'
       summary: User login
+      tags:
+      - auth
+  /api/auth/login/2fa:
+    post:
+      consumes:
+      - application/json
+      description: Verify TOTP code with a 2FA ticket to complete login
+      parameters:
+      - description: 2FA verification
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.verify2FARequestBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 2FA verification successful
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/api.loginResponse'
+              type: object
+        "400":
+          description: Invalid request body
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Invalid 2FA code or ticket
+          schema:
+            $ref: '#/definitions/common.Response'
+      summary: Verify 2FA code
       tags:
       - auth
   /api/auth/logout:
@@ -1995,6 +2074,55 @@ paths:
       summary: Delete user
       tags:
       - admin
+  /api/v1/admin/users/{id}/2fa/reset:
+    post:
+      consumes:
+      - application/json
+      description: Clear a user's TOTP 2FA settings. This does not change password
+        or revoke sessions.
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 2FA reset
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/admin.MessageResponse'
+              type: object
+        "400":
+          description: Invalid user ID
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/common.Response'
+        "404":
+          description: User not found
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Reset user 2FA
+      tags:
+      - admin
   /api/v1/admin/users/{id}/oauth-identities:
     get:
       consumes:
@@ -3005,6 +3133,139 @@ paths:
       summary: Enable API key
       tags:
       - keys
+  /api/v1/user/2fa:
+    get:
+      description: 返回当前用户的 TOTP 两步验证状态
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/user.twoFAStatusResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: 获取 2FA 状态
+      tags:
+      - user
+  /api/v1/user/2fa/disable:
+    post:
+      consumes:
+      - application/json
+      description: 验证当前 TOTP code 后关闭两步验证
+      parameters:
+      - description: TOTP code
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/user.twoFACodeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: 关闭 2FA
+      tags:
+      - user
+  /api/v1/user/2fa/enable:
+    post:
+      consumes:
+      - application/json
+      description: 验证 TOTP code，确认启用两步验证
+      parameters:
+      - description: TOTP code
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/user.twoFACodeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+        "400":
+          description: Invalid code or 2FA not set up
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: 启用 2FA
+      tags:
+      - user
+  /api/v1/user/2fa/setup:
+    post:
+      consumes:
+      - application/json
+      description: 生成 TOTP secret 和 URI，返回给前端渲染 QR 码。不立即启用，需调用 enable 接口确认。
+      parameters:
+      - description: Current password or current TOTP code
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/user.twoFASetupRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/user.twoFASetupResponse'
+              type: object
+        "400":
+          description: 2FA already enabled
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: 设置 2FA
+      tags:
+      - user
   /api/v1/user/password:
     post:
       consumes:

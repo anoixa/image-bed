@@ -26,12 +26,13 @@ var serverLog = utils.ForModule("Server")
 
 // Repositories 所有数据库仓库
 type Repositories struct {
-	AccountsRepo *accounts.Repository
-	DevicesRepo  *accounts.DeviceRepository
-	IdentityRepo *accounts.IdentityRepository
-	ImagesRepo   *images.Repository
-	AlbumsRepo   *albums.Repository
-	KeysRepo     *keys.Repository
+	AccountsRepo  *accounts.Repository
+	DevicesRepo   *accounts.DeviceRepository
+	IdentityRepo  *accounts.IdentityRepository
+	TwoFactorRepo *accounts.TwoFactorRepository
+	ImagesRepo    *images.Repository
+	AlbumsRepo    *albums.Repository
+	KeysRepo      *keys.Repository
 }
 
 // ServerVersion 服务器版本信息
@@ -111,7 +112,21 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	jwtService := deps.JWTService
 	var loginService *auth.LoginService
 	if jwtService != nil {
-		loginService = auth.NewLoginService(deps.Repositories.AccountsRepo, deps.Repositories.DevicesRepo, jwtService)
+		var secretCrypto auth.SecretEncryptor
+		if deps.ConfigManager != nil {
+			secretCrypto = deps.ConfigManager.GetCrypto()
+		}
+		twoFactorRepo := deps.Repositories.TwoFactorRepo
+		if secretCrypto == nil {
+			twoFactorRepo = nil
+		}
+		loginService = auth.NewLoginServiceWith2FA(
+			deps.Repositories.AccountsRepo,
+			deps.Repositories.DevicesRepo,
+			jwtService,
+			twoFactorRepo,
+			secretCrypto,
+		)
 	}
 
 	routerDeps := &RouterDependencies{

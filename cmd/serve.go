@@ -94,12 +94,13 @@ func InitDependencies(cfg *config.Config) (*Dependencies, error) {
 	}
 
 	repos := &core.Repositories{
-		AccountsRepo: accounts.NewRepository(db),
-		DevicesRepo:  accounts.NewDeviceRepository(db),
-		ImagesRepo:   images.NewRepository(db),
-		AlbumsRepo:   albums.NewRepository(db),
-		KeysRepo:     keys.NewRepository(db),
-		IdentityRepo: accounts.NewIdentityRepository(db),
+		AccountsRepo:  accounts.NewRepository(db),
+		DevicesRepo:   accounts.NewDeviceRepository(db),
+		ImagesRepo:    images.NewRepository(db),
+		AlbumsRepo:    albums.NewRepository(db),
+		KeysRepo:      keys.NewRepository(db),
+		IdentityRepo:  accounts.NewIdentityRepository(db),
+		TwoFactorRepo: accounts.NewTwoFactorRepository(db),
 	}
 
 	// 从配置文件初始化缓存
@@ -227,7 +228,13 @@ func RunServer() {
 	// Initialize OAuth service (providers registered from config)
 	var oauthService *auth.OAuthService
 	if jwtService != nil && deps.Repositories.IdentityRepo != nil {
-		loginSvc := auth.NewLoginService(deps.Repositories.AccountsRepo, deps.Repositories.DevicesRepo, jwtService)
+		loginSvc := auth.NewLoginServiceWith2FA(
+			deps.Repositories.AccountsRepo,
+			deps.Repositories.DevicesRepo,
+			jwtService,
+			deps.Repositories.TwoFactorRepo,
+			deps.ConfigManager.GetCrypto(),
+		)
 		oauthService = auth.NewOAuthService(
 			[]byte(cfg.JWTSecret),
 			loginSvc,

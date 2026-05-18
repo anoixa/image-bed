@@ -33,12 +33,13 @@ const minPasswordLength = 6
 
 // UserService 管理员用户管理服务
 type UserService struct {
-	accountsRepo *accounts.Repository
-	devicesRepo  *accounts.DeviceRepository
-	keysRepo     *keys.Repository
-	imagesRepo   *images.Repository
-	albumsRepo   *albumRepo.Repository
-	identityRepo *accounts.IdentityRepository
+	accountsRepo  *accounts.Repository
+	devicesRepo   *accounts.DeviceRepository
+	keysRepo      *keys.Repository
+	imagesRepo    *images.Repository
+	albumsRepo    *albumRepo.Repository
+	identityRepo  *accounts.IdentityRepository
+	twoFactorRepo *accounts.TwoFactorRepository
 }
 
 // NewUserService 创建用户管理服务
@@ -75,6 +76,10 @@ func NewUserServiceWithOAuth(
 		albumsRepo:   albumsRepo,
 		identityRepo: identityRepo,
 	}
+}
+
+func (s *UserService) SetTwoFactorRepository(repo *accounts.TwoFactorRepository) {
+	s.twoFactorRepo = repo
 }
 
 // CreateUser 创建新用户（管理员操作）
@@ -218,6 +223,17 @@ func (s *UserService) ResetPassword(userID uint) (string, error) {
 
 	adminLog.Infof("Admin reset password for user ID: %d", userID)
 	return newPassword, nil
+}
+
+// ResetTwoFactor clears a user's 2FA settings without changing password or sessions.
+func (s *UserService) ResetTwoFactor(ctx context.Context, userID uint) error {
+	if _, err := s.accountsRepo.GetUserByID(userID); err != nil {
+		return ErrUserNotFound
+	}
+	if s.twoFactorRepo == nil {
+		return fmt.Errorf("two factor repository not initialized")
+	}
+	return s.twoFactorRepo.ResetTOTP(ctx, userID)
 }
 
 // DeleteUser 删除用户

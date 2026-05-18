@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -40,8 +41,16 @@ type userAuthRequestBody struct {
 }
 
 type loginResponse struct {
-	AccessToken       string `json:"access_token"`
-	AccessTokenExpiry int64  `json:"access_token_expiry"`
+	AccessToken       string `json:"access_token,omitempty"`
+	AccessTokenExpiry int64  `json:"access_token_expiry,omitempty"`
+	Requires2FA       bool   `json:"requires_2fa,omitempty"`
+	Ticket            string `json:"ticket,omitempty"`
+	ExpiresIn         int64  `json:"expires_in,omitempty"`
+}
+
+type verify2FARequestBody struct {
+	Ticket string `json:"ticket" binding:"required"`
+	Code   string `json:"code" binding:"required,len=6"`
 }
 
 // LoginHandlerFunc user login
@@ -88,6 +97,16 @@ func (h *LoginHandler) LoginHandlerFunc(context *gin.Context) {
 		return
 	}
 
+	// 需要 2FA 验证
+	if result.Requires2FA {
+		common.RespondSuccessMessage(context, "2FA required", loginResponse{
+			Requires2FA: true,
+			Ticket:      result.TwoFATicket,
+			ExpiresIn:   result.TwoFAExpiresIn,
+		})
+		return
+	}
+
 	// 设置 HttpOnly Cookie
 	refreshTokenMaxAge := int(time.Until(result.RefreshTokenExpiry).Seconds())
 	setAuthCookies(context, result.RefreshToken, result.DeviceID, refreshTokenMaxAge)
@@ -107,6 +126,61 @@ func (h *LoginHandler) passwordLoginEnabled(ctx context.Context) bool {
 		return h.authSettings.IsPasswordLoginEnabled(ctx, fallback)
 	}
 	return fallback
+}
+
+// Verify2FAHandlerFunc 验证 2FA TOTP code
+// @Summary      Verify 2FA code
+// @Description  Verify TOTP code with a 2FA ticket to complete login
+// @Tags         auth
+// @Accept       json
+// @Produce      json
+// @Param        request  body      verify2FARequestBody  true  "2FA verification"
+// @Success      200      {object}  common.Response{data=loginResponse}  "2FA verification successful"
+// @Failure      400      {object}  common.Response  "Invalid request body"
+// @Failure      401      {object}  common.Response  "Invalid 2FA code or ticket"
+// @Router       /api/auth/login/2fa [post]
+func (h *LoginHandler) Verify2FAHandlerFunc(c *gin.Context) {
+	if h.loginService == nil {
+		common.RespondError(c, http.StatusInternalServerError, "Login service not initialized")
+		return
+	}
+
+	var req verify2FARequestBody
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.RespondError(c, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	ticket := strings.TrimSpace(req.Ticket)
+	if ticket == "" {
+		common.RespondError(c, http.StatusBadRequest, "2FA ticket is required")
+		return
+	}
+
+	result, err := h.loginService.Verify2FA(ticket, req.Code)
+	if err != nil {
+		switch {
+		case errors.Is(err, auth.ErrInvalidTwoFactorTicket):
+			common.RespondError(c, http.StatusUnauthorized, "Invalid or expired 2FA ticket")
+		case errors.Is(err, auth.ErrInvalidTwoFactorCode):
+			common.RespondError(c, http.StatusUnauthorized, "Invalid 2FA code")
+		case errors.Is(err, auth.ErrTooManyTwoFactorAttempt):
+			common.RespondError(c, http.StatusUnauthorized, "Too many attempts, ticket revoked")
+		case errors.Is(err, auth.ErrTwoFactorReplay):
+			common.RespondError(c, http.StatusUnauthorized, "2FA code already used")
+		default:
+			common.RespondError(c, http.StatusUnauthorized, "2FA verification failed")
+		}
+		return
+	}
+
+	refreshTokenMaxAge := int(time.Until(result.RefreshTokenExpiry).Seconds())
+	setAuthCookies(c, result.RefreshToken, result.DeviceID, refreshTokenMaxAge)
+
+	common.RespondSuccessMessage(c, "Login successful", loginResponse{
+		AccessToken:       "Bearer " + result.AccessToken,
+		AccessTokenExpiry: result.AccessTokenExpiry.Unix(),
+	})
 }
 
 // RefreshTokenHandlerFunc Refresh token authentication

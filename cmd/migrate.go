@@ -258,6 +258,9 @@ func autoMigrate(db *gorm.DB) error {
 		&models.Image{},
 		&models.Album{},
 		&models.ApiToken{},
+		&models.UserIdentity{},
+		&models.UserTOTPSetting{},
+		&models.TwoFactorChallenge{},
 	)
 }
 
