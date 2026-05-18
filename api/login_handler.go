@@ -26,14 +26,6 @@ type PasswordLoginSettingsProvider interface {
 	IsPasswordLoginEnabled(ctx context.Context, fallbackPasswordLoginEnabled bool) bool
 }
 
-// NewLoginHandlerWithService 使用 LoginService 创建登录处理器
-func NewLoginHandlerWithService(loginService *auth.LoginService, cfg *config.Config) *LoginHandler {
-	return &LoginHandler{
-		loginService: loginService,
-		cfg:          cfg,
-	}
-}
-
 func NewLoginHandlerWithAuthSettings(loginService *auth.LoginService, cfg *config.Config, authSettings PasswordLoginSettingsProvider) *LoginHandler {
 	return &LoginHandler{
 		loginService: loginService,

@@ -23,13 +23,9 @@ func NewDeviceRepository(db *gorm.DB) *DeviceRepository {
 
 // CreateLoginDevice 创建设备登录记录
 func (r *DeviceRepository) CreateLoginDevice(userID uint, deviceID string, refreshToken string, refreshTokenExpiry time.Time) error {
-	hasher := sha256.New()
-	hasher.Write([]byte(refreshToken))
-	hashedToken := hex.EncodeToString(hasher.Sum(nil))
-
 	device := &models.Device{
 		UserID:       userID,
-		RefreshToken: hashedToken,
+		RefreshToken: hashRefreshToken(refreshToken),
 		Expiry:       refreshTokenExpiry,
 		DeviceID:     deviceID,
 	}
@@ -38,12 +34,8 @@ func (r *DeviceRepository) CreateLoginDevice(userID uint, deviceID string, refre
 
 // GetDeviceByRefreshTokenAndDeviceID 通过刷新令牌和设备ID获取设备
 func (r *DeviceRepository) GetDeviceByRefreshTokenAndDeviceID(refreshToken string, deviceID string) (*models.Device, error) {
-	hasher := sha256.New()
-	hasher.Write([]byte(refreshToken))
-	hashedToken := hex.EncodeToString(hasher.Sum(nil))
-
 	var device models.Device
-	err := r.db.Where("refresh_token = ? AND device_id = ? AND expiry > ?", hashedToken, deviceID, time.Now()).First(&device).Error
+	err := r.db.Where("refresh_token = ? AND device_id = ? AND expiry > ?", hashRefreshToken(refreshToken), deviceID, time.Now()).First(&device).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
@@ -55,12 +47,8 @@ func (r *DeviceRepository) GetDeviceByRefreshTokenAndDeviceID(refreshToken strin
 
 // GetDeviceByRefreshToken 通过刷新令牌获取设备
 func (r *DeviceRepository) GetDeviceByRefreshToken(refreshToken string) (*models.Device, error) {
-	hasher := sha256.New()
-	hasher.Write([]byte(refreshToken))
-	hashedToken := hex.EncodeToString(hasher.Sum(nil))
-
 	var device models.Device
-	err := r.db.Where("refresh_token = ? AND expiry > ?", hashedToken, time.Now()).First(&device).Error
+	err := r.db.Where("refresh_token = ? AND expiry > ?", hashRefreshToken(refreshToken), time.Now()).First(&device).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
@@ -70,32 +58,8 @@ func (r *DeviceRepository) GetDeviceByRefreshToken(refreshToken string) (*models
 	return &device, nil
 }
 
-// DeleteRefreshToken 删除刷新令牌
-func (r *DeviceRepository) DeleteRefreshToken(device *models.Device) error {
-	return r.db.Where("device_id = ?", device.DeviceID).Delete(&models.Device{}).Error
-}
-
-// SaveDevice 保存设备
-func (r *DeviceRepository) SaveDevice(userID uint, deviceID string, refreshToken string, refreshTokenExpiry time.Time) error {
-	hasher := sha256.New()
-	hasher.Write([]byte(refreshToken))
-	hashedToken := hex.EncodeToString(hasher.Sum(nil))
-
-	device := &models.Device{
-		UserID:       userID,
-		RefreshToken: hashedToken,
-		Expiry:       refreshTokenExpiry,
-		DeviceID:     deviceID,
-	}
-	return r.db.Create(device).Error
-}
-
 // RotateRefreshToken 轮换刷新令牌
 func (r *DeviceRepository) RotateRefreshToken(userID uint, deviceID, newRefreshToken string, newRefreshTokenExpiry time.Time) error {
-	hasher := sha256.New()
-	hasher.Write([]byte(newRefreshToken))
-	hashedToken := hex.EncodeToString(hasher.Sum(nil))
-
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("device_id = ?", deviceID).Delete(&models.Device{}).Error; err != nil {
 			return err
@@ -103,7 +67,7 @@ func (r *DeviceRepository) RotateRefreshToken(userID uint, deviceID, newRefreshT
 
 		newDevice := &models.Device{
 			UserID:       userID,
-			RefreshToken: hashedToken,
+			RefreshToken: hashRefreshToken(newRefreshToken),
 			Expiry:       newRefreshTokenExpiry,
 			DeviceID:     deviceID,
 		}
@@ -118,11 +82,7 @@ func (r *DeviceRepository) DeleteDeviceByDeviceID(deviceID string) error {
 
 // DeleteDeviceByDeviceIDAndRefreshToken 通过设备ID和刷新令牌删除设备（双重验证）
 func (r *DeviceRepository) DeleteDeviceByDeviceIDAndRefreshToken(deviceID string, refreshToken string) error {
-	hasher := sha256.New()
-	hasher.Write([]byte(refreshToken))
-	hashedToken := hex.EncodeToString(hasher.Sum(nil))
-
-	result := r.db.Where("device_id = ? AND refresh_token = ?", deviceID, hashedToken).Delete(&models.Device{})
+	result := r.db.Where("device_id = ? AND refresh_token = ?", deviceID, hashRefreshToken(refreshToken)).Delete(&models.Device{})
 	if result.Error != nil {
 		return result.Error
 	}
@@ -144,14 +104,13 @@ func (r *DeviceRepository) DeleteDevicesByUser(userID uint) error {
 	return r.db.Where("user_id = ?", userID).Delete(&models.Device{}).Error
 }
 
-// CountDevicesByUser 统计用户的设备数量
-func (r *DeviceRepository) CountDevicesByUser(userID uint) (int64, error) {
-	var count int64
-	err := r.db.Model(&models.Device{}).Where("user_id = ?", userID).Count(&count).Error
-	return count, err
-}
-
 // WithContext 返回带上下文的仓库
 func (r *DeviceRepository) WithContext(ctx context.Context) *DeviceRepository {
 	return &DeviceRepository{db: r.db.WithContext(ctx)}
+}
+
+func hashRefreshToken(token string) string {
+	hasher := sha256.New()
+	hasher.Write([]byte(token))
+	return hex.EncodeToString(hasher.Sum(nil))
 }

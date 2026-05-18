@@ -18,7 +18,6 @@ import (
 // OAuthHandler handles OAuth login, link, and unlink flows.
 type OAuthHandler struct {
 	oauthService *auth.OAuthService
-	loginService *auth.LoginService
 	cfg          *config.Config
 	authSettings PasswordLoginSettingsProvider
 }
@@ -51,19 +50,9 @@ type oauthIdentitiesResponse struct {
 	Identities []oauthIdentityResponse `json:"identities"`
 }
 
-// NewOAuthHandler creates a new OAuthHandler.
-func NewOAuthHandler(oauthService *auth.OAuthService, loginService *auth.LoginService, cfg *config.Config) *OAuthHandler {
+func NewOAuthHandler(oauthService *auth.OAuthService, cfg *config.Config, authSettings PasswordLoginSettingsProvider) *OAuthHandler {
 	return &OAuthHandler{
 		oauthService: oauthService,
-		loginService: loginService,
-		cfg:          cfg,
-	}
-}
-
-func NewOAuthHandlerWithAuthSettings(oauthService *auth.OAuthService, loginService *auth.LoginService, cfg *config.Config, authSettings PasswordLoginSettingsProvider) *OAuthHandler {
-	return &OAuthHandler{
-		oauthService: oauthService,
-		loginService: loginService,
 		cfg:          cfg,
 		authSettings: authSettings,
 	}

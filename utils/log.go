@@ -193,16 +193,6 @@ func logWithModule(level slog.Level, module string, message string) {
 	slog.LogAttrs(context.Background(), level, message, slog.String(logModuleAttrKey, module))
 }
 
-// LogIfDev 兼容旧接口，映射到 Debugf
-func LogIfDev(msg string) {
-	slog.Debug(msg)
-}
-
-// LogIfDevf 兼容旧接口，映射到 Debugf
-func LogIfDevf(format string, v ...any) {
-	Debugf(format, v...)
-}
-
 func parseModulePrefix(message string) (string, string) {
 	message = strings.TrimSpace(message)
 	if message == "" {

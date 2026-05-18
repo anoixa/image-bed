@@ -188,7 +188,7 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies, imageHandle
 
 			// OAuth routes
 			if deps.OAuthService != nil {
-				oauthHandler := api.NewOAuthHandlerWithAuthSettings(deps.OAuthService, deps.LoginService, cfg, deps.ConfigManager)
+				oauthHandler := api.NewOAuthHandler(deps.OAuthService, cfg, deps.ConfigManager)
 
 				oauthGroup := authGroup.Group("/oauth")
 				{
