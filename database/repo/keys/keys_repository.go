@@ -14,6 +14,9 @@ import (
 
 var keysRepoLog = utils.ForModule("KeysRepository")
 
+const tokenLastUsedUpdateInterval = 5 * time.Minute
+const tokenLastUsedUpdateTimeout = 2 * time.Second
+
 // Repository API Token 仓库
 type Repository struct {
 	db *gorm.DB
@@ -46,20 +49,37 @@ func (r *Repository) GetUserByApiToken(token string) (*models.User, error) {
 	if apiToken.User.ID == 0 {
 		return nil, errors.New("invalid or non-existent API token")
 	}
+	if !apiToken.User.IsActive() {
+		return nil, errors.New("invalid or non-existent API token")
+	}
+
+	r.scheduleTokenLastUsedUpdate(apiToken)
+	return &apiToken.User, nil
+}
+
+func (r *Repository) scheduleTokenLastUsedUpdate(apiToken models.ApiToken) {
+	now := time.Now()
+	if apiToken.LastUsedAt != nil && now.Sub(*apiToken.LastUsedAt) < tokenLastUsedUpdateInterval {
+		return
+	}
 
 	go func() {
 		defer func() {
 			_ = recover()
 		}()
-		r.updateTokenLastUsed(apiToken.ID)
+		r.updateTokenLastUsed(apiToken.ID, now)
 	}()
-	return &apiToken.User, nil
 }
 
 // updateTokenLastUsed 更新 Token 最后使用时间
-func (r *Repository) updateTokenLastUsed(tokenID uint) {
-	ctx := context.Background()
-	err := r.db.WithContext(ctx).Model(&models.ApiToken{}).Where("id = ?", tokenID).Update("last_used_at", time.Now()).Error
+func (r *Repository) updateTokenLastUsed(tokenID uint, usedAt time.Time) {
+	ctx, cancel := context.WithTimeout(context.Background(), tokenLastUsedUpdateTimeout)
+	defer cancel()
+
+	cutoff := usedAt.Add(-tokenLastUsedUpdateInterval)
+	err := r.db.WithContext(ctx).Model(&models.ApiToken{}).
+		Where("id = ? AND (last_used_at IS NULL OR last_used_at < ?)", tokenID, cutoff).
+		Update("last_used_at", usedAt).Error
 	if err != nil {
 		keysRepoLog.Errorf("Failed to update last_used_at for token ID %d: %v", tokenID, err)
 	}
