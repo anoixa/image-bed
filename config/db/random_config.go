@@ -2,13 +2,20 @@ package config
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/anoixa/image-bed/database/models"
+	"gorm.io/gorm"
 )
 
 // RandomSourceAlbumConfigKey 随机图源相册配置键
 const RandomSourceAlbumConfigKey = "system:random_source_album"
+
+const (
+	randomSourceAlbumConfigName      = "random_source_album"
+	legacyRandomSourceAlbumConfigKey = "system:" + RandomSourceAlbumConfigKey
+)
 
 // RandomAlbumConfig 随机图源相册配置
 type RandomAlbumConfig struct {
@@ -39,7 +46,7 @@ func (m *Manager) getRandomAlbumConfig() *RandomAlbumConfig {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	config, err := m.repo.GetByKey(ctx, RandomSourceAlbumConfigKey)
+	config, err := m.getRandomAlbumSystemConfig(ctx)
 	if err != nil || config == nil {
 		return nil
 	}
@@ -85,8 +92,7 @@ func (m *Manager) SetRandomSourceAlbum(albumID uint, includeAllPublic bool) erro
 		"include_all_public": includeAllPublic,
 	}
 
-	// 检查是否已存在
-	existing, err := m.repo.GetByKey(ctx, RandomSourceAlbumConfigKey)
+	existing, err := m.getRandomAlbumSystemConfig(ctx)
 	if err != nil || existing == nil {
 		// 创建新配置
 		return m.createRandomAlbumConfig(ctx, config)
@@ -100,7 +106,7 @@ func (m *Manager) SetRandomSourceAlbum(albumID uint, includeAllPublic bool) erro
 func (m *Manager) createRandomAlbumConfig(ctx context.Context, config map[string]any) error {
 	req := &models.SystemConfigStoreRequest{
 		Category:    models.ConfigCategorySystem,
-		Name:        RandomSourceAlbumConfigKey,
+		Name:        randomSourceAlbumConfigName,
 		Config:      config,
 		IsEnabled:   boolPtr(true),
 		Description: "随机图片API源相册配置",
@@ -114,7 +120,7 @@ func (m *Manager) createRandomAlbumConfig(ctx context.Context, config map[string
 func (m *Manager) updateRandomAlbumConfig(ctx context.Context, id uint, config map[string]any) error {
 	req := &models.SystemConfigStoreRequest{
 		Category:    models.ConfigCategorySystem,
-		Name:        RandomSourceAlbumConfigKey,
+		Name:        randomSourceAlbumConfigName,
 		Config:      config,
 		IsEnabled:   boolPtr(true),
 		Description: "随机图片API源相册配置",
@@ -122,6 +128,31 @@ func (m *Manager) updateRandomAlbumConfig(ctx context.Context, id uint, config m
 
 	_, err := m.UpdateConfig(ctx, id, req)
 	return err
+}
+
+func (m *Manager) getRandomAlbumSystemConfig(ctx context.Context) (*models.SystemConfig, error) {
+	config, err := m.repo.GetByKey(ctx, RandomSourceAlbumConfigKey)
+	if err == nil {
+		return config, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	config, err = m.repo.GetByKey(ctx, legacyRandomSourceAlbumConfigKey)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	config.Key = RandomSourceAlbumConfigKey
+	config.Name = randomSourceAlbumConfigName
+	if err := m.repo.Update(ctx, config); err != nil {
+		configManagerLog.Warnf("Failed to migrate random source album config key: %v", err)
+	}
+	return config, nil
 }
 
 func boolPtr(b bool) *bool {
