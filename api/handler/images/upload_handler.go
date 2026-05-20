@@ -257,7 +257,17 @@ func parseMultipartUploadRequest(r *http.Request, settings *dbconfig.ImageProces
 			return nil, nil, &uploadRequestError{status: http.StatusBadRequest, message: "Maximum 10 files allowed per upload"}
 		}
 
-		tempFile, size, fileHash, writeErr := writePartToTempFile(part, maxFileSize)
+		remainingTotalSize := maxTotalSize - totalSize
+		if remainingTotalSize <= 0 {
+			_ = part.Close()
+			cleanup()
+			return nil, nil, &uploadRequestError{
+				status:  http.StatusRequestEntityTooLarge,
+				message: fmt.Sprintf("Total size of all files (%.2f MB) exceeds maximum allowed (%d MB)", float64(totalSize)/1024/1024, maxBatchTotalMB),
+			}
+		}
+
+		tempFile, size, fileHash, writeErr := writePartToTempFile(part, maxFileSize, remainingTotalSize, maxBatchTotalMB, totalSize)
 		_ = part.Close()
 		if writeErr != nil {
 			cleanup()
@@ -298,7 +308,7 @@ func readSmallFormField(part io.Reader, maxBytes int64) (string, error) {
 	return string(data), nil
 }
 
-func writePartToTempFile(part io.Reader, maxFileSize int64) (uploadTempFile, int64, string, error) {
+func writePartToTempFile(part io.Reader, maxFileSize, maxRemainingTotal int64, maxBatchTotalMB int, currentTotal int64) (uploadTempFile, int64, string, error) {
 	tmp, err := os.CreateTemp(config.TempDir, "upload-stream-*")
 	if err != nil {
 		return uploadTempFile{}, 0, "", fmt.Errorf("create temp file: %w", err)
@@ -313,9 +323,10 @@ func writePartToTempFile(part io.Reader, maxFileSize int64) (uploadTempFile, int
 	bufPtr := pool.SharedBufferPool.Get().(*[]byte)
 	defer pool.SharedBufferPool.Put(bufPtr)
 
+	limit := smallestPositiveLimit(maxFileSize, maxRemainingTotal)
 	reader := io.Reader(part)
-	if maxFileSize > 0 {
-		reader = io.LimitReader(part, maxFileSize+1)
+	if limit > 0 {
+		reader = io.LimitReader(part, limit+1)
 	}
 
 	hash := sha256.New()
@@ -336,8 +347,26 @@ func writePartToTempFile(part io.Reader, maxFileSize int64) (uploadTempFile, int
 			message: fmt.Sprintf("File size (%.2f MB) exceeds maximum allowed (%d MB)", float64(written)/1024/1024, maxFileSize/(1024*1024)),
 		}
 	}
+	if maxRemainingTotal > 0 && written > maxRemainingTotal {
+		tempFile.cleanup()
+		totalSize := currentTotal + written
+		return uploadTempFile{}, 0, "", &uploadRequestError{
+			status:  http.StatusRequestEntityTooLarge,
+			message: fmt.Sprintf("Total size of all files (%.2f MB) exceeds maximum allowed (%d MB)", float64(totalSize)/1024/1024, maxBatchTotalMB),
+		}
+	}
 
 	return tempFile, written, hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func smallestPositiveLimit(a, b int64) int64 {
+	if a <= 0 {
+		return b
+	}
+	if b <= 0 || a < b {
+		return a
+	}
+	return b
 }
 
 func asUploadRequestError(err error, target **uploadRequestError) bool {

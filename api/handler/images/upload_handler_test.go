@@ -147,3 +147,13 @@ func TestParseMultipartUploadRequestCleanupSkipsReleasedTempFile(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "open temp upload")
 }
+
+func TestWritePartToTempFileStopsAtRemainingBatchLimit(t *testing.T) {
+	_, _, _, err := writePartToTempFile(bytes.NewReader([]byte("hello")), 0, 4, 1, 0)
+
+	require.Error(t, err)
+	requestErr, ok := err.(*uploadRequestError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusRequestEntityTooLarge, requestErr.status)
+	assert.Contains(t, requestErr.message, "Total size of all files")
+}

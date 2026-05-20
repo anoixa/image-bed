@@ -83,15 +83,19 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	const (
 		defaultMaxUploadSizeMB = 50
 		multipartMemoryMB      = 8 // gin in-memory multipart buffer; actual size limit enforced per-request
-		defaultMaxBatchTotalMB = 500
+		requestBodyOverheadMB  = 16
 		minBatchRequestLimitMB = 100
-		batchRequestLimitRatio = 2
 		apiMaxConcurrency      = 100
 		publicMaxConcurrency   = 200
 	)
 
 	router.MaxMultipartMemory = multipartMemoryMB << 20
-	requestBodyLimit := int64(defaultMaxBatchTotalMB) * batchRequestLimitRatio << 20
+	defaultImageSettings := configSvc.DefaultImageProcessingSettings()
+	maxBatchTotalMB := defaultImageSettings.MaxBatchTotalMB
+	if cfg != nil && cfg.UploadMaxBatchTotalMB > 0 {
+		maxBatchTotalMB = cfg.UploadMaxBatchTotalMB
+	}
+	requestBodyLimit := int64(maxBatchTotalMB+requestBodyOverheadMB) << 20
 	if requestBodyLimit < minBatchRequestLimitMB<<20 {
 		requestBodyLimit = minBatchRequestLimitMB << 20
 	}
