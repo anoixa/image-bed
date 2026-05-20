@@ -71,22 +71,14 @@ func handleJwtAuth(c *gin.Context, token string, jwtService *auth.JWTService) er
 		return errors.New("invalid or expired token")
 	}
 
-	if claims.UserID == 0 {
-		return errors.New("user_id not found in token claims")
+	user, err := jwtService.ValidateAccessTokenClaims(c.Request.Context(), claims)
+	if err != nil {
+		return err
 	}
 
-	if claims.Username == "" {
-		return errors.New("username not found in token claims")
-	}
-
-	role := claims.Role
-	if role == "" {
-		role = RoleUser
-	}
-
-	c.Set(ContextUserIDKey, claims.UserID)
-	c.Set(ContextUsernameKey, claims.Username)
-	c.Set(ContextRoleKey, role)
+	c.Set(ContextUserIDKey, user.ID)
+	c.Set(ContextUsernameKey, user.Username)
+	c.Set(ContextRoleKey, user.Role)
 	c.Set(AuthTypeKey, AuthTypeJWT)
 
 	return nil

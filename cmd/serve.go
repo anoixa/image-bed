@@ -222,6 +222,7 @@ func RunServer() {
 	if err != nil {
 		exitWithErrorf("Failed to initialize JWT: %v", err)
 	}
+	jwtService.SetAccountsRepository(deps.Repositories.AccountsRepo)
 
 	passwordLoginEnabled := deps.ConfigManager.IsPasswordLoginEnabled(context.Background(), cfg.AuthPasswordLoginEnabled)
 
