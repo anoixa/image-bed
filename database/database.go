@@ -209,18 +209,6 @@ func isIndexExistsError(err error) bool {
 
 // fixImageIdentifierIndexes 创建部分唯一索引，只在未删除记录上强制 identifier 唯一性
 func fixImageIdentifierIndexes(db *gorm.DB) error {
-	var dbType string
-	if db.Name() == "sqlite" {
-		dbType = "sqlite"
-	} else {
-		dbType = "postgres"
-	}
-
-	if dbType == "sqlite" {
-		dbMigrationLog.Debugf("SQLite detected, skipping partial index for images.identifier")
-		return nil
-	}
-
 	dropOldIndexSQL := `DROP INDEX IF EXISTS idx_identifier`
 	if err := db.Exec(dropOldIndexSQL).Error; err != nil {
 		dbMigrationLog.Warnf("Failed to drop old index idx_identifier: %v", err)
@@ -238,6 +226,10 @@ func fixImageIdentifierIndexes(db *gorm.DB) error {
 	createIndexSQL := `CREATE UNIQUE INDEX IF NOT EXISTS idx_images_identifier_active ON images(identifier) WHERE deleted_at IS NULL`
 
 	if err := db.Exec(createIndexSQL).Error; err != nil {
+		if hasActiveDuplicateImageIdentifiers(db) {
+			dbMigrationLog.Warnf("Skipped unique index idx_images_identifier_active because active duplicate image identifiers already exist; new uploads now generate random identifiers, but existing duplicates should be repaired manually")
+			return nil
+		}
 		if !isIndexExistsError(err) {
 			return fmt.Errorf("failed to create partial index for images.identifier: %w", err)
 		}
@@ -246,6 +238,25 @@ func fixImageIdentifierIndexes(db *gorm.DB) error {
 	}
 
 	return nil
+}
+
+func hasActiveDuplicateImageIdentifiers(db *gorm.DB) bool {
+	var duplicateCount int64
+	err := db.Raw(`
+		SELECT COUNT(*)
+		FROM (
+			SELECT identifier
+			FROM images
+			WHERE deleted_at IS NULL
+			GROUP BY identifier
+			HAVING COUNT(*) > 1
+		) AS duplicate_identifiers
+	`).Scan(&duplicateCount).Error
+	if err != nil {
+		dbMigrationLog.Warnf("Failed to check duplicate image identifiers: %v", err)
+		return false
+	}
+	return duplicateCount > 0
 }
 
 // Close 关闭数据库连接

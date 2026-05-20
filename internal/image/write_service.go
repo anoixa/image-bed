@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
-	"path/filepath"
 	"time"
 
 	"github.com/anoixa/image-bed/api/middleware"
@@ -28,6 +27,7 @@ import (
 var writeServiceLog = utils.ForModule("WriteService")
 
 const storageCleanupTimeout = 5 * time.Second
+const maxIdentifierGenerationAttempts = 5
 
 // WriteService 负责图片上传与写入相关用例
 type WriteService struct {
@@ -304,7 +304,10 @@ func (s *WriteService) processAndSaveImage(ctx context.Context, userID uint, sou
 	}
 
 	ext := getSafeFileExtension(mimeType)
-	ids := s.pathGenerator.GenerateOriginalIdentifiers(fileHash, ext, time.Now())
+	ids, err := s.generateUnusedOriginalIdentifiers(ctx, fileHash, ext, time.Now())
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to generate image identifier: %w", err)
+	}
 	identifier := ids.Identifier
 	storagePath := ids.StoragePath
 	storageWriteStart := time.Now()
@@ -437,7 +440,10 @@ func cleanupSavedUpload(provider storage.Provider, storagePath string) {
 
 // createDedupedImageRecord 为不同用户创建去重后的新图片记录
 func (s *WriteService) createDedupedImageRecord(ctx context.Context, existing *models.Image, userID uint, originalName string, _ uint, isPublic bool) (*models.Image, error) {
-	ids := s.pathGenerator.GenerateOriginalIdentifiers(existing.FileHash+fmt.Sprintf("_%d", userID), filepath.Ext(originalName), time.Now())
+	ids, err := s.generateUnusedOriginalIdentifiers(ctx, existing.FileHash+fmt.Sprintf(":%d:%s", userID, originalName), getSafeFileExtension(existing.MimeType), time.Now())
+	if err != nil {
+		return nil, err
+	}
 
 	newImg := &models.Image{
 		Identifier:      ids.Identifier,
@@ -458,6 +464,21 @@ func (s *WriteService) createDedupedImageRecord(ctx context.Context, existing *m
 	}
 
 	return newImg, nil
+}
+
+func (s *WriteService) generateUnusedOriginalIdentifiers(ctx context.Context, seed, ext string, uploadTime time.Time) (generator.StorageIdentifiers, error) {
+	repo := s.repo.WithContext(ctx)
+	for range maxIdentifierGenerationAttempts {
+		ids := s.pathGenerator.GenerateOriginalIdentifiers(seed, ext, uploadTime)
+		exists, err := repo.ImageExists(ids.Identifier)
+		if err != nil {
+			return generator.StorageIdentifiers{}, err
+		}
+		if !exists {
+			return ids, nil
+		}
+	}
+	return generator.StorageIdentifiers{}, errors.New("unable to generate a unique image identifier")
 }
 
 func (s *WriteService) warmCache(image *models.Image) {
