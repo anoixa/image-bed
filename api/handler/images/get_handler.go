@@ -523,6 +523,9 @@ func (h *Handler) shouldUseImageDataCache(provider storage.Provider) bool {
 	if _, ok := provider.(storage.PathProvider); ok {
 		return false
 	}
+	if _, ok := provider.(*storage.WebDAVStorage); ok {
+		return false
+	}
 
 	return true
 }
