@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/anoixa/image-bed/api/common"
@@ -117,6 +118,111 @@ func TestRandomImageAlbumIDZeroOverridesConfiguredSourceAlbum(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(dataBytes, &payload))
 	assert.Equal(t, publicImage.Identifier, payload.Identifier)
+}
+
+func TestRandomImageConfiguredAlbumTakesPrecedenceOverIncludeAllPublic(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	db := setupRandomHandlerTestDB(t)
+	repo := repoimages.NewRepository(db)
+
+	outsideImage := &models.Image{
+		Identifier:   "outside-album",
+		OriginalName: "outside.jpg",
+		FileHash:     "outside-hash",
+		StoragePath:  "uploads/outside.jpg",
+		FileSize:     1024,
+		MimeType:     "image/jpeg",
+		UserID:       1,
+		IsPublic:     true,
+	}
+	require.NoError(t, repo.SaveImage(outsideImage))
+
+	albumImage := &models.Image{
+		Identifier:   "inside-album",
+		OriginalName: "inside.jpg",
+		FileHash:     "inside-hash",
+		StoragePath:  "uploads/inside.jpg",
+		FileSize:     1024,
+		MimeType:     "image/jpeg",
+		UserID:       1,
+		IsPublic:     true,
+	}
+	require.NoError(t, repo.SaveImage(albumImage))
+
+	album := &models.Album{
+		UserID: 1,
+		Name:   "Random Source",
+	}
+	require.NoError(t, db.Create(album).Error)
+	require.NoError(t, db.Exec("INSERT INTO album_images (album_id, image_id) VALUES (?, ?)", album.ID, albumImage.ID).Error)
+
+	randomService := randomsvc.NewService(nil)
+	require.NoError(t, randomService.SetSourceAlbum(album.ID, true))
+
+	handler := &Handler{
+		baseURL:       "http://localhost:8080",
+		readService:   imageSvc.NewReadService(repo, nil, nil, nil, "http://localhost:8080", nil),
+		randomService: randomService,
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/images/random?format=json", nil)
+
+	handler.RandomImage(c)
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var response common.Response
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	dataBytes, err := json.Marshal(response.Data)
+	require.NoError(t, err)
+
+	var payload struct {
+		Identifier string `json:"identifier"`
+	}
+	require.NoError(t, json.Unmarshal(dataBytes, &payload))
+	assert.Equal(t, albumImage.Identifier, payload.Identifier)
+
+	_, includeAllPublic := randomService.GetSourceAlbum()
+	assert.False(t, includeAllPublic)
+}
+
+func TestSetRandomSourceAlbumReturnsNormalizedSpecificAlbumConfig(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	randomService := randomsvc.NewService(nil)
+	handler := &Handler{
+		randomService: randomService,
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/admin/random-source-album",
+		strings.NewReader(`{"album_id":123,"include_all_public":true}`),
+	)
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.SetRandomSourceAlbum(c)
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var response common.Response
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	dataBytes, err := json.Marshal(response.Data)
+	require.NoError(t, err)
+
+	var payload struct {
+		AlbumID          uint `json:"album_id"`
+		IncludeAllPublic bool `json:"include_all_public"`
+	}
+	require.NoError(t, json.Unmarshal(dataBytes, &payload))
+
+	assert.Equal(t, uint(123), payload.AlbumID)
+	assert.False(t, payload.IncludeAllPublic)
 }
 
 func TestRandomImageRejectsInvalidFormat(t *testing.T) {

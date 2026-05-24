@@ -89,10 +89,10 @@ func (h *Handler) RandomImage(c *gin.Context) {
 		}
 	} else {
 		sourceAlbumID, includeAllPublic := h.getRandomSourceAlbum()
-		if includeAllPublic {
-			filter.IncludeAllPublic = true
-		} else if sourceAlbumID > 0 {
+		if sourceAlbumID > 0 {
 			filter.AlbumID = &sourceAlbumID
+		} else if includeAllPublic {
+			filter.IncludeAllPublic = true
 		}
 	}
 
@@ -219,10 +219,11 @@ func (h *Handler) SetRandomSourceAlbum(c *gin.Context) {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to save configuration")
 		return
 	}
+	albumID, includeAllPublic := h.randomService.GetSourceAlbum()
 
 	common.RespondSuccess(c, gin.H{
-		"album_id":           req.AlbumID,
-		"include_all_public": req.IncludeAllPublic,
+		"album_id":           albumID,
+		"include_all_public": includeAllPublic,
 		"message":            "Random source album updated successfully",
 	})
 }

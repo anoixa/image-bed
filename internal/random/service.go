@@ -51,6 +51,7 @@ func (s *Service) GetSourceAlbum() (uint, bool) {
 		albumID = s.configManager.GetRandomSourceAlbum()
 		includeAllPublic = s.configManager.GetRandomIncludeAllPublic()
 	}
+	albumID, includeAllPublic = normalizeSourceAlbum(albumID, includeAllPublic)
 
 	s.mu.Lock()
 	s.cache = &albumCache{
@@ -65,6 +66,8 @@ func (s *Service) GetSourceAlbum() (uint, bool) {
 
 // SetSourceAlbum 设置随机图源相册ID和是否包含所有公开图片的配置（数据库+缓存）
 func (s *Service) SetSourceAlbum(albumID uint, includeAllPublic bool) error {
+	albumID, includeAllPublic = normalizeSourceAlbum(albumID, includeAllPublic)
+
 	// 保存到数据库
 	if s.configManager != nil {
 		if err := s.configManager.SetRandomSourceAlbum(albumID, includeAllPublic); err != nil {
@@ -86,4 +89,11 @@ func (s *Service) SetSourceAlbum(albumID uint, includeAllPublic bool) error {
 // warmCache 预热缓存
 func (s *Service) warmCache() {
 	_, _ = s.GetSourceAlbum()
+}
+
+func normalizeSourceAlbum(albumID uint, includeAllPublic bool) (uint, bool) {
+	if albumID > 0 {
+		return albumID, false
+	}
+	return albumID, includeAllPublic
 }
