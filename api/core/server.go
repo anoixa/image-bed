@@ -59,14 +59,17 @@ type ServerDependencies struct {
 // 启动gin
 func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	cfg := deps.Config
-	router := gin.New()
 
 	// 仅在开发版本时启用 gin 日志
 	if config.IsDevelopment() {
 		gin.SetMode(gin.DebugMode)
-		router.Use(gin.Logger())
 	} else {
 		gin.SetMode(gin.ReleaseMode)
+	}
+
+	router := gin.New()
+	if config.IsDevelopment() {
+		router.Use(gin.Logger())
 	}
 	router.Use(gin.Recovery())
 	router.Use(cors.New(cors.Config{
