@@ -344,6 +344,9 @@ func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies, imageHan
 			deps.Repositories.AlbumsRepo,
 		)
 		userSvc.SetTwoFactorRepository(twoFactorRepo)
+		if deps.OAuthService != nil {
+			userSvc.SetPasswordLoginEnabledProvider(deps.OAuthService.IsPasswordLoginEnabled)
+		}
 		if deps.Repositories.IdentityRepo != nil {
 			userSvc = svcAdmin.NewUserServiceWithOAuth(
 				deps.Repositories.AccountsRepo,
@@ -354,6 +357,9 @@ func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies, imageHan
 				deps.Repositories.IdentityRepo,
 			)
 			userSvc.SetTwoFactorRepository(twoFactorRepo)
+			if deps.OAuthService != nil {
+				userSvc.SetPasswordLoginEnabledProvider(deps.OAuthService.IsPasswordLoginEnabled)
+			}
 		}
 		userHandler := admin.NewUserHandler(userSvc)
 		adminGroup.GET("/users", userHandler.ListUsers)
@@ -364,6 +370,7 @@ func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies, imageHan
 		adminGroup.POST("/users/:id/2fa/reset", userHandler.ResetTwoFactor)
 		adminGroup.DELETE("/users/:id", userHandler.DeleteUser)
 		adminGroup.GET("/users/:id/oauth-identities", userHandler.GetOAuthIdentities)
+		adminGroup.DELETE("/users/:id/oauth-identities/:provider", userHandler.UnlinkOAuthIdentity)
 	}
 }
 

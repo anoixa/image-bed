@@ -425,6 +425,48 @@ func (h *UserHandler) GetOAuthIdentities(c *gin.Context) {
 	})
 }
 
+// UnlinkOAuthIdentity removes a linked OAuth identity from a user.
+// @Summary      Unlink user OAuth identity
+// @Description  Remove a linked OAuth identity from a user. Refuses to remove the user's last usable login method.
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Param        id        path      int     true  "User ID"
+// @Param        provider  path      string  true  "OAuth provider"  Enums(github, google, gitee)
+// @Success      200       {object}  common.Response{data=MessageResponse}  "OAuth identity unlinked"
+// @Failure      400       {object}  common.Response  "Invalid user ID"
+// @Failure      401       {object}  common.Response  "Unauthorized"
+// @Failure      403       {object}  common.Response  "Forbidden"
+// @Failure      404       {object}  common.Response  "User or identity not found"
+// @Failure      409       {object}  common.Response  "Cannot unlink the last login method"
+// @Failure      500       {object}  common.Response  "Failed to unlink identity"
+// @Security     ApiKeyAuth
+// @Router       /api/v1/admin/users/{id}/oauth-identities/{provider} [delete]
+func (h *UserHandler) UnlinkOAuthIdentity(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		common.RespondError(c, http.StatusBadRequest, "Invalid user ID")
+		return
+	}
+
+	provider := c.Param("provider")
+	if err := h.svc.UnlinkUserIdentity(c.Request.Context(), uint(id), provider); err != nil {
+		switch {
+		case errors.Is(err, admin.ErrUserNotFound):
+			common.RespondError(c, http.StatusNotFound, err.Error())
+		case errors.Is(err, admin.ErrIdentityNotFound):
+			common.RespondError(c, http.StatusNotFound, "Identity not found")
+		case errors.Is(err, admin.ErrLastLoginMethod):
+			common.RespondError(c, http.StatusConflict, "Cannot unlink the last login method")
+		default:
+			common.RespondError(c, http.StatusInternalServerError, "Failed to unlink identity")
+		}
+		return
+	}
+
+	common.RespondSuccess(c, MessageResponse{Message: "OAuth identity unlinked successfully"})
+}
+
 func buildOAuthUserIdentitySummaries(identities []*models.UserIdentity) []oauthUserIdentitySummary {
 	result := make([]oauthUserIdentitySummary, 0, len(identities))
 	for _, identity := range identities {

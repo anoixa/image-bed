@@ -2164,6 +2164,68 @@ paths:
       summary: Get user OAuth identities
       tags:
       - admin
+  /api/v1/admin/users/{id}/oauth-identities/{provider}:
+    delete:
+      consumes:
+      - application/json
+      description: Remove a linked OAuth identity from a user. Refuses to remove the
+        user's last usable login method.
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: OAuth provider
+        enum:
+        - github
+        - google
+        - gitee
+        in: path
+        name: provider
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OAuth identity unlinked
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/admin.MessageResponse'
+              type: object
+        "400":
+          description: Invalid user ID
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/common.Response'
+        "404":
+          description: User or identity not found
+          schema:
+            $ref: '#/definitions/common.Response'
+        "409":
+          description: Cannot unlink the last login method
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Failed to unlink identity
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Unlink user OAuth identity
+      tags:
+      - admin
   /api/v1/admin/users/{id}/reset-password:
     post:
       consumes:

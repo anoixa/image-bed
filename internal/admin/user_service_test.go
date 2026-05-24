@@ -22,8 +22,9 @@ func setupAdminTestDB(t *testing.T) *gorm.DB {
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.User{}, &models.Device{}, &models.ApiToken{}, &models.Album{}))
+	require.NoError(t, db.AutoMigrate(&models.User{}, &models.Device{}, &models.ApiToken{}, &models.Album{}, &models.UserIdentity{}))
 	// Clean all tables before each test
+	db.Exec("DELETE FROM user_identities")
 	db.Exec("DELETE FROM devices")
 	db.Exec("DELETE FROM api_tokens")
 	db.Exec("DELETE FROM albums")
@@ -211,6 +212,67 @@ func TestResetPassword(t *testing.T) {
 	stored, _ := repo.GetUserByID(user.ID)
 	ok, _ := cryptopackage.ComparePasswordAndHash(newPassword, stored.Password)
 	assert.True(t, ok)
+}
+
+func TestUnlinkUserIdentity(t *testing.T) {
+	db := setupAdminTestDB(t)
+	repo := accounts.NewRepository(db)
+	identityRepo := accounts.NewIdentityRepository(db)
+	svc := NewUserServiceWithOAuth(repo, nil, nil, nil, nil, identityRepo)
+	svc.SetPasswordLoginEnabledProvider(func() bool { return true })
+
+	user, _, err := svc.CreateUser("oauth-user", "password123", models.RoleUser)
+	require.NoError(t, err)
+	require.NoError(t, identityRepo.Create(t.Context(), &models.UserIdentity{
+		UserID:   user.ID,
+		Provider: "github",
+		Subject:  "github-user",
+	}))
+
+	err = svc.UnlinkUserIdentity(t.Context(), user.ID, "github")
+	require.NoError(t, err)
+
+	_, err = identityRepo.FindByUserProvider(t.Context(), user.ID, "github")
+	assert.ErrorIs(t, err, accounts.ErrIdentityNotFound)
+}
+
+func TestUnlinkUserIdentityRefusesLastLoginMethod(t *testing.T) {
+	db := setupAdminTestDB(t)
+	repo := accounts.NewRepository(db)
+	identityRepo := accounts.NewIdentityRepository(db)
+	svc := NewUserServiceWithOAuth(repo, nil, nil, nil, nil, identityRepo)
+	svc.SetPasswordLoginEnabledProvider(func() bool { return false })
+
+	user := &models.User{
+		Username: "oauth-only",
+		Role:     models.RoleUser,
+		Status:   models.UserStatusActive,
+	}
+	require.NoError(t, repo.CreateUser(user))
+	require.NoError(t, identityRepo.Create(t.Context(), &models.UserIdentity{
+		UserID:   user.ID,
+		Provider: "github",
+		Subject:  "github-user",
+	}))
+
+	err := svc.UnlinkUserIdentity(t.Context(), user.ID, "github")
+	assert.ErrorIs(t, err, ErrLastLoginMethod)
+
+	_, err = identityRepo.FindByUserProvider(t.Context(), user.ID, "github")
+	assert.NoError(t, err)
+}
+
+func TestUnlinkUserIdentityReturnsNotFound(t *testing.T) {
+	db := setupAdminTestDB(t)
+	repo := accounts.NewRepository(db)
+	identityRepo := accounts.NewIdentityRepository(db)
+	svc := NewUserServiceWithOAuth(repo, nil, nil, nil, nil, identityRepo)
+
+	user, _, err := svc.CreateUser("oauth-user", "password123", models.RoleUser)
+	require.NoError(t, err)
+
+	err = svc.UnlinkUserIdentity(t.Context(), user.ID, "github")
+	assert.ErrorIs(t, err, ErrIdentityNotFound)
 }
 
 func TestDeleteUser(t *testing.T) {

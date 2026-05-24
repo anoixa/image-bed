@@ -25,6 +25,8 @@ var (
 	ErrUserNotFound      = errors.New("user not found")
 	ErrUserHasOwnedData  = errors.New("cannot delete user with owned images or albums")
 	ErrLastAdmin         = errors.New("cannot modify or delete the last admin")
+	ErrLastLoginMethod   = errors.New("cannot unlink the last login method")
+	ErrIdentityNotFound  = accounts.ErrIdentityNotFound
 	ErrCannotDisableSelf = errors.New("cannot disable yourself")
 	ErrInvalidRole       = errors.New("invalid role")
 )
@@ -40,6 +42,8 @@ type UserService struct {
 	albumsRepo    *albumRepo.Repository
 	identityRepo  *accounts.IdentityRepository
 	twoFactorRepo *accounts.TwoFactorRepository
+
+	passwordLoginEnabled func() bool
 }
 
 // NewUserService 创建用户管理服务
@@ -80,6 +84,10 @@ func NewUserServiceWithOAuth(
 
 func (s *UserService) SetTwoFactorRepository(repo *accounts.TwoFactorRepository) {
 	s.twoFactorRepo = repo
+}
+
+func (s *UserService) SetPasswordLoginEnabledProvider(fn func() bool) {
+	s.passwordLoginEnabled = fn
 }
 
 // CreateUser 创建新用户（管理员操作）
@@ -298,6 +306,43 @@ func (s *UserService) GetUserIdentities(ctx context.Context, userID uint) ([]*mo
 		return nil, nil
 	}
 	return s.identityRepo.FindByUser(ctx, userID)
+}
+
+// UnlinkUserIdentity removes an OAuth identity from a user while preserving at
+// least one usable login method.
+func (s *UserService) UnlinkUserIdentity(ctx context.Context, userID uint, provider string) error {
+	user, err := s.accountsRepo.GetUserByID(userID)
+	if err != nil {
+		return ErrUserNotFound
+	}
+	if s.identityRepo == nil {
+		return fmt.Errorf("identity repository not initialized")
+	}
+
+	if _, err := s.identityRepo.FindByUserProvider(ctx, userID, provider); err != nil {
+		if errors.Is(err, accounts.ErrIdentityNotFound) {
+			return ErrIdentityNotFound
+		}
+		return err
+	}
+
+	identities, err := s.identityRepo.FindByUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	hasPassword := s.isPasswordLoginEnabled() && user.Password != ""
+	if len(identities) <= 1 && !hasPassword {
+		return ErrLastLoginMethod
+	}
+
+	return s.identityRepo.Delete(ctx, userID, provider)
+}
+
+func (s *UserService) isPasswordLoginEnabled() bool {
+	if s.passwordLoginEnabled == nil {
+		return true
+	}
+	return s.passwordLoginEnabled()
 }
 
 func (s *UserService) withTx(fn func(tx *gorm.DB) error) error {

@@ -22,7 +22,7 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-func setupUserHandlerTest(t *testing.T) (*gin.Engine, *admin.UserService, *authpkg.JWTService, uint) {
+func setupUserHandlerTest(t *testing.T) (*gin.Engine, *admin.UserService, *accounts.IdentityRepository, *authpkg.JWTService, uint) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 
@@ -30,13 +30,15 @@ func setupUserHandlerTest(t *testing.T) (*gin.Engine, *admin.UserService, *authp
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.User{}, &models.Device{}))
+	require.NoError(t, db.AutoMigrate(&models.User{}, &models.Device{}, &models.UserIdentity{}))
+	db.Exec("DELETE FROM user_identities")
 	db.Exec("DELETE FROM devices")
 	db.Exec("DELETE FROM users")
 
 	repo := accounts.NewRepository(db)
 	devicesRepo := accounts.NewDeviceRepository(db)
-	svc := admin.NewUserService(repo, devicesRepo, nil, nil, nil)
+	identityRepo := accounts.NewIdentityRepository(db)
+	svc := admin.NewUserServiceWithOAuth(repo, devicesRepo, nil, nil, nil, identityRepo)
 	handler := NewUserHandler(svc)
 
 	jwtSvc, err := api.NewTestJWTService("0123456789abcdef0123456789abcdef", "15m", "24h")
@@ -63,9 +65,10 @@ func setupUserHandlerTest(t *testing.T) (*gin.Engine, *admin.UserService, *authp
 		adminGroup.PUT("/users/:id/status", handler.UpdateStatus)
 		adminGroup.POST("/users/:id/reset-password", handler.ResetPassword)
 		adminGroup.DELETE("/users/:id", handler.DeleteUser)
+		adminGroup.DELETE("/users/:id/oauth-identities/:provider", handler.UnlinkOAuthIdentity)
 	}
 
-	return router, svc, jwtSvc, adminUser.ID
+	return router, svc, identityRepo, jwtSvc, adminUser.ID
 }
 
 func adminAuthHeader(jwtSvc *authpkg.JWTService, adminUserID uint) string {
@@ -77,7 +80,7 @@ func adminAuthHeader(jwtSvc *authpkg.JWTService, adminUserID uint) string {
 }
 
 func TestListUsersHandler(t *testing.T) {
-	router, svc, jwtSvc, adminID := setupUserHandlerTest(t)
+	router, svc, _, jwtSvc, adminID := setupUserHandlerTest(t)
 
 	// Create test users via service
 	_, _, err := svc.CreateUser("user1", "password123", models.RoleUser)
@@ -96,7 +99,7 @@ func TestListUsersHandler(t *testing.T) {
 }
 
 func TestCreateUserHandler(t *testing.T) {
-	router, _, jwtSvc, adminID := setupUserHandlerTest(t)
+	router, _, _, jwtSvc, adminID := setupUserHandlerTest(t)
 
 	body, _ := json.Marshal(map[string]string{
 		"username": "newuser",
@@ -113,7 +116,7 @@ func TestCreateUserHandler(t *testing.T) {
 }
 
 func TestCreateUserHandlerEmptyBody(t *testing.T) {
-	router, _, jwtSvc, adminID := setupUserHandlerTest(t)
+	router, _, _, jwtSvc, adminID := setupUserHandlerTest(t)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/users", nil)
 	req.Header.Set("Authorization", adminAuthHeader(jwtSvc, adminID))
@@ -125,7 +128,7 @@ func TestCreateUserHandlerEmptyBody(t *testing.T) {
 }
 
 func TestDeleteUserHandler(t *testing.T) {
-	router, svc, jwtSvc, adminID := setupUserHandlerTest(t)
+	router, svc, _, jwtSvc, adminID := setupUserHandlerTest(t)
 
 	user, _, err := svc.CreateUser("to-delete", "password123", models.RoleUser)
 	require.NoError(t, err)
@@ -136,4 +139,45 @@ func TestDeleteUserHandler(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestUnlinkOAuthIdentityHandler(t *testing.T) {
+	router, svc, identityRepo, jwtSvc, adminID := setupUserHandlerTest(t)
+
+	user, _, err := svc.CreateUser("oauth-user", "password123", models.RoleUser)
+	require.NoError(t, err)
+	require.NoError(t, identityRepo.Create(t.Context(), &models.UserIdentity{
+		UserID:   user.ID,
+		Provider: "github",
+		Subject:  "github-user",
+	}))
+
+	req := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/v1/admin/users/%d/oauth-identities/github", user.ID), nil)
+	req.Header.Set("Authorization", adminAuthHeader(jwtSvc, adminID))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	_, err = identityRepo.FindByUserProvider(t.Context(), user.ID, "github")
+	assert.ErrorIs(t, err, accounts.ErrIdentityNotFound)
+}
+
+func TestUnlinkOAuthIdentityHandlerRefusesLastLoginMethod(t *testing.T) {
+	router, svc, identityRepo, jwtSvc, adminID := setupUserHandlerTest(t)
+	svc.SetPasswordLoginEnabledProvider(func() bool { return false })
+
+	user, _, err := svc.CreateUser("oauth-only", "password123", models.RoleUser)
+	require.NoError(t, err)
+	require.NoError(t, identityRepo.Create(t.Context(), &models.UserIdentity{
+		UserID:   user.ID,
+		Provider: "github",
+		Subject:  "github-user",
+	}))
+
+	req := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/v1/admin/users/%d/oauth-identities/github", user.ID), nil)
+	req.Header.Set("Authorization", adminAuthHeader(jwtSvc, adminID))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusConflict, w.Code)
 }
