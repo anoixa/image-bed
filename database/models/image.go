@@ -32,7 +32,7 @@ type Image struct {
 	UpdatedAt time.Time      `gorm:"index:idx_image_variant_status_updated_at,priority:2"`
 	DeletedAt gorm.DeletedAt `gorm:"uniqueIndex:idx_filehash_deleted;index"`
 
-	Identifier      string `gorm:"index:idx_identifier;not null"`
+	Identifier      string `gorm:"not null"`
 	StoragePath     string `gorm:"not null"`
 	OriginalName    string `gorm:"not null"`
 	FileSize        int64  `gorm:"not null;index:idx_images_public_file_size,priority:2"`
