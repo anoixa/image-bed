@@ -1,7 +1,6 @@
 package database
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"os"
@@ -21,9 +20,6 @@ var (
 	databaseLog    = utils.ForModule("Database")
 	dbMigrationLog = utils.ForModule("DBMigration")
 )
-
-// TxFunc 事务函数类型
-type TxFunc func(tx *gorm.DB) error
 
 // New 创建数据库连接
 func New(cfg *config.Config) (*gorm.DB, error) {
@@ -147,6 +143,9 @@ func AutoMigrate(db *gorm.DB) error {
 		&models.Album{},
 		&models.SystemConfig{},
 		&models.ImageVariant{},
+		&models.UserIdentity{},
+		&models.UserTOTPSetting{},
+		&models.TwoFactorChallenge{},
 	); err != nil {
 		return err
 	}
@@ -161,31 +160,17 @@ func AutoMigrate(db *gorm.DB) error {
 
 // fixSystemConfigIndexes 修复 system_configs 表的索引
 func fixSystemConfigIndexes(db *gorm.DB) error {
-	// 获取数据库类型
-	var dbType string
-	if db.Name() == "sqlite" {
-		dbType = "sqlite"
-	} else {
-		dbType = "postgres"
-	}
-
-	// 删除旧索引
-	dropOldIndexSQL := `DROP INDEX IF EXISTS idx_system_configs_key`
-	if err := db.Exec(dropOldIndexSQL).Error; err != nil {
-		dbMigrationLog.Warnf("Failed to drop old index: %v", err)
-	} else {
+	if dropped, err := dropIndexIfExists(db, &models.SystemConfig{}, "idx_system_configs_key"); err != nil {
+		dbMigrationLog.Warnf("Failed to drop old index idx_system_configs_key: %v", err)
+	} else if dropped {
 		dbMigrationLog.Infof("Dropped old index idx_system_configs_key")
 	}
 
-	// 创建新条件索引
-	var createIndexSQL string
-	if dbType == "sqlite" {
-		createIndexSQL = `CREATE UNIQUE INDEX IF NOT EXISTS idx_key_unique ON system_configs(key) WHERE deleted_at IS NULL`
-	} else {
-		// PostgreSQL
-		createIndexSQL = `CREATE UNIQUE INDEX IF NOT EXISTS idx_key_unique ON system_configs(key) WHERE deleted_at IS NULL`
+	if db.Migrator().HasIndex(&models.SystemConfig{}, "idx_key_unique") {
+		return nil
 	}
 
+	createIndexSQL := `CREATE UNIQUE INDEX IF NOT EXISTS idx_key_unique ON system_configs(key) WHERE deleted_at IS NULL`
 	if err := db.Exec(createIndexSQL).Error; err != nil {
 		if !isIndexExistsError(err) {
 			return fmt.Errorf("failed to create new index: %w", err)
@@ -210,35 +195,29 @@ func isIndexExistsError(err error) bool {
 
 // fixImageIdentifierIndexes 创建部分唯一索引，只在未删除记录上强制 identifier 唯一性
 func fixImageIdentifierIndexes(db *gorm.DB) error {
-	var dbType string
-	if db.Name() == "sqlite" {
-		dbType = "sqlite"
-	} else {
-		dbType = "postgres"
-	}
-
-	if dbType == "sqlite" {
-		dbMigrationLog.Debugf("SQLite detected, skipping partial index for images.identifier")
-		return nil
-	}
-
-	dropOldIndexSQL := `DROP INDEX IF EXISTS idx_identifier`
-	if err := db.Exec(dropOldIndexSQL).Error; err != nil {
+	if dropped, err := dropIndexIfExists(db, &models.Image{}, "idx_identifier"); err != nil {
 		dbMigrationLog.Warnf("Failed to drop old index idx_identifier: %v", err)
-	} else {
+	} else if dropped {
 		dbMigrationLog.Infof("Dropped old index idx_identifier")
 	}
 
-	dropOldIndexSQL2 := `DROP INDEX IF EXISTS idx_images_identifier`
-	if err := db.Exec(dropOldIndexSQL2).Error; err != nil {
+	if dropped, err := dropIndexIfExists(db, &models.Image{}, "idx_images_identifier"); err != nil {
 		dbMigrationLog.Warnf("Failed to drop old index idx_images_identifier: %v", err)
-	} else {
+	} else if dropped {
 		dbMigrationLog.Infof("Dropped old index idx_images_identifier")
+	}
+
+	if db.Migrator().HasIndex(&models.Image{}, "idx_images_identifier_active") {
+		return nil
 	}
 
 	createIndexSQL := `CREATE UNIQUE INDEX IF NOT EXISTS idx_images_identifier_active ON images(identifier) WHERE deleted_at IS NULL`
 
 	if err := db.Exec(createIndexSQL).Error; err != nil {
+		if hasActiveDuplicateImageIdentifiers(db) {
+			dbMigrationLog.Warnf("Skipped unique index idx_images_identifier_active because active duplicate image identifiers already exist; new uploads now generate random identifiers, but existing duplicates should be repaired manually")
+			return nil
+		}
 		if !isIndexExistsError(err) {
 			return fmt.Errorf("failed to create partial index for images.identifier: %w", err)
 		}
@@ -249,14 +228,30 @@ func fixImageIdentifierIndexes(db *gorm.DB) error {
 	return nil
 }
 
-// Transaction 执行事务
-func Transaction(db *gorm.DB, fn TxFunc) error {
-	return db.Transaction(fn)
+func dropIndexIfExists(db *gorm.DB, model any, indexName string) (bool, error) {
+	if !db.Migrator().HasIndex(model, indexName) {
+		return false, nil
+	}
+	return true, db.Exec("DROP INDEX IF EXISTS " + indexName).Error
 }
 
-// TransactionWithContext 带上下文的事务
-func TransactionWithContext(ctx context.Context, db *gorm.DB, fn TxFunc) error {
-	return db.WithContext(ctx).Transaction(fn)
+func hasActiveDuplicateImageIdentifiers(db *gorm.DB) bool {
+	var duplicateCount int64
+	err := db.Raw(`
+		SELECT COUNT(*)
+		FROM (
+			SELECT identifier
+			FROM images
+			WHERE deleted_at IS NULL
+			GROUP BY identifier
+			HAVING COUNT(*) > 1
+		) AS duplicate_identifiers
+	`).Scan(&duplicateCount).Error
+	if err != nil {
+		dbMigrationLog.Warnf("Failed to check duplicate image identifiers: %v", err)
+		return false
+	}
+	return duplicateCount > 0
 }
 
 // Close 关闭数据库连接

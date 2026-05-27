@@ -36,30 +36,39 @@ type OverviewStats struct {
 }
 
 // GetOverviewStats 获取概览统计
-func (r *Repository) GetOverviewStats(ctx context.Context) (*OverviewStats, error) {
+func (r *Repository) GetOverviewStats(ctx context.Context, userID *uint) (*OverviewStats, error) {
 	var result OverviewStats
 
 	db := r.db.WithContext(ctx)
 
-	// 图片总数和存储大小
-	err := db.Model(&models.Image{}).
+	imageQuery := db.Model(&models.Image{}).Where("deleted_at IS NULL")
+	if userID != nil {
+		imageQuery = imageQuery.Where("user_id = ?", *userID)
+	}
+
+	err := imageQuery.
 		Select("COUNT(*) as image_total, COALESCE(SUM(file_size), 0) as storage_total").
-		Where("deleted_at IS NULL").
 		Scan(&result).Error
 	if err != nil {
 		return nil, err
 	}
 
-	// 相册数量
-	if err := db.Model(&models.Album{}).
-		Where("deleted_at IS NULL").
-		Select("COUNT(*)").
-		Scan(&result.AlbumTotal).Error; err != nil {
+	albumQuery := db.Model(&models.Album{}).Where("deleted_at IS NULL")
+	if userID != nil {
+		albumQuery = albumQuery.Where("user_id = ?", *userID)
+	}
+	if err := albumQuery.Select("COUNT(*)").Scan(&result.AlbumTotal).Error; err != nil {
 		return nil, fmt.Errorf("failed to count albums: %w", err)
 	}
 
-	// 用户固定为1（单用户系统）
-	result.UserTotal = 1
+	// 普通用户视角不应看到全局用户总数
+	if userID == nil {
+		if err := db.Model(&models.User{}).Count(&result.UserTotal).Error; err != nil {
+			return nil, fmt.Errorf("failed to count users: %w", err)
+		}
+	} else {
+		result.UserTotal = 1
+	}
 
 	return &result, nil
 }
@@ -73,13 +82,12 @@ type ImageTimeStats struct {
 }
 
 // GetImageTimeStats 获取图片时间维度统计
-func (r *Repository) GetImageTimeStats(ctx context.Context) (*ImageTimeStats, error) {
+func (r *Repository) GetImageTimeStats(ctx context.Context, userID *uint) (*ImageTimeStats, error) {
 	var stats ImageTimeStats
-	now := time.Now()
-	db := r.db.WithContext(ctx)
+	now := time.Now().In(time.Local)
 
 	// 计算今日时间范围
-	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	todayStart := startOfDay(now)
 	todayEnd := todayStart.Add(24 * time.Hour)
 
 	// 计算昨日时间范围
@@ -91,40 +99,34 @@ func (r *Repository) GetImageTimeStats(ctx context.Context) (*ImageTimeStats, er
 	if weekday == 0 {
 		weekday = 7
 	}
-	weekStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).
-		Add(-time.Duration(weekday-1) * 24 * time.Hour)
+	weekStart := todayStart.Add(-time.Duration(weekday-1) * 24 * time.Hour)
 	weekEnd := weekStart.Add(7 * 24 * time.Hour)
 
 	// 计算本月时间范围
-	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.Local)
 	monthEnd := monthStart.AddDate(0, 1, 0)
 
-	// 今日
-	if err := db.Model(&models.Image{}).
-		Where("created_at >= ? AND created_at < ? AND deleted_at IS NULL", todayStart, todayEnd).
-		Count(&stats.Today).Error; err != nil {
-		return nil, fmt.Errorf("failed to count today images: %w", err)
+	rangeStart := minTime(yesterdayStart, weekStart, monthStart)
+	rangeEnd := maxTime(todayEnd, weekEnd, monthEnd)
+	createdAtValues, err := r.getCreatedAtValues(ctx, rangeStart, rangeEnd, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get image timestamps: %w", err)
 	}
 
-	// 昨日
-	if err := db.Model(&models.Image{}).
-		Where("created_at >= ? AND created_at < ? AND deleted_at IS NULL", yesterdayStart, yesterdayEnd).
-		Count(&stats.Yesterday).Error; err != nil {
-		return nil, fmt.Errorf("failed to count yesterday images: %w", err)
-	}
-
-	// 本周
-	if err := db.Model(&models.Image{}).
-		Where("created_at >= ? AND created_at < ? AND deleted_at IS NULL", weekStart, weekEnd).
-		Count(&stats.ThisWeek).Error; err != nil {
-		return nil, fmt.Errorf("failed to count this week images: %w", err)
-	}
-
-	// 本月
-	if err := db.Model(&models.Image{}).
-		Where("created_at >= ? AND created_at < ? AND deleted_at IS NULL", monthStart, monthEnd).
-		Count(&stats.ThisMonth).Error; err != nil {
-		return nil, fmt.Errorf("failed to count this month images: %w", err)
+	for _, createdAt := range createdAtValues {
+		localCreatedAt := createdAt.In(time.Local)
+		if inTimeRange(localCreatedAt, todayStart, todayEnd) {
+			stats.Today++
+		}
+		if inTimeRange(localCreatedAt, yesterdayStart, yesterdayEnd) {
+			stats.Yesterday++
+		}
+		if inTimeRange(localCreatedAt, weekStart, weekEnd) {
+			stats.ThisWeek++
+		}
+		if inTimeRange(localCreatedAt, monthStart, monthEnd) {
+			stats.ThisMonth++
+		}
 	}
 
 	return &stats, nil
@@ -139,13 +141,18 @@ type StorageStat struct {
 }
 
 // GetStorageStats 获取各存储类型统计
-func (r *Repository) GetStorageStats(ctx context.Context) ([]StorageStat, error) {
+func (r *Repository) GetStorageStats(ctx context.Context, userID *uint) ([]StorageStat, error) {
 	var stats []StorageStat
 
-	err := r.db.WithContext(ctx).Table("images i").
+	query := r.db.WithContext(ctx).Table("images i").
 		Select("i.storage_config_id as storage_id, sc.name as storage_name, COUNT(*) as count, SUM(i.file_size) as size").
 		Joins("LEFT JOIN system_configs sc ON i.storage_config_id = sc.id").
-		Where("i.deleted_at IS NULL").
+		Where("i.deleted_at IS NULL")
+	if userID != nil {
+		query = query.Where("i.user_id = ?", *userID)
+	}
+
+	err := query.
 		Group("i.storage_config_id, sc.name").
 		Order("size DESC").
 		Scan(&stats).Error
@@ -159,32 +166,110 @@ type DailyStat struct {
 	Count int64
 }
 
-// GetDailyStats 获取近 N 天每日统计
-func (r *Repository) GetDailyStats(ctx context.Context, days int) ([]DailyStat, error) {
-	var stats []DailyStat
+type createdAtRow struct {
+	CreatedAt time.Time `gorm:"column:created_at"`
+}
 
-	// 计算起始时间（N天前的零点）
-	now := time.Now()
-	startDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).
-		AddDate(0, 0, -days)
+// GetDailyStats 获取近 N 天每日统计
+func (r *Repository) GetDailyStats(ctx context.Context, days int, userID *uint) ([]DailyStat, error) {
+	if days <= 0 {
+		return nil, nil
+	}
+
+	now := time.Now().In(time.Local)
+	todayStart := startOfDay(now)
+	startDate := todayStart.AddDate(0, 0, -(days - 1))
+	endDate := todayStart.AddDate(0, 0, 1)
 
 	statsRepoLog.Debugf("Querying from %s, days=%d", startDate.Format("2006-01-02"), days)
 
-	err := r.db.WithContext(ctx).Table("images").
-		Select("DATE(created_at) as date, COUNT(*) as count").
-		Where("created_at >= ? AND deleted_at IS NULL", startDate).
-		Group("DATE(created_at)").
-		Order("date").
-		Scan(&stats).Error
-
+	createdAtValues, err := r.getCreatedAtValues(ctx, startDate, endDate, userID)
 	if err != nil {
 		statsRepoLog.Debugf("Error: %v", err)
-	} else {
-		statsRepoLog.Debugf("Found %d records", len(stats))
-		for _, s := range stats {
-			statsRepoLog.Debugf("Result: date=%s, count=%d", s.Date.Format("2006-01-02"), s.Count)
-		}
+		return nil, err
 	}
 
-	return stats, err
+	counts := make(map[string]int64, days)
+	for _, createdAt := range createdAtValues {
+		localCreatedAt := createdAt.In(time.Local)
+		if !inTimeRange(localCreatedAt, startDate, endDate) {
+			continue
+		}
+		counts[localCreatedAt.Format("2006-01-02")]++
+	}
+
+	stats := make([]DailyStat, 0, len(counts))
+	for i := 0; i < days; i++ {
+		date := startDate.AddDate(0, 0, i)
+		count := counts[date.Format("2006-01-02")]
+		if count == 0 {
+			continue
+		}
+		stats = append(stats, DailyStat{
+			Date:  date,
+			Count: count,
+		})
+	}
+
+	statsRepoLog.Debugf("Found %d records", len(stats))
+	for _, s := range stats {
+		statsRepoLog.Debugf("Result: date=%s, count=%d", s.Date.Format("2006-01-02"), s.Count)
+	}
+
+	return stats, nil
+}
+
+func (r *Repository) getCreatedAtValues(ctx context.Context, start, end time.Time, userID *uint) ([]time.Time, error) {
+	var rows []createdAtRow
+
+	query := r.db.WithContext(ctx).Table("images").
+		Select("created_at").
+		Where("created_at >= ? AND created_at < ? AND deleted_at IS NULL", start.Add(-24*time.Hour), end.Add(24*time.Hour))
+	if userID != nil {
+		query = query.Where("user_id = ?", *userID)
+	}
+	if err := query.Order("created_at").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	values := make([]time.Time, 0, len(rows))
+	for _, row := range rows {
+		values = append(values, row.CreatedAt)
+	}
+	return values, nil
+}
+
+func startOfDay(t time.Time) time.Time {
+	local := t.In(time.Local)
+	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.Local)
+}
+
+func inTimeRange(value, start, end time.Time) bool {
+	return !value.Before(start) && value.Before(end)
+}
+
+func minTime(values ...time.Time) time.Time {
+	if len(values) == 0 {
+		return time.Time{}
+	}
+	minValue := values[0]
+	for _, value := range values[1:] {
+		if value.Before(minValue) {
+			minValue = value
+		}
+	}
+	return minValue
+}
+
+func maxTime(values ...time.Time) time.Time {
+	if len(values) == 0 {
+		return time.Time{}
+	}
+	maxValue := values[0]
+	for _, value := range values[1:] {
+		if value.After(maxValue) {
+			maxValue = value
+		}
+	}
+	return maxValue
 }

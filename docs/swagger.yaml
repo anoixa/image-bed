@@ -1,11 +1,83 @@
 definitions:
+  admin.AuthSettingsResponse:
+    properties:
+      callback_urls:
+        additionalProperties:
+          type: string
+        type: object
+      oauth_login_enabled:
+        type: boolean
+      password_login_enabled:
+        type: boolean
+      providers:
+        items:
+          $ref: '#/definitions/auth.ProviderInfo'
+        type: array
+    type: object
+  admin.CreateUserRequest:
+    properties:
+      password:
+        type: string
+      role:
+        type: string
+      username:
+        type: string
+    required:
+    - username
+    type: object
+  admin.CreateUserResponse:
+    properties:
+      id:
+        type: integer
+      password:
+        type: string
+      role:
+        type: string
+      status:
+        type: string
+      username:
+        type: string
+    type: object
+  admin.ListUsersResponse:
+    properties:
+      page:
+        type: integer
+      page_size:
+        type: integer
+      total:
+        type: integer
+      users:
+        items:
+          $ref: '#/definitions/admin.UserSummary'
+        type: array
+    type: object
+  admin.MessageResponse:
+    properties:
+      message:
+        type: string
+    type: object
+  admin.ResetPasswordResponse:
+    properties:
+      password:
+        type: string
+    type: object
   admin.SetTransferModeRequest:
     properties:
+      auto_direct_threshold_bytes:
+        description: auto 模式下启用直链的最小文件大小
+        type: integer
       mode:
         description: auto, always_proxy, always_direct
         type: string
     required:
     - mode
+    type: object
+  admin.UpdateAuthSettingsRequest:
+    properties:
+      password_login_enabled:
+        type: boolean
+    required:
+    - password_login_enabled
     type: object
   admin.UpdateConfigRequest:
     properties:
@@ -48,11 +120,72 @@ definitions:
       webp_quality:
         type: integer
     type: object
+  admin.UpdateRoleRequest:
+    properties:
+      role:
+        enum:
+        - admin
+        - user
+        type: string
+    required:
+    - role
+    type: object
+  admin.UpdateStatusRequest:
+    properties:
+      status:
+        enum:
+        - active
+        - disabled
+        type: string
+    required:
+    - status
+    type: object
+  admin.UserSummary:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: integer
+      role:
+        type: string
+      status:
+        type: string
+      updated_at:
+        type: string
+      username:
+        type: string
+    type: object
+  admin.oauthUserIdentitiesResponse:
+    properties:
+      identities:
+        items:
+          $ref: '#/definitions/admin.oauthUserIdentitySummary'
+        type: array
+    type: object
+  admin.oauthUserIdentitySummary:
+    properties:
+      avatar_url:
+        type: string
+      created_at:
+        type: string
+      email:
+        type: string
+      email_verified:
+        type: boolean
+      id:
+        type: integer
+      provider:
+        example: github
+        type: string
+      username:
+        type: string
+    type: object
   albums.AddImagesToAlbumRequest:
     properties:
       identifiers:
         items:
           type: string
+        maxItems: 100
         minItems: 1
         type: array
     required:
@@ -146,6 +279,7 @@ definitions:
       identifiers:
         items:
           type: string
+        maxItems: 100
         minItems: 1
         type: array
     required:
@@ -184,22 +318,100 @@ definitions:
     required:
     - name
     type: object
+  api.authCapabilitiesResponse:
+    properties:
+      oauth_login_enabled:
+        example: true
+        type: boolean
+      password_login_enabled:
+        example: true
+        type: boolean
+      providers:
+        items:
+          $ref: '#/definitions/auth.ProviderInfo'
+        type: array
+    type: object
   api.loginResponse:
     properties:
       access_token:
         type: string
       access_token_expiry:
         type: integer
+      expires_in:
+        type: integer
+      requires_2fa:
+        type: boolean
+      ticket:
+        type: string
+    type: object
+  api.oauthIdentitiesResponse:
+    properties:
+      identities:
+        items:
+          $ref: '#/definitions/api.oauthIdentityResponse'
+        type: array
+    type: object
+  api.oauthIdentityResponse:
+    properties:
+      avatar_url:
+        type: string
+      created_at:
+        type: string
+      email:
+        type: string
+      email_verified:
+        type: boolean
+      id:
+        type: integer
+      provider:
+        example: github
+        type: string
+      username:
+        type: string
+    type: object
+  api.oauthProvidersResponse:
+    properties:
+      providers:
+        items:
+          $ref: '#/definitions/auth.ProviderInfo'
+        type: array
+    type: object
+  api.oauthStartResponse:
+    properties:
+      auth_url:
+        type: string
     type: object
   api.userAuthRequestBody:
     properties:
       password:
+        maxLength: 1024
         type: string
       username:
         type: string
     required:
     - password
     - username
+    type: object
+  api.verify2FARequestBody:
+    properties:
+      code:
+        type: string
+      ticket:
+        type: string
+    required:
+    - code
+    - ticket
+    type: object
+  auth.ProviderInfo:
+    properties:
+      display_name:
+        type: string
+      enabled:
+        type: boolean
+      icon:
+        type: string
+      provider:
+        type: string
     type: object
   common.Response:
     properties:
@@ -212,6 +424,7 @@ definitions:
   github_com_anoixa_image-bed_api_handler_user.ChangePasswordRequest:
     properties:
       new_password:
+        maxLength: 1024
         minLength: 6
         type: string
       old_password:
@@ -225,6 +438,7 @@ definitions:
       identifiers:
         items:
           type: string
+        maxItems: 100
         type: array
     required:
     - identifiers
@@ -300,6 +514,8 @@ definitions:
     properties:
       album_id:
         type: integer
+      enabled:
+        type: boolean
       include_all_public:
         type: boolean
     type: object
@@ -313,6 +529,66 @@ definitions:
       description:
         type: string
     type: object
+  middleware.ImageMetrics:
+    properties:
+      cache_responses:
+        type: integer
+      data_cache_hits:
+        type: integer
+      data_cache_misses:
+        type: integer
+      direct_redirects:
+        type: integer
+      metadata_cache_hits:
+        type: integer
+      metadata_cache_misses:
+        type: integer
+      original_responses:
+        type: integer
+      reader_responses:
+        type: integer
+      sendfile_responses:
+        type: integer
+      stream_responses:
+        type: integer
+      thumbnail_responses:
+        type: integer
+      variant_responses:
+        type: integer
+    type: object
+  middleware.UploadMetrics:
+    properties:
+      avg_db_write_duration_ms:
+        type: number
+      avg_file_process_duration_ms:
+        type: number
+      avg_hash_duration_ms:
+        type: number
+      avg_parse_duration_ms:
+        type: number
+      avg_storage_write_duration_ms:
+        type: number
+      db_write_duration_ms:
+        type: integer
+      file_process_duration_ms:
+        type: integer
+      files_processed:
+        type: integer
+      hash_duration_ms:
+        type: integer
+      parse_duration_ms:
+        type: integer
+      parse_requests:
+        type: integer
+      storage_write_duration_ms:
+        type: integer
+      task_submit_accepted:
+        type: integer
+      task_submit_attempts:
+        type: integer
+      task_submit_rejected:
+        type: integer
+    type: object
   models.ConfigCategory:
     enum:
     - storage
@@ -320,6 +596,7 @@ definitions:
     - system
     - image_processing
     - security
+    - oauth
     type: string
     x-enum-varnames:
     - ConfigCategoryStorage
@@ -327,6 +604,7 @@ definitions:
     - ConfigCategorySystem
     - ConfigCategoryImageProcessing
     - ConfigCategorySecurity
+    - ConfigCategoryOAuth
   models.SystemConfigStoreRequest:
     properties:
       category:
@@ -407,9 +685,17 @@ definitions:
         type: number
       heap_alloc_str:
         type: string
+      heap_idle_mb:
+        type: number
+      heap_idle_str:
+        type: string
       heap_in_use_mb:
         type: number
       heap_in_use_str:
+        type: string
+      heap_released_mb:
+        type: number
+      heap_released_str:
         type: string
       heap_sys_mb:
         type: number
@@ -419,6 +705,18 @@ definitions:
         type: integer
       num_gc:
         type: integer
+      rss_anon_mb:
+        type: number
+      rss_anon_str:
+        type: string
+      rss_file_mb:
+        type: number
+      rss_file_str:
+        type: string
+      rss_mb:
+        type: number
+      rss_str:
+        type: string
       stack_sys_mb:
         type: number
       stack_sys_str:
@@ -427,15 +725,35 @@ definitions:
         type: number
       total_alloc_str:
         type: string
+      vips_allocs:
+        type: integer
+      vips_mem_high_mb:
+        type: number
+      vips_mem_high_str:
+        type: string
+      vips_mem_mb:
+        type: number
+      vips_mem_str:
+        type: string
+      vips_open_files:
+        type: integer
     type: object
   system.MetricsResponse:
     properties:
       avg_duration_ms:
         type: number
+      image_delivery:
+        $ref: '#/definitions/middleware.ImageMetrics'
       request_count:
         type: integer
       request_duration_ms:
         type: integer
+      sweeper:
+        $ref: '#/definitions/worker.SweeperStats'
+      upload:
+        $ref: '#/definitions/middleware.UploadMetrics'
+      worker:
+        $ref: '#/definitions/system.WorkerStatus'
     type: object
   system.RuntimeStatus:
     properties:
@@ -458,8 +776,14 @@ definitions:
         $ref: '#/definitions/system.MemoryStatus'
       runtime:
         $ref: '#/definitions/system.RuntimeStatus'
+      sweeper:
+        $ref: '#/definitions/worker.SweeperStats'
+      temp_dir:
+        $ref: '#/definitions/system.DirStatus'
       version:
         type: string
+      worker:
+        $ref: '#/definitions/system.WorkerStatus'
     type: object
   system.VersionResponse:
     properties:
@@ -468,14 +792,116 @@ definitions:
       version:
         type: string
     type: object
+  system.WorkerStatus:
+    properties:
+      executed:
+        type: integer
+      failed:
+        type: integer
+      in_flight_tasks:
+        type: integer
+      in_flight_variants:
+        type: integer
+      queue_cap:
+        type: integer
+      queue_size:
+        type: integer
+      submitted:
+        type: integer
+      worker_count:
+        type: integer
+    type: object
   user.ChangePasswordResponse:
     properties:
       message:
         type: string
     type: object
+  user.CurrentUserResponse:
+    properties:
+      id:
+        type: integer
+      role:
+        type: string
+      status:
+        type: string
+      username:
+        type: string
+    type: object
+  user.twoFACodeRequest:
+    properties:
+      code:
+        type: string
+    required:
+    - code
+    type: object
+  user.twoFASetupRequest:
+    properties:
+      current_code:
+        type: string
+      current_password:
+        type: string
+    type: object
+  user.twoFASetupResponse:
+    properties:
+      enabled:
+        type: boolean
+      secret:
+        type: string
+      uri:
+        type: string
+    type: object
+  user.twoFAStatusResponse:
+    properties:
+      enabled:
+        type: boolean
+    type: object
+  worker.SweeperStats:
+    properties:
+      errors:
+        type: integer
+      failed_images:
+        type: integer
+      failed_variants:
+        type: integer
+      last_error_message:
+        type: string
+      last_error_unix:
+        type: integer
+      last_run_unix:
+        type: integer
+      last_success_unix:
+        type: integer
+      reset_images:
+        type: integer
+      reset_variants:
+        type: integer
+      retriggered:
+        type: integer
+      runs:
+        type: integer
+    type: object
 info:
   contact: {}
 paths:
+  /api/auth/capabilities:
+    get:
+      description: Get password-login and OAuth-login availability for frontend login-page
+        rendering.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Authentication capabilities
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/api.authCapabilitiesResponse'
+              type: object
+      summary: Get auth capabilities
+      tags:
+      - auth
   /api/auth/login:
     post:
       consumes:
@@ -516,6 +942,41 @@ paths:
       summary: User login
       tags:
       - auth
+  /api/auth/login/2fa:
+    post:
+      consumes:
+      - application/json
+      description: Verify TOTP code with a 2FA ticket to complete login
+      parameters:
+      - description: 2FA verification
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.verify2FARequestBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 2FA verification successful
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/api.loginResponse'
+              type: object
+        "400":
+          description: Invalid request body
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Invalid 2FA code or ticket
+          schema:
+            $ref: '#/definitions/common.Response'
+      summary: Verify 2FA code
+      tags:
+      - auth
   /api/auth/logout:
     post:
       consumes:
@@ -531,6 +992,253 @@ paths:
           schema:
             $ref: '#/definitions/common.Response'
       summary: User logout
+      tags:
+      - auth
+  /api/auth/me:
+    get:
+      description: 返回当前 JWT 登录用户的基础资料
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/user.CurrentUserResponse'
+              type: object
+        "401":
+          description: 未认证
+          schema:
+            $ref: '#/definitions/common.Response'
+        "404":
+          description: 用户不存在
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: 服务器内部错误
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: 获取当前用户信息
+      tags:
+      - auth
+  /api/auth/oauth/{provider}/callback:
+    get:
+      description: Complete an OAuth login or account-link flow. On login success
+        it sets auth cookies and redirects to return_to; on failure it redirects with
+        oauth_error.
+      parameters:
+      - description: OAuth provider
+        enum:
+        - github
+        - google
+        - gitee
+        in: path
+        name: provider
+        required: true
+        type: string
+      - description: Authorization code
+        in: query
+        name: code
+        required: true
+        type: string
+      - description: Signed OAuth state
+        in: query
+        name: state
+        required: true
+        type: string
+      responses:
+        "302":
+          description: Redirect to return_to, /login, or /settings/account
+      summary: OAuth callback
+      tags:
+      - auth
+  /api/auth/oauth/{provider}/link/start:
+    post:
+      description: Start linking an OAuth provider to the current authenticated user.
+        Redirects to the provider authorization page.
+      parameters:
+      - description: OAuth provider
+        enum:
+        - github
+        - google
+        - gitee
+        in: path
+        name: provider
+        required: true
+        type: string
+      - description: Same-site relative return path
+        in: query
+        name: return_to
+        type: string
+      - description: Set to json to receive auth_url instead of redirect
+        in: query
+        name: response
+        type: string
+      responses:
+        "200":
+          description: OAuth authorization URL
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/api.oauthStartResponse'
+              type: object
+        "302":
+          description: Redirect to OAuth provider
+        "400":
+          description: Provider not enabled or invalid return_to
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Failed to start link flow
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Start OAuth account link
+      tags:
+      - auth
+  /api/auth/oauth/{provider}/start:
+    get:
+      description: Start an OAuth login flow. Redirects to the provider authorization
+        page.
+      parameters:
+      - description: OAuth provider
+        enum:
+        - github
+        - google
+        - gitee
+        in: path
+        name: provider
+        required: true
+        type: string
+      - description: Same-site relative return path
+        in: query
+        name: return_to
+        type: string
+      - description: Set to json to receive auth_url instead of redirect
+        in: query
+        name: response
+        type: string
+      responses:
+        "200":
+          description: OAuth authorization URL
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/api.oauthStartResponse'
+              type: object
+        "302":
+          description: Redirect to OAuth provider
+        "400":
+          description: Provider not enabled or invalid return_to
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Failed to start OAuth flow
+          schema:
+            $ref: '#/definitions/common.Response'
+      summary: Start OAuth login
+      tags:
+      - auth
+  /api/auth/oauth/identities:
+    get:
+      description: Get OAuth identities linked to the current user.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Linked identities
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/api.oauthIdentitiesResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Failed to get identities
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: List linked OAuth identities
+      tags:
+      - auth
+  /api/auth/oauth/identities/{provider}:
+    delete:
+      description: Remove a linked OAuth identity from the current user. Refuses to
+        remove the last usable login method.
+      parameters:
+      - description: OAuth provider
+        enum:
+        - github
+        - google
+        - gitee
+        in: path
+        name: provider
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Identity unlinked
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "404":
+          description: Identity not found
+          schema:
+            $ref: '#/definitions/common.Response'
+        "409":
+          description: Cannot unlink the last login method
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Failed to unlink identity
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Unlink OAuth identity
+      tags:
+      - auth
+  /api/auth/oauth/providers:
+    get:
+      description: Get enabled OAuth providers for login-page rendering.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OAuth provider list
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/api.oauthProvidersResponse'
+              type: object
+      summary: List OAuth providers
       tags:
       - auth
   /api/auth/refresh:
@@ -561,14 +1269,93 @@ paths:
       summary: Refresh access token
       tags:
       - auth
+  /api/v1/admin/auth/settings:
+    get:
+      description: Get password login switch, enabled OAuth providers, and callback
+        URLs.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Login settings
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/admin.AuthSettingsResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Get login settings
+      tags:
+      - admin
+    put:
+      consumes:
+      - application/json
+      description: Update password login availability. Disabling password login requires
+        at least one enabled OAuth provider and a linked OAuth identity for the current
+        admin.
+      parameters:
+      - description: Login settings
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/admin.UpdateAuthSettingsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Login settings
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/admin.AuthSettingsResponse'
+              type: object
+        "400":
+          description: Invalid request or unsafe lockout risk
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Update login settings
+      tags:
+      - admin
   /api/v1/admin/configs:
     get:
       consumes:
       - application/json
-      description: Get list of system configurations including storage and image processing
-        settings
+      description: Get list of system configurations including storage, image processing,
+        and OAuth settings
       parameters:
-      - description: 'Filter by category: storage, image_processing'
+      - description: 'Filter by category: storage, image_processing, oauth'
         in: query
         name: category
         type: string
@@ -603,7 +1390,8 @@ paths:
     post:
       consumes:
       - application/json
-      description: Create a new system configuration (storage or image processing)
+      description: Create a new system configuration (storage, image processing, or
+        OAuth provider)
       parameters:
       - description: Configuration data
         in: body
@@ -1094,8 +1882,7 @@ paths:
             - $ref: '#/definitions/common.Response'
             - properties:
                 data:
-                  additionalProperties:
-                    type: string
+                  additionalProperties: true
                   type: object
               type: object
         "401":
@@ -1140,6 +1927,461 @@ paths:
       security:
       - ApiKeyAuth: []
       summary: Set global transfer mode
+      tags:
+      - admin
+  /api/v1/admin/users:
+    get:
+      consumes:
+      - application/json
+      description: Get paginated user list for administration
+      parameters:
+      - description: Page number
+        in: query
+        minimum: 1
+        name: page
+        type: integer
+      - description: Page size
+        in: query
+        maximum: 100
+        minimum: 1
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: User list
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/admin.ListUsersResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: List users
+      tags:
+      - admin
+    post:
+      consumes:
+      - application/json
+      description: Create a new user. If password is omitted, backend auto-generates
+        one and returns it once.
+      parameters:
+      - description: Create user request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/admin.CreateUserRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: User created
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/admin.CreateUserResponse'
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/common.Response'
+        "409":
+          description: Username already exists
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Create user
+      tags:
+      - admin
+  /api/v1/admin/users/{id}:
+    delete:
+      consumes:
+      - application/json
+      description: Delete a user when they do not own images or albums
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: User deleted
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/admin.MessageResponse'
+              type: object
+        "400":
+          description: Invalid user ID, delete self, or last admin protection
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/common.Response'
+        "404":
+          description: User not found
+          schema:
+            $ref: '#/definitions/common.Response'
+        "409":
+          description: User still owns data
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Delete user
+      tags:
+      - admin
+  /api/v1/admin/users/{id}/2fa/reset:
+    post:
+      consumes:
+      - application/json
+      description: Clear a user's TOTP 2FA settings. This does not change password
+        or revoke sessions.
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 2FA reset
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/admin.MessageResponse'
+              type: object
+        "400":
+          description: Invalid user ID
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/common.Response'
+        "404":
+          description: User not found
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Reset user 2FA
+      tags:
+      - admin
+  /api/v1/admin/users/{id}/oauth-identities:
+    get:
+      consumes:
+      - application/json
+      description: Get linked OAuth identities for a user. Users bind OAuth identities
+        from their own account settings.
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OAuth identity list
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/admin.oauthUserIdentitiesResponse'
+              type: object
+        "400":
+          description: Invalid user ID
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Failed to get identities
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Get user OAuth identities
+      tags:
+      - admin
+  /api/v1/admin/users/{id}/oauth-identities/{provider}:
+    delete:
+      consumes:
+      - application/json
+      description: Remove a linked OAuth identity from a user. Refuses to remove the
+        user's last usable login method.
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: OAuth provider
+        enum:
+        - github
+        - google
+        - gitee
+        in: path
+        name: provider
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OAuth identity unlinked
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/admin.MessageResponse'
+              type: object
+        "400":
+          description: Invalid user ID
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/common.Response'
+        "404":
+          description: User or identity not found
+          schema:
+            $ref: '#/definitions/common.Response'
+        "409":
+          description: Cannot unlink the last login method
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Failed to unlink identity
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Unlink user OAuth identity
+      tags:
+      - admin
+  /api/v1/admin/users/{id}/reset-password:
+    post:
+      consumes:
+      - application/json
+      description: Reset a user's password and revoke all of their active sessions
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Password reset
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/admin.ResetPasswordResponse'
+              type: object
+        "400":
+          description: Invalid user ID
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/common.Response'
+        "404":
+          description: User not found
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Reset user password
+      tags:
+      - admin
+  /api/v1/admin/users/{id}/role:
+    put:
+      consumes:
+      - application/json
+      description: Change a user's role between admin and user
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Role update request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/admin.UpdateRoleRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Role updated
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/admin.MessageResponse'
+              type: object
+        "400":
+          description: Validation error or last admin protection
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/common.Response'
+        "404":
+          description: User not found
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Update user role
+      tags:
+      - admin
+  /api/v1/admin/users/{id}/status:
+    put:
+      consumes:
+      - application/json
+      description: Change a user's status between active and disabled
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Status update request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/admin.UpdateStatusRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Status updated
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/admin.MessageResponse'
+              type: object
+        "400":
+          description: Validation error, disable self, or last admin protection
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/common.Response'
+        "404":
+          description: User not found
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: Update user status
       tags:
       - admin
   /api/v1/albums:
@@ -1734,19 +2976,18 @@ paths:
     post:
       consumes:
       - multipart/form-data
-      description: Upload a single image file with optional storage strategy and visibility
-        settings
+      description: Upload one or multiple image files (max 10 per request)
       parameters:
-      - description: Image file to upload
+      - description: Image file(s) to upload (max 10)
         in: formData
-        name: file
+        name: files
         required: true
         type: file
       - description: Storage strategy ID
         in: formData
         name: strategy_id
         type: string
-      - description: 'Whether the image is public (default: true)'
+      - description: 'Whether images are public (default: true)'
         in: formData
         name: is_public
         type: boolean
@@ -1775,57 +3016,7 @@ paths:
             $ref: '#/definitions/common.Response'
       security:
       - ApiKeyAuth: []
-      summary: Upload single image
-      tags:
-      - images
-  /api/v1/images/uploads:
-    post:
-      consumes:
-      - multipart/form-data
-      description: Upload up to 10 images in a single batch request
-      parameters:
-      - collectionFormat: csv
-        description: Image files to upload (max 10)
-        in: formData
-        items:
-          type: file
-        name: files
-        required: true
-        type: array
-      - description: Storage strategy ID
-        in: formData
-        name: strategy_id
-        type: string
-      - description: 'Whether images are public (default: true)'
-        in: formData
-        name: is_public
-        type: boolean
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Batch upload completed
-          schema:
-            $ref: '#/definitions/common.Response'
-        "400":
-          description: Invalid form data or too many files
-          schema:
-            $ref: '#/definitions/common.Response'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/common.Response'
-        "413":
-          description: Total file size too large
-          schema:
-            $ref: '#/definitions/common.Response'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/common.Response'
-      security:
-      - ApiKeyAuth: []
-      summary: Upload multiple images
+      summary: Upload images
       tags:
       - images
   /api/v1/token:
@@ -2006,6 +3197,139 @@ paths:
       summary: Enable API key
       tags:
       - keys
+  /api/v1/user/2fa:
+    get:
+      description: 返回当前用户的 TOTP 两步验证状态
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/user.twoFAStatusResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: 获取 2FA 状态
+      tags:
+      - user
+  /api/v1/user/2fa/disable:
+    post:
+      consumes:
+      - application/json
+      description: 验证当前 TOTP code 后关闭两步验证
+      parameters:
+      - description: TOTP code
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/user.twoFACodeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: 关闭 2FA
+      tags:
+      - user
+  /api/v1/user/2fa/enable:
+    post:
+      consumes:
+      - application/json
+      description: 验证 TOTP code，确认启用两步验证
+      parameters:
+      - description: TOTP code
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/user.twoFACodeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+        "400":
+          description: Invalid code or 2FA not set up
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: 启用 2FA
+      tags:
+      - user
+  /api/v1/user/2fa/setup:
+    post:
+      consumes:
+      - application/json
+      description: 生成 TOTP secret 和 URI，返回给前端渲染 QR 码。不立即启用，需调用 enable 接口确认。
+      parameters:
+      - description: Current password or current TOTP code
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/user.twoFASetupRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/user.twoFASetupResponse'
+              type: object
+        "400":
+          description: 2FA already enabled
+          schema:
+            $ref: '#/definitions/common.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: 设置 2FA
+      tags:
+      - user
   /api/v1/user/password:
     post:
       consumes:
@@ -2140,6 +3464,10 @@ paths:
             type: string
         "400":
           description: Invalid query parameters
+          schema:
+            $ref: '#/definitions/common.Response'
+        "403":
+          description: Random API disabled
           schema:
             $ref: '#/definitions/common.Response'
         "500":

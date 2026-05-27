@@ -267,3 +267,10 @@ func (r *Repository) RemoveImagesFromAlbum(albumID, userID uint, imageIDs []uint
 func (r *Repository) WithContext(ctx context.Context) *Repository {
 	return &Repository{db: r.db.WithContext(ctx)}
 }
+
+// CountAlbumsByUser 统计用户的相册数量
+func (r *Repository) CountAlbumsByUser(userID uint) (int64, error) {
+	var count int64
+	err := r.db.Model(&models.Album{}).Where("user_id = ?", userID).Count(&count).Error
+	return count, err
+}

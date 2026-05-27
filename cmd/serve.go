@@ -2,13 +2,16 @@ package cmd
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/anoixa/image-bed/api"
@@ -23,7 +26,9 @@ import (
 	dashboardRepo "github.com/anoixa/image-bed/database/repo/dashboard"
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/database/repo/keys"
+	"github.com/anoixa/image-bed/internal/auth"
 	imageSvc "github.com/anoixa/image-bed/internal/image"
+	"github.com/anoixa/image-bed/internal/tempfiles"
 	"github.com/anoixa/image-bed/internal/vipsfile"
 	"github.com/anoixa/image-bed/internal/worker"
 	"github.com/anoixa/image-bed/storage"
@@ -38,6 +43,8 @@ var (
 	dependenciesLog = utils.ForModule("Dependencies")
 	vipsLog         = utils.ForModule("VIPS")
 )
+
+const jwtSecretFileName = "jwt.secret"
 
 // serveCmd represents the serve command
 var serveCmd = &cobra.Command{
@@ -87,11 +94,13 @@ func InitDependencies(cfg *config.Config) (*Dependencies, error) {
 	}
 
 	repos := &core.Repositories{
-		AccountsRepo: accounts.NewRepository(db),
-		DevicesRepo:  accounts.NewDeviceRepository(db),
-		ImagesRepo:   images.NewRepository(db),
-		AlbumsRepo:   albums.NewRepository(db),
-		KeysRepo:     keys.NewRepository(db),
+		AccountsRepo:  accounts.NewRepository(db),
+		DevicesRepo:   accounts.NewDeviceRepository(db),
+		ImagesRepo:    images.NewRepository(db),
+		AlbumsRepo:    albums.NewRepository(db),
+		KeysRepo:      keys.NewRepository(db),
+		IdentityRepo:  accounts.NewIdentityRepository(db),
+		TwoFactorRepo: accounts.NewTwoFactorRepository(db),
 	}
 
 	// 从配置文件初始化缓存
@@ -163,24 +172,28 @@ func RunServer() {
 
 	dataDir := utils.GetDataDir()
 
-	if err := os.MkdirAll(dataDir, os.ModePerm); err != nil {
+	if err := os.MkdirAll(dataDir, 0o750); err != nil {
 		exitWithErrorf("Failed to create data directory: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(dataDir, "temp"), os.ModePerm); err != nil {
+	if err := os.MkdirAll(filepath.Join(dataDir, "temp"), 0o700); err != nil {
 		exitWithErrorf("Failed to create temp directory: %v", err)
 	}
+	if err := ensureJWTSecret(cfg, dataDir); err != nil {
+		exitWithErrorf("Failed to initialize JWT secret: %v", err)
+	}
 
+	vipsCache := cfg.GetVipsCacheConfig()
 	if err := vipsfile.Startup(&vips.Config{
-		MaxCacheMem:      1,
-		MaxCacheSize:     1,
-		MaxCacheFiles:    0,
+		MaxCacheMem:      vipsCache.MaxCacheMem,
+		MaxCacheSize:     vipsCache.MaxCacheSize,
+		MaxCacheFiles:    vipsCache.MaxCacheFiles,
 		ConcurrencyLevel: 2,
 	}); err != nil {
 		exitWithErrorf("Failed to initialize govips: %v", err)
 	}
 	defer vipsfile.Shutdown()
 
-	vipsLog.Infof("Govips initialized with cache limited to 1 byte / 1 entry")
+	vipsLog.Infof("Govips initialized with %s", vipsCache.String())
 	if config.IsDevelopment() {
 		utils.LogMemoryStats("VIPS_INIT")
 	}
@@ -195,15 +208,54 @@ func RunServer() {
 		exitWithErrorf("Failed to initialize database: %v", err)
 	}
 
+	processingConfig := worker.DefaultImageProcessingConfig()
+	processingConfig.MaxConcurrentAVIF = cfg.GetAVIFConcurrency()
+	worker.InitGlobalSemaphore(processingConfig)
 	worker.InitGlobalPool(cfg.WorkerCount, 1000)
 
 	sweeperCtx, sweeperCancel := context.WithCancel(context.Background())
 	defer sweeperCancel()
 	worker.StartVariantSweeper(sweeperCtx, deps.VariantRepo, deps.Repositories.ImagesRepo, deps.Converter.TriggerConversionFromSweeper)
+	tempfiles.StartSweeper(sweeperCtx)
 
 	jwtService, err := api.NewJWTServiceFromConfig(cfg, deps.ConfigManager, deps.Repositories.KeysRepo)
 	if err != nil {
 		exitWithErrorf("Failed to initialize JWT: %v", err)
+	}
+	jwtService.SetAccountsRepository(deps.Repositories.AccountsRepo)
+
+	passwordLoginEnabled := deps.ConfigManager.IsPasswordLoginEnabled(context.Background(), cfg.AuthPasswordLoginEnabled)
+
+	// Initialize OAuth service (providers registered from config)
+	var oauthService *auth.OAuthService
+	if jwtService != nil && deps.Repositories.IdentityRepo != nil {
+		loginSvc := auth.NewLoginServiceWith2FA(
+			deps.Repositories.AccountsRepo,
+			deps.Repositories.DevicesRepo,
+			jwtService,
+			deps.Repositories.TwoFactorRepo,
+			deps.ConfigManager.GetCrypto(),
+		)
+		oauthService = auth.NewOAuthService(
+			[]byte(cfg.JWTSecret),
+			loginSvc,
+			deps.Repositories.IdentityRepo,
+			deps.Repositories.AccountsRepo,
+			passwordLoginEnabled,
+		)
+		if err := reloadOAuthProviders(context.Background(), oauthService, deps.ConfigManager, cfg); err != nil {
+			serveLog.Warnf("Failed to load OAuth providers: %v", err)
+		}
+		subscribeOAuthConfigReload(deps.ConfigManager, oauthService, cfg)
+	}
+
+	// Warn if no login method is available
+	if !passwordLoginEnabled && (oauthService == nil || len(oauthService.ListProviders()) == 0) {
+		serveLog.Warnf("========================================")
+		serveLog.Warnf("WARNING: Password login is disabled and no OAuth provider is configured!")
+		serveLog.Warnf("Users can only continue via existing sessions/API tokens until they expire.")
+		serveLog.Warnf("Set AUTH_PASSWORD_LOGIN_ENABLED=true or configure an OAuth provider.")
+		serveLog.Warnf("========================================")
 	}
 
 	serverDeps := &core.ServerDependencies{
@@ -214,6 +266,7 @@ func RunServer() {
 		ConfigManager: deps.ConfigManager,
 		Converter:     deps.Converter,
 		JWTService:    jwtService,
+		OAuthService:  oauthService,
 		Config:        cfg,
 		CacheProvider: cache.GetDefault(),
 		ServerVersion: core.ServerVersion{
@@ -267,9 +320,90 @@ func RunServer() {
 	serveLog.Infof("Server exited")
 }
 
+func ensureJWTSecret(cfg *config.Config, dataDir string) error {
+	if cfg == nil {
+		return errors.New("config is nil")
+	}
+	if strings.TrimSpace(cfg.JWTSecret) != "" {
+		return nil
+	}
+
+	secretPath := filepath.Join(dataDir, jwtSecretFileName)
+	secret, err := readJWTSecret(secretPath)
+	if err == nil {
+		cfg.JWTSecret = secret
+		serveLog.Infof("Loaded JWT secret from %s", secretPath)
+		return nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
+	secret, err = generateJWTSecret()
+	if err != nil {
+		return err
+	}
+	if err := writeJWTSecret(secretPath, secret); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			secret, readErr := readJWTSecret(secretPath)
+			if readErr != nil {
+				return readErr
+			}
+			cfg.JWTSecret = secret
+			return nil
+		}
+		return err
+	}
+
+	cfg.JWTSecret = secret
+	serveLog.Warnf("JWT_SECRET is not set; generated persistent secret at %s", secretPath)
+	return nil
+}
+
+func readJWTSecret(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	secret := strings.TrimSpace(string(data))
+	if len([]rune(secret)) < 32 {
+		return "", fmt.Errorf("stored JWT secret in %s must be at least 32 characters long", path)
+	}
+	return secret, nil
+}
+
+func writeJWTSecret(path, secret string) error {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = file.Close() }()
+
+	if _, err := file.WriteString(secret + "\n"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func generateJWTSecret() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("failed to generate JWT secret: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
 // InitDatabase 初始化数据库
 func InitDatabase(deps *Dependencies) error {
 	serveLog.Infof("Initializing database")
+
+	rows, err := deps.Repositories.AccountsRepo.BackfillEmptyUserStatus(models.UserStatusActive)
+	if err != nil {
+		return fmt.Errorf("failed to backfill legacy user status: %w", err)
+	}
+	if rows > 0 {
+		serveLog.Infof("Backfilled %d legacy user rows with active status", rows)
+	}
 
 	password, err := deps.Repositories.AccountsRepo.CreateDefaultAdminUser()
 	if err != nil {
@@ -285,6 +419,7 @@ func InitDatabase(deps *Dependencies) error {
 	} else {
 		serveLog.Infof("Admin user already exists, skipping creation")
 	}
+
 	return nil
 }
 
@@ -363,5 +498,107 @@ func buildCacheConfig(cfg *config.Config) cache.Config {
 			BufferItems: 64,
 			Metrics:     true,
 		}
+	}
+}
+
+// OAuthCallbackPath returns the callback path for the given provider.
+const oauthCallbackPath = "/api/auth/oauth/%s/callback"
+
+func subscribeOAuthConfigReload(manager *configSvc.Manager, svc *auth.OAuthService, cfg *config.Config) {
+	if manager == nil || svc == nil {
+		return
+	}
+
+	reload := func(event *configSvc.Event) {
+		if event == nil || event.Config == nil || event.Config.Category != models.ConfigCategoryOAuth {
+			return
+		}
+		if err := reloadOAuthProviders(context.Background(), svc, manager, cfg); err != nil {
+			serveLog.Warnf("Failed to reload OAuth providers: %v", err)
+		}
+	}
+
+	manager.Subscribe(configSvc.EventConfigCreated, reload)
+	manager.Subscribe(configSvc.EventConfigUpdated, reload)
+	manager.Subscribe(configSvc.EventConfigDeleted, reload)
+}
+
+func reloadOAuthProviders(ctx context.Context, svc *auth.OAuthService, manager *configSvc.Manager, cfg *config.Config) error {
+	providers, source, err := buildOAuthProviders(ctx, manager, cfg)
+	if err != nil {
+		return err
+	}
+	svc.ReplaceProviders(providers)
+	serveLog.Infof("OAuth providers loaded from %s: %d enabled", source, len(providers))
+	return nil
+}
+
+func buildOAuthProviders(ctx context.Context, manager *configSvc.Manager, cfg *config.Config) ([]auth.OAuthProvider, string, error) {
+	if manager != nil {
+		dbConfigs, total, err := manager.GetOAuthProviderConfigs(ctx)
+		if err != nil {
+			return nil, "database", err
+		}
+		if total > 0 {
+			return oauthProvidersFromDBConfig(dbConfigs, cfg), "database", nil
+		}
+	}
+
+	return oauthProvidersFromEnv(cfg), "environment", nil
+}
+
+func oauthProvidersFromDBConfig(configs []configSvc.OAuthProviderConfig, cfg *config.Config) []auth.OAuthProvider {
+	providers := make([]auth.OAuthProvider, 0, len(configs))
+	for _, oauthConfig := range configs {
+		if provider := newOAuthProvider(oauthConfig.Provider, oauthConfig.ClientID, oauthConfig.ClientSecret, cfg); provider != nil {
+			providers = append(providers, provider)
+		}
+	}
+	return providers
+}
+
+func oauthProvidersFromEnv(cfg *config.Config) []auth.OAuthProvider {
+	if cfg == nil {
+		return nil
+	}
+
+	type envProvider struct {
+		provider     string
+		clientID     string
+		clientSecret string
+	}
+	configs := []envProvider{
+		{provider: "github", clientID: cfg.OAuthGitHubClientID, clientSecret: cfg.OAuthGitHubClientSecret},
+		{provider: "google", clientID: cfg.OAuthGoogleClientID, clientSecret: cfg.OAuthGoogleClientSecret},
+		{provider: "gitee", clientID: cfg.OAuthGiteeClientID, clientSecret: cfg.OAuthGiteeClientSecret},
+	}
+
+	providers := make([]auth.OAuthProvider, 0, len(configs))
+	for _, oauthConfig := range configs {
+		if oauthConfig.clientID == "" || oauthConfig.clientSecret == "" {
+			continue
+		}
+		if provider := newOAuthProvider(oauthConfig.provider, oauthConfig.clientID, oauthConfig.clientSecret, cfg); provider != nil {
+			providers = append(providers, provider)
+		}
+	}
+	return providers
+}
+
+func newOAuthProvider(provider, clientID, clientSecret string, cfg *config.Config) auth.OAuthProvider {
+	if cfg == nil || clientID == "" || clientSecret == "" {
+		return nil
+	}
+
+	redirectURL := strings.TrimRight(cfg.BaseURL(), "/") + fmt.Sprintf(oauthCallbackPath, provider)
+	switch provider {
+	case "github":
+		return auth.NewGitHubProvider(clientID, clientSecret, redirectURL)
+	case "google":
+		return auth.NewGoogleProvider(clientID, clientSecret, redirectURL)
+	case "gitee":
+		return auth.NewGiteeProvider(clientID, clientSecret, redirectURL)
+	default:
+		return nil
 	}
 }

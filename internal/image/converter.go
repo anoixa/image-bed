@@ -1,8 +1,8 @@
 package image
 
 import (
+	"errors"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/anoixa/image-bed/cache"
@@ -13,6 +13,7 @@ import (
 	"github.com/anoixa/image-bed/internal/worker"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/anoixa/image-bed/utils"
+	"gorm.io/gorm"
 )
 
 var converterLog = utils.ForModule("Converter")
@@ -40,32 +41,29 @@ func NewConverter(cm *config.Manager, variantRepo *images.VariantRepository, ima
 // TriggerConversion 触发图片转换（统一流水线）
 // 使用 PipelineTask 顺序生成缩略图、WebP 和 AVIF。
 func (c *Converter) TriggerConversion(image *models.Image) {
-	c.triggerConversion(image, false, "")
+	c.triggerConversion(image, false, nil)
 }
 
-// TriggerConversionWithLocalFile triggers conversion with a pre-staged local
-// file, allowing the pipeline to skip downloading from remote storage.
-// Ownership of localPath transfers to the pipeline; it will be cleaned up
-// after processing completes or on submission failure.
-func (c *Converter) TriggerConversionWithLocalFile(image *models.Image, localPath string) {
-	c.triggerConversion(image, false, localPath)
+// TriggerConversionWithLocalFile triggers conversion with a pre-staged local file
+// lease, allowing the pipeline to skip downloading from remote storage.
+func (c *Converter) TriggerConversionWithLocalFile(image *models.Image, localFile *worker.LocalFileLease) {
+	c.triggerConversion(image, false, localFile)
 }
 
 // TriggerConversionFromSweeper re-submits stale work recovered by the sweeper.
 // This path intentionally ignores variant retry windows because the sweeper has
 // already decided the stale work should be retried now.
 func (c *Converter) TriggerConversionFromSweeper(image *models.Image) {
-	c.triggerConversion(image, true, "")
+	c.triggerConversion(image, true, nil)
 }
 
-func (c *Converter) triggerConversion(image *models.Image, ignoreRetryWindow bool, localFilePath string) {
-	// Register cleanup FIRST so localFilePath is removed on any exit path
-	// (panic, early return, or failed submission). On successful submission
-	// the pipeline task takes ownership and cleans up the file itself.
+func (c *Converter) triggerConversion(image *models.Image, ignoreRetryWindow bool, localFile *worker.LocalFileLease) {
+	// Register cleanup FIRST so transferred temp files are removed on any exit
+	// path before the pipeline task takes ownership.
 	submitted := false
 	defer func() {
-		if !submitted && localFilePath != "" {
-			_ = os.Remove(localFilePath)
+		if !submitted && localFile != nil {
+			localFile.CleanupTransferred()
 		}
 	}()
 
@@ -81,24 +79,30 @@ func (c *Converter) triggerConversion(image *models.Image, ignoreRetryWindow boo
 		return
 	}
 
+	if !shouldTriggerVariantConversion(image, settings) {
+		return
+	}
+
 	thumbnailEnabled := settings.ThumbnailEnabled && len(settings.ThumbnailSizes) > 0
 	webpEnabled := settings.IsFormatEnabled(models.FormatWebP)
 	avifEnabled := settings.IsFormatEnabled(models.FormatAVIF) && vipsfile.SupportsAVIFEncoding()
-	if !shouldStartVariantPipeline(thumbnailEnabled, webpEnabled, avifEnabled) {
+
+	// Check runtime dependencies before creating variant rows. If storage or the
+	// worker pool is unavailable, creating pending variants only to mark them
+	// failed creates noisy writes and makes recovery harder.
+	storageProvider := c.getStorageForImage(image)
+	if storageProvider == nil {
+		converterLog.Warnf("Storage provider unavailable for image %s (StorageConfigID=%d)",
+			image.Identifier, image.StorageConfigID)
+		c.markImageConversionUnavailable(imageRepo, image, "storage provider unavailable")
 		return
 	}
 
-	// 跳过 GIF 格式
-	if image.MimeType == "image/gif" {
+	pool := worker.GetGlobalPool()
+	if pool == nil {
+		converterLog.Warnf("Worker pool unavailable for image %s", image.Identifier)
+		c.markImageConversionUnavailable(imageRepo, image, "worker pool not initialized")
 		return
-	}
-
-	// 跳过小于阈值的图片
-	if settings.SkipSmallerThan > 0 {
-		minSize := int64(settings.SkipSmallerThan * 1024)
-		if image.FileSize < minSize {
-			return
-		}
 	}
 
 	// 创建缩略图变体记录（如果启用）
@@ -106,61 +110,36 @@ func (c *Converter) triggerConversion(image *models.Image, ignoreRetryWindow boo
 	if thumbnailEnabled {
 		size := settings.ThumbnailSizes[0]
 		thumbFormat := models.FormatThumbnailSize(size.Width)
-		thumbVariant, err = variantRepo.UpsertPending(image.ID, thumbFormat)
+		thumbVariant, err = prepareVariantForSubmit(variantRepo, image.ID, thumbFormat, now, ignoreRetryWindow)
 		if err != nil {
 			converterLog.Warnf("Failed to prepare thumbnail variant for image %s: %v", image.Identifier, err)
 			return
-		}
-		if !variantReadyForSubmit(thumbVariant, now, ignoreRetryWindow) {
-			thumbVariant = nil
 		}
 	}
 
 	// 创建 WebP 变体记录（如果启用）
 	var webpVariant *models.ImageVariant
 	if webpEnabled {
-		webpVariant, err = variantRepo.UpsertPending(image.ID, models.FormatWebP)
+		webpVariant, err = prepareVariantForSubmit(variantRepo, image.ID, models.FormatWebP, now, ignoreRetryWindow)
 		if err != nil {
 			converterLog.Warnf("Failed to prepare WebP variant for image %s: %v", image.Identifier, err)
 			c.failPendingVariantsOnSubmitFailure(imageRepo, variantRepo, image, fmt.Sprintf("submit aborted during webp preparation: %v", err), thumbVariant)
 			return
 		}
-		if !variantReadyForSubmit(webpVariant, now, ignoreRetryWindow) {
-			webpVariant = nil
-		}
 	}
 
 	var avifVariant *models.ImageVariant
 	if avifEnabled {
-		avifVariant, err = variantRepo.UpsertPending(image.ID, models.FormatAVIF)
+		avifVariant, err = prepareVariantForSubmit(variantRepo, image.ID, models.FormatAVIF, now, ignoreRetryWindow)
 		if err != nil {
 			converterLog.Warnf("Failed to prepare AVIF variant for image %s: %v", image.Identifier, err)
 			c.failPendingVariantsOnSubmitFailure(imageRepo, variantRepo, image, fmt.Sprintf("submit aborted during avif preparation: %v", err), thumbVariant, webpVariant)
 			return
 		}
-		if !variantReadyForSubmit(avifVariant, now, ignoreRetryWindow) {
-			avifVariant = nil
-		}
 	}
 
 	// 如果没有需要处理的变体，直接返回
 	if thumbVariant == nil && webpVariant == nil && avifVariant == nil {
-		return
-	}
-
-	pool := worker.GetGlobalPool()
-	if pool == nil {
-		converterLog.Warnf("Worker pool unavailable for image %s", image.Identifier)
-		c.failPendingVariantsOnSubmitFailure(imageRepo, variantRepo, image, "worker pool not initialized", thumbVariant, webpVariant, avifVariant)
-		return
-	}
-
-	// 获取图片对应的存储提供者
-	storageProvider := c.getStorageForImage(image)
-	if storageProvider == nil {
-		converterLog.Warnf("Storage provider unavailable for image %s (StorageConfigID=%d)",
-			image.Identifier, image.StorageConfigID)
-		c.failPendingVariantsOnSubmitFailure(imageRepo, variantRepo, image, "storage provider unavailable", thumbVariant, webpVariant, avifVariant)
 		return
 	}
 
@@ -180,7 +159,7 @@ func (c *Converter) triggerConversion(image *models.Image, ignoreRetryWindow boo
 			VariantRepo:     c.variantRepo,
 			ImageRepo:       c.imageRepo,
 			CacheHelper:     c.cacheHelper,
-			LocalFilePath:   localFilePath,
+			LocalFile:       localFile,
 		}
 		task.Execute()
 	})
@@ -194,6 +173,24 @@ func (c *Converter) triggerConversion(image *models.Image, ignoreRetryWindow boo
 
 	if err := c.markImageProcessing(imageRepo, image); err != nil {
 		converterLog.Warnf("Failed to update image %s status after submit: %v", image.Identifier, err)
+	}
+}
+
+func (c *Converter) markImageConversionUnavailable(imageRepo *images.Repository, image *models.Image, reason string) {
+	if image == nil || imageRepo == nil {
+		return
+	}
+
+	if err := imageRepo.UpdateVariantStatus(image.ID, models.ImageVariantStatusFailed); err != nil {
+		converterLog.Warnf("Failed to mark image %s failed after conversion unavailable (%s): %v", image.Identifier, reason, err)
+		return
+	}
+	image.VariantStatus = models.ImageVariantStatusFailed
+	if c.cacheHelper != nil {
+		ctx, cancel := utils.DetachedContext(5 * time.Second)
+		defer cancel()
+		_ = c.cacheHelper.DeleteCachedImage(ctx, image.Identifier)
+		_ = c.cacheHelper.DeleteCachedImageVariants(ctx, image.ID)
 	}
 }
 
@@ -250,6 +247,34 @@ func shouldTriggerVariantConversion(image *models.Image, settings *config.ImageP
 	}
 
 	return true
+}
+
+func prepareVariantForSubmit(variantRepo *images.VariantRepository, imageID uint, format string, now time.Time, ignoreRetryWindow bool) (*models.ImageVariant, error) {
+	variant, err := variantRepo.GetVariantByImageIDAndFormat(imageID, format)
+	if err == nil {
+		if variant.Status == models.VariantStatusCanceled {
+			variant, err = variantRepo.ResetCanceledToPending(variant.ID)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if variantReadyForSubmit(variant, now, ignoreRetryWindow) {
+			return variant, nil
+		}
+		return nil, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	variant, err = variantRepo.UpsertPending(imageID, format)
+	if err != nil {
+		return nil, err
+	}
+	if !variantReadyForSubmit(variant, now, ignoreRetryWindow) {
+		return nil, nil
+	}
+	return variant, nil
 }
 
 func shouldStartVariantPipeline(thumbnailEnabled, webpEnabled, avifEnabled bool) bool {

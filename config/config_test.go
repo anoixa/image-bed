@@ -18,6 +18,28 @@ func TestGetCorsOriginsTrimsAndDropsEmptyEntries(t *testing.T) {
 	}, cfg.GetCorsOrigins())
 }
 
+func TestGetTrustedProxiesTrimsAndDropsEmptyEntries(t *testing.T) {
+	cfg := &Config{
+		TrustedProxies: " 172.22.0.0/16 , , 127.0.0.1 ",
+	}
+
+	assert.Equal(t, []string{"172.22.0.0/16", "127.0.0.1"}, cfg.GetTrustedProxies())
+}
+
+func TestGetRealIPHeadersFallsBackToSafeDefaults(t *testing.T) {
+	cfg := &Config{}
+
+	assert.Equal(t, []string{"X-Forwarded-For", "X-Real-IP"}, cfg.GetRealIPHeaders())
+}
+
+func TestGetRealIPHeadersTrimsAndDropsEmptyEntries(t *testing.T) {
+	cfg := &Config{
+		RealIPHeaders: " CF-Connecting-IP , X-Forwarded-For , ",
+	}
+
+	assert.Equal(t, []string{"CF-Connecting-IP", "X-Forwarded-For"}, cfg.GetRealIPHeaders())
+}
+
 func TestBaseURLFallsBackToHostAndPort(t *testing.T) {
 	cfg := &Config{
 		ServerHost:   "192.168.1.10",
@@ -49,4 +71,10 @@ func TestSetDefaultsLeavesServerDomainEmpty(t *testing.T) {
 	setDefaults()
 
 	assert.Equal(t, "", viper.GetString("server_domain"))
+}
+
+func TestGetAVIFConcurrencyFallsBackToDefault(t *testing.T) {
+	assert.Equal(t, 1, (&Config{}).GetAVIFConcurrency())
+	assert.Equal(t, 1, (&Config{AVIFConcurrency: -1}).GetAVIFConcurrency())
+	assert.Equal(t, 3, (&Config{AVIFConcurrency: 3}).GetAVIFConcurrency())
 }

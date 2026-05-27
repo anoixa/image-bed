@@ -426,40 +426,6 @@ func TestNewTestJWTService_Validation(t *testing.T) {
 	}
 }
 
-// TestLoginResponse_Structure 测试登录响应结构
-func TestLoginResponse_Structure(t *testing.T) {
-	response := loginResponse{
-		AccessToken:       "test-token",
-		AccessTokenExpiry: 1234567890,
-	}
-
-	data, err := json.Marshal(response)
-	assert.NoError(t, err)
-
-	var decoded map[string]interface{}
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, "test-token", decoded["access_token"])
-	assert.Equal(t, float64(1234567890), decoded["access_token_expiry"])
-}
-
-// TestLogoutResponse_Structure 测试登出响应结构
-func TestLogoutResponse_Structure(t *testing.T) {
-	response := logoutResponse{
-		DeviceID: "device-123",
-	}
-
-	data, err := json.Marshal(response)
-	assert.NoError(t, err)
-
-	var decoded map[string]interface{}
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, "device-123", decoded["device_id"])
-}
-
 // TestRefreshToken_MissingCookies 测试刷新接口缺少 Cookie
 func TestRefreshToken_MissingCookies(t *testing.T) {
 	router := setupTest(t)

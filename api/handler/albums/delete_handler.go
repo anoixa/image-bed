@@ -57,9 +57,6 @@ func (h *Handler) DeleteAlbumHandler(c *gin.Context) {
 	albumAsync(func() {
 		ctx, cancel := utils.DetachedContext(5 * time.Second)
 		defer cancel()
-		if err := h.cacheHelper.DeleteCachedAlbum(ctx, uint(albumID)); err != nil {
-			albumLog.Debugf("Failed to delete album cache for %d: %v", albumID, err)
-		}
 		if err := h.cacheHelper.DeleteCachedAlbumList(ctx, userID); err != nil {
 			albumLog.Debugf("Failed to delete album list cache for user %d: %v", userID, err)
 		}

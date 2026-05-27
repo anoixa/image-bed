@@ -32,6 +32,11 @@ func (c *CacheLayer) Invalidate(category models.ConfigCategory) {
 		delete(c.localCache, keyImageProcessing)
 	case models.ConfigCategorySystem:
 		delete(c.localCache, keyTransferMode)
+		delete(c.localCache, keyAutoDirectThresholdBytes)
+	case models.ConfigCategoryOAuth:
+		delete(c.localCache, keyOAuth)
+	case models.ConfigCategorySecurity:
+		delete(c.localCache, keyAuthSettings)
 	}
 }
 
@@ -84,10 +89,43 @@ func (c *CacheLayer) SetTransferMode(mode storage.TransferMode) {
 	c.localCache[keyTransferMode] = mode
 }
 
+func (c *CacheLayer) GetAutoDirectThresholdBytes() (int64, bool) {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+	if val, ok := c.localCache[keyAutoDirectThresholdBytes]; ok {
+		return val.(int64), true
+	}
+	return 0, false
+}
+
+func (c *CacheLayer) SetAutoDirectThresholdBytes(thresholdBytes int64) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.localCache[keyAutoDirectThresholdBytes] = thresholdBytes
+}
+
+func (c *CacheLayer) GetAuthSettings() (*AuthSettings, bool) {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+	if val, ok := c.localCache[keyAuthSettings]; ok {
+		return val.(*AuthSettings), true
+	}
+	return nil, false
+}
+
+func (c *CacheLayer) SetAuthSettings(settings *AuthSettings) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.localCache[keyAuthSettings] = settings
+}
+
 const (
-	keyStorage         = "config:storage"
-	keyImageProcessing = "config:image_processing"
-	keyTransferMode    = "config:transfer_mode"
+	keyStorage                  = "config:storage"
+	keyImageProcessing          = "config:image_processing"
+	keyTransferMode             = "config:transfer_mode"
+	keyAutoDirectThresholdBytes = "config:auto_direct_threshold_bytes"
+	keyOAuth                    = "config:oauth"
+	keyAuthSettings             = "config:auth_settings"
 )
 
 // InvalidateAll 清除所有缓存

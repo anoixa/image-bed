@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"image"
 	"io"
@@ -26,6 +27,8 @@ import (
 )
 
 var pipelineLog = utils.ForModule("Pipeline")
+
+var errPipelineCanceled = errors.New("pipeline canceled")
 
 // VariantRepository 变体仓库接口
 type VariantRepository interface {
@@ -182,13 +185,13 @@ type ImagePipelineTask struct {
 	VariantRepo     VariantRepository
 	ImageRepo       ImageRepository
 	CacheHelper     *cache.Helper
-	LocalFilePath   string // optional: pre-staged local file, skip download from remote
+	LocalFile       *LocalFileLease // optional: pre-staged local file, skip download from remote
 	inFlightLease   *inFlightTaskLease
 }
 
 const avifMinSavingsPercent int64 = 5
 
-var processingHeartbeatInterval = 4 * time.Minute
+var processingHeartbeatInterval = staleThreshold / 4
 
 // getProcessingFilePath returns an OS file path suitable for vips file-based APIs.
 // For local storage it returns the stored file path directly (no I/O).
@@ -197,15 +200,15 @@ var processingHeartbeatInterval = 4 * time.Minute
 func (t *ImagePipelineTask) getProcessingFilePath(ctx context.Context) (path string, cleanup func(), err error) {
 	noop := func() {}
 
-	// Pre-staged local file (e.g. from upload handler) — skip download entirely.
-	if t.LocalFilePath != "" {
-		if _, statErr := os.Stat(t.LocalFilePath); statErr == nil {
-			path := t.LocalFilePath
-			t.LocalFilePath = "" // mark consumed — Execute's defer won't double-clean
-			return path, func() { _ = os.Remove(path) }, nil
+	if t.LocalFile != nil {
+		path, cleanup, ok := t.LocalFile.Consume()
+		t.LocalFile = nil
+		if ok {
+			if _, statErr := os.Stat(path); statErr == nil {
+				return path, cleanup, nil
+			}
+			cleanup()
 		}
-		// File already gone (e.g. cleaned up by timeout); fall through to normal path.
-		t.LocalFilePath = ""
 	}
 
 	// Local storage: return path directly, no temp file needed
@@ -272,14 +275,10 @@ func (t *ImagePipelineTask) Execute() {
 	var acquiredVariants []uint
 	defer t.finalize(&acquiredVariants)
 
-	// Ensure LocalFilePath is cleaned up on any exit path (panic, early
-	// return before runPipeline, or failed acquisition). On the happy path,
-	// getProcessingFilePath consumes it by setting the field to "" and
-	// returns its own cleanup func — this defer sees the empty string and skips.
-	if t.LocalFilePath != "" {
+	if t.LocalFile != nil {
 		defer func() {
-			if t.LocalFilePath != "" {
-				_ = os.Remove(t.LocalFilePath)
+			if t.LocalFile != nil {
+				t.LocalFile.CleanupTransferred()
 			}
 		}()
 	}
@@ -362,12 +361,33 @@ func (t *ImagePipelineTask) Execute() {
 		return
 	}
 	defer semaphore.Release()
+
+	if err := waitForMemory(); err != nil {
+		pipelineLog.Warnf("Processing delayed too long by memory backpressure for image %s: %v", t.ImageIdentifier, err)
+		for _, id := range append([]uint(nil), acquiredVariants...) {
+			t.markVariantFailed(&acquiredVariants, id, fmt.Sprintf("memory backpressure: %v", err))
+		}
+		_ = t.ImageRepo.UpdateVariantStatus(t.ImageID, models.ImageVariantStatusFailed)
+		t.deleteCacheOnTerminalState("failed")
+		return
+	}
+
 	stopHeartbeat := t.startProcessingHeartbeat(ctx, acquiredVariants)
 	defer stopHeartbeat()
+
+	if err := t.ensureStillProcessing(acquiredVariants); err != nil {
+		pipelineLog.Debugf("Skipping pipeline for image %s: %v", t.ImageIdentifier, err)
+		return
+	}
 
 	pipelineLog.Debugf("Processing image=%s thumb_variant=%d webp_variant=%d avif_variant=%d",
 		t.StoragePath, t.ThumbVariantID, t.WebPVariantID, t.AVIFVariantID)
 	if err := t.runPipeline(ctx, &acquiredVariants); err != nil {
+		if errors.Is(err, errPipelineCanceled) {
+			pipelineLog.Debugf("Pipeline canceled for image %s: %v", t.ImageIdentifier, err)
+			t.deleteCacheOnTerminalState("canceled")
+			return
+		}
 		pipelineLog.Warnf("Processing failed for image %s: %v", t.ImageIdentifier, err)
 		_ = t.ImageRepo.UpdateVariantStatus(t.ImageID, models.ImageVariantStatusFailed)
 		t.deleteCacheOnTerminalState("failed")
@@ -399,6 +419,9 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context, acquiredVariants *[
 	var thumbSkipped, webpSkipped, avifSkipped bool
 
 	if t.ThumbVariantID > 0 {
+		if err := t.ensureStillProcessing(*acquiredVariants); err != nil {
+			return err
+		}
 		result, err := t.generateThumbnail(ctx, filePath)
 		switch {
 		case err != nil:
@@ -418,8 +441,19 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context, acquiredVariants *[
 	var imgInfo vipsfile.ImageInfo
 	needLoad := t.WebPVariantID > 0 || t.AVIFVariantID > 0
 	if needLoad {
+		if err := t.ensureStillProcessing(*acquiredVariants); err != nil {
+			return err
+		}
 		var err error
-		originImg, imgInfo, err = vipsfile.LoadImageFromFile(filePath)
+		importOpts := vipsfile.DefaultImportOptions()
+		if t.AVIFVariantID > 0 {
+			// AVIF export can require random-access reads from the decoded source.
+			// Reusing a sequential JPEG loader for WebP and then AVIF still trips
+			// "out of order read" on tall images, so switch the shared decode to
+			// random access whenever AVIF is in play.
+			importOpts.Access = "random"
+		}
+		originImg, imgInfo, err = vipsfile.LoadImageFromFileWithOptions(filePath, importOpts)
 		if err != nil {
 			if t.WebPVariantID > 0 {
 				t.markVariantFailed(acquiredVariants, t.WebPVariantID, fmt.Sprintf("load image: %v", err))
@@ -434,6 +468,9 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context, acquiredVariants *[
 	}
 
 	if t.WebPVariantID > 0 {
+		if err := t.ensureStillProcessing(*acquiredVariants); err != nil {
+			return err
+		}
 		result, err := t.generateWebP(ctx, filePath, originImg, imgInfo)
 		switch {
 		case err != nil:
@@ -448,8 +485,11 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context, acquiredVariants *[
 		}
 	}
 
-	avifRequired := t.AVIFVariantID > 0 && t.WebPVariantID == 0
+	avifRequired := avifFailureShouldFailPipeline(t.AVIFVariantID, webpResult)
 	if t.AVIFVariantID > 0 {
+		if err := t.ensureStillProcessing(*acquiredVariants); err != nil {
+			return err
+		}
 		result, err := t.generateAVIF(ctx, filePath, webpResult, originImg, imgInfo)
 		switch {
 		case err != nil:
@@ -467,6 +507,10 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context, acquiredVariants *[
 	}
 
 	if hasSuccess {
+		if err := t.ensureStillProcessing(*acquiredVariants); err != nil {
+			t.cleanupPipelineResults(thumbResult, webpResult, avifResult)
+			return err
+		}
 		if err := t.saveVariantResults(acquiredVariants, thumbResult, webpResult, avifResult); err != nil {
 			pipelineLog.Warnf("Failed to persist variant results for image %s: %v", t.ImageIdentifier, err)
 			hasFailed = true
@@ -490,6 +534,10 @@ func (t *ImagePipelineTask) runPipeline(ctx context.Context, acquiredVariants *[
 	))
 	t.deleteCacheOnTerminalState("success")
 	return nil
+}
+
+func avifFailureShouldFailPipeline(avifVariantID uint, webpResult *pipelineResult) bool {
+	return avifVariantID > 0 && webpResult == nil
 }
 
 // generateThumbnail 生成缩略图
@@ -583,7 +631,9 @@ func (t *ImagePipelineTask) generateWebPWithSettings(ctx context.Context, filePa
 	var width, height int
 	if originImg == nil {
 		var err error
-		originImg, info, err = vipsfile.LoadImageFromFile(filePath)
+		importOpts := vipsfile.DefaultImportOptions()
+		importOpts.Access = "random"
+		originImg, info, err = vipsfile.LoadImageFromFileWithOptions(filePath, importOpts)
 		if err != nil {
 			return nil, fmt.Errorf("load image from file: %w", err)
 		}
@@ -688,6 +738,13 @@ func (t *ImagePipelineTask) generateAVIF(ctx context.Context, filePath string, w
 	if settings.AVIFExperimental {
 		bitdepth = 10
 	}
+
+	avifSemaphore := GetGlobalSemaphore()
+	if err := avifSemaphore.AcquireAVIF(ctx); err != nil {
+		return nil, fmt.Errorf("avif semaphore: %w", err)
+	}
+	defer avifSemaphore.ReleaseAVIF()
+
 	if err := originImg.SaveAVIFToFile(tmpPath, vipsfile.AVIFOptions{
 		Quality:       settings.AVIFQuality,
 		Effort:        settings.AVIFSpeed,
@@ -769,6 +826,7 @@ func (t *ImagePipelineTask) saveVariantResults(acquiredVariants *[]uint, thumbRe
 			thumbResult.Height,
 		); err != nil {
 			pipelineLog.Warnf("Failed to mark thumbnail variant %d completed: %v", t.ThumbVariantID, err)
+			t.cleanupSavedVariant(thumbResult.StoragePath)
 			t.markVariantFailed(acquiredVariants, t.ThumbVariantID, "failed to persist result: "+err.Error())
 			if firstErr == nil {
 				firstErr = err
@@ -789,6 +847,7 @@ func (t *ImagePipelineTask) saveVariantResults(acquiredVariants *[]uint, thumbRe
 			webpResult.Height,
 		); err != nil {
 			pipelineLog.Warnf("Failed to mark WebP variant %d completed: %v", t.WebPVariantID, err)
+			t.cleanupSavedVariant(webpResult.StoragePath)
 			t.markVariantFailed(acquiredVariants, t.WebPVariantID, "failed to persist result: "+err.Error())
 			if firstErr == nil {
 				firstErr = err
@@ -809,6 +868,7 @@ func (t *ImagePipelineTask) saveVariantResults(acquiredVariants *[]uint, thumbRe
 			avifResult.Height,
 		); err != nil {
 			pipelineLog.Warnf("Failed to mark AVIF variant %d completed: %v", t.AVIFVariantID, err)
+			t.cleanupSavedVariant(avifResult.StoragePath)
 			t.markVariantFailed(acquiredVariants, t.AVIFVariantID, "failed to persist result: "+err.Error())
 			if firstErr == nil && t.WebPVariantID == 0 {
 				firstErr = err
@@ -819,6 +879,51 @@ func (t *ImagePipelineTask) saveVariantResults(acquiredVariants *[]uint, thumbRe
 	}
 
 	return firstErr
+}
+
+func (t *ImagePipelineTask) ensureStillProcessing(acquiredVariants []uint) error {
+	if t.ImageRepo != nil && t.ImageID > 0 {
+		img, err := t.ImageRepo.GetImageByID(t.ImageID)
+		if err != nil || img == nil {
+			return fmt.Errorf("%w: image is no longer active", errPipelineCanceled)
+		}
+	}
+
+	if t.VariantRepo == nil {
+		return nil
+	}
+	for _, id := range acquiredVariants {
+		if id == 0 {
+			continue
+		}
+		variant, err := t.VariantRepo.GetByID(id)
+		if err != nil || variant == nil {
+			return fmt.Errorf("%w: variant %d is no longer active", errPipelineCanceled, id)
+		}
+		if variant.Status != models.VariantStatusProcessing {
+			return fmt.Errorf("%w: variant %d status is %s", errPipelineCanceled, id, variant.Status)
+		}
+	}
+	return nil
+}
+
+func (t *ImagePipelineTask) cleanupPipelineResults(results ...*pipelineResult) {
+	for _, result := range results {
+		if result != nil {
+			t.cleanupSavedVariant(result.StoragePath)
+		}
+	}
+}
+
+func (t *ImagePipelineTask) cleanupSavedVariant(storagePath string) {
+	if t.Storage == nil || storagePath == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := t.Storage.DeleteWithContext(ctx, storagePath); err != nil {
+		pipelineLog.Warnf("Failed to cleanup orphan variant file %s for image %s: %v", storagePath, t.ImageIdentifier, err)
+	}
 }
 
 func (t *ImagePipelineTask) releaseTrackedVariant(acquiredVariants *[]uint, id uint) {

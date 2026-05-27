@@ -61,19 +61,19 @@ type mockRepository struct {
 	dailyStats    []dashboardRepo.DailyStat
 }
 
-func (m *mockRepository) GetOverviewStats(_ context.Context) (*dashboardRepo.OverviewStats, error) {
+func (m *mockRepository) GetOverviewStats(_ context.Context, _ *uint) (*dashboardRepo.OverviewStats, error) {
 	return m.overviewStats, nil
 }
 
-func (m *mockRepository) GetImageTimeStats(_ context.Context) (*dashboardRepo.ImageTimeStats, error) {
+func (m *mockRepository) GetImageTimeStats(_ context.Context, _ *uint) (*dashboardRepo.ImageTimeStats, error) {
 	return m.timeStats, nil
 }
 
-func (m *mockRepository) GetStorageStats(_ context.Context) ([]dashboardRepo.StorageStat, error) {
+func (m *mockRepository) GetStorageStats(_ context.Context, _ *uint) ([]dashboardRepo.StorageStat, error) {
 	return m.storageStats, nil
 }
 
-func (m *mockRepository) GetDailyStats(_ context.Context, days int) ([]dashboardRepo.DailyStat, error) {
+func (m *mockRepository) GetDailyStats(_ context.Context, days int, _ *uint) ([]dashboardRepo.DailyStat, error) {
 	return m.dailyStats, nil
 }
 
@@ -105,7 +105,7 @@ func TestService_GetStats(t *testing.T) {
 	svc := NewService(mockRepo, mockCache)
 
 	ctx := context.Background()
-	stats, err := svc.GetStats(ctx)
+	stats, err := svc.GetStats(ctx, nil)
 	if err != nil {
 		t.Fatalf("GetStats failed: %v", err)
 	}
@@ -127,12 +127,41 @@ func TestService_GetStats(t *testing.T) {
 	}
 
 	// 验证缓存
-	cachedStats, err := svc.GetStats(ctx)
+	cachedStats, err := svc.GetStats(ctx, nil)
 	if err != nil {
 		t.Fatalf("GetStats from cache failed: %v", err)
 	}
 	if cachedStats.Overview.Images.Total != 100 {
 		t.Errorf("Cached stats incorrect")
+	}
+}
+
+func TestService_GetStats_UserScoped(t *testing.T) {
+	mockRepo := &mockRepository{
+		overviewStats: &dashboardRepo.OverviewStats{
+			ImageTotal:   50,
+			AlbumTotal:   2,
+			UserTotal:    1,
+			StorageTotal: 1024 * 1024 * 50,
+		},
+		timeStats:    &dashboardRepo.ImageTimeStats{Today: 3},
+		storageStats: []dashboardRepo.StorageStat{},
+		dailyStats:   []dashboardRepo.DailyStat{},
+	}
+
+	mockCache := newMockCache()
+	svc := NewService(mockRepo, mockCache)
+
+	userID := uint(42)
+	stats, err := svc.GetStats(context.Background(), &userID)
+	if err != nil {
+		t.Fatalf("GetStats failed: %v", err)
+	}
+	if stats.Overview.Images.Total != 50 {
+		t.Errorf("Expected 50 user-scoped images, got %d", stats.Overview.Images.Total)
+	}
+	if stats.Overview.Users.Total != 1 {
+		t.Errorf("Expected UserTotal=1 for user-scoped view, got %d", stats.Overview.Users.Total)
 	}
 }
 
@@ -153,7 +182,7 @@ func TestService_RefreshCache(t *testing.T) {
 	ctx := context.Background()
 
 	// 先获取一次，写入缓存
-	_, err := svc.GetStats(ctx)
+	_, err := svc.GetStats(ctx, nil)
 	if err != nil {
 		t.Fatalf("GetStats failed: %v", err)
 	}
@@ -165,7 +194,7 @@ func TestService_RefreshCache(t *testing.T) {
 	}
 
 	// 刷新缓存
-	err = svc.RefreshCache(ctx)
+	err = svc.RefreshCache(ctx, nil)
 	if err != nil {
 		t.Fatalf("RefreshCache failed: %v", err)
 	}

@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 
+	"github.com/anoixa/image-bed/internal/runtimeenv"
 	"github.com/spf13/viper"
 
 	"github.com/spf13/cobra"
@@ -18,6 +19,8 @@ var rootCmd = &cobra.Command{
 }
 
 func Execute() {
+	runtimeenv.InitProcessEnv()
+
 	err := rootCmd.Execute()
 	if err != nil {
 		os.Exit(1)

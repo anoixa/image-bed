@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"time"
 
@@ -14,10 +15,10 @@ import (
 var dashboardLog = utils.ForModule("Dashboard")
 
 type StatsRepository interface {
-	GetOverviewStats(ctx context.Context) (*dashboard.OverviewStats, error)
-	GetImageTimeStats(ctx context.Context) (*dashboard.ImageTimeStats, error)
-	GetStorageStats(ctx context.Context) ([]dashboard.StorageStat, error)
-	GetDailyStats(ctx context.Context, days int) ([]dashboard.DailyStat, error)
+	GetOverviewStats(ctx context.Context, userID *uint) (*dashboard.OverviewStats, error)
+	GetImageTimeStats(ctx context.Context, userID *uint) (*dashboard.ImageTimeStats, error)
+	GetStorageStats(ctx context.Context, userID *uint) ([]dashboard.StorageStat, error)
+	GetDailyStats(ctx context.Context, days int, userID *uint) ([]dashboard.DailyStat, error)
 }
 
 type Service struct {
@@ -79,8 +80,11 @@ type TrendStats struct {
 	Data   []int64  `json:"data"`
 }
 
-func (s *Service) GetStats(ctx context.Context) (*StatsResponse, error) {
+func (s *Service) GetStats(ctx context.Context, userID *uint) (*StatsResponse, error) {
 	cacheKey := "dashboard:stats"
+	if userID != nil {
+		cacheKey = fmt.Sprintf("dashboard:stats:%d", *userID)
+	}
 
 	// 尝试从缓存获取
 	var cached StatsResponse
@@ -89,25 +93,25 @@ func (s *Service) GetStats(ctx context.Context) (*StatsResponse, error) {
 	}
 
 	// 查询概览统计
-	overview, err := s.repo.GetOverviewStats(ctx)
+	overview, err := s.repo.GetOverviewStats(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
 
 	// 查询时间维度统计
-	timeStats, err := s.repo.GetImageTimeStats(ctx)
+	timeStats, err := s.repo.GetImageTimeStats(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
 
 	// 查询存储统计
-	storageStats, err := s.repo.GetStorageStats(ctx)
+	storageStats, err := s.repo.GetStorageStats(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
 
 	// 查询趋势数据
-	dailyStats, err := s.repo.GetDailyStats(ctx, 30)
+	dailyStats, err := s.repo.GetDailyStats(ctx, 30, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -120,8 +124,11 @@ func (s *Service) GetStats(ctx context.Context) (*StatsResponse, error) {
 	return response, nil
 }
 
-func (s *Service) RefreshCache(ctx context.Context) error {
+func (s *Service) RefreshCache(ctx context.Context, userID *uint) error {
 	cacheKey := "dashboard:stats"
+	if userID != nil {
+		cacheKey = fmt.Sprintf("dashboard:stats:%d", *userID)
+	}
 	return s.cache.Delete(ctx, cacheKey)
 }
 
@@ -187,7 +194,7 @@ func (s *Service) buildTrendData(stats []dashboard.DailyStat, days int) TrendSta
 	dates := make([]string, days)
 	data := make([]int64, days)
 
-	now := time.Now()
+	now := time.Now().In(time.Local)
 	for i := 0; i < days; i++ {
 		date := now.AddDate(0, 0, -(days - 1 - i)).Format("2006-01-02")
 		dates[i] = date
@@ -197,7 +204,7 @@ func (s *Service) buildTrendData(stats []dashboard.DailyStat, days int) TrendSta
 	statMap := make(map[string]int64)
 	dashboardLog.Debugf("buildTrendData received %d stats from DB", len(stats))
 	for _, stat := range stats {
-		dateStr := stat.Date.Format("2006-01-02")
+		dateStr := stat.Date.In(time.Local).Format("2006-01-02")
 		statMap[dateStr] = stat.Count
 		dashboardLog.Debugf("buildTrendData DB stat: date=%s, count=%d", dateStr, stat.Count)
 	}

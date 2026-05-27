@@ -279,13 +279,13 @@ func (r *Repository) GetImageList(storageConfigIDs []uint, identifier, search st
 }
 
 // GetImagesByAlbumID 根据相册ID获取图片列表
-func (r *Repository) GetImagesByAlbumID(albumID uint, page, pageSize int) ([]*models.Image, int64, error) {
+func (r *Repository) GetImagesByAlbumID(albumID, userID uint, page, pageSize int) ([]*models.Image, int64, error) {
 	var imageList []*models.Image
 	var total int64
 
 	db := r.db.Model(&models.Image{}).
 		Joins("JOIN album_images ON album_images.image_id = images.id").
-		Where("album_images.album_id = ?", albumID)
+		Where("album_images.album_id = ? AND images.user_id = ?", albumID, userID)
 
 	if err := db.Count(&total).Error; err != nil {
 		return nil, 0, err

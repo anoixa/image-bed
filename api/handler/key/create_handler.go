@@ -3,12 +3,14 @@ package key
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"net/http"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
 	"github.com/anoixa/image-bed/database/models"
+	"github.com/anoixa/image-bed/internal/auth"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/gin-gonic/gin"
 )
@@ -66,6 +68,10 @@ func (h *Handler) CreateStaticToken(context *gin.Context) {
 	err = h.svc.CreateKey(&token)
 
 	if err != nil {
+		if errors.Is(err, auth.ErrUserDisabled) {
+			common.RespondError(context, http.StatusForbidden, "User account is disabled")
+			return
+		}
 		common.RespondError(context, http.StatusInternalServerError, "Failed to create API token")
 		return
 	}

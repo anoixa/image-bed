@@ -1,12 +1,14 @@
 package key
 
 import (
+	"errors"
 	"net/http"
 	"sort"
 	"time"
 
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/api/middleware"
+	"github.com/anoixa/image-bed/internal/auth"
 	"github.com/gin-gonic/gin"
 )
 
@@ -39,6 +41,10 @@ func (h *Handler) GetToken(context *gin.Context) {
 
 	apiTokens, err := h.svc.GetAllApiTokensByUser(userID)
 	if err != nil {
+		if errors.Is(err, auth.ErrUserDisabled) {
+			common.RespondError(context, http.StatusForbidden, "User account is disabled")
+			return
+		}
 		keyLog.Errorf("Failed to get API tokens for user %d: %v", userID, err)
 
 		common.RespondError(context, http.StatusInternalServerError, "Failed to retrieve API tokens due to an internal error.")

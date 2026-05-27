@@ -79,10 +79,18 @@ func (m *Manager) Subscribe(eventType EventType, handler EventHandler) {
 // ClearCache 清除配置缓存
 func (m *Manager) ClearCache() {
 	m.cache.Invalidate(models.ConfigCategoryStorage)
+	m.cache.Invalidate(models.ConfigCategoryOAuth)
+	m.cache.Invalidate(models.ConfigCategorySecurity)
 }
 
 // CreateConfig 创建配置
 func (m *Manager) CreateConfig(ctx context.Context, req *models.SystemConfigStoreRequest, userID uint) (*models.ConfigResponse, error) {
+	if req.Category == models.ConfigCategoryOAuth {
+		if err := ValidateOAuthConfigMap(req.Config); err != nil {
+			return nil, err
+		}
+	}
+
 	baseKey := fmt.Sprintf("%s:%s", req.Category, req.Name)
 	key, err := m.repo.EnsureKeyUnique(ctx, baseKey)
 	if err != nil {
@@ -120,7 +128,7 @@ func (m *Manager) CreateConfig(ctx context.Context, req *models.SystemConfigStor
 	m.cache.Invalidate(req.Category)
 	m.eventBus.Publish(EventConfigCreated, config)
 
-	return m.ToResponse(ctx, config)
+	return m.ToResponseWithMask(ctx, config, true)
 }
 
 // UpdateConfig 更新配置
@@ -154,7 +162,7 @@ func (m *Manager) UpdateConfig(ctx context.Context, id uint, req *models.SystemC
 	m.cache.Invalidate(config.Category)
 	m.eventBus.Publish(EventConfigUpdated, config)
 
-	return m.ToResponse(ctx, config)
+	return m.ToResponseWithMask(ctx, config, true)
 }
 
 // mergeConfig 合并配置
@@ -170,6 +178,12 @@ func (m *Manager) mergeConfig(config *models.SystemConfig, newConfig map[string]
 			continue
 		}
 		existingConfig[key] = value
+	}
+
+	if config.Category == models.ConfigCategoryOAuth {
+		if err := ValidateOAuthConfigMap(existingConfig); err != nil {
+			return err
+		}
 	}
 
 	encrypted, err := m.crypto.Encrypt(existingConfig)
@@ -456,9 +470,36 @@ func parseBool(val any, defaultValue bool) bool {
 	}
 }
 
+func parseInt64(val any, defaultValue int64) int64 {
+	switch v := val.(type) {
+	case int:
+		return int64(v)
+	case int64:
+		return v
+	case int32:
+		return int64(v)
+	case float64:
+		return int64(v)
+	case json.Number:
+		n, err := v.Int64()
+		if err == nil {
+			return n
+		}
+	case string:
+		var n int64
+		if _, err := fmt.Sscanf(v, "%d", &n); err == nil {
+			return n
+		}
+	}
+	return defaultValue
+}
+
 // === 全局转发模式配置 ===
 
-const globalTransferModeKey = "system:transfer_mode"
+const (
+	globalTransferModeKey           = "system:transfer_mode"
+	DefaultAutoDirectThresholdBytes = int64(1 << 20)
+)
 
 // GetGlobalTransferMode 获取全局转发模式
 func (m *Manager) GetGlobalTransferMode(ctx context.Context) storage.TransferMode {
@@ -497,10 +538,57 @@ func (m *Manager) GetGlobalTransferMode(ctx context.Context) storage.TransferMod
 	return mode
 }
 
+// GetAutoDirectThresholdBytes 获取 auto 模式下启用直链的最小文件大小。
+func (m *Manager) GetAutoDirectThresholdBytes(ctx context.Context) int64 {
+	if cached, ok := m.cache.GetAutoDirectThresholdBytes(); ok {
+		return cached
+	}
+
+	v, err, _ := m.loads.Do(keyAutoDirectThresholdBytes, func() (any, error) {
+		config, err := m.repo.GetByKey(ctx, globalTransferModeKey)
+		if err != nil {
+			return DefaultAutoDirectThresholdBytes, err
+		}
+
+		configMap, err := m.crypto.Decrypt(config.ConfigJSON)
+		if err != nil {
+			return DefaultAutoDirectThresholdBytes, err
+		}
+
+		threshold := parseInt64(configMap["auto_direct_threshold_bytes"], DefaultAutoDirectThresholdBytes)
+		if threshold <= 0 {
+			return DefaultAutoDirectThresholdBytes, nil
+		}
+
+		return threshold, nil
+	})
+	if err != nil {
+		configManagerLog.Debugf("Falling back to default auto direct threshold after cache miss load error: %v", err)
+		return DefaultAutoDirectThresholdBytes
+	}
+
+	threshold, ok := v.(int64)
+	if !ok || threshold <= 0 {
+		return DefaultAutoDirectThresholdBytes
+	}
+	m.cache.SetAutoDirectThresholdBytes(threshold)
+	return threshold
+}
+
 // SetGlobalTransferMode 设置全局转发模式
 func (m *Manager) SetGlobalTransferMode(ctx context.Context, mode storage.TransferMode) error {
+	return m.SetGlobalTransferSettings(ctx, mode, m.GetAutoDirectThresholdBytes(ctx))
+}
+
+// SetGlobalTransferSettings 设置全局转发模式及 auto 直链阈值。
+func (m *Manager) SetGlobalTransferSettings(ctx context.Context, mode storage.TransferMode, autoDirectThresholdBytes int64) error {
+	if autoDirectThresholdBytes <= 0 {
+		autoDirectThresholdBytes = DefaultAutoDirectThresholdBytes
+	}
+
 	configMap := map[string]any{
-		"mode": string(mode),
+		"mode":                        string(mode),
+		"auto_direct_threshold_bytes": autoDirectThresholdBytes,
 	}
 
 	encryptedJSON, err := m.crypto.Encrypt(configMap)
@@ -518,12 +606,13 @@ func (m *Manager) SetGlobalTransferMode(ctx context.Context, mode storage.Transf
 			Key:         globalTransferModeKey,
 			ConfigJSON:  encryptedJSON,
 			IsEnabled:   true,
-			Description: "全局图片转发模式: auto(自动), always_proxy(总是代理), always_direct(总是直链)",
+			Description: "全局图片转发模式: auto(自动), always_proxy(总是代理), always_direct(总是直链); auto_direct_threshold_bytes 控制 auto 模式下启用直链的最小文件大小",
 		}); err != nil {
 			return err
 		}
-		m.cache.SetTransferMode(mode)
 		m.cache.Invalidate(models.ConfigCategorySystem)
+		m.cache.SetTransferMode(mode)
+		m.cache.SetAutoDirectThresholdBytes(autoDirectThresholdBytes)
 		m.eventBus.Publish(EventConfigCreated, nil)
 		return nil
 	}
@@ -533,8 +622,9 @@ func (m *Manager) SetGlobalTransferMode(ctx context.Context, mode storage.Transf
 	if err := m.repo.Update(ctx, existing); err != nil {
 		return err
 	}
-	m.cache.SetTransferMode(mode)
 	m.cache.Invalidate(models.ConfigCategorySystem)
+	m.cache.SetTransferMode(mode)
+	m.cache.SetAutoDirectThresholdBytes(autoDirectThresholdBytes)
 	m.eventBus.Publish(EventConfigUpdated, existing)
 	return nil
 }

@@ -71,9 +71,16 @@ func (m *mockVariantRepo) ResetStaleProcessing(olderThan time.Duration) (int64, 
 
 type mockImageRepo struct {
 	touchedImageIDs []uint
+	statusUpdates   []imageStatusUpdate
+}
+
+type imageStatusUpdate struct {
+	imageID uint
+	status  models.ImageVariantStatus
 }
 
 func (m *mockImageRepo) UpdateVariantStatus(imageID uint, status models.ImageVariantStatus) error {
+	m.statusUpdates = append(m.statusUpdates, imageStatusUpdate{imageID: imageID, status: status})
 	return nil
 }
 
@@ -112,20 +119,53 @@ func TestGetProcessingFilePath_LocalStorage(t *testing.T) {
 	assert.NoError(t, statErr, "local storage file must not be deleted by cleanup")
 }
 
+func TestProcessingHeartbeatIntervalStaysBelowStaleThresholdThird(t *testing.T) {
+	assert.Less(t, processingHeartbeatInterval, staleThreshold/3)
+}
+
+func TestGetProcessingFilePathConsumesLocalFileLease(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "upload.tmp")
+	require.NoError(t, os.WriteFile(path, []byte("body"), 0o600))
+	lease := NewLocalFileLease(path)
+	require.True(t, lease.Transfer())
+
+	task := &ImagePipelineTask{LocalFile: lease}
+	gotPath, cleanup, err := task.getProcessingFilePath(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, path, gotPath)
+	assert.Nil(t, task.LocalFile)
+
+	cleanup()
+	_, statErr := os.Stat(path)
+	require.Error(t, statErr)
+	assert.True(t, os.IsNotExist(statErr))
+}
+
 func TestSaveVariantResults_UpdateCompletedError_CallsUpdateFailed(t *testing.T) {
+	dir := t.TempDir()
+	ls, err := storage.NewLocalStorage(dir)
+	require.NoError(t, err)
+	variantPath := "webp/foo.webp"
+	fullPath := filepath.Join(dir, variantPath)
+	require.NoError(t, os.MkdirAll(filepath.Dir(fullPath), 0o755))
+	require.NoError(t, os.WriteFile(fullPath, []byte("orphan"), 0o600))
+
 	repo := &mockVariantRepo{updateCompletedErr: errors.New("db down")}
 	task := &ImagePipelineTask{
 		WebPVariantID: 7,
 		VariantRepo:   repo,
+		Storage:       ls,
 	}
-	result := &pipelineResult{StoragePath: "webp/foo.webp", Width: 100, Height: 100, FileSize: 1000, FileHash: "abc"}
+	result := &pipelineResult{StoragePath: variantPath, Width: 100, Height: 100, FileSize: 1000, FileHash: "abc"}
 	acquiredVariants := []uint{7}
 
-	err := task.saveVariantResults(&acquiredVariants, nil, result, nil)
+	err = task.saveVariantResults(&acquiredVariants, nil, result, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "db down")
 	assert.Contains(t, repo.updateFailedCalls, uint(7), "UpdateFailed must be called for the variant")
+	_, statErr := os.Stat(fullPath)
+	assert.True(t, os.IsNotExist(statErr), "orphan variant file should be cleaned up when DB completion fails")
 }
 
 func TestTouchProcessingStateRefreshesImageAndVariants(t *testing.T) {
@@ -204,6 +244,12 @@ func TestShouldKeepAVIF(t *testing.T) {
 	assert.True(t, shouldKeepAVIF(90, 0))
 }
 
+func TestAVIFFailureShouldFailPipeline(t *testing.T) {
+	assert.False(t, avifFailureShouldFailPipeline(0, nil))
+	assert.True(t, avifFailureShouldFailPipeline(8, nil), "AVIF failure is fatal when no WebP was produced")
+	assert.False(t, avifFailureShouldFailPipeline(8, &pipelineResult{StoragePath: "webp/out.webp"}))
+}
+
 func TestFinalizeOnlyRollsBackStillTrackedVariants(t *testing.T) {
 	repo := &mockVariantRepo{}
 	task := &ImagePipelineTask{VariantRepo: repo}
@@ -219,4 +265,46 @@ func TestFinalizeOnlyRollsBackStillTrackedVariants(t *testing.T) {
 		newStatus: models.VariantStatusPending,
 		errMsg:    "",
 	}, repo.statusCASCalls[0])
+}
+
+func TestExecuteMemoryBackpressureFailureAfterSemaphore(t *testing.T) {
+	previousCheck := workerMemoryCheck
+	workerMemoryCheck = func() error {
+		return errors.New("memory limit exceeded")
+	}
+	defer func() {
+		workerMemoryCheck = previousCheck
+	}()
+
+	origTimeout := backpressureTimeout
+	origInterval := backpressureInterval
+	backpressureTimeout = 20 * time.Millisecond
+	backpressureInterval = 5 * time.Millisecond
+	defer func() {
+		backpressureTimeout = origTimeout
+		backpressureInterval = origInterval
+	}()
+
+	variantRepo := &mockVariantRepo{}
+	imageRepo := &mockImageRepo{}
+	task := &ImagePipelineTask{
+		ImageID:         42,
+		ImageIdentifier: "memory-test",
+		WebPVariantID:   7,
+		VariantRepo:     variantRepo,
+		ImageRepo:       imageRepo,
+	}
+
+	task.Execute()
+
+	require.Contains(t, variantRepo.updateFailedCalls, uint(7))
+	require.Contains(t, imageRepo.statusUpdates, imageStatusUpdate{
+		imageID: 42,
+		status:  models.ImageVariantStatusFailed,
+	})
+	assert.Empty(t, CurrentInFlightTasks())
+
+	for _, call := range variantRepo.statusCASCalls {
+		assert.False(t, call.expected == models.VariantStatusProcessing && call.newStatus == models.VariantStatusPending, "memory failure must not roll variant back to pending")
+	}
 }

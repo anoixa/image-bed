@@ -8,9 +8,6 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
-	"os"
-	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/anoixa/image-bed/api/middleware"
@@ -28,6 +25,9 @@ import (
 )
 
 var writeServiceLog = utils.ForModule("WriteService")
+
+const storageCleanupTimeout = 5 * time.Second
+const maxIdentifierGenerationAttempts = 5
 
 // WriteService 负责图片上传与写入相关用例
 type WriteService struct {
@@ -135,7 +135,6 @@ func (s *WriteService) UploadBatchSources(ctx context.Context, userID uint, file
 	}
 
 	results := make([]*UploadResult, len(files))
-	var resultsMutex sync.Mutex
 
 	g, ctx := errgroup.WithContext(ctx)
 	sem := make(chan struct{}, concurrentLimit)
@@ -165,9 +164,7 @@ func (s *WriteService) UploadBatchSources(ctx context.Context, userID uint, file
 					result.Links = utils.BuildLinkFormats(s.baseURL, image.Identifier)
 				}
 
-				resultsMutex.Lock()
 				results[i] = result
-				resultsMutex.Unlock()
 				return nil
 			}
 		})
@@ -190,10 +187,10 @@ func (s *WriteService) processAndSaveImage(ctx context.Context, userID uint, sou
 	// Ensure temp file is cleaned up on any exit path (panic, error, dedup)
 	// unless ownership is explicitly transferred to the converter.
 	tempFileConsumed := false
-	if source.TempFilePath != "" {
+	if source.tempFilePath != "" {
 		defer func() {
 			if !tempFileConsumed {
-				cleanupOwnedTempFile(source.TempFilePath)
+				source.CleanupRequestTempFile()
 			}
 		}()
 	}
@@ -307,11 +304,14 @@ func (s *WriteService) processAndSaveImage(ctx context.Context, userID uint, sou
 	}
 
 	ext := getSafeFileExtension(mimeType)
-	ids := s.pathGenerator.GenerateOriginalIdentifiers(fileHash, ext, time.Now())
+	ids, err := s.generateUnusedOriginalIdentifiers(ctx, fileHash, ext, time.Now())
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to generate image identifier: %w", err)
+	}
 	identifier := ids.Identifier
 	storagePath := ids.StoragePath
 	storageWriteStart := time.Now()
-	if err := storageProvider.SaveWithContext(ctx, storagePath, src); err != nil {
+	if err := storageProvider.SaveWithContext(ctx, storagePath, storageSaveReader(src, source)); err != nil {
 		return nil, false, errors.New("failed to save uploaded file")
 	}
 	middleware.RecordUploadStorageWriteDuration(time.Since(storageWriteStart))
@@ -337,7 +337,7 @@ func (s *WriteService) processAndSaveImage(ctx context.Context, userID uint, sou
 
 	dbWriteStart := time.Now()
 	if err := s.repo.WithContext(ctx).SaveImage(newImg); err != nil {
-		_ = storageProvider.DeleteWithContext(ctx, storagePath)
+		cleanupSavedUpload(storageProvider, storagePath)
 		return nil, false, errors.New("failed to save image metadata")
 	}
 	middleware.RecordUploadDBWriteDuration(time.Since(dbWriteStart))
@@ -350,12 +350,17 @@ func (s *WriteService) processAndSaveImage(ctx context.Context, userID uint, sou
 
 	submitBackgroundTask(func() { s.warmCache(newImg) })
 	if s.converter != nil {
-		if source.TempFilePath != "" {
-			accepted := submitBackgroundTask(func() { s.converter.TriggerConversionWithLocalFile(newImg, source.TempFilePath) })
+		if source.tempFilePath != "" {
+			localFile := source.TransferTempFile()
+			accepted := false
+			if localFile != nil {
+				accepted = submitBackgroundTask(func() { s.converter.TriggerConversionWithLocalFile(newImg, localFile) })
+			}
 			middleware.RecordUploadTaskSubmit(accepted)
 			if accepted {
 				tempFileConsumed = true
-				source.ReleaseRequestCleanup()
+			} else if localFile != nil {
+				localFile.CleanupTransferred()
 			}
 		} else {
 			middleware.RecordUploadTaskSubmit(submitBackgroundTask(func() { s.converter.TriggerConversion(newImg) }))
@@ -410,9 +415,35 @@ func getUploadSourceSize(src io.Seeker, hintedSize int64) (int64, error) {
 	return endPos, nil
 }
 
+type copyOnlyReader struct {
+	io.Reader
+}
+
+func storageSaveReader(src io.Reader, source UploadSource) io.Reader {
+	if source.tempFilePath == "" {
+		return src
+	}
+	return copyOnlyReader{Reader: src}
+}
+
+func cleanupSavedUpload(provider storage.Provider, storagePath string) {
+	if provider == nil || storagePath == "" {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), storageCleanupTimeout)
+	defer cancel()
+	if err := provider.DeleteWithContext(ctx, storagePath); err != nil {
+		writeServiceLog.Warnf("Failed to cleanup uploaded file %s after metadata save failure: %v", storagePath, err)
+	}
+}
+
 // createDedupedImageRecord 为不同用户创建去重后的新图片记录
 func (s *WriteService) createDedupedImageRecord(ctx context.Context, existing *models.Image, userID uint, originalName string, _ uint, isPublic bool) (*models.Image, error) {
-	ids := s.pathGenerator.GenerateOriginalIdentifiers(existing.FileHash+fmt.Sprintf("_%d", userID), filepath.Ext(originalName), time.Now())
+	ids, err := s.generateUnusedOriginalIdentifiers(ctx, existing.FileHash+fmt.Sprintf(":%d:%s", userID, originalName), getSafeFileExtension(existing.MimeType), time.Now())
+	if err != nil {
+		return nil, err
+	}
 
 	newImg := &models.Image{
 		Identifier:      ids.Identifier,
@@ -435,6 +466,21 @@ func (s *WriteService) createDedupedImageRecord(ctx context.Context, existing *m
 	return newImg, nil
 }
 
+func (s *WriteService) generateUnusedOriginalIdentifiers(ctx context.Context, seed, ext string, uploadTime time.Time) (generator.StorageIdentifiers, error) {
+	repo := s.repo.WithContext(ctx)
+	for range maxIdentifierGenerationAttempts {
+		ids := s.pathGenerator.GenerateOriginalIdentifiers(seed, ext, uploadTime)
+		exists, err := repo.ImageExists(ids.Identifier)
+		if err != nil {
+			return generator.StorageIdentifiers{}, err
+		}
+		if !exists {
+			return ids, nil
+		}
+	}
+	return generator.StorageIdentifiers{}, errors.New("unable to generate a unique image identifier")
+}
+
 func (s *WriteService) warmCache(image *models.Image) {
 	if s.cacheHelper == nil {
 		return
@@ -442,12 +488,4 @@ func (s *WriteService) warmCache(image *models.Image) {
 	ctx, cancel := utils.DetachedContext(5 * time.Second)
 	defer cancel()
 	_ = s.cacheHelper.CacheImage(ctx, image)
-}
-
-// cleanupOwnedTempFile removes a temp file whose ownership was transferred
-// from the upload handler. Safe to call with empty string (no-op).
-func cleanupOwnedTempFile(path string) {
-	if path != "" {
-		_ = os.Remove(path)
-	}
 }

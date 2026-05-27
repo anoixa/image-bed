@@ -1,13 +1,13 @@
 # image-bed
 
-一个基于 Go + Gin 的轻量级图床服务，支持多种存储后端、图片转换和相册管理。
+一个基于 Go + Gin 的个人 / 小团队自托管图片托管系统，支持多存储后端、图片格式自动协商、异步转换、相册管理和基础多用户能力。
 
 ## 功能特性
 
 - **多存储后端支持**：本地磁盘、MinIO/S3、WebDAV
-- **图片处理**：基于 libvips 的 WebP 自动转换、缩略图生成
+- **图片处理**：基于 libvips 的 WebP/AVIF 自动转换、缩略图生成
 - **相册管理**：创建相册、批量管理图片
-- **多种认证方式**：JWT 认证、API Token、Refresh Token
+- **多种认证方式**：JWT 认证、API Token、Refresh Token、OAuth 登录（GitHub / Google / Gitee）
 - **缓存支持**：内存缓存 (Ristretto) 或 Redis
 - **限流保护**：基于令牌桶的 API 和图片访问限流
 - **数据统计**：Dashboard 统计面板
@@ -69,12 +69,32 @@ CGO_ENABLED=1 go build -ldflags="-s -w \
 ### Docker 构建
 
 ```bash
-docker-compose up -d
+docker compose up -d --build
+```
+
+默认使用 SQLite 和 Docker named volume，未提供 `.env` 也可以启动。首次启动会自动创建管理员账号，密码查看容器日志。
+
+如使用已发布镜像，可直接运行：
+
+```bash
+docker run -d \
+  --name image-bed \
+  -p 8080:8080 \
+  -v image-bed:/app/data \
+  <image-name>:<tag>
+```
+
+如果改用宿主机目录 bind mount，需确保目录 owner 可写，而不是使用 `chmod 777`：
+
+```bash
+mkdir -p ./data
+sudo chown -R "$(id -u):$(id -g)" ./data
+PUID="$(id -u)" PGID="$(id -g)" docker compose up -d --build
 ```
 
 ## 前端集成
 
-本项目为纯后端 API 服务，前端需单独部署。
+后端可以托管前端构建产物，也可以作为纯 API 服务独立部署。
 
 ### 前端项目
 
@@ -115,11 +135,27 @@ SERVE_FRONTEND=true
 
 ### 仅使用 API
 
-如不需要前端界面，设置 `SERVE_FRONTEND=false`，后端仅提供 API 服务。
+如不需要后端托管前端界面，设置 `SERVE_FRONTEND=false`，后端仅提供 API 服务。
 
 ## API 文档
 
 启动服务后访问：`http://localhost:8080/swagger/index.html`
+
+## OAuth 登录
+
+支持 GitHub、Google、Gitee OAuth2 登录。
+
+项目不提供公开注册。账号只能由管理员手动创建；用户登录后可在账号设置中自行绑定 OAuth2 账号。未绑定的 OAuth2 账号不能直接登录，也不会自动创建用户。
+
+启用 OAuth2 时需将 `SERVER_DOMAIN` 配置为浏览器可访问的公网地址，并在 provider 控制台配置 callback URL：
+
+```text
+<SERVER_DOMAIN>/api/auth/oauth/<provider>/callback
+```
+
+## 图片格式自动协商
+
+图片访问接口会根据客户端 `Accept` 头自动选择原图、WebP 或 AVIF 变体，客户端无需拼接不同格式的图片地址。
 
 ## 配置
 
@@ -130,6 +166,7 @@ SERVE_FRONTEND=true
 SERVER_HOST=127.0.0.1
 SERVER_PORT=8080
 SERVER_DOMAIN=http://localhost:8080
+APP_TIMEZONE=Asia/Shanghai
 
 # 数据库 (sqlite 或 postgresql)
 DB_TYPE=sqlite
@@ -138,14 +175,19 @@ DB_TYPE=sqlite
 CACHE_TYPE=memory
 
 # JWT
-JWT_SECRET=change-this-to-a-strong-secret-with-at-least-32-chars
+JWT_SECRET=
 JWT_ACCESS_TOKEN_TTL=15m
 JWT_REFRESH_TOKEN_TTL=168h
+
+# 认证 / OAuth
+AUTH_PASSWORD_LOGIN_ENABLED=true
 
 # Worker
 WORKER_COUNT=-1
 WORKER_MEMORY_LIMIT_MB=512
 ```
+
+`JWT_SECRET` 留空会在首次启动自动生成；`SERVER_DOMAIN` 用于图片链接和 OAuth callback；`APP_TIMEZONE` 为项目时区设置。
 
 完整配置见 `.env.example`
 

@@ -26,7 +26,11 @@ func (s *Service) Initialize(checkDataExists func() (bool, error)) error {
 		return fmt.Errorf("failed to initialize master key: %w", err)
 	}
 
-	s.encryptor = cryptoutils.NewConfigEncryptor(s.keyManager.GetKey())
+	encryptionKey, err := s.keyManager.GetConfigEncryptionKey()
+	if err != nil {
+		return fmt.Errorf("failed to derive config encryption key: %w", err)
+	}
+	s.encryptor = cryptoutils.NewConfigEncryptorWithFallback(encryptionKey, s.keyManager.GetLegacyConfigEncryptionKeys()...)
 	return nil
 }
 

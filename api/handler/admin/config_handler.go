@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/anoixa/image-bed/api/common"
+	appconfig "github.com/anoixa/image-bed/config"
+	configsvc "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
 	imagesRepo "github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/storage"
@@ -29,15 +31,18 @@ type configManager interface {
 	Enable(ctx context.Context, id uint) error
 	Disable(ctx context.Context, id uint) error
 	GetGlobalTransferMode(ctx context.Context) storage.TransferMode
+	GetAutoDirectThresholdBytes(ctx context.Context) int64
 	SetGlobalTransferMode(ctx context.Context, mode storage.TransferMode) error
+	SetGlobalTransferSettings(ctx context.Context, mode storage.TransferMode, autoDirectThresholdBytes int64) error
 	ClearCache()
 }
 
 // ConfigHandler 配置管理处理器
 type ConfigHandler struct {
-	manager             configManager
-	imagesRepo          *imagesRepo.Repository
-	reloadStorageConfig func(id uint, config map[string]any, isDefault bool) error
+	manager                      configManager
+	imagesRepo                   *imagesRepo.Repository
+	reloadStorageConfig          func(id uint, config map[string]any, isDefault bool) error
+	allowPrivateStorageEndpoints bool
 }
 
 var hiddenExternalConfigCategories = map[models.ConfigCategory]struct{}{
@@ -48,8 +53,9 @@ var hiddenExternalConfigCategories = map[models.ConfigCategory]struct{}{
 // NewConfigHandler 创建配置处理器
 func NewConfigHandler(manager configManager, imagesRepo *imagesRepo.Repository) *ConfigHandler {
 	handler := &ConfigHandler{
-		manager:    manager,
-		imagesRepo: imagesRepo,
+		manager:                      manager,
+		imagesRepo:                   imagesRepo,
+		allowPrivateStorageEndpoints: appconfig.Get().StorageAllowPrivateEndpoints,
 	}
 	handler.reloadStorageConfig = handler.hotReloadStorageConfig
 	return handler
@@ -57,11 +63,11 @@ func NewConfigHandler(manager configManager, imagesRepo *imagesRepo.Repository) 
 
 // ListConfigs 列出配置列表
 // @Summary      List system configurations
-// @Description  Get list of system configurations including storage and image processing settings
+// @Description  Get list of system configurations including storage, image processing, and OAuth settings
 // @Tags         admin
 // @Accept       json
 // @Produce      json
-// @Param        category        query     string  false  "Filter by category: storage, image_processing"
+// @Param        category        query     string  false  "Filter by category: storage, image_processing, oauth"
 // @Param        enabled_only    query     bool    false  "Only show enabled configs"
 // @Param        mask_sensitive  query     bool    false  "Mask sensitive information (default: true)"
 // @Success      200  {object}  common.Response  "Configuration list"
@@ -143,7 +149,7 @@ func (h *ConfigHandler) GetConfig(c *gin.Context) {
 
 // CreateConfig 创建新配置
 // @Summary      Create configuration
-// @Description  Create a new system configuration (storage or image processing)
+// @Description  Create a new system configuration (storage, image processing, or OAuth provider)
 // @Tags         admin
 // @Accept       json
 // @Produce      json
@@ -184,6 +190,10 @@ func (h *ConfigHandler) CreateConfig(c *gin.Context) {
 	config, err := h.manager.CreateConfig(ctx, &req, userID)
 	if err != nil {
 		adminConfigLog.Errorf("Failed to create config: %v", err)
+		if errors.Is(err, configsvc.ErrInvalidOAuthConfig) {
+			common.RespondError(c, http.StatusBadRequest, err.Error())
+			return
+		}
 		common.RespondError(c, http.StatusInternalServerError, "Failed to create config")
 		return
 	}
@@ -250,6 +260,10 @@ func (h *ConfigHandler) UpdateConfig(c *gin.Context) {
 	config, err := h.manager.UpdateConfig(ctx, uint(id), &req)
 	if err != nil {
 		adminConfigLog.Errorf("Failed to update config: %v", err)
+		if errors.Is(err, configsvc.ErrInvalidOAuthConfig) {
+			common.RespondError(c, http.StatusBadRequest, err.Error())
+			return
+		}
 		common.RespondError(c, http.StatusInternalServerError, "Failed to update config")
 		return
 	}
@@ -553,6 +567,18 @@ func filterVisibleConfigs(configs []*models.ConfigResponse) []*models.ConfigResp
 // testConfig 测试配置
 func (h *ConfigHandler) testConfig(ctx context.Context, req *models.TestConfigRequest) *models.TestConfigResponse {
 	switch req.Category {
+	case models.ConfigCategoryOAuth:
+		if err := configsvc.ValidateOAuthConfigMap(req.Config); err != nil {
+			return &models.TestConfigResponse{
+				Success: false,
+				Message: err.Error(),
+			}
+		}
+		return &models.TestConfigResponse{
+			Success: true,
+			Message: "OAuth provider configuration is valid",
+		}
+
 	case models.ConfigCategoryStorage:
 		return h.testStorageConfig(ctx, req.Config)
 	case models.ConfigCategoryImageProcessing:
@@ -627,7 +653,7 @@ func (h *ConfigHandler) testStorageConfig(ctx context.Context, config map[string
 				Message: "Endpoint, access_key_id, secret_access_key and bucket_name are required",
 			}
 		}
-		if err := validateRemoteStorageTestTarget(s3Cfg.Endpoint); err != nil {
+		if err := validateRemoteStorageTestTarget(s3Cfg.Endpoint, h.allowPrivateStorageEndpoints); err != nil {
 			return &models.TestConfigResponse{
 				Success: false,
 				Message: err.Error(),
@@ -665,7 +691,7 @@ func (h *ConfigHandler) testStorageConfig(ctx context.Context, config map[string
 				Message: "WebDAV URL is required",
 			}
 		}
-		if err := validateRemoteStorageTestTarget(webdavCfg.URL); err != nil {
+		if err := validateRemoteStorageTestTarget(webdavCfg.URL, h.allowPrivateStorageEndpoints); err != nil {
 			return &models.TestConfigResponse{
 				Success: false,
 				Message: err.Error(),
@@ -697,7 +723,7 @@ func (h *ConfigHandler) testStorageConfig(ctx context.Context, config map[string
 	}
 }
 
-func validateRemoteStorageTestTarget(rawTarget string) error {
+func validateRemoteStorageTestTarget(rawTarget string, allowPrivate bool) error {
 	targetURL, err := parseRemoteStorageTestTarget(rawTarget)
 	if err != nil {
 		return fmt.Errorf("invalid remote storage address: %w", err)
@@ -706,6 +732,9 @@ func validateRemoteStorageTestTarget(rawTarget string) error {
 	host := strings.TrimSuffix(strings.ToLower(targetURL.Hostname()), ".")
 	if host == "" {
 		return fmt.Errorf("invalid remote storage address: missing host")
+	}
+	if allowPrivate {
+		return nil
 	}
 
 	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
@@ -877,16 +906,18 @@ func getBool(m map[string]any, key string) bool {
 // @Tags         admin
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  common.Response{data=map[string]string}  "Transfer mode"
+// @Success      200  {object}  common.Response{data=map[string]any}  "Transfer mode"
 // @Failure      401  {object}  common.Response  "Unauthorized"
 // @Security     ApiKeyAuth
 // @Router       /api/v1/admin/transfer-mode [get]
 func (h *ConfigHandler) GetGlobalTransferMode(c *gin.Context) {
 	ctx := c.Request.Context()
 	mode := h.manager.GetGlobalTransferMode(ctx)
+	thresholdBytes := h.manager.GetAutoDirectThresholdBytes(ctx)
 
-	common.RespondSuccess(c, map[string]string{
-		"mode": string(mode),
+	common.RespondSuccess(c, map[string]any{
+		"mode":                        string(mode),
+		"auto_direct_threshold_bytes": thresholdBytes,
 	})
 }
 
@@ -921,7 +952,16 @@ func (h *ConfigHandler) SetGlobalTransferMode(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	if err := h.manager.SetGlobalTransferMode(ctx, mode); err != nil {
+	thresholdBytes := h.manager.GetAutoDirectThresholdBytes(ctx)
+	if req.AutoDirectThresholdBytes != nil {
+		if *req.AutoDirectThresholdBytes <= 0 {
+			common.RespondError(c, http.StatusBadRequest, "auto_direct_threshold_bytes must be greater than 0")
+			return
+		}
+		thresholdBytes = *req.AutoDirectThresholdBytes
+	}
+
+	if err := h.manager.SetGlobalTransferSettings(ctx, mode, thresholdBytes); err != nil {
 		adminConfigLog.Errorf("Failed to set transfer mode: %v", err)
 		common.RespondError(c, http.StatusInternalServerError, "Failed to set transfer mode")
 		return
@@ -930,12 +970,14 @@ func (h *ConfigHandler) SetGlobalTransferMode(c *gin.Context) {
 	// 清除配置缓存，使新配置立即生效
 	h.manager.ClearCache()
 
-	common.RespondSuccess(c, map[string]string{
-		"mode": req.Mode,
+	common.RespondSuccess(c, map[string]any{
+		"mode":                        req.Mode,
+		"auto_direct_threshold_bytes": thresholdBytes,
 	})
 }
 
 // SetTransferModeRequest 设置转发模式请求
 type SetTransferModeRequest struct {
-	Mode string `json:"mode" binding:"required"` // auto, always_proxy, always_direct
+	Mode                     string `json:"mode" binding:"required"`               // auto, always_proxy, always_direct
+	AutoDirectThresholdBytes *int64 `json:"auto_direct_threshold_bytes,omitempty"` // auto 模式下启用直链的最小文件大小
 }

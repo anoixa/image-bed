@@ -15,6 +15,38 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/api/auth/capabilities": {
+            "get": {
+                "description": "Get password-login and OAuth-login availability for frontend login-page rendering.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Get auth capabilities",
+                "responses": {
+                    "200": {
+                        "description": "Authentication capabilities",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/api.authCapabilitiesResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
         "/api/auth/login": {
             "post": {
                 "description": "Authenticate user with username and password, returns access token and sets refresh token cookie",
@@ -79,6 +111,64 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/auth/login/2fa": {
+            "post": {
+                "description": "Verify TOTP code with a 2FA ticket to complete login",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Verify 2FA code",
+                "parameters": [
+                    {
+                        "description": "2FA verification",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.verify2FARequestBody"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "2FA verification successful",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/api.loginResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid 2FA code or ticket",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/api/auth/logout": {
             "post": {
                 "description": "Logout user by invalidating session. Works with any combination of cookies (refresh_token, device_id, or both). Always clears cookies and returns 200 for idempotency.",
@@ -95,6 +185,398 @@ const docTemplate = `{
                 "responses": {
                     "200": {
                         "description": "Logout successful or already logged out",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/me": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "返回当前 JWT 登录用户的基础资料",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "获取当前用户信息",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/user.CurrentUserResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "未认证",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "用户不存在",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器内部错误",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/oauth/identities": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Get OAuth identities linked to the current user.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "List linked OAuth identities",
+                "responses": {
+                    "200": {
+                        "description": "Linked identities",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/api.oauthIdentitiesResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to get identities",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/oauth/identities/{provider}": {
+            "delete": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Remove a linked OAuth identity from the current user. Refuses to remove the last usable login method.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Unlink OAuth identity",
+                "parameters": [
+                    {
+                        "enum": [
+                            "github",
+                            "google",
+                            "gitee"
+                        ],
+                        "type": "string",
+                        "description": "OAuth provider",
+                        "name": "provider",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Identity unlinked",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Identity not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "409": {
+                        "description": "Cannot unlink the last login method",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to unlink identity",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/oauth/providers": {
+            "get": {
+                "description": "Get enabled OAuth providers for login-page rendering.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "List OAuth providers",
+                "responses": {
+                    "200": {
+                        "description": "OAuth provider list",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/api.oauthProvidersResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/oauth/{provider}/callback": {
+            "get": {
+                "description": "Complete an OAuth login or account-link flow. On login success it sets auth cookies and redirects to return_to; on failure it redirects with oauth_error.",
+                "tags": [
+                    "auth"
+                ],
+                "summary": "OAuth callback",
+                "parameters": [
+                    {
+                        "enum": [
+                            "github",
+                            "google",
+                            "gitee"
+                        ],
+                        "type": "string",
+                        "description": "OAuth provider",
+                        "name": "provider",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Authorization code",
+                        "name": "code",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Signed OAuth state",
+                        "name": "state",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "302": {
+                        "description": "Redirect to return_to, /login, or /settings/account"
+                    }
+                }
+            }
+        },
+        "/api/auth/oauth/{provider}/link/start": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Start linking an OAuth provider to the current authenticated user. Redirects to the provider authorization page.",
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Start OAuth account link",
+                "parameters": [
+                    {
+                        "enum": [
+                            "github",
+                            "google",
+                            "gitee"
+                        ],
+                        "type": "string",
+                        "description": "OAuth provider",
+                        "name": "provider",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Same-site relative return path",
+                        "name": "return_to",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Set to json to receive auth_url instead of redirect",
+                        "name": "response",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OAuth authorization URL",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/api.oauthStartResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "302": {
+                        "description": "Redirect to OAuth provider"
+                    },
+                    "400": {
+                        "description": "Provider not enabled or invalid return_to",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to start link flow",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/oauth/{provider}/start": {
+            "get": {
+                "description": "Start an OAuth login flow. Redirects to the provider authorization page.",
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Start OAuth login",
+                "parameters": [
+                    {
+                        "enum": [
+                            "github",
+                            "google",
+                            "gitee"
+                        ],
+                        "type": "string",
+                        "description": "OAuth provider",
+                        "name": "provider",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Same-site relative return path",
+                        "name": "return_to",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Set to json to receive auth_url instead of redirect",
+                        "name": "response",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OAuth authorization URL",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/api.oauthStartResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "302": {
+                        "description": "Redirect to OAuth provider"
+                    },
+                    "400": {
+                        "description": "Provider not enabled or invalid return_to",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to start OAuth flow",
                         "schema": {
                             "$ref": "#/definitions/common.Response"
                         }
@@ -149,6 +631,134 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/admin/auth/settings": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Get password login switch, enabled OAuth providers, and callback URLs.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get login settings",
+                "responses": {
+                    "200": {
+                        "description": "Login settings",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/admin.AuthSettingsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Update password login availability. Disabling password login requires at least one enabled OAuth provider and a linked OAuth identity for the current admin.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Update login settings",
+                "parameters": [
+                    {
+                        "description": "Login settings",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.UpdateAuthSettingsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Login settings",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/admin.AuthSettingsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request or unsafe lockout risk",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/admin/configs": {
             "get": {
                 "security": [
@@ -156,7 +766,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Get list of system configurations including storage and image processing settings",
+                "description": "Get list of system configurations including storage, image processing, and OAuth settings",
                 "consumes": [
                     "application/json"
                 ],
@@ -170,7 +780,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Filter by category: storage, image_processing",
+                        "description": "Filter by category: storage, image_processing, oauth",
                         "name": "category",
                         "in": "query"
                     },
@@ -214,7 +824,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Create a new system configuration (storage or image processing)",
+                "description": "Create a new system configuration (storage, image processing, or OAuth provider)",
                 "consumes": [
                     "application/json"
                 ],
@@ -984,9 +1594,7 @@ const docTemplate = `{
                                     "properties": {
                                         "data": {
                                             "type": "object",
-                                            "additionalProperties": {
-                                                "type": "string"
-                                            }
+                                            "additionalProperties": true
                                         }
                                     }
                                 }
@@ -1044,6 +1652,743 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/users": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Get paginated user list for administration",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "List users",
+                "parameters": [
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "Page number",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "Page size",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "User list",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/admin.ListUsersResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Create a new user. If password is omitted, backend auto-generates one and returns it once.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Create user",
+                "parameters": [
+                    {
+                        "description": "Create user request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.CreateUserRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "User created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/admin.CreateUserResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "409": {
+                        "description": "Username already exists",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/users/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Delete a user when they do not own images or albums",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Delete user",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "User ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "User deleted",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/admin.MessageResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid user ID, delete self, or last admin protection",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "User not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "409": {
+                        "description": "User still owns data",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/users/{id}/2fa/reset": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Clear a user's TOTP 2FA settings. This does not change password or revoke sessions.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Reset user 2FA",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "User ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "2FA reset",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/admin.MessageResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid user ID",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "User not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/users/{id}/oauth-identities": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Get linked OAuth identities for a user. Users bind OAuth identities from their own account settings.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get user OAuth identities",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "User ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OAuth identity list",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/admin.oauthUserIdentitiesResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid user ID",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to get identities",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/users/{id}/oauth-identities/{provider}": {
+            "delete": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Remove a linked OAuth identity from a user. Refuses to remove the user's last usable login method.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Unlink user OAuth identity",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "User ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "github",
+                            "google",
+                            "gitee"
+                        ],
+                        "type": "string",
+                        "description": "OAuth provider",
+                        "name": "provider",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OAuth identity unlinked",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/admin.MessageResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid user ID",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "User or identity not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "409": {
+                        "description": "Cannot unlink the last login method",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to unlink identity",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/users/{id}/reset-password": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Reset a user's password and revoke all of their active sessions",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Reset user password",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "User ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Password reset",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/admin.ResetPasswordResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid user ID",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "User not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/users/{id}/role": {
+            "put": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Change a user's role between admin and user",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Update user role",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "User ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Role update request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.UpdateRoleRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Role updated",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/admin.MessageResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error or last admin protection",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "User not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/users/{id}/status": {
+            "put": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Change a user's status between active and disabled",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Update user status",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "User ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Status update request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.UpdateStatusRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Status updated",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/admin.MessageResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error, disable self, or last admin protection",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "User not found",
                         "schema": {
                             "$ref": "#/definitions/common.Response"
                         }
@@ -1861,7 +3206,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Upload a single image file with optional storage strategy and visibility settings",
+                "description": "Upload one or multiple image files (max 10 per request)",
                 "consumes": [
                     "multipart/form-data"
                 ],
@@ -1871,12 +3216,12 @@ const docTemplate = `{
                 "tags": [
                     "images"
                 ],
-                "summary": "Upload single image",
+                "summary": "Upload images",
                 "parameters": [
                     {
                         "type": "file",
-                        "description": "Image file to upload",
-                        "name": "file",
+                        "description": "Image file(s) to upload (max 10)",
+                        "name": "files",
                         "in": "formData",
                         "required": true
                     },
@@ -1888,7 +3233,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "boolean",
-                        "description": "Whether the image is public (default: true)",
+                        "description": "Whether images are public (default: true)",
                         "name": "is_public",
                         "in": "formData"
                     }
@@ -1914,83 +3259,6 @@ const docTemplate = `{
                     },
                     "413": {
                         "description": "File too large",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/images/uploads": {
-            "post": {
-                "security": [
-                    {
-                        "ApiKeyAuth": []
-                    }
-                ],
-                "description": "Upload up to 10 images in a single batch request",
-                "consumes": [
-                    "multipart/form-data"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "images"
-                ],
-                "summary": "Upload multiple images",
-                "parameters": [
-                    {
-                        "type": "array",
-                        "items": {
-                            "type": "file"
-                        },
-                        "collectionFormat": "csv",
-                        "description": "Image files to upload (max 10)",
-                        "name": "files",
-                        "in": "formData",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Storage strategy ID",
-                        "name": "strategy_id",
-                        "in": "formData"
-                    },
-                    {
-                        "type": "boolean",
-                        "description": "Whether images are public (default: true)",
-                        "name": "is_public",
-                        "in": "formData"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Batch upload completed",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "400": {
-                        "description": "Invalid form data or too many files",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/common.Response"
-                        }
-                    },
-                    "413": {
-                        "description": "Total file size too large",
                         "schema": {
                             "$ref": "#/definitions/common.Response"
                         }
@@ -2419,6 +3687,226 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/user/2fa": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "返回当前用户的 TOTP 两步验证状态",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "user"
+                ],
+                "summary": "获取 2FA 状态",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/user.twoFAStatusResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/user/2fa/disable": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "验证当前 TOTP code 后关闭两步验证",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "user"
+                ],
+                "summary": "关闭 2FA",
+                "parameters": [
+                    {
+                        "description": "TOTP code",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/user.twoFACodeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/user/2fa/enable": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "验证 TOTP code，确认启用两步验证",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "user"
+                ],
+                "summary": "启用 2FA",
+                "parameters": [
+                    {
+                        "description": "TOTP code",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/user.twoFACodeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid code or 2FA not set up",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/user/2fa/setup": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "生成 TOTP secret 和 URI，返回给前端渲染 QR 码。不立即启用，需调用 enable 接口确认。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "user"
+                ],
+                "summary": "设置 2FA",
+                "parameters": [
+                    {
+                        "description": "Current password or current TOTP code",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/user.twoFASetupRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/common.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/user.twoFASetupResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "2FA already enabled",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/user/password": {
             "post": {
                 "security": [
@@ -2567,6 +4055,12 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Invalid query parameters",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Random API disabled",
                         "schema": {
                             "$ref": "#/definitions/common.Response"
                         }
@@ -2834,15 +4328,126 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "admin.AuthSettingsResponse": {
+            "type": "object",
+            "properties": {
+                "callback_urls": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "oauth_login_enabled": {
+                    "type": "boolean"
+                },
+                "password_login_enabled": {
+                    "type": "boolean"
+                },
+                "providers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/auth.ProviderInfo"
+                    }
+                }
+            }
+        },
+        "admin.CreateUserRequest": {
+            "type": "object",
+            "required": [
+                "username"
+            ],
+            "properties": {
+                "password": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "admin.CreateUserResponse": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer"
+                },
+                "password": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "admin.ListUsersResponse": {
+            "type": "object",
+            "properties": {
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "users": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/admin.UserSummary"
+                    }
+                }
+            }
+        },
+        "admin.MessageResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "admin.ResetPasswordResponse": {
+            "type": "object",
+            "properties": {
+                "password": {
+                    "type": "string"
+                }
+            }
+        },
         "admin.SetTransferModeRequest": {
             "type": "object",
             "required": [
                 "mode"
             ],
             "properties": {
+                "auto_direct_threshold_bytes": {
+                    "description": "auto 模式下启用直链的最小文件大小",
+                    "type": "integer"
+                },
                 "mode": {
                     "description": "auto, always_proxy, always_direct",
                     "type": "string"
+                }
+            }
+        },
+        "admin.UpdateAuthSettingsRequest": {
+            "type": "object",
+            "required": [
+                "password_login_enabled"
+            ],
+            "properties": {
+                "password_login_enabled": {
+                    "type": "boolean"
                 }
             }
         },
@@ -2908,6 +4513,97 @@ const docTemplate = `{
                 }
             }
         },
+        "admin.UpdateRoleRequest": {
+            "type": "object",
+            "required": [
+                "role"
+            ],
+            "properties": {
+                "role": {
+                    "type": "string",
+                    "enum": [
+                        "admin",
+                        "user"
+                    ]
+                }
+            }
+        },
+        "admin.UpdateStatusRequest": {
+            "type": "object",
+            "required": [
+                "status"
+            ],
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "active",
+                        "disabled"
+                    ]
+                }
+            }
+        },
+        "admin.UserSummary": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "admin.oauthUserIdentitiesResponse": {
+            "type": "object",
+            "properties": {
+                "identities": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/admin.oauthUserIdentitySummary"
+                    }
+                }
+            }
+        },
+        "admin.oauthUserIdentitySummary": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "email_verified": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "provider": {
+                    "type": "string",
+                    "example": "github"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
         "albums.AddImagesToAlbumRequest": {
             "type": "object",
             "required": [
@@ -2916,6 +4612,7 @@ const docTemplate = `{
             "properties": {
                 "identifiers": {
                     "type": "array",
+                    "maxItems": 100,
                     "minItems": 1,
                     "items": {
                         "type": "string"
@@ -3058,6 +4755,7 @@ const docTemplate = `{
             "properties": {
                 "identifiers": {
                     "type": "array",
+                    "maxItems": 100,
                     "minItems": 1,
                     "items": {
                         "type": "string"
@@ -3114,6 +4812,25 @@ const docTemplate = `{
                 }
             }
         },
+        "api.authCapabilitiesResponse": {
+            "type": "object",
+            "properties": {
+                "oauth_login_enabled": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "password_login_enabled": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "providers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/auth.ProviderInfo"
+                    }
+                }
+            }
+        },
         "api.loginResponse": {
             "type": "object",
             "properties": {
@@ -3122,6 +4839,72 @@ const docTemplate = `{
                 },
                 "access_token_expiry": {
                     "type": "integer"
+                },
+                "expires_in": {
+                    "type": "integer"
+                },
+                "requires_2fa": {
+                    "type": "boolean"
+                },
+                "ticket": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.oauthIdentitiesResponse": {
+            "type": "object",
+            "properties": {
+                "identities": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.oauthIdentityResponse"
+                    }
+                }
+            }
+        },
+        "api.oauthIdentityResponse": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "email_verified": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "provider": {
+                    "type": "string",
+                    "example": "github"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.oauthProvidersResponse": {
+            "type": "object",
+            "properties": {
+                "providers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/auth.ProviderInfo"
+                    }
+                }
+            }
+        },
+        "api.oauthStartResponse": {
+            "type": "object",
+            "properties": {
+                "auth_url": {
+                    "type": "string"
                 }
             }
         },
@@ -3133,9 +4916,42 @@ const docTemplate = `{
             ],
             "properties": {
                 "password": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 1024
                 },
                 "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.verify2FARequestBody": {
+            "type": "object",
+            "required": [
+                "code",
+                "ticket"
+            ],
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "ticket": {
+                    "type": "string"
+                }
+            }
+        },
+        "auth.ProviderInfo": {
+            "type": "object",
+            "properties": {
+                "display_name": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "icon": {
+                    "type": "string"
+                },
+                "provider": {
                     "type": "string"
                 }
             }
@@ -3161,6 +4977,7 @@ const docTemplate = `{
             "properties": {
                 "new_password": {
                     "type": "string",
+                    "maxLength": 1024,
                     "minLength": 6
                 },
                 "old_password": {
@@ -3176,6 +4993,7 @@ const docTemplate = `{
             "properties": {
                 "identifiers": {
                     "type": "array",
+                    "maxItems": 100,
                     "items": {
                         "type": "string"
                     }
@@ -3288,6 +5106,9 @@ const docTemplate = `{
                 "album_id": {
                     "type": "integer"
                 },
+                "enabled": {
+                    "type": "boolean"
+                },
                 "include_all_public": {
                     "type": "boolean"
                 }
@@ -3309,6 +5130,97 @@ const docTemplate = `{
                 }
             }
         },
+        "middleware.ImageMetrics": {
+            "type": "object",
+            "properties": {
+                "cache_responses": {
+                    "type": "integer"
+                },
+                "data_cache_hits": {
+                    "type": "integer"
+                },
+                "data_cache_misses": {
+                    "type": "integer"
+                },
+                "direct_redirects": {
+                    "type": "integer"
+                },
+                "metadata_cache_hits": {
+                    "type": "integer"
+                },
+                "metadata_cache_misses": {
+                    "type": "integer"
+                },
+                "original_responses": {
+                    "type": "integer"
+                },
+                "reader_responses": {
+                    "type": "integer"
+                },
+                "sendfile_responses": {
+                    "type": "integer"
+                },
+                "stream_responses": {
+                    "type": "integer"
+                },
+                "thumbnail_responses": {
+                    "type": "integer"
+                },
+                "variant_responses": {
+                    "type": "integer"
+                }
+            }
+        },
+        "middleware.UploadMetrics": {
+            "type": "object",
+            "properties": {
+                "avg_db_write_duration_ms": {
+                    "type": "number"
+                },
+                "avg_file_process_duration_ms": {
+                    "type": "number"
+                },
+                "avg_hash_duration_ms": {
+                    "type": "number"
+                },
+                "avg_parse_duration_ms": {
+                    "type": "number"
+                },
+                "avg_storage_write_duration_ms": {
+                    "type": "number"
+                },
+                "db_write_duration_ms": {
+                    "type": "integer"
+                },
+                "file_process_duration_ms": {
+                    "type": "integer"
+                },
+                "files_processed": {
+                    "type": "integer"
+                },
+                "hash_duration_ms": {
+                    "type": "integer"
+                },
+                "parse_duration_ms": {
+                    "type": "integer"
+                },
+                "parse_requests": {
+                    "type": "integer"
+                },
+                "storage_write_duration_ms": {
+                    "type": "integer"
+                },
+                "task_submit_accepted": {
+                    "type": "integer"
+                },
+                "task_submit_attempts": {
+                    "type": "integer"
+                },
+                "task_submit_rejected": {
+                    "type": "integer"
+                }
+            }
+        },
         "models.ConfigCategory": {
             "type": "string",
             "enum": [
@@ -3316,14 +5228,16 @@ const docTemplate = `{
                 "jwt",
                 "system",
                 "image_processing",
-                "security"
+                "security",
+                "oauth"
             ],
             "x-enum-varnames": [
                 "ConfigCategoryStorage",
                 "ConfigCategoryJWT",
                 "ConfigCategorySystem",
                 "ConfigCategoryImageProcessing",
-                "ConfigCategorySecurity"
+                "ConfigCategorySecurity",
+                "ConfigCategoryOAuth"
             ]
         },
         "models.SystemConfigStoreRequest": {
@@ -3446,10 +5360,22 @@ const docTemplate = `{
                 "heap_alloc_str": {
                     "type": "string"
                 },
+                "heap_idle_mb": {
+                    "type": "number"
+                },
+                "heap_idle_str": {
+                    "type": "string"
+                },
                 "heap_in_use_mb": {
                     "type": "number"
                 },
                 "heap_in_use_str": {
+                    "type": "string"
+                },
+                "heap_released_mb": {
+                    "type": "number"
+                },
+                "heap_released_str": {
                     "type": "string"
                 },
                 "heap_sys_mb": {
@@ -3464,6 +5390,24 @@ const docTemplate = `{
                 "num_gc": {
                     "type": "integer"
                 },
+                "rss_anon_mb": {
+                    "type": "number"
+                },
+                "rss_anon_str": {
+                    "type": "string"
+                },
+                "rss_file_mb": {
+                    "type": "number"
+                },
+                "rss_file_str": {
+                    "type": "string"
+                },
+                "rss_mb": {
+                    "type": "number"
+                },
+                "rss_str": {
+                    "type": "string"
+                },
                 "stack_sys_mb": {
                     "type": "number"
                 },
@@ -3475,6 +5419,24 @@ const docTemplate = `{
                 },
                 "total_alloc_str": {
                     "type": "string"
+                },
+                "vips_allocs": {
+                    "type": "integer"
+                },
+                "vips_mem_high_mb": {
+                    "type": "number"
+                },
+                "vips_mem_high_str": {
+                    "type": "string"
+                },
+                "vips_mem_mb": {
+                    "type": "number"
+                },
+                "vips_mem_str": {
+                    "type": "string"
+                },
+                "vips_open_files": {
+                    "type": "integer"
                 }
             }
         },
@@ -3484,11 +5446,23 @@ const docTemplate = `{
                 "avg_duration_ms": {
                     "type": "number"
                 },
+                "image_delivery": {
+                    "$ref": "#/definitions/middleware.ImageMetrics"
+                },
                 "request_count": {
                     "type": "integer"
                 },
                 "request_duration_ms": {
                     "type": "integer"
+                },
+                "sweeper": {
+                    "$ref": "#/definitions/worker.SweeperStats"
+                },
+                "upload": {
+                    "$ref": "#/definitions/middleware.UploadMetrics"
+                },
+                "worker": {
+                    "$ref": "#/definitions/system.WorkerStatus"
                 }
             }
         },
@@ -3524,8 +5498,17 @@ const docTemplate = `{
                 "runtime": {
                     "$ref": "#/definitions/system.RuntimeStatus"
                 },
+                "sweeper": {
+                    "$ref": "#/definitions/worker.SweeperStats"
+                },
+                "temp_dir": {
+                    "$ref": "#/definitions/system.DirStatus"
+                },
                 "version": {
                     "type": "string"
+                },
+                "worker": {
+                    "$ref": "#/definitions/system.WorkerStatus"
                 }
             }
         },
@@ -3540,11 +5523,139 @@ const docTemplate = `{
                 }
             }
         },
+        "system.WorkerStatus": {
+            "type": "object",
+            "properties": {
+                "executed": {
+                    "type": "integer"
+                },
+                "failed": {
+                    "type": "integer"
+                },
+                "in_flight_tasks": {
+                    "type": "integer"
+                },
+                "in_flight_variants": {
+                    "type": "integer"
+                },
+                "queue_cap": {
+                    "type": "integer"
+                },
+                "queue_size": {
+                    "type": "integer"
+                },
+                "submitted": {
+                    "type": "integer"
+                },
+                "worker_count": {
+                    "type": "integer"
+                }
+            }
+        },
         "user.ChangePasswordResponse": {
             "type": "object",
             "properties": {
                 "message": {
                     "type": "string"
+                }
+            }
+        },
+        "user.CurrentUserResponse": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "user.twoFACodeRequest": {
+            "type": "object",
+            "required": [
+                "code"
+            ],
+            "properties": {
+                "code": {
+                    "type": "string"
+                }
+            }
+        },
+        "user.twoFASetupRequest": {
+            "type": "object",
+            "properties": {
+                "current_code": {
+                    "type": "string"
+                },
+                "current_password": {
+                    "type": "string"
+                }
+            }
+        },
+        "user.twoFASetupResponse": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "secret": {
+                    "type": "string"
+                },
+                "uri": {
+                    "type": "string"
+                }
+            }
+        },
+        "user.twoFAStatusResponse": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "worker.SweeperStats": {
+            "type": "object",
+            "properties": {
+                "errors": {
+                    "type": "integer"
+                },
+                "failed_images": {
+                    "type": "integer"
+                },
+                "failed_variants": {
+                    "type": "integer"
+                },
+                "last_error_message": {
+                    "type": "string"
+                },
+                "last_error_unix": {
+                    "type": "integer"
+                },
+                "last_run_unix": {
+                    "type": "integer"
+                },
+                "last_success_unix": {
+                    "type": "integer"
+                },
+                "reset_images": {
+                    "type": "integer"
+                },
+                "reset_variants": {
+                    "type": "integer"
+                },
+                "retriggered": {
+                    "type": "integer"
+                },
+                "runs": {
+                    "type": "integer"
                 }
             }
         }

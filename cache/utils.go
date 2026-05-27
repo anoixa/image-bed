@@ -25,44 +25,20 @@ const (
 	// ImageVariantsCachePrefix 图片变体列表缓存前缀
 	ImageVariantsCachePrefix = "image_variants:"
 
-	// UserCachePrefix 用户缓存前缀
-	UserCachePrefix = "user:"
-
-	// DeviceCachePrefix 设备缓存前缀
-	DeviceCachePrefix = "device:"
-
-	// StaticTokenCachePrefix static_token缓存前缀
-	StaticTokenCachePrefix = "static_token:"
-
 	// EmptyValueCachePrefix 空值缓存前缀
 	EmptyValueCachePrefix = "empty:"
 
 	// DefaultImageCacheExpiration 图片缓存过期时间
 	DefaultImageCacheExpiration = 1 * time.Hour
 
-	// DefaultUserCacheExpiration 用户缓存过期时间
-	DefaultUserCacheExpiration = 30 * time.Minute
-
-	// DefaultDeviceCacheExpiration 设备缓存过期时间
-	DefaultDeviceCacheExpiration = 24 * time.Hour
-
-	// DefaultStaticTokenCacheExpiration static_token缓存过期时间
-	DefaultStaticTokenCacheExpiration = 1 * time.Hour
-
 	// DefaultEmptyValueCacheExpiration 空值缓存过期时间
 	DefaultEmptyValueCacheExpiration = 5 * time.Minute
-
-	// AlbumCachePrefix 相册缓存前缀
-	AlbumCachePrefix = "album:"
 
 	// AlbumListCachePrefix 相册列表缓存前缀
 	AlbumListCachePrefix = "album_list:"
 
 	// AlbumListVersionPrefix 相册列表版本号缓存前缀
 	AlbumListVersionPrefix = "album_list_version:"
-
-	// DefaultAlbumCacheExpiration 相册缓存过期时间
-	DefaultAlbumCacheExpiration = 30 * time.Minute
 
 	// DefaultAlbumListCacheExpiration 相册列表缓存过期时间
 	DefaultAlbumListCacheExpiration = 10 * time.Minute
@@ -142,56 +118,6 @@ func (h *Helper) GetCachedImage(ctx context.Context, identifier string, image *m
 	return h.provider.Get(ctx, key, image)
 }
 
-// CacheUser 缓存用户信息
-func (h *Helper) CacheUser(ctx context.Context, user *models.User) error {
-	if h.provider == nil {
-		return fmt.Errorf("cache provider not initialized")
-	}
-
-	key := UserCachePrefix + fmt.Sprintf("%d", user.ID)
-	return h.provider.Set(ctx, key, user, addJitter(DefaultUserCacheExpiration))
-}
-
-// GetCachedUser 获取缓存的用户信息
-func (h *Helper) GetCachedUser(ctx context.Context, userID uint, user *models.User) error {
-	if h.provider == nil {
-		return ErrCacheMiss
-	}
-
-	key := UserCachePrefix + fmt.Sprintf("%d", userID)
-
-	if isEmpty, err := h.IsEmptyValue(ctx, key); err == nil && isEmpty {
-		return ErrCacheMiss
-	}
-
-	return h.provider.Get(ctx, key, user)
-}
-
-// CacheDevice 缓存设备信息
-func (h *Helper) CacheDevice(ctx context.Context, device *models.Device) error {
-	if h.provider == nil {
-		return fmt.Errorf("cache provider not initialized")
-	}
-
-	key := DeviceCachePrefix + device.DeviceID
-	return h.provider.Set(ctx, key, device, addJitter(DefaultDeviceCacheExpiration))
-}
-
-// GetCachedDevice 获取缓存的设备信息
-func (h *Helper) GetCachedDevice(ctx context.Context, deviceID string, device *models.Device) error {
-	if h.provider == nil {
-		return ErrCacheMiss
-	}
-
-	key := DeviceCachePrefix + deviceID
-
-	if isEmpty, err := h.IsEmptyValue(ctx, key); err == nil && isEmpty {
-		return ErrCacheMiss
-	}
-
-	return h.provider.Get(ctx, key, device)
-}
-
 // DeleteCachedImage 删除缓存的图片
 func (h *Helper) DeleteCachedImage(ctx context.Context, identifier string) error {
 	if h.provider == nil {
@@ -203,61 +129,6 @@ func (h *Helper) DeleteCachedImage(ctx context.Context, identifier string) error
 		return err
 	}
 	return h.DeleteEmptyValue(ctx, key)
-}
-
-// DeleteCachedUser 删除缓存的用户
-func (h *Helper) DeleteCachedUser(ctx context.Context, userID uint) error {
-	if h.provider == nil {
-		return nil
-	}
-
-	key := UserCachePrefix + fmt.Sprintf("%d", userID)
-	return h.provider.Delete(ctx, key)
-}
-
-// DeleteCachedDevice 删除缓存的设备
-func (h *Helper) DeleteCachedDevice(ctx context.Context, deviceID string) error {
-	if h.provider == nil {
-		return nil
-	}
-
-	key := DeviceCachePrefix + deviceID
-	return h.provider.Delete(ctx, key)
-}
-
-// CacheStaticToken 缓存 static_token 和用户信息
-func (h *Helper) CacheStaticToken(ctx context.Context, token string, user *models.User) error {
-	if h.provider == nil {
-		return fmt.Errorf("cache provider not initialized")
-	}
-
-	key := StaticTokenCachePrefix + token
-	return h.provider.Set(ctx, key, user, addJitter(DefaultStaticTokenCacheExpiration))
-}
-
-// GetCachedStaticToken 获取缓存的 static_token 用户信息
-func (h *Helper) GetCachedStaticToken(ctx context.Context, token string, user *models.User) error {
-	if h.provider == nil {
-		return ErrCacheMiss
-	}
-
-	key := StaticTokenCachePrefix + token
-
-	if isEmpty, err := h.IsEmptyValue(ctx, key); err == nil && isEmpty {
-		return ErrCacheMiss
-	}
-
-	return h.provider.Get(ctx, key, user)
-}
-
-// DeleteCachedStaticToken 删除缓存的 static_token
-func (h *Helper) DeleteCachedStaticToken(ctx context.Context, token string) error {
-	if h.provider == nil {
-		return nil
-	}
-
-	key := StaticTokenCachePrefix + token
-	return h.provider.Delete(ctx, key)
 }
 
 // CacheEmptyValue 缓存空值标记
@@ -366,36 +237,6 @@ func (h *Helper) DeleteCachedImageVariants(ctx context.Context, imageID uint) er
 	}
 
 	return h.provider.Delete(ctx, imageVariantsCacheKey(imageID))
-}
-
-// CacheAlbum 缓存相册信息
-func (h *Helper) CacheAlbum(ctx context.Context, album *models.Album) error {
-	if h.provider == nil {
-		return fmt.Errorf("cache provider not initialized")
-	}
-
-	key := AlbumCachePrefix + fmt.Sprintf("%d", album.ID)
-	return h.provider.Set(ctx, key, album, addJitter(DefaultAlbumCacheExpiration))
-}
-
-// GetCachedAlbum 获取缓存的相册信息
-func (h *Helper) GetCachedAlbum(ctx context.Context, albumID uint, album *models.Album) error {
-	if h.provider == nil {
-		return ErrCacheMiss
-	}
-
-	key := AlbumCachePrefix + fmt.Sprintf("%d", albumID)
-	return h.provider.Get(ctx, key, album)
-}
-
-// DeleteCachedAlbum 删除缓存的相册
-func (h *Helper) DeleteCachedAlbum(ctx context.Context, albumID uint) error {
-	if h.provider == nil {
-		return nil
-	}
-
-	key := AlbumCachePrefix + fmt.Sprintf("%d", albumID)
-	return h.provider.Delete(ctx, key)
 }
 
 // getAlbumListVersion 获取用户相册列表的当前版本号

@@ -25,6 +25,7 @@ type StatusResponse struct {
 	Sweeper     worker.SweeperStats `json:"sweeper"`
 	Cache       CacheStatus         `json:"cache"`
 	DataDir     DirStatus           `json:"data_dir"`
+	TempDir     DirStatus           `json:"temp_dir"`
 }
 
 type MemoryStatus struct {
@@ -116,7 +117,8 @@ func (h *Handler) GetStatus(c *gin.Context) {
 	}
 
 	// 获取数据目录信息
-	dataDirInfo := getDataDirInfo()
+	dataDirInfo := getDirInfo("./data")
+	tempDirInfo := getDirInfo(config.TempDir)
 	workerStats := worker.PoolStats{}
 	if pool := worker.GetGlobalPool(); pool != nil {
 		workerStats = pool.GetStats()
@@ -185,6 +187,7 @@ func (h *Handler) GetStatus(c *gin.Context) {
 			Type:     cacheType,
 		},
 		DataDir: dataDirInfo,
+		TempDir: tempDirInfo,
 	}
 
 	common.RespondSuccess(c, response)
@@ -205,21 +208,20 @@ func getNumCPU() int {
 	return utils.GetNumCPU()
 }
 
-func getDataDirInfo() DirStatus {
-	dataPath := "./data"
-	if _, err := os.Stat(dataPath); os.IsNotExist(err) {
+func getDirInfo(dirPath string) DirStatus {
+	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
 		return DirStatus{
-			Path:      dataPath,
+			Path:      dirPath,
 			FileCount: 0,
 			TotalSize: 0,
 			SizeStr:   "0 B",
 		}
 	}
 
-	fileCount, totalSize := countDirStats(dataPath)
+	fileCount, totalSize := countDirStats(dirPath)
 
 	return DirStatus{
-		Path:      dataPath,
+		Path:      dirPath,
 		FileCount: fileCount,
 		TotalSize: totalSize,
 		SizeStr:   formatBytes(uint64(totalSize)),

@@ -26,11 +26,13 @@ var serverLog = utils.ForModule("Server")
 
 // Repositories 所有数据库仓库
 type Repositories struct {
-	AccountsRepo *accounts.Repository
-	DevicesRepo  *accounts.DeviceRepository
-	ImagesRepo   *images.Repository
-	AlbumsRepo   *albums.Repository
-	KeysRepo     *keys.Repository
+	AccountsRepo  *accounts.Repository
+	DevicesRepo   *accounts.DeviceRepository
+	IdentityRepo  *accounts.IdentityRepository
+	TwoFactorRepo *accounts.TwoFactorRepository
+	ImagesRepo    *images.Repository
+	AlbumsRepo    *albums.Repository
+	KeysRepo      *keys.Repository
 }
 
 // ServerVersion 服务器版本信息
@@ -48,6 +50,7 @@ type ServerDependencies struct {
 	ConfigManager *configSvc.Manager
 	Converter     *imageSvc.Converter
 	JWTService    *auth.JWTService
+	OAuthService  *auth.OAuthService
 	Config        *config.Config
 	CacheProvider cache.Provider
 	ServerVersion ServerVersion
@@ -56,14 +59,17 @@ type ServerDependencies struct {
 // 启动gin
 func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	cfg := deps.Config
-	router := gin.New()
 
 	// 仅在开发版本时启用 gin 日志
 	if config.IsDevelopment() {
 		gin.SetMode(gin.DebugMode)
-		router.Use(gin.Logger())
 	} else {
 		gin.SetMode(gin.ReleaseMode)
+	}
+
+	router := gin.New()
+	if config.IsDevelopment() {
+		router.Use(gin.Logger())
 	}
 	router.Use(gin.Recovery())
 	router.Use(cors.New(cors.Config{
@@ -75,22 +81,24 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 		OptionsResponseStatusCode: 204,
 	}))
 
-	if err := router.SetTrustedProxies(nil); err != nil {
-		serverLog.Warnf("Failed to set trusted proxies: %v", err)
-	}
+	configureClientIPTrust(router, cfg)
 
 	const (
 		defaultMaxUploadSizeMB = 50
 		multipartMemoryMB      = 8 // gin in-memory multipart buffer; actual size limit enforced per-request
-		defaultMaxBatchTotalMB = 500
+		requestBodyOverheadMB  = 16
 		minBatchRequestLimitMB = 100
-		batchRequestLimitRatio = 2
 		apiMaxConcurrency      = 100
 		publicMaxConcurrency   = 200
 	)
 
 	router.MaxMultipartMemory = multipartMemoryMB << 20
-	requestBodyLimit := int64(defaultMaxBatchTotalMB) * batchRequestLimitRatio << 20
+	defaultImageSettings := configSvc.DefaultImageProcessingSettings()
+	maxBatchTotalMB := defaultImageSettings.MaxBatchTotalMB
+	if cfg != nil && cfg.UploadMaxBatchTotalMB > 0 {
+		maxBatchTotalMB = cfg.UploadMaxBatchTotalMB
+	}
+	requestBodyLimit := int64(maxBatchTotalMB+requestBodyOverheadMB) << 20
 	if requestBodyLimit < minBatchRequestLimitMB<<20 {
 		requestBodyLimit = minBatchRequestLimitMB << 20
 	}
@@ -111,7 +119,21 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	jwtService := deps.JWTService
 	var loginService *auth.LoginService
 	if jwtService != nil {
-		loginService = auth.NewLoginService(deps.Repositories.AccountsRepo, deps.Repositories.DevicesRepo, jwtService)
+		var secretCrypto auth.SecretEncryptor
+		if deps.ConfigManager != nil {
+			secretCrypto = deps.ConfigManager.GetCrypto()
+		}
+		twoFactorRepo := deps.Repositories.TwoFactorRepo
+		if secretCrypto == nil {
+			twoFactorRepo = nil
+		}
+		loginService = auth.NewLoginServiceWith2FA(
+			deps.Repositories.AccountsRepo,
+			deps.Repositories.DevicesRepo,
+			jwtService,
+			twoFactorRepo,
+			secretCrypto,
+		)
 	}
 
 	routerDeps := &RouterDependencies{
@@ -123,6 +145,7 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 		Converter:         deps.Converter,
 		JWTService:        jwtService,
 		LoginService:      loginService,
+		OAuthService:      deps.OAuthService,
 		AuthRateLimiter:   authRateLimiter,
 		APIRateLimiter:    apiRateLimiter,
 		ImageRateLimiter:  imageRateLimiter,
@@ -135,6 +158,28 @@ func setupRouter(deps *ServerDependencies) (*gin.Engine, func()) {
 	RegisterRoutes(router, routerDeps)
 
 	return router, cleanup
+}
+
+func configureClientIPTrust(router *gin.Engine, cfg *config.Config) {
+	if cfg == nil {
+		if err := router.SetTrustedProxies(nil); err != nil {
+			serverLog.Warnf("Failed to disable trusted proxies: %v", err)
+		}
+		return
+	}
+
+	router.RemoteIPHeaders = cfg.GetRealIPHeaders()
+	trustedProxies := cfg.GetTrustedProxies()
+	if len(trustedProxies) == 0 {
+		if err := router.SetTrustedProxies(nil); err != nil {
+			serverLog.Warnf("Failed to disable trusted proxies: %v", err)
+		}
+		return
+	}
+
+	if err := router.SetTrustedProxies(trustedProxies); err != nil {
+		serverLog.Warnf("Failed to set trusted proxies %v: %v", trustedProxies, err)
+	}
 }
 
 // StartServer 创建 http.Server

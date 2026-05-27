@@ -9,6 +9,7 @@ import (
 
 	appconfig "github.com/anoixa/image-bed/config"
 	configSvc "github.com/anoixa/image-bed/config/db"
+	"github.com/anoixa/image-bed/database/repo/accounts"
 	"github.com/anoixa/image-bed/database/repo/keys"
 	"github.com/anoixa/image-bed/utils"
 
@@ -37,6 +38,7 @@ type TokenClaims struct {
 // JWTService JWT Token 服务 - 合并 TokenManager 功能
 type JWTService struct {
 	configManager *configSvc.Manager
+	accountsRepo  *accounts.Repository
 	keysRepo      *keys.Repository
 	config        TokenConfig
 	mutex         sync.RWMutex
@@ -50,10 +52,13 @@ type TokenConfig struct {
 }
 
 // NewJWTService 创建新的 JWT 服务
-func NewJWTService(cfg *appconfig.Config, configManager *configSvc.Manager, keysRepo *keys.Repository) (*JWTService, error) {
+func NewJWTService(cfg *appconfig.Config, configManager *configSvc.Manager, keysRepo *keys.Repository, accountsRepo ...*accounts.Repository) (*JWTService, error) {
 	svc := &JWTService{
 		configManager: configManager,
 		keysRepo:      keysRepo,
+	}
+	if len(accountsRepo) > 0 {
+		svc.accountsRepo = accountsRepo[0]
 	}
 
 	if err := svc.initialize(cfg); err != nil {
@@ -61,6 +66,13 @@ func NewJWTService(cfg *appconfig.Config, configManager *configSvc.Manager, keys
 	}
 
 	return svc, nil
+}
+
+// SetAccountsRepository enables access-token validation against current user status and role.
+func (s *JWTService) SetAccountsRepository(repo *accounts.Repository) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	s.accountsRepo = repo
 }
 
 // initialize 从应用配置初始化 JWT 配置
@@ -122,6 +134,12 @@ func (s *JWTService) GetConfig() TokenConfig {
 		ExpiresIn:        s.config.ExpiresIn,
 		RefreshExpiresIn: s.config.RefreshExpiresIn,
 	}
+}
+
+func (s *JWTService) getAccountsRepository() *accounts.Repository {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	return s.accountsRepo
 }
 
 // SetConfig 设置 JWT 配置
@@ -249,6 +267,57 @@ func (s *JWTService) ParseToken(tokenString string) (*TokenClaims, error) {
 	return claims, nil
 }
 
+// AuthenticatedUser is the current user identity after token and account checks.
+type AuthenticatedUser struct {
+	ID       uint
+	Username string
+	Role     string
+}
+
+// ValidateAccessTokenClaims verifies that a parsed access token still maps to an active user.
+func (s *JWTService) ValidateAccessTokenClaims(ctx context.Context, claims *TokenClaims) (*AuthenticatedUser, error) {
+	if claims == nil {
+		return nil, errors.New("missing token claims")
+	}
+	if claims.UserID == 0 {
+		return nil, errors.New("user_id not found in token claims")
+	}
+	if claims.Username == "" {
+		return nil, errors.New("username not found in token claims")
+	}
+
+	repo := s.getAccountsRepository()
+	if repo == nil {
+		role := claims.Role
+		if role == "" {
+			role = "user"
+		}
+		return &AuthenticatedUser{
+			ID:       claims.UserID,
+			Username: claims.Username,
+			Role:     role,
+		}, nil
+	}
+
+	user, err := repo.WithContext(ctx).GetUserByID(claims.UserID)
+	if err != nil {
+		return nil, errors.New("user not found or disabled")
+	}
+	if !user.IsActive() {
+		return nil, errors.New("user not found or disabled")
+	}
+
+	role := user.Role
+	if role == "" {
+		role = "user"
+	}
+	return &AuthenticatedUser{
+		ID:       user.ID,
+		Username: user.Username,
+		Role:     role,
+	}, nil
+}
+
 // ExtractClaims 从令牌中提取声明
 func (s *JWTService) ExtractClaims(tokenString string) (*TokenClaims, error) {
 	return s.ParseToken(tokenString)
@@ -287,6 +356,9 @@ func (s *JWTService) ValidateStaticToken(ctx context.Context, token string) (*St
 	user, err := s.keysRepo.GetUserByApiToken(token)
 	if err != nil {
 		return nil, err
+	}
+	if !user.IsActive() {
+		return nil, errors.New("user not found or disabled")
 	}
 
 	return &StaticTokenUser{

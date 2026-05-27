@@ -1,15 +1,23 @@
 package generator
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
 // PathGenerator 分层路径生成器
 type PathGenerator struct{}
+
+const originalIdentifierBytes = 16
+
+var fallbackOriginalIdentifierCounter uint64
 
 // NewPathGenerator 创建路径生成器
 func NewPathGenerator() *PathGenerator {
@@ -24,13 +32,24 @@ type StorageIdentifiers struct {
 
 // GenerateOriginalIdentifiers 生成原图的 identifier 和 storage_path
 func (pg *PathGenerator) GenerateOriginalIdentifiers(fileHash string, ext string, uploadTime time.Time) StorageIdentifiers {
-	hash := fileHash[:12]
+	identifier := generateOriginalIdentifier(fileHash, uploadTime)
 	datePath := uploadTime.Format("2006/01/02")
 
 	return StorageIdentifiers{
-		Identifier:  hash,
-		StoragePath: fmt.Sprintf("original/%s/%s%s", datePath, hash, ext),
+		Identifier:  identifier,
+		StoragePath: fmt.Sprintf("original/%s/%s%s", datePath, identifier, ext),
 	}
+}
+
+func generateOriginalIdentifier(seed string, uploadTime time.Time) string {
+	randomBytes := make([]byte, originalIdentifierBytes)
+	if _, err := rand.Read(randomBytes); err == nil {
+		return base64.RawURLEncoding.EncodeToString(randomBytes)
+	}
+
+	counter := atomic.AddUint64(&fallbackOriginalIdentifierCounter, 1)
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d:%d", seed, uploadTime.UnixNano(), counter)))
+	return base64.RawURLEncoding.EncodeToString(sum[:originalIdentifierBytes])
 }
 
 // GenerateThumbnailIdentifiers 生成缩略图的 identifier 和 storage_path
@@ -81,7 +100,11 @@ func (pg *PathGenerator) extractHashFromPath(storagePath string) string {
 	ext := filepath.Ext(base)
 	hash := strings.TrimSuffix(base, ext)
 
-	if idx := strings.LastIndex(hash, "_"); idx > 0 {
+	if strings.HasPrefix(storagePath, "thumbnails/") {
+		idx := strings.LastIndex(hash, "_")
+		if idx <= 0 {
+			return hash
+		}
 		if _, err := strconv.Atoi(hash[idx+1:]); err == nil {
 			hash = hash[:idx]
 		}

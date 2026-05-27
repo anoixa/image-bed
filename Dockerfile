@@ -33,6 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libheif-plugin-aomdec \
     ca-certificates \
     tzdata \
+    gosu \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
@@ -41,15 +42,18 @@ RUN useradd -m -u 10001 -s /usr/sbin/nologin appuser
 WORKDIR /app
 
 COPY --from=builder /app/image-bed .
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
-RUN mkdir -p /app/data && chown -R appuser:appuser /app/data
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
+    && mkdir -p /app/data \
+    && chown -R appuser:appuser /app/data
 
-USER appuser
+USER root
 
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/system/health || exit 1
 
 ENV SERVER_HOST=0.0.0.0 \
     SERVER_PORT=8080 \
@@ -58,5 +62,5 @@ ENV SERVER_HOST=0.0.0.0 \
 
 VOLUME ["/app/data"]
 
-ENTRYPOINT ["./image-bed"]
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["serve"]

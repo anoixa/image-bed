@@ -185,6 +185,30 @@ func (r *VariantRepository) DeleteVariant(id uint) error {
 	return r.db.Delete(&models.ImageVariant{}, id).Error
 }
 
+// CountActiveVariantsByStoragePath counts non-deleted variants from active
+// images that still reference the same physical variant object.
+func (r *VariantRepository) CountActiveVariantsByStoragePath(storagePath string, storageConfigID uint, excludeID uint) (int64, error) {
+	if storagePath == "" {
+		return 0, nil
+	}
+
+	query := r.db.Model(&models.ImageVariant{}).
+		Joins("JOIN images ON images.id = image_variants.image_id").
+		Where("image_variants.storage_path = ?", storagePath).
+		Where("images.storage_config_id = ?", storageConfigID).
+		Where("images.deleted_at IS NULL")
+
+	if excludeID > 0 {
+		query = query.Where("image_variants.id <> ?", excludeID)
+	}
+
+	var count int64
+	if err := query.Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 // ResetStaleProcessing resets processing variants older than the given
 // duration back to pending so they can be retried. Returns the number of
 // affected rows.
@@ -206,7 +230,7 @@ func (r *VariantRepository) RecoverStaleProcessing(olderThan time.Duration, maxR
 		nextRetryCount := variant.RetryCount + 1
 		if maxRetries > 0 && nextRetryCount >= maxRetries {
 			result := r.db.Model(&models.ImageVariant{}).
-				Where("id = ? AND status = ?", variant.ID, models.VariantStatusProcessing).
+				Where("id = ? AND status = ? AND updated_at < ?", variant.ID, models.VariantStatusProcessing, cutoff).
 				Updates(map[string]any{
 					"status":        models.VariantStatusFailed,
 					"error_message": fmt.Sprintf("stale processing exceeded retry limit (%d/%d)", nextRetryCount, maxRetries),
@@ -223,7 +247,7 @@ func (r *VariantRepository) RecoverStaleProcessing(olderThan time.Duration, maxR
 
 		nextRetryAt := now.Add(staleRetryDelay(nextRetryCount))
 		result := r.db.Model(&models.ImageVariant{}).
-			Where("id = ? AND status = ?", variant.ID, models.VariantStatusProcessing).
+			Where("id = ? AND status = ? AND updated_at < ?", variant.ID, models.VariantStatusProcessing, cutoff).
 			Updates(map[string]any{
 				"status":        models.VariantStatusPending,
 				"error_message": "",
@@ -235,13 +259,49 @@ func (r *VariantRepository) RecoverStaleProcessing(olderThan time.Duration, maxR
 			return resetCount, failedCount, retriedImageIDs, result.Error
 		}
 		resetCount += result.RowsAffected
-		retriedSet[variant.ImageID] = true
+		if result.RowsAffected > 0 {
+			retriedSet[variant.ImageID] = true
+		}
 	}
 
 	for id := range retriedSet {
 		retriedImageIDs = append(retriedImageIDs, id)
 	}
 	return resetCount, failedCount, retriedImageIDs, nil
+}
+
+// CancelProcessingVariant marks a processing variant as canceled without
+// deleting its row, so active workers can observe cancellation and stop safely.
+func (r *VariantRepository) CancelProcessingVariant(id uint, reason string) (bool, error) {
+	result := r.db.Model(&models.ImageVariant{}).
+		Where("id = ? AND status = ?", id, models.VariantStatusProcessing).
+		Updates(map[string]any{
+			"status":        models.VariantStatusCanceled,
+			"error_message": reason,
+			"next_retry_at": nil,
+			"updated_at":    time.Now(),
+		})
+	return result.RowsAffected > 0, result.Error
+}
+
+// ResetCanceledToPending revives a canceled variant when its image is active
+// again and conversion is explicitly re-triggered.
+func (r *VariantRepository) ResetCanceledToPending(id uint) (*models.ImageVariant, error) {
+	result := r.db.Model(&models.ImageVariant{}).
+		Where("id = ? AND status = ?", id, models.VariantStatusCanceled).
+		Updates(map[string]any{
+			"status":        models.VariantStatusPending,
+			"error_message": "",
+			"next_retry_at": nil,
+			"updated_at":    time.Now(),
+		})
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, fmt.Errorf("variant %d not in canceled state", id)
+	}
+	return r.GetByID(id)
 }
 
 func staleRetryDelay(retryCount int) time.Duration {

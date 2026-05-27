@@ -107,11 +107,91 @@ func TestVariantReadyForSubmit(t *testing.T) {
 	})
 }
 
+func TestPrepareVariantForSubmit(t *testing.T) {
+	db := setupConverterTestDB(t)
+	variantRepo := repoimages.NewVariantRepository(db)
+	image := &models.Image{
+		Identifier:   "img-prepare",
+		OriginalName: "test.jpg",
+		FileHash:     "hash-prepare",
+		FileSize:     1024,
+		MimeType:     "image/jpeg",
+		StoragePath:  "original/test.jpg",
+		UserID:       1,
+	}
+	require.NoError(t, db.Create(image).Error)
+
+	now := time.Now()
+
+	t.Run("existing pending variant in retry window is skipped without mutation", func(t *testing.T) {
+		retryAt := now.Add(5 * time.Minute)
+		variant := &models.ImageVariant{
+			ImageID:     image.ID,
+			Format:      models.FormatWebP,
+			Status:      models.VariantStatusPending,
+			NextRetryAt: &retryAt,
+		}
+		require.NoError(t, db.Create(variant).Error)
+
+		got, err := prepareVariantForSubmit(variantRepo, image.ID, models.FormatWebP, now, false)
+		require.NoError(t, err)
+		assert.Nil(t, got)
+
+		var count int64
+		require.NoError(t, db.Model(&models.ImageVariant{}).Where("image_id = ? AND format = ?", image.ID, models.FormatWebP).Count(&count).Error)
+		assert.Equal(t, int64(1), count)
+
+		updated, err := variantRepo.GetByID(variant.ID)
+		require.NoError(t, err)
+		require.NotNil(t, updated.NextRetryAt)
+		assert.Equal(t, retryAt.Unix(), updated.NextRetryAt.Unix())
+	})
+
+	t.Run("missing variant is created and returned", func(t *testing.T) {
+		got, err := prepareVariantForSubmit(variantRepo, image.ID, models.FormatAVIF, now, false)
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		assert.Equal(t, models.FormatAVIF, got.Format)
+		assert.Equal(t, models.VariantStatusPending, got.Status)
+	})
+}
+
 func TestGetStorageForImageDoesNotFallbackForMissingSpecificProvider(t *testing.T) {
 	converter := &Converter{storage: &testStorageProvider{}}
 	image := &models.Image{StorageConfigID: 999999}
 
 	assert.Nil(t, converter.getStorageForImage(image))
+}
+
+func TestTriggerConversionDoesNotCreateVariantsWhenStorageMissing(t *testing.T) {
+	db := setupConverterTestDB(t)
+	imageRepo := repoimages.NewRepository(db)
+	variantRepo := repoimages.NewVariantRepository(db)
+	manager := setupConverterConfigManager(t, db)
+
+	image := &models.Image{
+		Identifier:      "img-missing-storage",
+		OriginalName:    "test.jpg",
+		FileHash:        "hash-missing-storage",
+		FileSize:        32 * 1024,
+		MimeType:        "image/jpeg",
+		StoragePath:     "original/test.jpg",
+		StorageConfigID: 999999,
+		UserID:          1,
+		VariantStatus:   models.ImageVariantStatusNone,
+	}
+	require.NoError(t, imageRepo.SaveImage(image))
+
+	converter := NewConverter(manager, variantRepo, imageRepo, &testStorageProvider{}, nil)
+	converter.TriggerConversion(image)
+
+	var count int64
+	require.NoError(t, db.Model(&models.ImageVariant{}).Where("image_id = ?", image.ID).Count(&count).Error)
+	assert.Equal(t, int64(0), count)
+
+	updatedImage, err := imageRepo.GetImageByIdentifier(image.Identifier)
+	require.NoError(t, err)
+	assert.Equal(t, models.ImageVariantStatusFailed, updatedImage.VariantStatus)
 }
 
 func TestFailPendingVariantsOnSubmitFailureMarksVariantsAndImageFailed(t *testing.T) {
@@ -167,6 +247,14 @@ func setupConverterTestDB(t *testing.T) *gorm.DB {
 	})
 	require.NoError(t, err)
 
-	require.NoError(t, db.AutoMigrate(&models.Image{}, &models.ImageVariant{}))
+	require.NoError(t, db.AutoMigrate(&models.Image{}, &models.ImageVariant{}, &models.SystemConfig{}))
 	return db
+}
+
+func setupConverterConfigManager(t *testing.T, db *gorm.DB) *configdb.Manager {
+	t.Helper()
+
+	manager := configdb.NewManager(db, t.TempDir())
+	require.NoError(t, manager.Initialize())
+	return manager
 }

@@ -58,6 +58,37 @@ func TestCheckETagSupportsWeakAndMultiValueIfNoneMatch(t *testing.T) {
 	}
 }
 
+func TestAppendVaryHeaderAddsAcceptWithoutClobberingExistingValues(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	c.Header("Vary", "Accept-Encoding")
+	appendVaryHeader(c, "Accept")
+	appendVaryHeader(c, "accept")
+
+	assert.Equal(t, "Accept-Encoding, Accept", w.Header().Get("Vary"))
+}
+
+func TestCheckETagPreservesVaryAcceptOnNotModified(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	req := httptest.NewRequest(http.MethodGet, "/images/test", nil)
+	req.Header.Set("If-None-Match", `"abc"`)
+	c.Request = req
+
+	varyOnAccept(c)
+	matched := checkETag(c, "abc")
+
+	require.True(t, matched)
+	assert.Equal(t, http.StatusNotModified, c.Writer.Status())
+	assert.Equal(t, "Accept", w.Header().Get("Vary"))
+	assert.Equal(t, `"abc"`, w.Header().Get("ETag"))
+}
+
 // MockConfigManager 用于测试的配置管理器 mock
 type MockConfigManager struct {
 	mock.Mock
@@ -222,6 +253,68 @@ func TestShouldProxy_WithDifferentModes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := simulateShouldProxy(tt.imageIsPublic, tt.globalMode, tt.enableDirect, tt.isPublic, tt.forceProxy)
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestShouldProxyByAutoSize(t *testing.T) {
+	const threshold = int64(1 << 20)
+
+	tests := []struct {
+		name      string
+		mode      storage.TransferMode
+		fileSize  int64
+		threshold int64
+		wantProxy bool
+	}{
+		{
+			name:      "auto_small_file_proxies",
+			mode:      storage.TransferModeAuto,
+			fileSize:  threshold - 1,
+			threshold: threshold,
+			wantProxy: true,
+		},
+		{
+			name:      "auto_equal_threshold_proxies",
+			mode:      storage.TransferModeAuto,
+			fileSize:  threshold,
+			threshold: threshold,
+			wantProxy: true,
+		},
+		{
+			name:      "auto_large_file_directs",
+			mode:      storage.TransferModeAuto,
+			fileSize:  threshold + 1,
+			threshold: threshold,
+			wantProxy: false,
+		},
+		{
+			name:      "always_direct_ignores_size_threshold",
+			mode:      storage.TransferModeAlwaysDirect,
+			fileSize:  1,
+			threshold: threshold,
+			wantProxy: false,
+		},
+		{
+			name:      "unknown_auto_size_proxies",
+			mode:      storage.TransferModeAuto,
+			fileSize:  0,
+			threshold: threshold,
+			wantProxy: true,
+		},
+		{
+			name:      "empty_mode_uses_auto_policy",
+			mode:      "",
+			fileSize:  threshold - 1,
+			threshold: threshold,
+			wantProxy: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shouldProxyByAutoSize(tt.mode, tt.fileSize, tt.threshold)
+			assert.Equal(t, tt.wantProxy, got)
 		})
 	}
 }

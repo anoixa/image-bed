@@ -19,6 +19,7 @@ import (
 	configSvc "github.com/anoixa/image-bed/config/db"
 	dashboardRepo "github.com/anoixa/image-bed/database/repo/dashboard"
 	"github.com/anoixa/image-bed/database/repo/images"
+	svcAdmin "github.com/anoixa/image-bed/internal/admin"
 	svcAlbums "github.com/anoixa/image-bed/internal/albums"
 	"github.com/anoixa/image-bed/internal/auth"
 	svcDashboard "github.com/anoixa/image-bed/internal/dashboard"
@@ -49,6 +50,7 @@ type RouterDependencies struct {
 	Converter         *imageSvc.Converter
 	JWTService        *auth.JWTService
 	LoginService      *auth.LoginService
+	OAuthService      *auth.OAuthService
 	AuthRateLimiter   *middleware.IPRateLimiter
 	APIRateLimiter    *middleware.IPRateLimiter
 	ImageRateLimiter  *middleware.IPRateLimiter
@@ -153,14 +155,27 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies, imageHandle
 	albumService := svcAlbums.NewService(deps.Repositories.AlbumsRepo)
 	albumHandler := handlerAlbums.NewHandler(albumService, deps.CacheProvider, baseURL)
 	albumImageHandler := handlerAlbums.NewAlbumImageHandler(albumService, deps.Repositories.ImagesRepo, deps.CacheProvider, cfg)
-	keyService := auth.NewKeyService(deps.Repositories.KeysRepo)
+	keyService := auth.NewKeyService(deps.Repositories.KeysRepo, deps.Repositories.AccountsRepo)
 	keyHandler := key.NewHandler(keyService)
-	loginHandler := api.NewLoginHandlerWithService(deps.LoginService, cfg)
+	loginHandler := api.NewLoginHandlerWithAuthSettings(deps.LoginService, cfg, deps.ConfigManager)
 
 	dashboardService := svcDashboard.NewService(deps.DashboardRepo, deps.CacheProvider)
 	dashboardHandler := handlerDashboard.NewHandler(dashboardService)
 
-	userService := svcUser.NewService(deps.Repositories.AccountsRepo, deps.Repositories.DevicesRepo)
+	var secretCrypto auth.SecretEncryptor
+	if deps.ConfigManager != nil {
+		secretCrypto = deps.ConfigManager.GetCrypto()
+	}
+	twoFactorRepo := deps.Repositories.TwoFactorRepo
+	if secretCrypto == nil {
+		twoFactorRepo = nil
+	}
+	userService := svcUser.NewServiceWith2FA(
+		deps.Repositories.AccountsRepo,
+		deps.Repositories.DevicesRepo,
+		twoFactorRepo,
+		secretCrypto,
+	)
 	userHandler := handlerUser.NewHandler(userService)
 
 	apiGroup := router.Group("/api")
@@ -176,8 +191,39 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies, imageHandle
 		authGroup.Use(deps.AuthRateLimiter.Middleware())
 		{
 			authGroup.POST("/login", loginHandler.LoginHandlerFunc)
+			authGroup.POST("/login/2fa", loginHandler.Verify2FAHandlerFunc)
 			authGroup.POST("/refresh", loginHandler.RefreshTokenHandlerFunc)
 			authGroup.POST("/logout", loginHandler.LogoutHandlerFunc)
+
+			authMeGroup := authGroup.Group("")
+			authMeGroup.Use(middleware.CombinedAuth(deps.JWTService))
+			authMeGroup.Use(middleware.Authorize(middleware.AllowJWTOnly...))
+			authMeGroup.GET("/me", userHandler.GetCurrentUser)
+
+			// OAuth routes
+			if deps.OAuthService != nil {
+				oauthHandler := api.NewOAuthHandler(deps.OAuthService, cfg, deps.ConfigManager)
+
+				oauthGroup := authGroup.Group("/oauth")
+				{
+					oauthGroup.GET("/providers", oauthHandler.ListProviders)
+					oauthGroup.GET("/:provider/start", oauthHandler.StartLogin)
+					// Callback handles both login and link flows (mode detected from signed state).
+					oauthGroup.GET("/:provider/callback", oauthHandler.Callback)
+				}
+
+				// Authenticated OAuth routes (require active JWT session)
+				oauthAuthGroup := authGroup.Group("/oauth")
+				oauthAuthGroup.Use(middleware.CombinedAuth(deps.JWTService))
+				oauthAuthGroup.Use(middleware.Authorize(middleware.AllowJWTOnly...))
+				{
+					oauthAuthGroup.GET("/identities", oauthHandler.GetIdentities)
+					oauthAuthGroup.POST("/:provider/link/start", oauthHandler.StartLink)
+					oauthAuthGroup.DELETE("/identities/:provider", oauthHandler.UnlinkIdentity)
+				}
+
+				authGroup.GET("/capabilities", oauthHandler.Capabilities)
+			}
 		}
 
 		v1 := apiGroup.Group("/v1")
@@ -200,6 +246,12 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies, imageHandle
 			userGroup.Use(middleware.Authorize(middleware.AllowJWTOnly...))
 			{
 				userGroup.POST("/password", userHandler.ChangePassword)
+
+				// 2FA management
+				userGroup.GET("/2fa", userHandler.Get2FAStatus)
+				userGroup.POST("/2fa/setup", userHandler.Setup2FA)
+				userGroup.POST("/2fa/enable", userHandler.Enable2FA)
+				userGroup.POST("/2fa/disable", userHandler.Disable2FA)
 			}
 
 			// Static Token
@@ -245,6 +297,8 @@ func registerAPIRoutes(router *gin.Engine, deps *RouterDependencies, imageHandle
 // registerAdminRoutes 注册管理员路由
 func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies, imageHandler *handlerImages.Handler) {
 	configHandler := admin.NewConfigHandler(deps.ConfigManager, deps.Repositories.ImagesRepo)
+	authSettingsHandler := admin.NewAuthSettingsHandler(deps.ConfigManager, deps.OAuthService, deps.Config)
+	twoFactorRepo := deps.Repositories.TwoFactorRepo
 	adminGroup := v1.Group("/admin")
 	adminGroup.Use(middleware.Authorize(middleware.AllowJWTOnly...))
 	adminGroup.Use(middleware.RequireRole(middleware.RoleAdmin))
@@ -263,6 +317,9 @@ func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies, imageHan
 			configsGroup.DELETE("/:id", configHandler.DeleteConfig)
 		}
 
+		adminGroup.GET("/auth/settings", authSettingsHandler.GetSettings)
+		adminGroup.PUT("/auth/settings", authSettingsHandler.UpdateSettings)
+
 		adminGroup.GET("/storage/providers", configHandler.ListStorageProviders)
 		adminGroup.POST("/storage/reload/:id", configHandler.ReloadStorageConfig)
 
@@ -277,6 +334,43 @@ func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies, imageHan
 		// 全局转发模式配置
 		adminGroup.GET("/transfer-mode", configHandler.GetGlobalTransferMode)
 		adminGroup.POST("/transfer-mode", configHandler.SetGlobalTransferMode)
+
+		// User management
+		userSvc := svcAdmin.NewUserService(
+			deps.Repositories.AccountsRepo,
+			deps.Repositories.DevicesRepo,
+			deps.Repositories.KeysRepo,
+			deps.Repositories.ImagesRepo,
+			deps.Repositories.AlbumsRepo,
+		)
+		userSvc.SetTwoFactorRepository(twoFactorRepo)
+		if deps.OAuthService != nil {
+			userSvc.SetPasswordLoginEnabledProvider(deps.OAuthService.IsPasswordLoginEnabled)
+		}
+		if deps.Repositories.IdentityRepo != nil {
+			userSvc = svcAdmin.NewUserServiceWithOAuth(
+				deps.Repositories.AccountsRepo,
+				deps.Repositories.DevicesRepo,
+				deps.Repositories.KeysRepo,
+				deps.Repositories.ImagesRepo,
+				deps.Repositories.AlbumsRepo,
+				deps.Repositories.IdentityRepo,
+			)
+			userSvc.SetTwoFactorRepository(twoFactorRepo)
+			if deps.OAuthService != nil {
+				userSvc.SetPasswordLoginEnabledProvider(deps.OAuthService.IsPasswordLoginEnabled)
+			}
+		}
+		userHandler := admin.NewUserHandler(userSvc)
+		adminGroup.GET("/users", userHandler.ListUsers)
+		adminGroup.POST("/users", userHandler.CreateUser)
+		adminGroup.PUT("/users/:id/role", userHandler.UpdateRole)
+		adminGroup.PUT("/users/:id/status", userHandler.UpdateStatus)
+		adminGroup.POST("/users/:id/reset-password", userHandler.ResetPassword)
+		adminGroup.POST("/users/:id/2fa/reset", userHandler.ResetTwoFactor)
+		adminGroup.DELETE("/users/:id", userHandler.DeleteUser)
+		adminGroup.GET("/users/:id/oauth-identities", userHandler.GetOAuthIdentities)
+		adminGroup.DELETE("/users/:id/oauth-identities/:provider", userHandler.UnlinkOAuthIdentity)
 	}
 }
 

@@ -17,6 +17,7 @@ func TestVariantStatusConstants(t *testing.T) {
 	assert.Equal(t, "processing", models.VariantStatusProcessing)
 	assert.Equal(t, "completed", models.VariantStatusCompleted)
 	assert.Equal(t, "failed", models.VariantStatusFailed)
+	assert.Equal(t, "canceled", models.VariantStatusCanceled)
 }
 
 func TestFormatConstants(t *testing.T) {
@@ -81,6 +82,100 @@ func TestRecoverStaleProcessing(t *testing.T) {
 	assert.Equal(t, 3, updatedFailed.RetryCount)
 	assert.Contains(t, updatedFailed.ErrorMessage, "retry limit")
 	assert.Nil(t, updatedFailed.NextRetryAt)
+}
+
+func TestRecoverStaleProcessingSkipsVariantRefreshedAfterSelect(t *testing.T) {
+	db := setupVariantRepoTestDB(t)
+	repo := NewVariantRepository(db)
+
+	staleTime := time.Now().Add(-20 * time.Minute)
+	variant := &models.ImageVariant{
+		ImageID:     1,
+		Format:      models.FormatWebP,
+		Status:      models.VariantStatusProcessing,
+		Identifier:  "active.webp",
+		StoragePath: "converted/active.webp",
+		FileHash:    "hash-active",
+		FileSize:    1,
+		CreatedAt:   staleTime,
+		UpdatedAt:   staleTime,
+	}
+	require.NoError(t, db.Create(variant).Error)
+
+	refreshedAfterSelect := false
+	require.NoError(t, db.Callback().Query().After("gorm:after_query").Register("test:refresh_variant_after_select", func(tx *gorm.DB) {
+		if refreshedAfterSelect || tx.Statement.Schema == nil || tx.Statement.Schema.Name != "ImageVariant" {
+			return
+		}
+		refreshedAfterSelect = true
+		require.NoError(t, db.Session(&gorm.Session{NewDB: true}).
+			Model(&models.ImageVariant{}).
+			Where("id = ?", variant.ID).
+			Update("updated_at", time.Now()).
+			Error)
+	}))
+
+	resetCount, failedCount, retriedIDs, err := repo.RecoverStaleProcessing(15*time.Minute, 3)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), resetCount)
+	assert.Equal(t, int64(0), failedCount)
+	assert.Empty(t, retriedIDs)
+
+	updated, err := repo.GetByID(variant.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.VariantStatusProcessing, updated.Status)
+}
+
+func TestCancelProcessingVariant(t *testing.T) {
+	db := setupVariantRepoTestDB(t)
+	repo := NewVariantRepository(db)
+
+	variant := &models.ImageVariant{
+		ImageID:     1,
+		Format:      models.FormatAVIF,
+		Status:      models.VariantStatusProcessing,
+		Identifier:  "active.avif",
+		StoragePath: "converted/active.avif",
+		FileHash:    "hash-active",
+		FileSize:    1,
+	}
+	require.NoError(t, db.Create(variant).Error)
+
+	ok, err := repo.CancelProcessingVariant(variant.ID, "image deleted")
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	updated, err := repo.GetByID(variant.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.VariantStatusCanceled, updated.Status)
+	assert.Equal(t, "image deleted", updated.ErrorMessage)
+	assert.Nil(t, updated.NextRetryAt)
+}
+
+func TestResetCanceledToPending(t *testing.T) {
+	db := setupVariantRepoTestDB(t)
+	repo := NewVariantRepository(db)
+
+	variant := &models.ImageVariant{
+		ImageID:      1,
+		Format:       models.FormatAVIF,
+		Status:       models.VariantStatusCanceled,
+		Identifier:   "active.avif",
+		StoragePath:  "converted/active.avif",
+		FileHash:     "hash-active",
+		FileSize:     1,
+		ErrorMessage: "image deleted",
+		NextRetryAt:  nil,
+		RetryCount:   1,
+	}
+	require.NoError(t, db.Create(variant).Error)
+
+	updated, err := repo.ResetCanceledToPending(variant.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.VariantStatusPending, updated.Status)
+	assert.Empty(t, updated.ErrorMessage)
+	assert.Nil(t, updated.NextRetryAt)
+	assert.Equal(t, 1, updated.RetryCount)
 }
 
 func TestUpdateCompletedClearsRetryMetadata(t *testing.T) {

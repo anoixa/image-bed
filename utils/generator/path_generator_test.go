@@ -11,36 +11,34 @@ func TestPathGenerator_GenerateOriginalIdentifiers(t *testing.T) {
 	uploadTime := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
 
 	tests := []struct {
-		name            string
-		fileHash        string
-		ext             string
-		wantIdentifier  string
-		wantStoragePath string
+		name     string
+		fileHash string
+		ext      string
 	}{
 		{
-			name:            "jpg file",
-			fileHash:        "a1b2c3d4e5f6g7h8i9j0k1l2",
-			ext:             ".jpg",
-			wantIdentifier:  "a1b2c3d4e5f6",
-			wantStoragePath: "original/2024/01/15/a1b2c3d4e5f6.jpg",
+			name:     "jpg file",
+			fileHash: "a1b2c3d4e5f6g7h8i9j0k1l2",
+			ext:      ".jpg",
 		},
 		{
-			name:            "png file",
-			fileHash:        "abcdef123456",
-			ext:             ".png",
-			wantIdentifier:  "abcdef123456",
-			wantStoragePath: "original/2024/01/15/abcdef123456.png",
+			name:     "png file",
+			fileHash: "abcdef123456",
+			ext:      ".png",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := pg.GenerateOriginalIdentifiers(tt.fileHash, tt.ext, uploadTime)
-			if got.Identifier != tt.wantIdentifier {
-				t.Errorf("GenerateOriginalIdentifiers() Identifier = %v, want %v", got.Identifier, tt.wantIdentifier)
+			if len(got.Identifier) != 22 {
+				t.Errorf("GenerateOriginalIdentifiers() Identifier length = %d, want 22", len(got.Identifier))
 			}
-			if got.StoragePath != tt.wantStoragePath {
-				t.Errorf("GenerateOriginalIdentifiers() StoragePath = %v, want %v", got.StoragePath, tt.wantStoragePath)
+			if strings.Trim(got.Identifier, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_") != "" {
+				t.Errorf("GenerateOriginalIdentifiers() Identifier = %v, want base64url", got.Identifier)
+			}
+			wantStoragePath := "original/2024/01/15/" + got.Identifier + tt.ext
+			if got.StoragePath != wantStoragePath {
+				t.Errorf("GenerateOriginalIdentifiers() StoragePath = %v, want %v", got.StoragePath, wantStoragePath)
 			}
 		})
 	}
@@ -146,6 +144,11 @@ func TestPathGenerator_extractHashFromPath(t *testing.T) {
 			name:        "thumbnail path",
 			storagePath: "thumbnails/2024/01/15/a1b2c3d4e5f6_300.webp",
 			want:        "a1b2c3d4e5f6",
+		},
+		{
+			name:        "original base64url identifier with underscore digits suffix",
+			storagePath: "original/2024/01/15/abc_123.jpg",
+			want:        "abc_123",
 		},
 	}
 
