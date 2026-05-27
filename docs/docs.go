@@ -4059,6 +4059,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/common.Response"
                         }
                     },
+                    "403": {
+                        "description": "Random API disabled",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
                     "500": {
                         "description": "Internal server error",
                         "schema": {
@@ -5099,6 +5105,9 @@ const docTemplate = `{
             "properties": {
                 "album_id": {
                     "type": "integer"
+                },
+                "enabled": {
+                    "type": "boolean"
                 },
                 "include_all_public": {
                     "type": "boolean"

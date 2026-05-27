@@ -218,11 +218,63 @@ func TestSetRandomSourceAlbumReturnsNormalizedSpecificAlbumConfig(t *testing.T) 
 	var payload struct {
 		AlbumID          uint `json:"album_id"`
 		IncludeAllPublic bool `json:"include_all_public"`
+		Enabled          bool `json:"enabled"`
 	}
 	require.NoError(t, json.Unmarshal(dataBytes, &payload))
 
 	assert.Equal(t, uint(123), payload.AlbumID)
 	assert.False(t, payload.IncludeAllPublic)
+	assert.True(t, payload.Enabled)
+}
+
+func TestSetRandomSourceAlbumCanDisableRandomAPI(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	randomService := randomsvc.NewService(nil)
+	handler := &Handler{
+		randomService: randomService,
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/admin/random-source-album",
+		strings.NewReader(`{"album_id":0,"include_all_public":true,"enabled":false}`),
+	)
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.SetRandomSourceAlbum(c)
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	config := randomService.GetSourceConfig()
+	assert.False(t, config.Enabled)
+	assert.True(t, config.IncludeAllPublic)
+}
+
+func TestRandomImageReturnsForbiddenWhenRandomAPIDisabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	db := setupRandomHandlerTestDB(t)
+	repo := repoimages.NewRepository(db)
+	randomService := randomsvc.NewService(nil)
+	require.NoError(t, randomService.SetSourceConfig(randomsvc.SourceConfig{
+		Enabled: false,
+	}))
+
+	handler := &Handler{
+		readService:   imageSvc.NewReadService(repo, nil, nil, nil, "http://localhost:8080", nil),
+		randomService: randomService,
+	}
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/images/random?format=json", nil)
+
+	handler.RandomImage(c)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
 }
 
 func TestRandomImageRejectsInvalidFormat(t *testing.T) {

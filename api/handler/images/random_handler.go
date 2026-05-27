@@ -8,17 +8,18 @@ import (
 	"github.com/anoixa/image-bed/api/common"
 	"github.com/anoixa/image-bed/database/repo/images"
 	"github.com/anoixa/image-bed/internal/image"
+	randomsvc "github.com/anoixa/image-bed/internal/random"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
 
-// getRandomSourceAlbum 获取配置的随机图源相册ID和是否包含所有公开图片的配置
-func (h *Handler) getRandomSourceAlbum() (uint, bool) {
+// getRandomSourceConfig 获取随机图片 API 配置
+func (h *Handler) getRandomSourceConfig() randomsvc.SourceConfig {
 	if h.randomService != nil {
-		return h.randomService.GetSourceAlbum()
+		return h.randomService.GetSourceConfig()
 	}
-	return 0, false
+	return randomsvc.SourceConfig{Enabled: true}
 }
 
 // RandomImageQuery 随机图片查询参数
@@ -50,10 +51,17 @@ type RandomImageQuery struct {
 // @Success      200  {file}    binary           "Image data (when format=image)"
 // @Success      200  {object}  common.Response  "Image metadata (when format=json)"
 // @Failure      400  {object}  common.Response  "Invalid query parameters"
+// @Failure      403  {object}  common.Response  "Random API disabled"
 // @Failure      204  {string}  string           "No content - no matching images found"
 // @Failure      500  {object}  common.Response  "Internal server error"
 // @Router       /images/random [get]
 func (h *Handler) RandomImage(c *gin.Context) {
+	sourceConfig := h.getRandomSourceConfig()
+	if !sourceConfig.Enabled {
+		common.RespondError(c, http.StatusForbidden, "Random API disabled")
+		return
+	}
+
 	var query RandomImageQuery
 	if err := c.ShouldBindQuery(&query); err != nil {
 		common.RespondError(c, http.StatusBadRequest, "Invalid query parameters")
@@ -88,10 +96,9 @@ func (h *Handler) RandomImage(c *gin.Context) {
 			filter.AlbumID = &albumIDUint
 		}
 	} else {
-		sourceAlbumID, includeAllPublic := h.getRandomSourceAlbum()
-		if sourceAlbumID > 0 {
-			filter.AlbumID = &sourceAlbumID
-		} else if includeAllPublic {
+		if sourceConfig.AlbumID > 0 {
+			filter.AlbumID = &sourceConfig.AlbumID
+		} else if sourceConfig.IncludeAllPublic {
 			filter.IncludeAllPublic = true
 		}
 	}
@@ -176,18 +183,20 @@ func (h *Handler) respondRandomJSON(c *gin.Context, result *image.ImageResultDTO
 // @Security     ApiKeyAuth
 // @Router       /api/v1/admin/random-source-album [get]
 func (h *Handler) GetRandomSourceAlbum(c *gin.Context) {
-	albumID, includeAllPublic := h.getRandomSourceAlbum()
+	config := h.getRandomSourceConfig()
 	common.RespondSuccess(c, gin.H{
-		"album_id":           albumID,
-		"include_all_public": includeAllPublic,
+		"album_id":           config.AlbumID,
+		"include_all_public": config.IncludeAllPublic,
+		"enabled":            config.Enabled,
 	})
 }
 
 // SetRandomSourceAlbumRequest 设置随机图源相册请求
 // AlbumID: 0 表示所有公开图片, >0 表示特定相册ID
 type SetRandomSourceAlbumRequest struct {
-	AlbumID          uint `json:"album_id"`
-	IncludeAllPublic bool `json:"include_all_public"`
+	AlbumID          uint  `json:"album_id"`
+	IncludeAllPublic bool  `json:"include_all_public"`
+	Enabled          *bool `json:"enabled,omitempty"`
 }
 
 // SetRandomSourceAlbum 设置随机图片源相册
@@ -215,15 +224,25 @@ func (h *Handler) SetRandomSourceAlbum(c *gin.Context) {
 		return
 	}
 
-	if err := h.randomService.SetSourceAlbum(req.AlbumID, req.IncludeAllPublic); err != nil {
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+
+	if err := h.randomService.SetSourceConfig(randomsvc.SourceConfig{
+		AlbumID:          req.AlbumID,
+		IncludeAllPublic: req.IncludeAllPublic,
+		Enabled:          enabled,
+	}); err != nil {
 		common.RespondError(c, http.StatusInternalServerError, "Failed to save configuration")
 		return
 	}
-	albumID, includeAllPublic := h.randomService.GetSourceAlbum()
+	config := h.randomService.GetSourceConfig()
 
 	common.RespondSuccess(c, gin.H{
-		"album_id":           albumID,
-		"include_all_public": includeAllPublic,
+		"album_id":           config.AlbumID,
+		"include_all_public": config.IncludeAllPublic,
+		"enabled":            config.Enabled,
 		"message":            "Random source album updated successfully",
 	})
 }

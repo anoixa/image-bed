@@ -514,6 +514,8 @@ definitions:
     properties:
       album_id:
         type: integer
+      enabled:
+        type: boolean
       include_all_public:
         type: boolean
     type: object
@@ -3462,6 +3464,10 @@ paths:
             type: string
         "400":
           description: Invalid query parameters
+          schema:
+            $ref: '#/definitions/common.Response'
+        "403":
+          description: Random API disabled
           schema:
             $ref: '#/definitions/common.Response'
         "500":

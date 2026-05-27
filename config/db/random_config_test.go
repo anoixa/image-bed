@@ -17,11 +17,20 @@ func TestRandomSourceAlbumPersistsAcrossManagerRestart(t *testing.T) {
 	db, dataDir := newRandomConfigTestDB(t)
 
 	manager := newRandomConfigTestManager(t, db, dataDir)
-	require.NoError(t, manager.SetRandomSourceAlbum(42, false))
+	require.NoError(t, manager.SetRandomSourceAlbum(42, false, false))
 
 	restarted := newRandomConfigTestManager(t, db, dataDir)
 	assert.Equal(t, uint(42), restarted.GetRandomSourceAlbum())
 	assert.False(t, restarted.GetRandomIncludeAllPublic())
+	assert.False(t, restarted.GetRandomAPIEnabled())
+}
+
+func TestRandomAPIEnabledDefaultsToTrue(t *testing.T) {
+	db, dataDir := newRandomConfigTestDB(t)
+
+	manager := newRandomConfigTestManager(t, db, dataDir)
+
+	assert.True(t, manager.GetRandomAPIEnabled())
 }
 
 func TestRandomSourceAlbumMigratesLegacyDoubleSystemKey(t *testing.T) {
@@ -43,6 +52,7 @@ func TestRandomSourceAlbumMigratesLegacyDoubleSystemKey(t *testing.T) {
 
 	restarted := newRandomConfigTestManager(t, db, dataDir)
 	assert.Equal(t, uint(77), restarted.GetRandomSourceAlbum())
+	assert.True(t, restarted.GetRandomAPIEnabled())
 
 	migrated, err := restarted.repo.GetByKey(context.Background(), RandomSourceAlbumConfigKey)
 	require.NoError(t, err)

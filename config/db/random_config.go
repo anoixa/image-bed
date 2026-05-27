@@ -21,6 +21,7 @@ const (
 type RandomAlbumConfig struct {
 	AlbumID          uint `json:"album_id"`
 	IncludeAllPublic bool `json:"include_all_public"`
+	Enabled          bool `json:"enabled"`
 }
 
 // GetRandomSourceAlbum 获取随机图源相册ID
@@ -41,6 +42,15 @@ func (m *Manager) GetRandomIncludeAllPublic() bool {
 	return config.IncludeAllPublic
 }
 
+// GetRandomAPIEnabled 获取随机图片 API 是否启用。未配置时默认启用，兼容历史部署。
+func (m *Manager) GetRandomAPIEnabled() bool {
+	config := m.getRandomAlbumConfig()
+	if config == nil {
+		return true
+	}
+	return config.Enabled
+}
+
 // getRandomAlbumConfig 获取随机图源相册完整配置
 func (m *Manager) getRandomAlbumConfig() *RandomAlbumConfig {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -57,7 +67,7 @@ func (m *Manager) getRandomAlbumConfig() *RandomAlbumConfig {
 		return nil
 	}
 
-	result := &RandomAlbumConfig{}
+	result := &RandomAlbumConfig{Enabled: true}
 
 	// 解析相册ID
 	if albumID, ok := configMap["album_id"]; ok {
@@ -79,17 +89,25 @@ func (m *Manager) getRandomAlbumConfig() *RandomAlbumConfig {
 		}
 	}
 
+	if enabled, ok := configMap["enabled"]; ok {
+		switch v := enabled.(type) {
+		case bool:
+			result.Enabled = v
+		}
+	}
+
 	return result
 }
 
 // SetRandomSourceAlbum 设置随机图源相册配置
-func (m *Manager) SetRandomSourceAlbum(albumID uint, includeAllPublic bool) error {
+func (m *Manager) SetRandomSourceAlbum(albumID uint, includeAllPublic bool, enabled bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	config := map[string]any{
 		"album_id":           albumID,
 		"include_all_public": includeAllPublic,
+		"enabled":            enabled,
 	}
 
 	existing, err := m.getRandomAlbumSystemConfig(ctx)
