@@ -27,8 +27,8 @@ func (s ImageVariantStatus) HasPendingVariants() bool {
 }
 
 type Image struct {
-	ID        uint `gorm:"primarykey;index:idx_images_public_id,priority:2"`
-	CreatedAt time.Time
+	ID        uint           `gorm:"primarykey;index:idx_images_public_id,priority:2"`
+	CreatedAt time.Time      `gorm:"index:idx_images_user_created_at,priority:2,sort:desc;index:idx_images_user_storage_created_at,priority:3,sort:desc"`
 	UpdatedAt time.Time      `gorm:"index:idx_image_variant_status_updated_at,priority:2"`
 	DeletedAt gorm.DeletedAt `gorm:"uniqueIndex:idx_filehash_deleted;index"`
 
@@ -37,7 +37,7 @@ type Image struct {
 	OriginalName    string `gorm:"not null"`
 	FileSize        int64  `gorm:"not null;index:idx_images_public_file_size,priority:2"`
 	MimeType        string `gorm:"not null"`
-	StorageConfigID uint   `gorm:"column:storage_config_id;not null"`
+	StorageConfigID uint   `gorm:"column:storage_config_id;not null;index:idx_images_storage_config_id;index:idx_images_user_storage_created_at,priority:2"`
 
 	FileHash string `gorm:"uniqueIndex:idx_filehash_deleted;not null"`
 	Width    int    `gorm:"index:idx_images_public_width,priority:2"`
@@ -46,7 +46,7 @@ type Image struct {
 
 	VariantStatus ImageVariantStatus `gorm:"default:0;not null;index:idx_image_variant_status_updated_at,priority:1;index:idx_images_public_variant,priority:2"`
 
-	UserID uint `gorm:"index:idx_user_created_at,priority:1"`
+	UserID uint `gorm:"index:idx_user_created_at,priority:1;index:idx_images_user_created_at,priority:1;index:idx_images_user_storage_created_at,priority:1"`
 	User   User `gorm:"foreignKey:UserID"`
 
 	Albums []*Album `gorm:"many2many:album_images;"`
