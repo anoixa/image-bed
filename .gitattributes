@@ -1,0 +1,32 @@
+# Normalize all text files to LF in the repository and on checkout.
+# Prevents CRLF/LF churn (e.g. Windows-authored Dockerfile/workflows) from
+# polluting diffs, and avoids CRLF breaking shell parsing inside containers.
+* text=auto eol=lf
+
+# Line-ending-sensitive / source files: always LF, regardless of detection.
+*.sh           text eol=lf
+*.go           text eol=lf
+*.c            text eol=lf
+*.h            text eol=lf
+*.yml          text eol=lf
+*.yaml         text eol=lf
+*.json         text eol=lf
+*.mod          text eol=lf
+*.sum          text eol=lf
+Dockerfile     text eol=lf
+.dockerignore  text eol=lf
+.gitignore     text eol=lf
+.gitattributes text eol=lf
+.env.example   text eol=lf
+
+# Binary assets: never normalize.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.eot   binary
+*.exe   binary
