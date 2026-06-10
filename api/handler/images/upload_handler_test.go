@@ -5,8 +5,10 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"testing"
 
+	appconfig "github.com/anoixa/image-bed/config"
 	dbconfig "github.com/anoixa/image-bed/config/db"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -149,6 +151,8 @@ func TestParseMultipartUploadRequestCleanupSkipsReleasedTempFile(t *testing.T) {
 }
 
 func TestWritePartToTempFileStopsAtRemainingBatchLimit(t *testing.T) {
+	require.NoError(t, os.MkdirAll(appconfig.TempDir, 0o700))
+
 	_, _, _, err := writePartToTempFile(bytes.NewReader([]byte("hello")), 0, 4, 1, 0)
 
 	require.Error(t, err)
