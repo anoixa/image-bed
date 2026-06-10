@@ -38,20 +38,47 @@ func (m *Manager) GetAuthSettings(ctx context.Context, fallbackPasswordLoginEnab
 		return nil, fmt.Errorf("failed to decrypt auth settings: %w", err)
 	}
 
-	settings := &AuthSettings{
-		PasswordLoginEnabled: getBoolFromMap(configMap, "password_login_enabled", fallbackPasswordLoginEnabled),
+	settings, err := parseAuthSettings(configMap)
+	if err != nil {
+		return nil, err
 	}
 	m.cache.SetAuthSettings(settings)
 	return settings, nil
 }
 
-// IsPasswordLoginEnabled returns the current password-login switch. It falls
-// back to the static config on DB errors so auth endpoints remain available.
+// parseAuthSettings strictly decodes a decrypted auth-settings payload.
+//
+// password_login_enabled must be present and a real boolean. We intentionally
+// do NOT reuse the lenient getBoolFromMap here: a missing key, null, or a
+// wrong-typed value indicates a corrupted or tampered record, and silently
+// coercing it to a default would re-open password login on a security control
+// that an administrator may have deliberately disabled. Returning an error lets
+// IsPasswordLoginEnabled fail closed.
+func parseAuthSettings(configMap map[string]any) (*AuthSettings, error) {
+	raw, ok := configMap["password_login_enabled"]
+	if !ok {
+		return nil, errors.New("auth settings: missing password_login_enabled")
+	}
+	enabled, ok := raw.(bool)
+	if !ok {
+		return nil, fmt.Errorf("auth settings: password_login_enabled must be a bool, got %T", raw)
+	}
+	return &AuthSettings{PasswordLoginEnabled: enabled}, nil
+}
+
+// IsPasswordLoginEnabled returns the current password-login switch.
+//
+// GetAuthSettings already returns the static default for a missing record
+// (first-run, never configured). Any error reaching here is therefore an
+// operational failure — DB read, decryption or parsing — and we fail closed by
+// disabling password login. Treating such failures as "use the static default"
+// would let a transient config fault silently re-enable password login that an
+// administrator deliberately turned off (e.g. OAuth-only deployments).
 func (m *Manager) IsPasswordLoginEnabled(ctx context.Context, fallbackPasswordLoginEnabled bool) bool {
 	settings, err := m.GetAuthSettings(ctx, fallbackPasswordLoginEnabled)
 	if err != nil {
-		configManagerLog.Warnf("Failed to load auth settings, using static fallback: %v", err)
-		return fallbackPasswordLoginEnabled
+		configManagerLog.Errorf("Failed to load auth settings, failing closed (password login disabled): %v", err)
+		return false
 	}
 	return settings.PasswordLoginEnabled
 }

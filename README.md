@@ -74,6 +74,8 @@ docker compose up -d --build
 
 默认使用 SQLite 和 Docker named volume，未提供 `.env` 也可以启动。首次启动会自动创建管理员账号，密码查看容器日志。
 
+> **生产模式与 HTTPS**：Docker 镜像默认以生产模式运行（`APP_ENV=production`），会关闭 pprof/Swagger 并将认证 Cookie 标记为 `Secure`。这要求通过 HTTPS 访问（直接 TLS 或由反向代理终止 TLS，浏览器侧为 HTTPS 即可）。若仅在本地用明文 `http://localhost:8080` 测试，登录的 refresh token Cookie 不会被浏览器保存，需临时降级为开发模式：使用 `docker compose` 时在 `.env` 中加入一行 `APP_ENV=development`（Compose 会经 `env_file` 读取该文件）；使用 `docker run` 时追加 `-e APP_ENV=development`。
+
 如使用已发布镜像，可直接运行：
 
 ```bash

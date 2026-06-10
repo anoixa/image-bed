@@ -416,6 +416,7 @@ func isStaticAPIPath(p string) bool {
 		"/thumbnails/",
 		"/system/",
 		"/swagger/",
+		"/debug/",
 	}
 	for _, prefix := range apiPaths {
 		if strings.HasPrefix(p, prefix) {
