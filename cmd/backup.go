@@ -20,6 +20,16 @@ import (
 
 var backupLog = utils.ForModule("Backup")
 
+var legacyV1DefaultBackupTables = []string{
+	"users",
+	"devices",
+	"images",
+	"image_variants",
+	"albums",
+	"album_images",
+	"api_tokens",
+}
+
 // backupCmd 数据库备份命令
 var backupCmd = &cobra.Command{
 	Use:   "backup",
@@ -86,8 +96,6 @@ func initDB() (*gorm.DB, error) {
 
 // runBackup 执行备份
 func runBackup(outputFile string, tables []string, keepDir bool) error {
-	cfg := config.Get()
-
 	db, err := initDB()
 	if err != nil {
 		return err
@@ -104,16 +112,40 @@ func runBackup(outputFile string, tables []string, keepDir bool) error {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	tempDir := filepath.Join(os.TempDir(), fmt.Sprintf("image-bed-backup-%d", time.Now().Unix()))
-	if err := os.MkdirAll(tempDir, 0755); err != nil {
-		return fmt.Errorf("failed to create temp directory: %w", err)
+	backupLog.Infof("Starting backup to: %s", outputFile)
+
+	result, err := createBackupArchive(db, tables, outputFile, keepDir)
+	if err != nil {
+		return err
 	}
 
+	backupLog.Infof("Backup completed successfully: %s", result.OutputFile)
+	if keepDir {
+		backupLog.Infof("Temporary backup directory retained: %s", result.TempDir)
+	}
+	printBackupSummary(result.Metadata, result.OutputFile)
+
+	return nil
+}
+
+type backupArchiveResult struct {
+	OutputFile string
+	TempDir    string
+	Metadata   *backupMetadata
+}
+
+// createBackupArchive is the testable core: given a DB, table selection, and
+// output path, it builds the archive and returns the path plus metadata.
+func createBackupArchive(db *gorm.DB, tables []string, outputFile string, keepDir bool) (*backupArchiveResult, error) {
+	cfg := config.Get()
+
+	tempDir := filepath.Join(os.TempDir(), fmt.Sprintf("image-bed-backup-%d", time.Now().Unix()))
+	if err := os.MkdirAll(tempDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create temp directory: %w", err)
+	}
 	if !keepDir {
 		defer func() { _ = os.RemoveAll(tempDir) }()
 	}
-
-	backupLog.Infof("Starting backup to: %s", outputFile)
 
 	metadata := &backupMetadata{
 		Version:     "1.0",
@@ -123,7 +155,7 @@ func runBackup(outputFile string, tables []string, keepDir bool) error {
 	}
 
 	if len(tables) == 0 {
-		tables = []string{"users", "devices", "images", "image_variants", "albums", "album_images", "api_tokens"}
+		tables = append([]string(nil), legacyV1DefaultBackupTables...)
 	}
 	metadata.Tables = tables
 
@@ -140,18 +172,19 @@ func runBackup(outputFile string, tables []string, keepDir bool) error {
 
 	metadataPath := filepath.Join(tempDir, "metadata.json")
 	if err := writeJSONFile(metadataPath, metadata); err != nil {
-		return fmt.Errorf("failed to write metadata: %w", err)
+		return nil, fmt.Errorf("failed to write metadata: %w", err)
 	}
 
 	// 打包成 tar.gz
 	if err := createTarGz(tempDir, outputFile); err != nil {
-		return fmt.Errorf("failed to create archive: %w", err)
+		return nil, fmt.Errorf("failed to create archive: %w", err)
 	}
 
-	backupLog.Infof("Backup completed successfully: %s", outputFile)
-	printBackupSummary(metadata, outputFile)
-
-	return nil
+	return &backupArchiveResult{
+		OutputFile: outputFile,
+		TempDir:    tempDir,
+		Metadata:   metadata,
+	}, nil
 }
 
 // backupTable 备份单张表到 JSONL 文件
@@ -292,6 +325,10 @@ func createTarGz(sourceDir, targetFile string) error {
 		relPath, err := filepath.Rel(sourceDir, path)
 		if err != nil {
 			return err
+		}
+		// Skip the root directory entry (".")
+		if relPath == "." {
+			return nil
 		}
 		header.Name = relPath
 

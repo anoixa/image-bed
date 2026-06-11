@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/anoixa/image-bed/database"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/spf13/cobra"
@@ -252,16 +253,10 @@ func openDatabase(dbType, dsn string) (*gorm.DB, error) {
 
 // autoMigrate 自动迁移数据库结构
 func autoMigrate(db *gorm.DB) error {
-	return db.AutoMigrate(
-		&models.User{},
-		&models.Device{},
-		&models.Image{},
-		&models.Album{},
-		&models.ApiToken{},
-		&models.UserIdentity{},
-		&models.UserTOTPSetting{},
-		&models.TwoFactorChallenge{},
-	)
+	// Source the schema models from the shared durable-table manifest so the
+	// migration target schema can never drift from the application schema
+	// (previously this omitted system_configs and image_variants).
+	return db.AutoMigrate(database.MigrationModels()...)
 }
 
 // handleConflict 处理冲突
