@@ -147,7 +147,7 @@ type tempFileReadSeeker struct {
 
 func (t *tempFileReadSeeker) Close() error {
 	closeErr := t.File.Close()
-	if removeErr := os.Remove(t.File.Name()); removeErr != nil && !os.IsNotExist(removeErr) && closeErr == nil {
+	if removeErr := os.Remove(t.Name()); removeErr != nil && !os.IsNotExist(removeErr) && closeErr == nil {
 		closeErr = removeErr
 	}
 	return closeErr
