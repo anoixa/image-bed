@@ -5,6 +5,9 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,11 +15,13 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database"
 	"github.com/anoixa/image-bed/utils"
+	cryptopackage "github.com/anoixa/image-bed/utils/crypto"
 	"github.com/spf13/cobra"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -25,10 +30,12 @@ import (
 var restoreLog = utils.ForModule("Restore")
 
 const (
-	// supportedArchiveVersion is the only archive format this build can restore.
-	// The v2 format (structured per-table checksums + assets) is introduced in a
-	// later phase alongside its writer; until then non-1.0 archives are rejected.
-	supportedArchiveVersion = "1.0"
+	// Supported archive major versions. v1 archives were serialized from the
+	// API-facing GORM models (dropping json:"-" columns); v2 archives use the
+	// dedicated backup DTOs plus per-table SHA-256 checksums. The codec is
+	// chosen by the declared major version — v1 is never auto-upgraded to v2.
+	archiveMajorV1 = 1
+	archiveMajorV2 = 2
 
 	restoreBatchSize = 100
 
@@ -40,6 +47,31 @@ const (
 	maxArchiveEntries    = 256
 )
 
+// archiveMajorVersion parses the major component of a "MAJOR.MINOR" version
+// string. Unknown optional fields within a supported major are tolerated by the
+// JSON decoder; an unknown major is rejected by the caller.
+func archiveMajorVersion(v string) (int, error) {
+	major := v
+	if before, _, found := strings.Cut(v, "."); found {
+		major = before
+	}
+	n, err := strconv.Atoi(major)
+	if err != nil {
+		return 0, fmt.Errorf("malformed archive version %q", v)
+	}
+	return n, nil
+}
+
+// recordForVersion returns a fresh pointer to the record type used to decode and
+// insert a table for the given archive major version: the v2 backup DTO for v2,
+// the legacy model for v1.
+func recordForVersion(spec database.TableSpec, major int) any {
+	if major >= archiveMajorV2 {
+		return spec.V2Record()
+	}
+	return spec.NewRecord()
+}
+
 // restoreCmd 数据库还原命令
 var restoreCmd = &cobra.Command{
 	Use:   "restore",
@@ -49,6 +81,10 @@ var restoreCmd = &cobra.Command{
 The entire restore runs inside a single transaction: the archive is fully
 validated before any data is touched, and any error rolls everything back and
 exits non-zero, leaving the database unchanged.
+
+For v2.1 archives containing encrypted data, restore also requires the original
+CONFIG_ENCRYPTION_KEY or master.key and validates its fingerprint plus the
+archive HMAC before modifying the database.
 
 Example:
   # Restore from a backup file
@@ -72,8 +108,9 @@ Example:
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		truncate, _ := cmd.Flags().GetBool("truncate")
 		assumeYes, _ := cmd.Flags().GetBool("yes")
+		restoreMasterKey, _ := cmd.Flags().GetBool("restore-master-key")
 
-		if err := runRestore(inputFile, tables, dryRun, truncate, assumeYes); err != nil {
+		if err := runRestore(inputFile, tables, dryRun, truncate, assumeYes, restoreMasterKey); err != nil {
 			exitWithErrorf("Restore failed: %v", err)
 		}
 	},
@@ -86,6 +123,7 @@ func init() {
 	restoreCmd.Flags().Bool("dry-run", false, "Validate the archive and preview the plan without writing to the database")
 	restoreCmd.Flags().Bool("truncate", false, "Clear existing data before restore")
 	restoreCmd.Flags().Bool("yes", false, "Skip the interactive confirmation prompt (for scripted restores)")
+	restoreCmd.Flags().Bool("restore-master-key", false, "Replace an existing master.key during a complete --truncate restore of encrypted tables")
 
 	_ = restoreCmd.MarkFlagRequired("input")
 }
@@ -105,7 +143,7 @@ func newRestoreStats() *restoreStats {
 // metadata, resolve the table selection, stream-validate every record, show the
 // plan, confirm, and only then execute the transaction. All validation happens
 // before the prompt and before the first database mutation.
-func runRestore(inputFile string, tables []string, dryRun, truncate, assumeYes bool) error {
+func runRestore(inputFile string, tables []string, dryRun, truncate, assumeYes, restoreMasterKey bool) error {
 	if _, err := os.Stat(inputFile); err != nil {
 		return fmt.Errorf("backup file not found: %w", err)
 	}
@@ -117,6 +155,9 @@ func runRestore(inputFile string, tables []string, dryRun, truncate, assumeYes b
 		return err
 	}
 	defer func() { _ = database.Close(db) }()
+	if err := recoverPendingMasterKey(db, config.DefaultDataDir); err != nil {
+		return fmt.Errorf("failed to recover an interrupted restore: %w", err)
+	}
 
 	tempDir, err := os.MkdirTemp("", "image-bed-restore-*")
 	if err != nil {
@@ -133,26 +174,41 @@ func runRestore(inputFile string, tables []string, dryRun, truncate, assumeYes b
 	if err != nil {
 		return err
 	}
+	major, err := archiveMajorVersion(meta.Version)
+	if err != nil {
+		return err
+	}
 	restoreLog.Infof("Backup version: %s, Database: %s, Timestamp: %s",
 		meta.Version, meta.Database, meta.Timestamp.Format("2006-01-02 15:04:05"))
 
 	// fullRestore is true only when both: (1) user did NOT pass --tables, AND
 	// (2) the archive itself contains all BackupData tables. A partial backup
 	// (created with backup --tables) never triggers ephemeral-table clearing.
-	fullRestore := len(tables) == 0 && archiveIsComplete(meta)
+	fullRestore := len(tables) == 0 && archiveIsComplete(meta, major)
 	selected, err := resolveRestoreTables(meta, tables)
 	if err != nil {
 		return err
 	}
+	if err := validateArchiveSecurity(tempDir, config.DefaultDataDir, meta); err != nil {
+		return err
+	}
 
-	// Full archive/record validation before any prompt or mutation.
-	if err := validateArchiveData(tempDir, meta, selected); err != nil {
+	// Full archive/record validation before any prompt or mutation. For v2 this
+	// also verifies each table's SHA-256 against the metadata.
+	if err := validateArchiveData(tempDir, meta, selected, major); err != nil {
+		return err
+	}
+
+	// Validate a bundled master key BEFORE any database or filesystem mutation.
+	// Staging happens only after dry-run/confirmation handling below.
+	keyPlan, err := validateBundledMasterKey(tempDir, config.DefaultDataDir, meta, restoreMasterKey, truncate, selected)
+	if err != nil {
 		return err
 	}
 
 	printRestorePlan(meta, selected, truncate, dryRun)
 
-	if meta.Version == "1.0" {
+	if major == archiveMajorV1 {
 		fmt.Println("\n⚠️  WARNING: This is a v1.0 (legacy) archive.")
 		fmt.Println("Historical backup serialization used API-facing JSON models and may have")
 		fmt.Println("omitted security-sensitive fields such as password hashes, encrypted configs,")
@@ -179,12 +235,172 @@ func runRestore(inputFile string, tables []string, dryRun, truncate, assumeYes b
 		}
 	}
 
-	stats, err := executeRestore(db, cfg.DBType, tempDir, meta, selected, fullRestore, truncate)
+	keyPlan, err = stageMasterKeyFile(keyPlan)
+	if err != nil {
+		return err
+	}
+	defer cleanupStagedMasterKey(keyPlan)
+
+	stats, err := executeRestore(db, cfg.DBType, tempDir, meta, selected, major, fullRestore, truncate, keyPlan)
 	if err != nil {
 		return err
 	}
 
+	// All fallible key I/O was completed before the database transaction. The
+	// final same-directory rename is atomic and only happens after DB commit.
+	if err := commitMasterKeyFile(keyPlan, db); err != nil {
+		return err
+	}
+
 	printRestoreSummary(stats)
+	return nil
+}
+
+// masterKeyPlan is the validated decision about a bundled master key, produced
+// before any mutation and applied after the data commits.
+type masterKeyPlan struct {
+	write    bool
+	dest     string
+	data     []byte
+	tempPath string
+}
+
+// validateBundledMasterKey fully validates a bundled master key against the
+// metadata and the target, BEFORE the database is touched. It returns the action
+// to take (write or keep-existing). All failure modes are reported here so a key
+// problem never surfaces only after the database has already been modified.
+func validateBundledMasterKey(extractDir, dataPath string, meta *backupMetadata, force, truncate bool, selected []string) (masterKeyPlan, error) {
+	if !meta.MasterKeyIncluded {
+		return masterKeyPlan{}, nil
+	}
+
+	src := filepath.Join(extractDir, masterKeyArchiveEntry)
+	data, err := os.ReadFile(src)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return masterKeyPlan{}, fmt.Errorf("archive metadata declares a bundled master key but %q is missing from the archive", masterKeyArchiveEntry)
+		}
+		return masterKeyPlan{}, fmt.Errorf("failed to read bundled master key: %w", err)
+	}
+
+	// Integrity: the key file must match the checksum recorded at backup time.
+	if meta.MasterKeyChecksum != "" {
+		sum := sha256.Sum256(data)
+		if got := hex.EncodeToString(sum[:]); got != meta.MasterKeyChecksum {
+			return masterKeyPlan{}, fmt.Errorf("bundled master key checksum mismatch (archive corrupted): expected %s, got %s", meta.MasterKeyChecksum, got)
+		}
+	}
+
+	// Structure: must be base64 of exactly 32 bytes (the MasterKeyManager format).
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(data)))
+	if err != nil {
+		return masterKeyPlan{}, fmt.Errorf("bundled master key is not valid base64: %w", err)
+	}
+	if len(raw) != 32 {
+		return masterKeyPlan{}, fmt.Errorf("bundled master key must decode to 32 bytes, got %d", len(raw))
+	}
+
+	dest := filepath.Join(dataPath, cryptopackage.KeyDir, cryptopackage.MasterKeyFile)
+	existing, statErr := os.ReadFile(dest)
+	keyExists := statErr == nil
+	if statErr != nil && !os.IsNotExist(statErr) {
+		return masterKeyPlan{}, fmt.Errorf("failed to read existing master key: %w", statErr)
+	}
+
+	if !usesMasterKey(selected) {
+		restoreLog.Warnf("archive contains a master key, but no key-dependent table is selected; the key will not be restored")
+		return masterKeyPlan{}, nil
+	}
+	if os.Getenv("CONFIG_ENCRYPTION_KEY") != "" {
+		return masterKeyPlan{}, errors.New("cannot restore encrypted tables from an archive with a bundled master.key while CONFIG_ENCRYPTION_KEY is set because the environment key takes precedence")
+	}
+
+	keysEqual := keyExists && bytes.Equal(bytes.TrimSpace(existing), bytes.TrimSpace(data))
+	if keysEqual {
+		return masterKeyPlan{}, nil
+	}
+
+	if keyExists && !force {
+		// Keeping the existing key. If it differs from the archive's key and we
+		// are restoring config rows encrypted with the archive's key, those rows
+		// would be undecryptable — refuse rather than corrupt silently.
+		return masterKeyPlan{}, fmt.Errorf(
+			"the existing master key at %s differs from the archive's key while encrypted tables are being restored; restored secrets would be undecryptable. Re-run with --restore-master-key --truncate to perform a complete key-dependent restore", dest)
+	}
+
+	if !truncate || !containsAllTables(selected, masterKeyDependentTables) {
+		return masterKeyPlan{}, fmt.Errorf("restoring a bundled master key requires --truncate and all key-dependent tables: %s", strings.Join(masterKeyDependentTables, ", "))
+	}
+	return masterKeyPlan{write: true, dest: dest, data: data}, nil
+}
+
+// stageMasterKeyFile performs all fallible writes before database mutation. The
+// temporary file is created in the destination directory so the final rename is
+// atomic on the same filesystem.
+func stageMasterKeyFile(plan masterKeyPlan) (masterKeyPlan, error) {
+	if !plan.write {
+		return plan, nil
+	}
+	dir := filepath.Dir(plan.dest)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return masterKeyPlan{}, fmt.Errorf("failed to create key directory: %w", err)
+	}
+	if err := os.Chmod(dir, 0700); err != nil {
+		return masterKeyPlan{}, fmt.Errorf("failed to secure key directory: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, ".master-key-*.tmp")
+	if err != nil {
+		return masterKeyPlan{}, fmt.Errorf("failed to create staged master key: %w", err)
+	}
+	plan.tempPath = tmp.Name()
+	committed := false
+	defer func() {
+		_ = tmp.Close()
+		if !committed {
+			_ = os.Remove(plan.tempPath)
+		}
+	}()
+	if err := tmp.Chmod(0600); err != nil {
+		return masterKeyPlan{}, fmt.Errorf("failed to secure staged master key: %w", err)
+	}
+	if _, err := tmp.Write(plan.data); err != nil {
+		return masterKeyPlan{}, fmt.Errorf("failed to stage master key: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		return masterKeyPlan{}, fmt.Errorf("failed to flush staged master key: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return masterKeyPlan{}, fmt.Errorf("failed to close staged master key: %w", err)
+	}
+	committed = true
+	return plan, nil
+}
+
+func cleanupStagedMasterKey(plan masterKeyPlan) {
+	if plan.tempPath != "" {
+		_ = os.Remove(plan.tempPath)
+	}
+}
+
+func commitMasterKeyFile(plan masterKeyPlan, dbs ...*gorm.DB) error {
+	if !plan.write {
+		return nil
+	}
+	if plan.tempPath == "" {
+		return errors.New("master key was not staged before commit")
+	}
+	if err := os.Rename(plan.tempPath, plan.dest); err != nil {
+		return fmt.Errorf("failed to atomically install master key: %w", err)
+	}
+	if err := syncDirectory(filepath.Dir(plan.dest)); err != nil {
+		return err
+	}
+	if len(dbs) > 0 && dbs[0] != nil {
+		if err := deleteRestoreKeyJournal(dbs[0]); err != nil {
+			return fmt.Errorf("master key installed but restore journal cleanup failed: %w", err)
+		}
+	}
+	restoreLog.Infof("Restored master key to %s", plan.dest)
 	return nil
 }
 
@@ -201,8 +417,27 @@ func loadAndValidateMetadata(dir string) (*backupMetadata, error) {
 		return nil, fmt.Errorf("failed to parse metadata: %w", err)
 	}
 
-	if meta.Version != supportedArchiveVersion {
-		return nil, fmt.Errorf("unsupported archive version %q (this build supports %q)", meta.Version, supportedArchiveVersion)
+	if meta.Version == "" {
+		return nil, errors.New("archive metadata has no version")
+	}
+	major, err := archiveMajorVersion(meta.Version)
+	if err != nil {
+		return nil, err
+	}
+	if major != archiveMajorV1 && major != archiveMajorV2 {
+		return nil, fmt.Errorf("unsupported archive major version %d (version %q); this build supports 1 and 2", major, meta.Version)
+	}
+	if major >= archiveMajorV2 && meta.MasterKeyIncluded && meta.MasterKeyChecksum == "" {
+		return nil, errors.New("v2 archive metadata declares a bundled master key but has no master key checksum")
+	}
+	_, minor, err := archiveVersion(meta.Version)
+	if err != nil {
+		return nil, err
+	}
+	if major == archiveMajorV2 && minor >= 1 && archiveContainsKeyDependentData(&meta) {
+		if meta.EncryptionKeyFingerprint == "" || meta.ArchiveMAC == "" {
+			return nil, errors.New("v2.1 archive containing encrypted data is missing its encryption-key fingerprint or authentication code")
+		}
 	}
 	if len(meta.Tables) == 0 {
 		return nil, errors.New("archive metadata lists no tables")
@@ -271,9 +506,11 @@ func resolveRestoreTables(meta *backupMetadata, requested []string) ([]string, e
 }
 
 // validateArchiveData streams every selected JSONL file, decoding each record
-// into the manifest recovery type and confirming the line count matches the
-// metadata. It holds no more than one line in memory at a time.
-func validateArchiveData(dir string, meta *backupMetadata, selected []string) error {
+// into the version-appropriate record type and confirming the line count matches
+// the metadata. For v2 archives it also verifies each file's SHA-256 against the
+// checksum recorded at backup time, failing before any mutation on mismatch. It
+// holds no more than one line in memory at a time.
+func validateArchiveData(dir string, meta *backupMetadata, selected []string, major int) error {
 	for _, table := range selected {
 		spec, ok := database.TableByName(table)
 		if !ok {
@@ -287,10 +524,35 @@ func validateArchiveData(dir string, meta *backupMetadata, selected []string) er
 		if _, err := os.Stat(path); err != nil {
 			return fmt.Errorf("archive is missing the data file for %q: %w", table, err)
 		}
+
+		if major >= archiveMajorV2 {
+			want, ok := meta.Checksums[table]
+			if !ok || want == "" {
+				return fmt.Errorf("v2 archive metadata is missing a checksum for %q", table)
+			}
+			got, err := fileSHA256(path)
+			if err != nil {
+				return fmt.Errorf("failed to checksum %q: %w", table, err)
+			}
+			if got != want {
+				return fmt.Errorf("table %s: checksum mismatch (archive corrupted): expected %s, got %s", table, want, got)
+			}
+		}
+
 		count, err := streamJSONL(path, func(lineNum int, data []byte) error {
-			rec := spec.NewRecord()
+			rec := recordForVersion(spec, major)
 			if err := json.Unmarshal(data, rec); err != nil {
 				return fmt.Errorf("table %s: invalid record at line %d: %w", table, lineNum, err)
+			}
+			if table == "system_configs" {
+				value := reflect.ValueOf(rec)
+				if value.Kind() == reflect.Pointer {
+					value = value.Elem()
+				}
+				key := value.FieldByName("Key")
+				if key.IsValid() && key.Kind() == reflect.String && key.String() == restoreKeyJournalConfigKey {
+					return fmt.Errorf("table %s: record at line %d uses reserved internal key %q", table, lineNum, restoreKeyJournalConfigKey)
+				}
 			}
 			return nil
 		})
@@ -304,9 +566,23 @@ func validateArchiveData(dir string, meta *backupMetadata, selected []string) er
 	return nil
 }
 
+// fileSHA256 returns the hex-encoded SHA-256 of a file's bytes.
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
 // executeRestore performs the entire restore within one transaction. Any error
 // rolls the transaction back, leaving the database untouched.
-func executeRestore(db *gorm.DB, dbType, dir string, meta *backupMetadata, selected []string, fullRestore, truncate bool) (*restoreStats, error) {
+func executeRestore(db *gorm.DB, dbType, dir string, meta *backupMetadata, selected []string, major int, fullRestore, truncate bool, keyPlans ...masterKeyPlan) (*restoreStats, error) {
 	stats := newRestoreStats()
 	stats.Truncated = truncate
 
@@ -330,7 +606,7 @@ func executeRestore(db *gorm.DB, dbType, dir string, meta *backupMetadata, selec
 		}
 
 		for _, spec := range database.RestoreOrder(selected) {
-			affected, err := insertTable(tx, spec, dir)
+			affected, err := insertTable(tx, spec, dir, major)
 			if err != nil {
 				return fmt.Errorf("failed to restore %s: %w", spec.Name, err)
 			}
@@ -364,6 +640,11 @@ func executeRestore(db *gorm.DB, dbType, dir string, meta *backupMetadata, selec
 				return fmt.Errorf("table %s: row count grew by %d, expected %d", table, delta, expected)
 			}
 		}
+		if len(keyPlans) > 0 {
+			if err := writeRestoreKeyJournal(tx, keyPlans[0]); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	if err != nil {
@@ -373,9 +654,10 @@ func executeRestore(db *gorm.DB, dbType, dir string, meta *backupMetadata, selec
 }
 
 // insertTable streams a table's JSONL file and inserts it in bounded batches,
-// requiring each batch to affect exactly as many rows as were submitted.
-func insertTable(tx *gorm.DB, spec database.TableSpec, dir string) (int64, error) {
-	elemType := reflect.TypeOf(spec.NewRecord()).Elem() // e.g. models.User
+// requiring each batch to affect exactly as many rows as were submitted. The
+// record type is selected by archive major version (v2 backup DTO or v1 model).
+func insertTable(tx *gorm.DB, spec database.TableSpec, dir string, major int) (int64, error) {
+	elemType := reflect.TypeOf(recordForVersion(spec, major)).Elem() // e.g. database.BackupUser
 	ptrSliceType := reflect.SliceOf(reflect.PointerTo(elemType))
 
 	batch := reflect.MakeSlice(ptrSliceType, 0, restoreBatchSize)
@@ -651,13 +933,13 @@ func extractTarGz(archivePath, destDir string) error {
 
 // archiveIsComplete returns true if meta.Tables includes every BackupData table
 // from the manifest. Only complete archives should clear ephemeral tables.
-func archiveIsComplete(meta *backupMetadata) bool {
+func archiveIsComplete(meta *backupMetadata, major int) bool {
 	inArchive := make(map[string]bool, len(meta.Tables))
 	for _, t := range meta.Tables {
 		inArchive[t] = true
 	}
 
-	if meta.Version == "1.0" {
+	if major == archiveMajorV1 {
 		for _, name := range legacyV1DefaultBackupTables {
 			if !inArchive[name] {
 				return false

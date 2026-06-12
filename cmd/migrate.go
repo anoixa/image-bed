@@ -2,16 +2,20 @@ package cmd
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
+	"reflect"
+	"strings"
 	"time"
 
 	"github.com/anoixa/image-bed/database"
-	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/utils"
 	"github.com/spf13/cobra"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 )
 
@@ -77,14 +81,21 @@ func init() {
 
 // migrateStats 迁移统计
 type migrateStats struct {
-	users       int
-	devices     int
-	images      int
-	albums      int
-	tokens      int
-	skipped     int // 跳过的记录数
-	overwritten int // 覆盖的记录数
-	errors      []string
+	migrated    map[string]int // per-table inserted/overwritten row count
+	sourceRows  map[string]int // rows read from each source table
+	processed   map[string]int // rows successfully inserted, overwritten, or skipped
+	present     map[string]bool
+	skipped     int // skipped on conflict
+	overwritten int // overwritten on conflict
+}
+
+func newMigrateStats() *migrateStats {
+	return &migrateStats{
+		migrated:   make(map[string]int),
+		sourceRows: make(map[string]int),
+		processed:  make(map[string]int),
+		present:    make(map[string]bool),
+	}
 }
 
 // runMigration 执行数据库迁移
@@ -111,6 +122,10 @@ func runMigration(fromType, toType, fromDSN, toDSN, fromSQLite, toPostgres strin
 
 	if fromType == toType && fromDSN == toDSN {
 		return fmt.Errorf("source and target databases are the same")
+	}
+
+	if batchSize <= 0 {
+		batchSize = 100
 	}
 
 	migrateLog.Infof("Migrating from %s to %s", fromType, toType)
@@ -146,71 +161,56 @@ func runMigration(fromType, toType, fromDSN, toDSN, fromSQLite, toPostgres strin
 		}
 	}
 
-	stats := &migrateStats{}
-
-	// 自动迁移目标数据库结构
-	migrateLog.Infof("Migrating database schema")
-	if err := autoMigrate(targetDB); err != nil {
-		return fmt.Errorf("failed to migrate schema: %w", err)
-	}
-
-	// 迁移数据
+	// Migrate every table the manifest marks as MigrateData, in dependency
+	// order. Driving the loop from the manifest (rather than a hardcoded list)
+	// is what keeps the migration table set from drifting out of sync with the
+	// schema — the historical cause of system_configs / user_identities /
+	// user_totp_settings silently never being migrated.
+	stats := newMigrateStats()
 	ctx := context.Background()
+	sourceTxOptions := &sql.TxOptions{ReadOnly: true}
+	if fromType == "postgres" || fromType == "postgresql" {
+		sourceTxOptions.Isolation = sql.LevelRepeatableRead
+	} else {
+		sourceTxOptions.Isolation = sql.LevelSerializable
+	}
+	err = sourceDB.Transaction(func(sourceTx *gorm.DB) error {
+		return targetDB.Transaction(func(targetTx *gorm.DB) error {
+			migrateLog.Infof("Migrating database schema")
+			if err := autoMigrate(targetTx); err != nil {
+				return fmt.Errorf("failed to migrate schema: %w", err)
+			}
 
-	migrateLog.Infof("Migrating users")
-	if err := migrateUsers(ctx, sourceDB, targetDB, stats, onConflict); err != nil {
-		stats.errors = append(stats.errors, fmt.Sprintf("users migration failed: %v", err))
-		if onConflict == "error" {
-			return err
-		}
+			var migratedTables []string
+			for _, spec := range database.MigrateTables() {
+				migrateLog.Infof("Migrating %s", spec.Name)
+				if err := migrateTable(ctx, sourceTx, targetTx, spec, stats, batchSize, onConflict); err != nil {
+					return fmt.Errorf("%s migration failed: %w", spec.Name, err)
+				}
+				migratedTables = append(migratedTables, spec.Name)
+			}
+
+			if err := validateMigrationCounts(targetTx, stats); err != nil {
+				return err
+			}
+
+			// Rows are inserted with explicit ids, so target sequences must be reset
+			// inside the same transaction as the data they describe.
+			reset, err := resetSequences(targetTx, toType, migratedTables)
+			if err != nil {
+				return fmt.Errorf("sequence reset failed: %w", err)
+			}
+			if reset > 0 {
+				migrateLog.Infof("Reset %d auto-increment sequence(s) on the target", reset)
+			}
+			return nil
+		})
+	}, sourceTxOptions)
+	if err != nil {
+		return err
 	}
 
-	migrateLog.Infof("Migrating devices")
-	if err := migrateDevices(ctx, sourceDB, targetDB, stats, onConflict); err != nil {
-		stats.errors = append(stats.errors, fmt.Sprintf("devices migration failed: %v", err))
-		if onConflict == "error" {
-			return err
-		}
-	}
-
-	migrateLog.Infof("Migrating images")
-	if err := migrateImages(ctx, sourceDB, targetDB, stats, batchSize, onConflict); err != nil {
-		stats.errors = append(stats.errors, fmt.Sprintf("images migration failed: %v", err))
-		if onConflict == "error" {
-			return err
-		}
-	}
-
-	migrateLog.Infof("Migrating albums")
-	if err := migrateAlbums(ctx, sourceDB, targetDB, stats, batchSize, onConflict); err != nil {
-		stats.errors = append(stats.errors, fmt.Sprintf("albums migration failed: %v", err))
-		if onConflict == "error" {
-			return err
-		}
-	}
-
-	migrateLog.Infof("Migrating album_images relationships")
-	if err := migrateAlbumImages(ctx, sourceDB, targetDB, stats, onConflict); err != nil {
-		stats.errors = append(stats.errors, fmt.Sprintf("album_images migration failed: %v", err))
-		if onConflict == "error" {
-			return err
-		}
-	}
-
-	migrateLog.Infof("Migrating API tokens")
-	if err := migrateTokens(ctx, sourceDB, targetDB, stats, onConflict); err != nil {
-		stats.errors = append(stats.errors, fmt.Sprintf("tokens migration failed: %v", err))
-		if onConflict == "error" {
-			return err
-		}
-	}
-
-	// 打印统计
 	printMigrateStats(stats)
-
-	if len(stats.errors) > 0 {
-		return fmt.Errorf("migration completed with %d errors", len(stats.errors))
-	}
 
 	migrateLog.Infof("Migration completed successfully")
 	return nil
@@ -254,342 +254,230 @@ func openDatabase(dbType, dsn string) (*gorm.DB, error) {
 // autoMigrate 自动迁移数据库结构
 func autoMigrate(db *gorm.DB) error {
 	// Source the schema models from the shared durable-table manifest so the
-	// migration target schema can never drift from the application schema
-	// (previously this omitted system_configs and image_variants).
+	// migration target schema can never drift from the application schema.
 	return db.AutoMigrate(database.MigrationModels()...)
 }
 
-// handleConflict 处理冲突
-// 返回值: shouldCreate (是否创建), shouldOverwrite (是否覆盖), error
-func handleConflict(targetDB *gorm.DB, model any, where string, args []any, onConflict string) (bool, bool, error) {
-	result := targetDB.Model(model).Where(where, args...).First(model)
-
-	if result.Error == gorm.ErrRecordNotFound {
-		// 不存在，可以创建
-		return true, false, nil
-	}
-	if result.Error != nil {
-		return false, false, result.Error
+// migrateTable copies one manifest table from source to target. A table absent
+// from the source is skipped (a legitimate "older schema" case); any OTHER read
+// error is propagated rather than being silently swallowed as "table missing"
+// (the historical F5 bug in migrateAlbumImages / migrateTokens).
+func migrateTable(ctx context.Context, source, target *gorm.DB, spec database.TableSpec, stats *migrateStats, batchSize int, onConflict string) error {
+	if spec.IsJoinTable {
+		return migrateJoinTable(ctx, source, target, spec, stats, onConflict)
 	}
 
-	// 已存在
-	switch onConflict {
-	case "skip":
-		return false, false, nil
-	case "overwrite":
-		return false, true, nil
-	case "error":
-		return false, false, fmt.Errorf("record already exists: %v", args)
-	default:
-		return false, false, nil
-	}
-}
+	elemType := reflect.TypeOf(spec.NewRecord()).Elem() // e.g. models.User
+	sliceType := reflect.SliceOf(elemType)
 
-// migrateUsers 迁移用户数据
-func migrateUsers(ctx context.Context, sourceDB, targetDB *gorm.DB, stats *migrateStats, onConflict string) error {
-	var users []models.User
-	if err := sourceDB.WithContext(ctx).Find(&users).Error; err != nil {
-		return err
-	}
-
-	for _, user := range users {
-		shouldCreate, shouldOverwrite, err := handleConflict(
-			targetDB.WithContext(ctx),
-			&models.User{},
-			"id = ?",
-			[]any{user.ID},
-			onConflict,
-		)
-		if err != nil {
-			stats.errors = append(stats.errors, fmt.Sprintf("conflict check failed for user %d: %v", user.ID, err))
-			if onConflict == "error" {
-				return err
-			}
-			continue
-		}
-
-		if shouldCreate {
-			if user.DeletedAt.Valid {
-				user.DeletedAt = gorm.DeletedAt{Valid: true, Time: user.DeletedAt.Time}
-			}
-
-			if err := targetDB.WithContext(ctx).Create(&user).Error; err != nil {
-				stats.errors = append(stats.errors, fmt.Sprintf("failed to migrate user %d: %v", user.ID, err))
-				continue
-			}
-			stats.users++
-		} else if shouldOverwrite {
-			targetDB.WithContext(ctx).Where("id = ?", user.ID).Delete(&models.User{})
-			if err := targetDB.WithContext(ctx).Create(&user).Error; err != nil {
-				stats.errors = append(stats.errors, fmt.Sprintf("failed to overwrite user %d: %v", user.ID, err))
-				continue
-			}
-			stats.overwritten++
-			stats.users++
-		} else {
-			stats.skipped++
-		}
-	}
-
-	migrateLog.Infof("Migrated %d users (skipped: %d, overwritten: %d)", stats.users, stats.skipped, stats.overwritten)
-	return nil
-}
-
-// migrateDevices 迁移设备数据
-func migrateDevices(ctx context.Context, sourceDB, targetDB *gorm.DB, stats *migrateStats, onConflict string) error {
-	var devices []models.Device
-	if err := sourceDB.WithContext(ctx).Find(&devices).Error; err != nil {
-		return err
-	}
-
-	for _, device := range devices {
-		shouldCreate, shouldOverwrite, err := handleConflict(
-			targetDB.WithContext(ctx),
-			&models.Device{},
-			"id = ?",
-			[]any{device.ID},
-			onConflict,
-		)
-		if err != nil {
-			stats.errors = append(stats.errors, fmt.Sprintf("conflict check failed for device %d: %v", device.ID, err))
-			if onConflict == "error" {
-				return err
-			}
-			continue
-		}
-
-		if shouldCreate {
-			if err := targetDB.WithContext(ctx).Create(&device).Error; err != nil {
-				stats.errors = append(stats.errors, fmt.Sprintf("failed to migrate device %d: %v", device.ID, err))
-				continue
-			}
-			stats.devices++
-		} else if shouldOverwrite {
-			targetDB.WithContext(ctx).Where("id = ?", device.ID).Delete(&models.Device{})
-			if err := targetDB.WithContext(ctx).Create(&device).Error; err != nil {
-				stats.errors = append(stats.errors, fmt.Sprintf("failed to overwrite device %d: %v", device.ID, err))
-				continue
-			}
-			stats.devices++
-		}
-	}
-
-	migrateLog.Infof("Migrated %d devices", stats.devices)
-	return nil
-}
-
-// migrateImages 迁移图片数据
-func migrateImages(ctx context.Context, sourceDB, targetDB *gorm.DB, stats *migrateStats, batchSize int, onConflict string) error {
-	var totalCount int64
-	if err := sourceDB.WithContext(ctx).Model(&models.Image{}).Count(&totalCount).Error; err != nil {
-		return err
-	}
-
-	var offset int
+	offset := 0
 	for {
-		var images []models.Image
-		if err := sourceDB.WithContext(ctx).Limit(batchSize).Offset(offset).Find(&images).Error; err != nil {
+		slicePtr := reflect.New(sliceType)
+		// Unscoped: the models embed gorm.DeletedAt, so a plain read would have
+		// GORM apply the soft-delete scope (WHERE deleted_at IS NULL) and silently
+		// drop soft-deleted rows. Read the physical table so migration matches the
+		// backup/restore contract.
+		err := source.WithContext(ctx).Unscoped().Table(spec.Name).
+			Order("id").
+			Limit(batchSize).Offset(offset).
+			Find(slicePtr.Interface()).Error
+		if err != nil {
+			// A table absent from the source (an older schema) is a legitimate
+			// skip; any other error (connection, permissions, ...) must surface
+			// rather than be silently treated as "table missing".
+			if offset == 0 && isMissingTableError(err) {
+				migrateLog.Infof("Source database has no %q table; skipping", spec.Name)
+				return nil
+			}
 			return err
 		}
 
-		if len(images) == 0 {
+		rows := slicePtr.Elem()
+		n := rows.Len()
+		stats.present[spec.Name] = true
+		if n == 0 {
 			break
 		}
+		stats.sourceRows[spec.Name] += n
 
-		for _, image := range images {
-			shouldCreate, shouldOverwrite, err := handleConflict(
-				targetDB.WithContext(ctx),
-				&models.Image{},
-				"id = ? OR identifier = ?",
-				[]any{image.ID, image.Identifier},
-				onConflict,
-			)
+		for i := range n {
+			row := rows.Index(i)
+			id, ok := recordID(row)
+			if !ok {
+				return fmt.Errorf("record in %q has no usable id", spec.Name)
+			}
+			recPtr := row.Addr().Interface()
+
+			create, overwrite, err := resolveRowConflict(ctx, target, spec.Name, id, onConflict)
 			if err != nil {
-				stats.errors = append(stats.errors, fmt.Sprintf("conflict check failed for image %d: %v", image.ID, err))
-				if onConflict == "error" {
-					return err
-				}
-				continue
+				return fmt.Errorf("conflict check failed for %s id=%d: %w", spec.Name, id, err)
 			}
 
-			// 清除关联，避免外键约束问题
-			image.Albums = nil
-
-			if shouldCreate {
-				if err := targetDB.WithContext(ctx).Create(&image).Error; err != nil {
-					stats.errors = append(stats.errors, fmt.Sprintf("failed to migrate image %d: %v", image.ID, err))
-					continue
+			switch {
+			case overwrite:
+				if err := target.WithContext(ctx).Table(spec.Name).Where("id = ?", id).Delete(nil).Error; err != nil {
+					return fmt.Errorf("failed to delete existing %s id=%d: %w", spec.Name, id, err)
 				}
-				stats.images++
-			} else if shouldOverwrite {
-				targetDB.WithContext(ctx).Where("id = ? OR identifier = ?", image.ID, image.Identifier).Delete(&models.Image{})
-				if err := targetDB.WithContext(ctx).Create(&image).Error; err != nil {
-					stats.errors = append(stats.errors, fmt.Sprintf("failed to overwrite image %d: %v", image.ID, err))
-					continue
+				if err := target.WithContext(ctx).Omit(clause.Associations).Create(recPtr).Error; err != nil {
+					return fmt.Errorf("failed to overwrite %s id=%d: %w", spec.Name, id, err)
 				}
-				stats.images++
+				stats.overwritten++
+				stats.migrated[spec.Name]++
+			case create:
+				if err := target.WithContext(ctx).Omit(clause.Associations).Create(recPtr).Error; err != nil {
+					return fmt.Errorf("failed to migrate %s id=%d: %w", spec.Name, id, err)
+				}
+				stats.migrated[spec.Name]++
+			default:
+				stats.skipped++
 			}
+			stats.processed[spec.Name]++
 		}
 
 		offset += batchSize
-		if offset%1000 == 0 {
-			migrateLog.Infof("Migrated %d/%d images", stats.images, totalCount)
-		}
 	}
 
-	migrateLog.Infof("Migrated %d images", stats.images)
+	migrateLog.Infof("Migrated %d %s", stats.migrated[spec.Name], spec.Name)
 	return nil
 }
 
-// migrateAlbums 迁移相册数据
-func migrateAlbums(ctx context.Context, sourceDB, targetDB *gorm.DB, stats *migrateStats, batchSize int, onConflict string) error {
-	var albums []models.Album
-	if err := sourceDB.WithContext(ctx).Find(&albums).Error; err != nil {
-		return err
+// resolveRowConflict decides whether a row with the given id should be created,
+// overwritten, or skipped on the target. It counts the physical row (no
+// soft-delete scope) so a soft-deleted target row still counts as a conflict.
+func resolveRowConflict(ctx context.Context, target *gorm.DB, table string, id uint, onConflict string) (create, overwrite bool, err error) {
+	var count int64
+	if err := target.WithContext(ctx).Table(table).Where("id = ?", id).Count(&count).Error; err != nil {
+		return false, false, err
 	}
-
-	for _, album := range albums {
-		shouldCreate, shouldOverwrite, err := handleConflict(
-			targetDB.WithContext(ctx),
-			&models.Album{},
-			"id = ?",
-			[]any{album.ID},
-			onConflict,
-		)
-		if err != nil {
-			stats.errors = append(stats.errors, fmt.Sprintf("conflict check failed for album %d: %v", album.ID, err))
-			if onConflict == "error" {
-				return err
-			}
-			continue
-		}
-
-		// 清除关联
-		album.Images = nil
-
-		if shouldCreate {
-			if err := targetDB.WithContext(ctx).Create(&album).Error; err != nil {
-				stats.errors = append(stats.errors, fmt.Sprintf("failed to migrate album %d: %v", album.ID, err))
-				continue
-			}
-			stats.albums++
-		} else if shouldOverwrite {
-			targetDB.WithContext(ctx).Where("id = ?", album.ID).Delete(&models.Album{})
-			if err := targetDB.WithContext(ctx).Create(&album).Error; err != nil {
-				stats.errors = append(stats.errors, fmt.Sprintf("failed to overwrite album %d: %v", album.ID, err))
-				continue
-			}
-			stats.albums++
-		}
+	if count == 0 {
+		return true, false, nil
 	}
-
-	migrateLog.Infof("Migrated %d albums", stats.albums)
-	return nil
+	switch onConflict {
+	case "overwrite":
+		return false, true, nil
+	case "error":
+		return false, false, fmt.Errorf("record already exists in %s: id=%d", table, id)
+	default: // skip
+		return false, false, nil
+	}
 }
 
-// migrateAlbumImages 迁移相册-图片关联关系
-func migrateAlbumImages(ctx context.Context, sourceDB, targetDB *gorm.DB, stats *migrateStats, onConflict string) error {
-	type AlbumImage struct {
+// migrateJoinTable copies the composite-key album_images join. It inserts only
+// relations whose referenced album and image exist on the target, and treats an
+// existing relation as a conflict (error strategy) or a skip (otherwise).
+func migrateJoinTable(ctx context.Context, source, target *gorm.DB, spec database.TableSpec, stats *migrateStats, onConflict string) error {
+	type albumImage struct {
 		AlbumID uint
 		ImageID uint
 	}
 
-	var relations []AlbumImage
-	if err := sourceDB.WithContext(ctx).Raw("SELECT album_id, image_id FROM album_images").Scan(&relations).Error; err != nil {
-		// 表可能不存在
-		return nil
+	var relations []albumImage
+	if err := source.WithContext(ctx).Raw("SELECT album_id, image_id FROM album_images").Scan(&relations).Error; err != nil {
+		if isMissingTableError(err) {
+			migrateLog.Infof("Source database has no %q table; skipping", spec.Name)
+			return nil
+		}
+		return err
 	}
+	stats.present[spec.Name] = true
+	stats.sourceRows[spec.Name] = len(relations)
 
 	for _, rel := range relations {
-		var count int64
-		if err := targetDB.WithContext(ctx).Raw(
+		var existing int64
+		if err := target.WithContext(ctx).Raw(
 			"SELECT COUNT(*) FROM album_images WHERE album_id = ? AND image_id = ?",
 			rel.AlbumID, rel.ImageID,
-		).Scan(&count).Error; err != nil {
-			migrateLog.Warnf("Failed to check existing relation (album=%d, image=%d): %v", rel.AlbumID, rel.ImageID, err)
-			continue
+		).Scan(&existing).Error; err != nil {
+			return fmt.Errorf("failed to check existing relation (album=%d, image=%d): %w", rel.AlbumID, rel.ImageID, err)
 		}
-
-		if count > 0 {
+		if existing > 0 {
 			if onConflict == "error" {
 				return fmt.Errorf("album_image relation already exists: album_id=%d, image_id=%d", rel.AlbumID, rel.ImageID)
 			}
-			// skip 和 overwrite 都跳过已存在的关联
+			stats.skipped++
+			stats.processed[spec.Name]++
 			continue
 		}
 
 		var albumCount, imageCount int64
-		if err := targetDB.WithContext(ctx).Model(&models.Album{}).Where("id = ?", rel.AlbumID).Count(&albumCount).Error; err != nil {
-			migrateLog.Warnf("Failed to check album existence (id=%d): %v", rel.AlbumID, err)
-			continue
+		if err := target.WithContext(ctx).Table("albums").Where("id = ?", rel.AlbumID).Count(&albumCount).Error; err != nil {
+			return fmt.Errorf("failed to check album existence (id=%d): %w", rel.AlbumID, err)
 		}
-		if err := targetDB.WithContext(ctx).Model(&models.Image{}).Where("id = ?", rel.ImageID).Count(&imageCount).Error; err != nil {
-			migrateLog.Warnf("Failed to check image existence (id=%d): %v", rel.ImageID, err)
-			continue
+		if err := target.WithContext(ctx).Table("images").Where("id = ?", rel.ImageID).Count(&imageCount).Error; err != nil {
+			return fmt.Errorf("failed to check image existence (id=%d): %w", rel.ImageID, err)
 		}
-
 		if albumCount == 0 || imageCount == 0 {
-			migrateLog.Warnf("Skipping album_image relation: album_id=%d, image_id=%d (referenced record not found)",
-				rel.AlbumID, rel.ImageID)
-			continue
+			return fmt.Errorf("album_image relation references missing target row: album_id=%d, image_id=%d", rel.AlbumID, rel.ImageID)
 		}
 
-		if err := targetDB.WithContext(ctx).Exec(
+		if err := target.WithContext(ctx).Exec(
 			"INSERT INTO album_images (album_id, image_id) VALUES (?, ?)",
 			rel.AlbumID, rel.ImageID,
 		).Error; err != nil {
-			stats.errors = append(stats.errors, fmt.Sprintf(
-				"failed to migrate album_image relation (album=%d, image=%d): %v",
-				rel.AlbumID, rel.ImageID, err))
-			continue
+			return fmt.Errorf("failed to migrate album_image relation (album=%d, image=%d): %w", rel.AlbumID, rel.ImageID, err)
 		}
+		stats.migrated[spec.Name]++
+		stats.processed[spec.Name]++
 	}
 
-	migrateLog.Infof("Migrated %d album_image relations", len(relations))
+	migrateLog.Infof("Migrated %d album_image relations", stats.migrated[spec.Name])
 	return nil
 }
 
-// migrateTokens 迁移API Token数据
-func migrateTokens(ctx context.Context, sourceDB, targetDB *gorm.DB, stats *migrateStats, onConflict string) error {
-	var tokens []models.ApiToken
-	if err := sourceDB.WithContext(ctx).Find(&tokens).Error; err != nil {
-		return nil // tokens表可能不存在，不报错
+// isMissingTableError reports whether err indicates the queried table does not
+// exist on the source. It deliberately matches only SQLite's precise message
+// and PostgreSQL's undefined_table SQLSTATE; generic "does not exist" text can
+// also describe missing columns, functions, schemas, or permissions.
+func isMissingTableError(err error) bool {
+	if err == nil {
+		return false
 	}
+	type sqlStateError interface {
+		SQLState() string
+	}
+	var stateErr sqlStateError
+	if errors.As(err, &stateErr) && stateErr.SQLState() == "42P01" {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "no such table:")
+}
 
-	for _, token := range tokens {
-		shouldCreate, shouldOverwrite, err := handleConflict(
-			targetDB.WithContext(ctx),
-			&models.ApiToken{},
-			"id = ?",
-			[]any{token.ID},
-			onConflict,
-		)
-		if err != nil {
-			stats.errors = append(stats.errors, fmt.Sprintf("conflict check failed for token %d: %v", token.ID, err))
-			if onConflict == "error" {
-				return err
-			}
+// validateMigrationCounts catches silent row loss before commit. Existing
+// target rows are allowed by the skip/overwrite strategies, so target counts
+// may exceed source counts but may never be lower.
+func validateMigrationCounts(target *gorm.DB, stats *migrateStats) error {
+	for _, spec := range database.MigrateTables() {
+		if !stats.present[spec.Name] {
 			continue
 		}
-
-		if shouldCreate {
-			if err := targetDB.WithContext(ctx).Create(&token).Error; err != nil {
-				stats.errors = append(stats.errors, fmt.Sprintf("failed to migrate token %d: %v", token.ID, err))
-				continue
-			}
-			stats.tokens++
-		} else if shouldOverwrite {
-			targetDB.WithContext(ctx).Where("id = ?", token.ID).Delete(&models.ApiToken{})
-			if err := targetDB.WithContext(ctx).Create(&token).Error; err != nil {
-				stats.errors = append(stats.errors, fmt.Sprintf("failed to overwrite token %d: %v", token.ID, err))
-				continue
-			}
-			stats.tokens++
+		sourceCount := stats.sourceRows[spec.Name]
+		if stats.processed[spec.Name] != sourceCount {
+			return fmt.Errorf("table %s: processed %d of %d source rows", spec.Name, stats.processed[spec.Name], sourceCount)
+		}
+		var targetCount int64
+		if err := target.Table(spec.Name).Count(&targetCount).Error; err != nil {
+			return fmt.Errorf("failed to validate target count for %s: %w", spec.Name, err)
+		}
+		if targetCount < int64(sourceCount) {
+			return fmt.Errorf("table %s: target has %d rows after migration, fewer than %d source rows", spec.Name, targetCount, sourceCount)
 		}
 	}
-
-	migrateLog.Infof("Migrated %d API tokens", stats.tokens)
 	return nil
+}
+
+// recordID reads the uint primary key "ID" field from a record value.
+func recordID(v reflect.Value) (uint, bool) {
+	f := v.FieldByName("ID")
+	if !f.IsValid() {
+		return 0, false
+	}
+	switch f.Kind() {
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return uint(f.Uint()), true
+	default:
+		return 0, false
+	}
 }
 
 // maskDSN 隐藏敏感信息
@@ -606,19 +494,16 @@ func printMigrateStats(stats *migrateStats) {
 	fmt.Println("========================================")
 	fmt.Println("       Migration Statistics")
 	fmt.Println("========================================")
-	fmt.Printf("Users migrated:    %d\n", stats.users)
-	fmt.Printf("Devices migrated:  %d\n", stats.devices)
-	fmt.Printf("Images migrated:   %d\n", stats.images)
-	fmt.Printf("Albums migrated:   %d\n", stats.albums)
-	fmt.Printf("Tokens migrated:   %d\n", stats.tokens)
-	fmt.Printf("Skipped records:   %d\n", stats.skipped)
-	fmt.Printf("Overwritten:       %d\n", stats.overwritten)
+	var total int
+	for _, spec := range database.MigrateTables() {
+		n := stats.migrated[spec.Name]
+		total += n
+		fmt.Printf("%-22s %d\n", spec.Name+":", n)
+	}
+	fmt.Println("----------------------------------------")
+	fmt.Printf("%-22s %d\n", "Total migrated:", total)
+	fmt.Printf("%-22s %d\n", "Skipped records:", stats.skipped)
+	fmt.Printf("%-22s %d\n", "Overwritten:", stats.overwritten)
 	fmt.Println("========================================")
 
-	if len(stats.errors) > 0 {
-		fmt.Println("\nErrors encountered:")
-		for _, err := range stats.errors {
-			fmt.Printf("  - %s\n", err)
-		}
-	}
 }

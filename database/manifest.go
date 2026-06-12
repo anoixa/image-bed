@@ -32,14 +32,21 @@ type TableSpec struct {
 	// NewRecord / NewRecordSlice produce the recovery record type used to
 	// decode and insert rows during restore, and to query rows during backup.
 	//
-	// Phase 1 decodes legacy v1 archives, whose JSONL was produced from the
-	// GORM models, so these currently return the models themselves. Phase 2
-	// introduces dedicated v2 persistence DTOs (the GORM models drop
-	// security-sensitive columns such as users.password and
-	// system_configs.config_json via `json:"-"`), at which point a
-	// version-specific codec is layered on top of this manifest.
+	// The v1 record codec decodes legacy v1 archives, whose JSONL was produced
+	// from the GORM models, so NewRecord/NewRecordSlice return the models
+	// themselves.
 	NewRecord      func() any
 	NewRecordSlice func() any
+
+	// The v2 record codec is the dedicated backup-DTO type used by the v2
+	// archive format. The GORM models drop security-sensitive and internal
+	// columns from their JSON via `json:"-"` (users.password,
+	// system_configs.config_json, soft-delete state, images.is_pending_deletion);
+	// the v2 DTO re-exposes every physical column so a backup round-trips
+	// losslessly. When nil, the table's model already serializes all columns and
+	// the v1 codec is reused — see V2Record/V2RecordSlice.
+	NewV2Record      func() any
+	NewV2RecordSlice func() any
 
 	// HasAutoID is true when the table has an auto-increment primary key whose
 	// sequence must be reset after a restore or migration.
@@ -74,13 +81,15 @@ type TableSpec struct {
 // backup/restore/migrate table-list drift.
 var DurableTables = []TableSpec{
 	{
-		Name:           "users",
-		SchemaModel:    func() any { return &models.User{} },
-		NewRecord:      func() any { return &models.User{} },
-		NewRecordSlice: func() any { return &[]models.User{} },
-		HasAutoID:      true,
-		BackupData:     true,
-		MigrateData:    true,
+		Name:             "users",
+		SchemaModel:      func() any { return &models.User{} },
+		NewRecord:        func() any { return &models.User{} },
+		NewRecordSlice:   func() any { return &[]models.User{} },
+		NewV2Record:      func() any { return &BackupUser{} },
+		NewV2RecordSlice: func() any { return &[]BackupUser{} },
+		HasAutoID:        true,
+		BackupData:       true,
+		MigrateData:      true,
 	},
 	{
 		Name:           "devices",
@@ -92,22 +101,26 @@ var DurableTables = []TableSpec{
 		MigrateData:    true,
 	},
 	{
-		Name:           "images",
-		SchemaModel:    func() any { return &models.Image{} },
-		NewRecord:      func() any { return &models.Image{} },
-		NewRecordSlice: func() any { return &[]models.Image{} },
-		HasAutoID:      true,
-		BackupData:     true,
-		MigrateData:    true,
+		Name:             "images",
+		SchemaModel:      func() any { return &models.Image{} },
+		NewRecord:        func() any { return &models.Image{} },
+		NewRecordSlice:   func() any { return &[]models.Image{} },
+		NewV2Record:      func() any { return &BackupImage{} },
+		NewV2RecordSlice: func() any { return &[]BackupImage{} },
+		HasAutoID:        true,
+		BackupData:       true,
+		MigrateData:      true,
 	},
 	{
-		Name:           "image_variants",
-		SchemaModel:    func() any { return &models.ImageVariant{} },
-		NewRecord:      func() any { return &models.ImageVariant{} },
-		NewRecordSlice: func() any { return &[]models.ImageVariant{} },
-		HasAutoID:      true,
-		BackupData:     true,
-		MigrateData:    true,
+		Name:             "image_variants",
+		SchemaModel:      func() any { return &models.ImageVariant{} },
+		NewRecord:        func() any { return &models.ImageVariant{} },
+		NewRecordSlice:   func() any { return &[]models.ImageVariant{} },
+		NewV2Record:      func() any { return &BackupImageVariant{} },
+		NewV2RecordSlice: func() any { return &[]BackupImageVariant{} },
+		HasAutoID:        true,
+		BackupData:       true,
+		MigrateData:      true,
 	},
 	{
 		Name:           "albums",
@@ -138,13 +151,15 @@ var DurableTables = []TableSpec{
 		MigrateData:    true,
 	},
 	{
-		Name:           "system_configs",
-		SchemaModel:    func() any { return &models.SystemConfig{} },
-		NewRecord:      func() any { return &models.SystemConfig{} },
-		NewRecordSlice: func() any { return &[]models.SystemConfig{} },
-		HasAutoID:      true,
-		BackupData:     true,
-		MigrateData:    true,
+		Name:             "system_configs",
+		SchemaModel:      func() any { return &models.SystemConfig{} },
+		NewRecord:        func() any { return &models.SystemConfig{} },
+		NewRecordSlice:   func() any { return &[]models.SystemConfig{} },
+		NewV2Record:      func() any { return &BackupSystemConfig{} },
+		NewV2RecordSlice: func() any { return &[]BackupSystemConfig{} },
+		HasAutoID:        true,
+		BackupData:       true,
+		MigrateData:      true,
 	},
 	{
 		Name:           "user_identities",
@@ -263,4 +278,23 @@ func nameSet(names []string) map[string]bool {
 		set[n] = true
 	}
 	return set
+}
+
+// V2Record returns a pointer to the table's v2 backup record (the dedicated
+// backup DTO), falling back to the v1 model record when the table has no DTO
+// because its model already serializes every column.
+func (s TableSpec) V2Record() any {
+	if s.NewV2Record != nil {
+		return s.NewV2Record()
+	}
+	return s.NewRecord()
+}
+
+// V2RecordSlice returns a pointer to a slice of the table's v2 backup record,
+// falling back to the v1 model slice when the table has no DTO.
+func (s TableSpec) V2RecordSlice() any {
+	if s.NewV2RecordSlice != nil {
+		return s.NewV2RecordSlice()
+	}
+	return s.NewRecordSlice()
 }

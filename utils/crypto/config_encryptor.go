@@ -10,13 +10,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/anoixa/image-bed/utils"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
+
+	"github.com/anoixa/image-bed/utils"
 )
 
 var configLog = utils.ForModule("Config")
@@ -160,7 +161,7 @@ func (m *MasterKeyManager) GetConfigEncryptionKey() ([]byte, error) {
 	if m.source == "env" {
 		return key, nil
 	}
-	return deriveConfigEncryptionKey(key)
+	return DeriveConfigEncryptionKey(key)
 }
 
 // GetLegacyConfigEncryptionKeys 返回仅用于解密历史密文的旧密钥。
@@ -180,8 +181,49 @@ func (m *MasterKeyManager) GetSource() string {
 	return m.source
 }
 
-func deriveConfigEncryptionKey(masterKey []byte) ([]byte, error) {
+// DeriveConfigEncryptionKey derives the application config-encryption key from
+// an on-disk master.key. It is exported for disaster-recovery validation, which
+// must compare an archive against the effective key without initializing or
+// generating new key material.
+func DeriveConfigEncryptionKey(masterKey []byte) ([]byte, error) {
+	if len(masterKey) != 32 {
+		return nil, fmt.Errorf("master key must be 32 bytes, got %d", len(masterKey))
+	}
 	return hkdf.Key(sha256.New, masterKey, []byte(configEncryptionHKDFSalt), configEncryptionHKDFInfo, 32)
+}
+
+func deriveConfigEncryptionKey(masterKey []byte) ([]byte, error) {
+	return DeriveConfigEncryptionKey(masterKey)
+}
+
+// LoadExistingConfigEncryptionKey resolves the effective config-encryption key
+// using the same precedence as MasterKeyManager, but never creates a new key.
+func LoadExistingConfigEncryptionKey(dataPath string) ([]byte, string, error) {
+	if envKey := strings.TrimSpace(os.Getenv("CONFIG_ENCRYPTION_KEY")); envKey != "" {
+		key, err := base64.StdEncoding.DecodeString(envKey)
+		if err != nil {
+			return nil, "", fmt.Errorf("invalid CONFIG_ENCRYPTION_KEY: %w", err)
+		}
+		if len(key) != 32 {
+			return nil, "", fmt.Errorf("CONFIG_ENCRYPTION_KEY must be 32 bytes, got %d", len(key))
+		}
+		return key, "env", nil
+	}
+
+	keyPath := filepath.Join(dataPath, KeyDir, MasterKeyFile)
+	data, err := os.ReadFile(keyPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to read existing master key at %s: %w", keyPath, err)
+	}
+	masterKey, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(data)))
+	if err != nil {
+		return nil, "", fmt.Errorf("invalid master key file: %w", err)
+	}
+	key, err := DeriveConfigEncryptionKey(masterKey)
+	if err != nil {
+		return nil, "", err
+	}
+	return key, "file", nil
 }
 
 // ConfigEncryptor 配置加密器

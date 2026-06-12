@@ -3,6 +3,8 @@ package cryptopackage
 import (
 	"bytes"
 	"encoding/base64"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -64,6 +66,32 @@ func TestMasterKeyManagerUsesEnvKeyDirectlyForConfigEncryption(t *testing.T) {
 
 	assert.Equal(t, key, encryptionKey)
 	assert.Empty(t, manager.GetLegacyConfigEncryptionKeys())
+}
+
+func TestLoadExistingConfigEncryptionKeyDoesNotGenerateKeys(t *testing.T) {
+	t.Run("file key", func(t *testing.T) {
+		t.Setenv("CONFIG_ENCRYPTION_KEY", "")
+		dataPath := t.TempDir()
+		masterKey := []byte("0123456789abcdef0123456789abcdef")
+		keyDir := filepath.Join(dataPath, KeyDir)
+		require.NoError(t, os.MkdirAll(keyDir, 0700))
+		require.NoError(t, os.WriteFile(filepath.Join(keyDir, MasterKeyFile), []byte(base64.StdEncoding.EncodeToString(masterKey)), 0600))
+
+		got, source, err := LoadExistingConfigEncryptionKey(dataPath)
+		require.NoError(t, err)
+		want, err := DeriveConfigEncryptionKey(masterKey)
+		require.NoError(t, err)
+		assert.Equal(t, "file", source)
+		assert.Equal(t, want, got)
+	})
+
+	t.Run("missing key", func(t *testing.T) {
+		t.Setenv("CONFIG_ENCRYPTION_KEY", "")
+		dataPath := t.TempDir()
+		_, _, err := LoadExistingConfigEncryptionKey(dataPath)
+		require.Error(t, err)
+		assert.NoFileExists(t, filepath.Join(dataPath, KeyDir, MasterKeyFile))
+	})
 }
 
 func TestConfigEncryptorFallbackDecryptsLegacyMasterKeyCiphertext(t *testing.T) {

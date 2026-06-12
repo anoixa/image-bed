@@ -103,9 +103,9 @@ func TestRestore_ValidArchiveTruncateIntoEmptyDB(t *testing.T) {
 	require.NoError(t, err)
 	selected, err := resolveRestoreTables(m, nil)
 	require.NoError(t, err)
-	require.NoError(t, validateArchiveData(dir, m, selected))
+	require.NoError(t, validateArchiveData(dir, m, selected, archiveMajorV1))
 
-	stats, err := executeRestore(db, "sqlite", dir, m, selected, true, true)
+	stats, err := executeRestore(db, "sqlite", dir, m, selected, archiveMajorV1, true, true)
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), stats.Restored["users"])
 	assert.Equal(t, int64(1), stats.Restored["images"])
@@ -127,7 +127,7 @@ func TestRestore_CorruptJSONLFailsBeforeMutation(t *testing.T) {
 	selected, err := resolveRestoreTables(m, nil)
 	require.NoError(t, err)
 
-	err = validateArchiveData(dir, m, selected)
+	err = validateArchiveData(dir, m, selected, archiveMajorV1)
 	require.Error(t, err)
 	// The pre-existing row is untouched because validation precedes mutation.
 	assert.Equal(t, int64(1), countRows(t, db, "users"))
@@ -142,7 +142,7 @@ func TestRestore_MissingDataFileFails(t *testing.T) {
 	selected, err := resolveRestoreTables(m, nil)
 	require.NoError(t, err)
 
-	err = validateArchiveData(dir, m, selected)
+	err = validateArchiveData(dir, m, selected, archiveMajorV1)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing the data file")
 }
@@ -158,9 +158,29 @@ func TestRestore_CountMismatchFails(t *testing.T) {
 	selected, err := resolveRestoreTables(m, nil)
 	require.NoError(t, err)
 
-	err = validateArchiveData(dir, m, selected)
+	err = validateArchiveData(dir, m, selected, archiveMajorV1)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "expects 5")
+}
+
+func TestRestore_RejectsReservedRestoreJournalRecord(t *testing.T) {
+	meta := v1Meta([]string{"system_configs"}, map[string]int64{"system_configs": 1})
+	record := models.SystemConfig{
+		Category: models.ConfigCategorySystem,
+		Name:     "malicious journal",
+		Key:      restoreKeyJournalConfigKey,
+	}
+	dir := writeArchiveDir(t, meta, map[string]string{
+		"system_configs.jsonl": jsonlLines(t, record),
+	})
+
+	m, err := loadAndValidateMetadata(dir)
+	require.NoError(t, err)
+	selected, err := resolveRestoreTables(m, nil)
+	require.NoError(t, err)
+	err = validateArchiveData(dir, m, selected, archiveMajorV1)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reserved internal key")
 }
 
 func TestRestore_UnsupportedVersionFails(t *testing.T) {
@@ -170,7 +190,18 @@ func TestRestore_UnsupportedVersionFails(t *testing.T) {
 
 	_, err := loadAndValidateMetadata(dir)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unsupported archive version")
+	assert.Contains(t, err.Error(), "unsupported archive major version")
+}
+
+func TestRestore_V2BundledMasterKeyRequiresChecksum(t *testing.T) {
+	meta := v1Meta([]string{"users"}, map[string]int64{"users": 0})
+	meta.Version = currentBackupVersion
+	meta.MasterKeyIncluded = true
+	dir := writeArchiveDir(t, meta, map[string]string{"users.jsonl": ""})
+
+	_, err := loadAndValidateMetadata(dir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no master key checksum")
 }
 
 func TestRestore_DuplicateMetadataTableFails(t *testing.T) {
@@ -217,7 +248,7 @@ func TestRestore_OversizedLineFails(t *testing.T) {
 	selected, err := resolveRestoreTables(m, nil)
 	require.NoError(t, err)
 
-	err = validateArchiveData(dir, m, selected)
+	err = validateArchiveData(dir, m, selected, archiveMajorV1)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "line limit")
 }
@@ -232,7 +263,7 @@ func TestRestore_BlankLineFails(t *testing.T) {
 	selected, err := resolveRestoreTables(m, nil)
 	require.NoError(t, err)
 
-	err = validateArchiveData(dir, m, selected)
+	err = validateArchiveData(dir, m, selected, archiveMajorV1)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "blank line")
 }
@@ -266,9 +297,9 @@ func TestRestore_ConstraintFailureRollsBack(t *testing.T) {
 	require.NoError(t, err)
 	selected, err := resolveRestoreTables(m, nil)
 	require.NoError(t, err)
-	require.NoError(t, validateArchiveData(dir, m, selected))
+	require.NoError(t, validateArchiveData(dir, m, selected, archiveMajorV1))
 
-	_, err = executeRestore(db, "sqlite", dir, m, selected, true, true)
+	_, err = executeRestore(db, "sqlite", dir, m, selected, archiveMajorV1, true, true)
 	require.Error(t, err)
 
 	// Rolled back: the original user survives and the archive user is absent.
@@ -294,9 +325,9 @@ func TestRestore_MergeConflictErrors(t *testing.T) {
 	require.NoError(t, err)
 	selected, err := resolveRestoreTables(m, []string{"users"})
 	require.NoError(t, err)
-	require.NoError(t, validateArchiveData(dir, m, selected))
+	require.NoError(t, validateArchiveData(dir, m, selected, archiveMajorV1))
 
-	_, err = executeRestore(db, "sqlite", dir, m, selected, false, false)
+	_, err = executeRestore(db, "sqlite", dir, m, selected, archiveMajorV1, false, false)
 	require.Error(t, err)
 }
 
@@ -328,9 +359,9 @@ func TestRestore_AlbumImagesExact(t *testing.T) {
 	require.NoError(t, err)
 	selected, err := resolveRestoreTables(m, nil)
 	require.NoError(t, err)
-	require.NoError(t, validateArchiveData(dir, m, selected))
+	require.NoError(t, validateArchiveData(dir, m, selected, archiveMajorV1))
 
-	stats, err := executeRestore(db, "sqlite", dir, m, selected, true, true)
+	stats, err := executeRestore(db, "sqlite", dir, m, selected, archiveMajorV1, true, true)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), stats.Restored["album_images"])
 	assert.Equal(t, int64(1), countRows(t, db, "album_images"))
@@ -359,11 +390,11 @@ func TestRestore_FullTruncateClearsEphemeral(t *testing.T) {
 	require.NoError(t, err)
 	selected, err := resolveRestoreTables(m, nil)
 	require.NoError(t, err)
-	require.NoError(t, validateArchiveData(dir, m, selected))
+	require.NoError(t, validateArchiveData(dir, m, selected, archiveMajorV1))
 
-	fullRestore := archiveIsComplete(m)
+	fullRestore := archiveIsComplete(m, archiveMajorV1)
 	require.True(t, fullRestore)
-	_, err = executeRestore(db, "sqlite", dir, m, selected, fullRestore, true)
+	_, err = executeRestore(db, "sqlite", dir, m, selected, archiveMajorV1, fullRestore, true)
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), countRows(t, db, "two_factor_challenges"))
 }
@@ -381,11 +412,11 @@ func TestRestore_PartialArchiveDoesNotClearEphemeral(t *testing.T) {
 	require.NoError(t, err)
 	selected, err := resolveRestoreTables(m, nil)
 	require.NoError(t, err)
-	require.NoError(t, validateArchiveData(dir, m, selected))
+	require.NoError(t, validateArchiveData(dir, m, selected, archiveMajorV1))
 
-	fullRestore := archiveIsComplete(m)
+	fullRestore := archiveIsComplete(m, archiveMajorV1)
 	require.False(t, fullRestore)
-	_, err = executeRestore(db, "sqlite", dir, m, selected, fullRestore, true)
+	_, err = executeRestore(db, "sqlite", dir, m, selected, archiveMajorV1, fullRestore, true)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), countRows(t, db, "two_factor_challenges"))
 }
@@ -434,7 +465,7 @@ func TestRestore_ValidationIsReadOnly(t *testing.T) {
 	require.NoError(t, err)
 	selected, err := resolveRestoreTables(m, nil)
 	require.NoError(t, err)
-	require.NoError(t, validateArchiveData(dir, m, selected))
+	require.NoError(t, validateArchiveData(dir, m, selected, archiveMajorV1))
 
 	assert.Equal(t, int64(2), countRows(t, db, "users"), "validation must not change the database")
 }
@@ -453,9 +484,9 @@ func TestRestore_SequenceResetAllowsNextInsert(t *testing.T) {
 	require.NoError(t, err)
 	selected, err := resolveRestoreTables(m, nil)
 	require.NoError(t, err)
-	require.NoError(t, validateArchiveData(dir, m, selected))
+	require.NoError(t, validateArchiveData(dir, m, selected, archiveMajorV1))
 
-	_, err = executeRestore(db, "sqlite", dir, m, selected, true, true)
+	_, err = executeRestore(db, "sqlite", dir, m, selected, archiveMajorV1, true, true)
 	require.NoError(t, err)
 
 	next := models.User{Username: "after", Role: "user", Status: "active"}
