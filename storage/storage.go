@@ -69,8 +69,8 @@ type Provider interface {
 	// SaveWithContext 保存文件到存储
 	SaveWithContext(ctx context.Context, storagePath string, file io.Reader) error
 
-	// GetWithContext 从存储获取文件
-	GetWithContext(ctx context.Context, storagePath string) (io.ReadSeeker, error)
+	// GetWithContext 从存储获取文件。返回 io.ReadSeekCloser，调用方用完须 Close 以释放底层资源/临时文件。
+	GetWithContext(ctx context.Context, storagePath string) (io.ReadSeekCloser, error)
 
 	// DeleteWithContext 从存储删除文件
 	DeleteWithContext(ctx context.Context, storagePath string) error

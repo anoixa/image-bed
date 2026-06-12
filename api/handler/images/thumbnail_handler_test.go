@@ -26,7 +26,7 @@ func (p *thumbnailStreamProvider) SaveWithContext(ctx context.Context, storagePa
 	return nil
 }
 
-func (p *thumbnailStreamProvider) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeeker, error) {
+func (p *thumbnailStreamProvider) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeekCloser, error) {
 	return nil, os.ErrNotExist
 }
 

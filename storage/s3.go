@@ -168,7 +168,7 @@ func getRemainingReaderSize(file io.Reader) (int64, error) {
 	return endPos - currentPos, nil
 }
 
-func (s *S3Storage) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeeker, error) {
+func (s *S3Storage) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeekCloser, error) {
 	obj, err := s.client.GetObject(ctx, s.bucketName, storagePath, minio.GetObjectOptions{})
 	if err != nil {
 		errResponse := minio.ToErrorResponse(err)
@@ -219,9 +219,13 @@ func (s *S3Storage) GetObjectInfo(ctx context.Context, storagePath string) (Obje
 }
 
 func (s *S3Storage) Health(ctx context.Context) error {
-	_, err := s.client.ListBuckets(ctx)
+	// 仅检查目标 bucket，避免依赖 s3:ListAllMyBuckets 权限，兼容最小权限账号。
+	exists, err := s.client.BucketExists(ctx, s.bucketName)
 	if err != nil {
 		return fmt.Errorf("s3 storage health check failed: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("s3 storage health check failed: bucket %q not found", s.bucketName)
 	}
 	return nil
 }

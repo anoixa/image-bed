@@ -245,9 +245,7 @@ func (t *ImagePipelineTask) getProcessingFilePath(ctx context.Context) (path str
 		cleanupFn()
 		return "", noop, fmt.Errorf("get stream: %w", err)
 	}
-	if closer, ok := stream.(io.Closer); ok {
-		defer func() { _ = closer.Close() }()
-	}
+	defer func() { _ = stream.Close() }()
 
 	bufPtr := pool.SharedBufferPool.Get().(*[]byte)
 	defer pool.SharedBufferPool.Put(bufPtr)

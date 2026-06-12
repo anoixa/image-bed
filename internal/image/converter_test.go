@@ -22,7 +22,7 @@ func (p *testStorageProvider) SaveWithContext(ctx context.Context, storagePath s
 	return nil
 }
 
-func (p *testStorageProvider) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeeker, error) {
+func (p *testStorageProvider) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeekCloser, error) {
 	return nil, nil
 }
 

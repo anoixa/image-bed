@@ -2,9 +2,33 @@ package storage
 
 import (
 	"context"
+	"io"
+	"os"
 	"testing"
 	"time"
 )
+
+// TestTempFileReadSeekerCloseRemoves 验证 WebDAV 下载临时文件在 Close 时被删除。
+func TestTempFileReadSeekerCloseRemoves(t *testing.T) {
+	tmp, err := os.CreateTemp(t.TempDir(), "webdav-get-*")
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	name := tmp.Name()
+
+	var rs io.ReadSeeker = &tempFileReadSeeker{File: tmp}
+	closer, ok := rs.(io.Closer)
+	if !ok {
+		t.Fatal("tempFileReadSeeker must implement io.Closer")
+	}
+	if err := closer.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	if _, err := os.Stat(name); !os.IsNotExist(err) {
+		t.Fatalf("temp file should be removed after Close, stat err = %v", err)
+	}
+}
 
 // TestWebDAVConfig 测试 WebDAV 配置结构
 func TestWebDAVConfig(t *testing.T) {

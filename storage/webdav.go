@@ -139,8 +139,22 @@ func (s *WebDAVStorage) SaveWithContext(ctx context.Context, storagePath string,
 	return nil
 }
 
+// tempFileReadSeeker 包装本地临时文件，使其在 Close 时一并从磁盘删除，
+// 避免 WebDAV 下载产生的临时文件泄漏。
+type tempFileReadSeeker struct {
+	*os.File
+}
+
+func (t *tempFileReadSeeker) Close() error {
+	closeErr := t.File.Close()
+	if removeErr := os.Remove(t.File.Name()); removeErr != nil && !os.IsNotExist(removeErr) && closeErr == nil {
+		closeErr = removeErr
+	}
+	return closeErr
+}
+
 // GetWithContext 从 WebDAV 获取文件
-func (s *WebDAVStorage) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeeker, error) {
+func (s *WebDAVStorage) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeekCloser, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -181,7 +195,7 @@ func (s *WebDAVStorage) GetWithContext(ctx context.Context, storagePath string) 
 		return nil, fmt.Errorf("failed to reset temp file for %s: %w", storagePath, err)
 	}
 
-	return tmp, nil
+	return &tempFileReadSeeker{File: tmp}, nil
 }
 
 // DeleteWithContext 从 WebDAV 删除文件

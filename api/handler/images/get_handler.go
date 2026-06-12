@@ -225,11 +225,7 @@ func (h *Handler) serveOriginalImage(c *gin.Context, image *models.Image) {
 		common.RespondError(c, http.StatusNotFound, "Image file not found")
 		return
 	}
-	defer func() {
-		if closer, ok := stream.(io.Closer); ok {
-			_ = closer.Close()
-		}
-	}()
+	defer func() { _ = stream.Close() }()
 
 	middleware.RecordImageReaderResponse()
 	h.serveReadSeekerContent(c, image.Identifier, image.MimeType, image.FileHash, stream, false, cacheControlForImage(image.IsPublic))
@@ -436,11 +432,7 @@ func (h *Handler) serveVariantImage(c *gin.Context, img *models.Image, result *i
 		h.serveOriginalImage(c, img)
 		return
 	}
-	defer func() {
-		if closer, ok := stream.(io.Closer); ok {
-			_ = closer.Close()
-		}
-	}()
+	defer func() { _ = stream.Close() }()
 
 	middleware.RecordImageReaderResponse()
 	h.serveReadSeekerContent(c, result.Identifier, result.MIMEType, result.Variant.FileHash, stream, true, cacheControlForImage(img.IsPublic))
@@ -584,11 +576,7 @@ func (h *Handler) loadCacheableImageData(ctx context.Context, provider storage.P
 	if err != nil {
 		return nil, false, err
 	}
-	defer func() {
-		if closer, ok := stream.(io.Closer); ok {
-			_ = closer.Close()
-		}
-	}()
+	defer func() { _ = stream.Close() }()
 
 	if size, err := readRemainingReadSeekerSize(stream); err == nil && size > maxSize {
 		return nil, false, nil

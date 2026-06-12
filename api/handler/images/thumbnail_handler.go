@@ -1,7 +1,6 @@
 package images
 
 import (
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -128,11 +127,7 @@ func (h *Handler) serveThumbnailImage(c *gin.Context, image *models.Image, resul
 		h.serveOriginalImage(c, image)
 		return
 	}
-	defer func() {
-		if closer, ok := stream.(io.Closer); ok {
-			_ = closer.Close()
-		}
-	}()
+	defer func() { _ = stream.Close() }()
 	middleware.RecordImageReaderResponse()
 	h.serveReadSeekerContent(c, result.Identifier, result.MIMEType, result.FileHash, stream, true, cacheControlForImage(image.IsPublic))
 }
