@@ -65,12 +65,12 @@ func (s *WriteService) UploadSingle(
 	isPublic bool,
 	defaultAlbumID uint,
 ) (*UploadResult, error) {
-	storageProvider, err := getStorageProviderByID(storageID)
+	storageProvider, resolvedID, err := resolveWritableStorageForUpload(storageID)
 	if err != nil {
 		return nil, err
 	}
 
-	image, isDup, err := s.processAndSaveImage(ctx, userID, uploadSourceFromFileHeader(fileHeader), storageProvider, storageID, isPublic, defaultAlbumID)
+	image, isDup, err := s.processAndSaveImage(ctx, userID, uploadSourceFromFileHeader(fileHeader), storageProvider, resolvedID, isPublic, defaultAlbumID)
 	if err != nil {
 		return nil, err
 	}
@@ -94,12 +94,12 @@ func (s *WriteService) UploadSingleSource(
 	isPublic bool,
 	defaultAlbumID uint,
 ) (*UploadResult, error) {
-	storageProvider, err := getStorageProviderByID(storageID)
+	storageProvider, resolvedID, err := resolveWritableStorageForUpload(storageID)
 	if err != nil {
 		return nil, err
 	}
 
-	image, isDup, err := s.processAndSaveImage(ctx, userID, source, storageProvider, storageID, isPublic, defaultAlbumID)
+	image, isDup, err := s.processAndSaveImage(ctx, userID, source, storageProvider, resolvedID, isPublic, defaultAlbumID)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +125,7 @@ func (s *WriteService) UploadBatch(ctx context.Context, userID uint, files []*mu
 
 // UploadBatchSources 批量上传（基于已准备好的上传源）
 func (s *WriteService) UploadBatchSources(ctx context.Context, userID uint, files []UploadSource, storageID uint, isPublic bool, defaultAlbumID uint, concurrentLimit int) ([]*UploadResult, error) {
-	storageProvider, err := getStorageProviderByID(storageID)
+	storageProvider, resolvedID, err := resolveWritableStorageForUpload(storageID)
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +152,7 @@ func (s *WriteService) UploadBatchSources(ctx context.Context, userID uint, file
 			case <-ctx.Done():
 				return ctx.Err()
 			default:
-				image, _, err := s.processAndSaveImage(ctx, userID, fileHeader, storageProvider, storageID, isPublic, defaultAlbumID)
+				image, _, err := s.processAndSaveImage(ctx, userID, fileHeader, storageProvider, resolvedID, isPublic, defaultAlbumID)
 				result := &UploadResult{FileName: fileHeader.FileName}
 
 				if err != nil {
@@ -384,7 +384,7 @@ func (s *WriteService) canReuseSoftDeletedImage(ctx context.Context, img *models
 		return true, nil
 	}
 
-	provider, err := getStorageProviderByID(img.StorageConfigID)
+	provider, err := getReadableStorageProviderByID(img.StorageConfigID)
 	if err != nil {
 		return false, err
 	}

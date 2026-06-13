@@ -63,9 +63,12 @@ func (h *Handler) UploadImage(c *gin.Context) {
 			return
 		}
 		if cerr := imagesvc.CheckStorageAvailable(earlyID); cerr != nil {
-			if imagesvc.IsStorageUnavailable(cerr) {
+			switch {
+			case imagesvc.IsStorageDisabled(cerr):
+				common.RespondError(c, http.StatusConflict, "Target storage is disabled")
+			case imagesvc.IsStorageUnavailable(cerr):
 				common.RespondError(c, http.StatusServiceUnavailable, "Storage backend is currently unavailable")
-			} else {
+			default:
 				common.RespondError(c, http.StatusInternalServerError, "Failed to check storage backend")
 			}
 			return
@@ -92,18 +95,18 @@ func (h *Handler) UploadImage(c *gin.Context) {
 
 	storageConfigID, err := h.resolveStorageConfigIDValue(c, request.strategyID)
 	if err != nil {
-		imageHandlerLog.Errorf("Failed to resolve storage config: %v", err)
-		if errors.Is(err, errInvalidStrategyID) {
-			common.RespondError(c, http.StatusBadRequest, err.Error())
-		} else {
-			common.RespondError(c, http.StatusServiceUnavailable, "Storage backend is currently unavailable")
-		}
+		// resolveStorageConfigIDValue 现仅返回 errInvalidStrategyID（无策略 ID 时返回 0 不报错）。
+		imageHandlerLog.Warnf("Invalid storage strategy id: %v", err)
+		common.RespondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := imagesvc.CheckStorageAvailable(storageConfigID); err != nil {
-		if imagesvc.IsStorageUnavailable(err) {
+		switch {
+		case imagesvc.IsStorageDisabled(err):
+			common.RespondError(c, http.StatusConflict, "Target storage is disabled")
+		case imagesvc.IsStorageUnavailable(err):
 			common.RespondError(c, http.StatusServiceUnavailable, "Storage backend is currently unavailable")
-		} else {
+		default:
 			common.RespondError(c, http.StatusInternalServerError, "Failed to check storage backend")
 		}
 		return
@@ -171,8 +174,11 @@ func (h *Handler) UploadImage(c *gin.Context) {
 	})
 }
 
-// uploadErrorStatus 将上传失败映射为 HTTP 状态码：存储不可用返回 503，其余返回 500。
+// uploadErrorStatus 将上传失败映射为 HTTP 状态码：存储禁用返回 409，不可用返回 503，其余返回 500。
 func uploadErrorStatus(err error) int {
+	if imagesvc.IsStorageDisabled(err) {
+		return http.StatusConflict
+	}
 	if imagesvc.IsStorageUnavailable(err) {
 		return http.StatusServiceUnavailable
 	}
@@ -194,11 +200,9 @@ func (h *Handler) resolveStorageConfigIDValue(c *gin.Context, strategyIDStr stri
 		return uint(strategyID), nil
 	}
 
-	defaultID, err := h.configManager.GetDefaultStorageConfigID(c.Request.Context())
-	if err != nil {
-		return 0, err
-	}
-	return defaultID, nil
+	// 无显式目标：返回 0，交由写路径用 registry 默认解析并落库，
+	// 保证实际写入目标与记录的 StorageConfigID 一致。
+	return 0, nil
 }
 
 type parsedUploadRequest struct {

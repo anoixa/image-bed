@@ -58,7 +58,7 @@ func (s *DeleteService) DeleteSingle(ctx context.Context, identifier string, use
 		if err != nil {
 			deleteLog.Errorf("Failed to count references for storage path %s: %v", img.StoragePath, err)
 		} else if refCount == 0 {
-			provider, err := getStorageProviderByID(img.StorageConfigID)
+			provider, err := getReadableStorageProviderByID(img.StorageConfigID)
 			if err != nil {
 				deleteLog.Errorf("Failed to get storage provider for image %s: %v", utils.SanitizeLogMessage(img.Identifier), err)
 			} else if err := provider.DeleteWithContext(ctx, img.StoragePath); err != nil {
@@ -99,7 +99,7 @@ func (s *DeleteService) DeleteBatch(ctx context.Context, identifiers []string, u
 		}
 
 		if refCount == 0 {
-			provider, err := getStorageProviderByID(img.StorageConfigID)
+			provider, err := getReadableStorageProviderByID(img.StorageConfigID)
 			if err != nil {
 				deleteLog.Errorf("Failed to get storage provider for image %s: %v", utils.SanitizeLogMessage(img.Identifier), err)
 			} else if err := provider.DeleteWithContext(ctx, img.StoragePath); err != nil {
@@ -134,7 +134,7 @@ func (s *DeleteService) deleteVariantsForImage(ctx context.Context, img *models.
 		return
 	}
 
-	provider, err := getStorageProviderByID(img.StorageConfigID)
+	provider, err := getReadableStorageProviderByID(img.StorageConfigID)
 	if err != nil {
 		deleteLog.Errorf("Failed to get storage provider for image %d: %v", img.ID, err)
 		return
