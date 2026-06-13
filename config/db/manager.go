@@ -462,7 +462,7 @@ func (m *Manager) Disable(ctx context.Context, id uint) error {
 func getConfigForUpdate(tx *gorm.DB, id uint) (models.SystemConfig, error) {
 	var config models.SystemConfig
 	query := tx
-	if tx.Dialector.Name() == "postgres" {
+	if tx.Name() == "postgres" {
 		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
 	}
 	err := query.First(&config, id).Error
