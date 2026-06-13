@@ -181,6 +181,7 @@ type ImagePipelineTask struct {
 	FileSize        int64  // used by detectImageComplexity instead of len(fileBytes)
 	MimeType        string // used for GIF guard in generateThumbnail
 	Storage         storage.Provider
+	StorageConfigID uint
 	Settings        *dbconfig.ImageProcessingSettings
 	VariantRepo     VariantRepository
 	ImageRepo       ImageRepository
@@ -283,6 +284,19 @@ func (t *ImagePipelineTask) Execute() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
+
+	// 重新从当前 registry 快照解析写入目标：
+	//   - 明确禁用（已加载但不可写）→ 暂停，保持 pending，不消耗重试；
+	//   - 可写 → 刷新到当前 provider，避免 reload/默认切换后的旧指针 TOCTOU；
+	//   - 未加载/无默认 → 沿用任务构造时传入的 t.Storage（旧行为），由下游暴露失败。
+	provider, _, resolveErr := storage.ResolveWritable(t.StorageConfigID)
+	switch {
+	case resolveErr == nil:
+		t.Storage = provider
+	case errors.Is(resolveErr, storage.ErrProviderDisabled):
+		pipelineLog.Infof("Task for image %s skipped: storage disabled", t.ImageIdentifier)
+		return
+	}
 
 	if t.ThumbVariantID > 0 {
 		acquired, err := t.VariantRepo.UpdateStatusCAS(

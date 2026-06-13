@@ -9,6 +9,7 @@ import (
 	configdb "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
 	repoimages "github.com/anoixa/image-bed/database/repo/images"
+	"github.com/anoixa/image-bed/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
@@ -156,11 +157,15 @@ func TestPrepareVariantForSubmit(t *testing.T) {
 	})
 }
 
-func TestGetStorageForImageDoesNotFallbackForMissingSpecificProvider(t *testing.T) {
-	converter := &Converter{storage: &testStorageProvider{}}
-	image := &models.Image{StorageConfigID: 999999}
+func TestResolveStorageWritableUnavailableForMissingProvider(t *testing.T) {
+	storage.ResetForTest()
+	t.Cleanup(storage.ResetForTest)
 
-	assert.Nil(t, converter.getStorageForImage(image))
+	converter := &Converter{}
+	image := &models.Image{StorageConfigID: 999999} // not in registry
+
+	state, _ := converter.resolveStorageWritable(image)
+	assert.Equal(t, storageWriteUnavailable, state)
 }
 
 func TestTriggerConversionDoesNotCreateVariantsWhenStorageMissing(t *testing.T) {
