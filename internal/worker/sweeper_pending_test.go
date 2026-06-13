@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -77,4 +78,52 @@ func TestExecuteSkipsWhenStorageDisabled(t *testing.T) {
 	// disabled storage -> Execute skips before any CAS or failure marking
 	assert.Empty(t, variantRepo.statusCASCalls, "no CAS should be attempted for disabled storage")
 	assert.Empty(t, variantRepo.updateFailedCalls, "no failure marking for disabled storage")
+}
+
+func TestExecuteSkipsWhenStorageUnavailable(t *testing.T) {
+	storage.ResetForTest()
+	t.Cleanup(storage.ResetForTest)
+
+	variantRepo := &mockVariantRepo{}
+	imageRepo := &mockImageRepo{}
+	task := &ImagePipelineTask{
+		ImageID:         1,
+		ImageIdentifier: "missing-test",
+		WebPVariantID:   9,
+		StorageConfigID: 999,
+		VariantRepo:     variantRepo,
+		ImageRepo:       imageRepo,
+	}
+	task.Execute()
+
+	assert.Empty(t, variantRepo.statusCASCalls, "unavailable storage must not use a captured provider")
+	assert.Empty(t, variantRepo.updateFailedCalls, "unavailable storage must leave variants pending")
+}
+
+func TestSweeperBoundsDuePendingRetriggersPerRun(t *testing.T) {
+	db := setupSweeperTestDB(t)
+	vRepo := images.NewVariantRepository(db)
+	iRepo := images.NewRepository(db)
+
+	for i := 1; i <= pendingScanRunLimit+25; i++ {
+		image := &models.Image{
+			Identifier:      fmt.Sprintf("pending-%d", i),
+			StoragePath:     fmt.Sprintf("p-%d", i),
+			OriginalName:    fmt.Sprintf("%d.jpg", i),
+			FileSize:        1024,
+			MimeType:        "image/jpeg",
+			StorageConfigID: 1,
+			FileHash:        fmt.Sprintf("hash-%d", i),
+		}
+		require.NoError(t, db.Create(image).Error)
+		_, err := vRepo.UpsertPending(image.ID, models.FormatWebP)
+		require.NoError(t, err)
+	}
+
+	var triggered atomic.Int32
+	sweepOnce(context.Background(), vRepo, iRepo, func(*models.Image) {
+		triggered.Add(1)
+	})
+
+	assert.Equal(t, int32(pendingScanRunLimit), triggered.Load())
 }

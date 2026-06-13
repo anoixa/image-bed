@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -100,6 +101,36 @@ func TestSetDefaultEnabledSucceeds(t *testing.T) {
 	assert.Equal(t, other, defaultStorageID(t, mgr))
 }
 
+func TestConcurrentDisableAndSetDefaultPreserveStorageInvariant(t *testing.T) {
+	mgr := newStorageTestManager(t)
+
+	for i := 0; i < 20; i++ {
+		createStorage(t, mgr, fmt.Sprintf("default-%d", i), true, true)
+		target := createStorage(t, mgr, fmt.Sprintf("target-%d", i), false, true)
+
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			_ = mgr.Disable(context.Background(), target)
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			_ = mgr.SetDefault(context.Background(), target)
+		}()
+		close(start)
+		wg.Wait()
+
+		stored, err := mgr.repo.GetByID(context.Background(), target)
+		require.NoError(t, err)
+		assert.False(t, stored.IsDefault && !stored.IsEnabled,
+			"concurrent operations must never leave a disabled default storage")
+	}
+}
+
 func TestCreateConfigRejectsDisabledDefaultStorage(t *testing.T) {
 	mgr := newStorageTestManager(t)
 	_, err := mgr.CreateConfig(context.Background(), &models.SystemConfigStoreRequest{
@@ -110,6 +141,15 @@ func TestCreateConfigRejectsDisabledDefaultStorage(t *testing.T) {
 		IsEnabled: bptr(false),
 	}, 0)
 	assert.ErrorIs(t, err, ErrCannotSetDisabledStorageDefault)
+}
+
+func TestCreateConfigPersistsDisabledStorage(t *testing.T) {
+	mgr := newStorageTestManager(t)
+	id := createStorage(t, mgr, "disabled", false, false)
+
+	stored, err := mgr.repo.GetByID(context.Background(), id)
+	require.NoError(t, err)
+	assert.False(t, stored.IsEnabled, "explicit false must not be replaced by the GORM default")
 }
 
 func TestCreateConfigDefaultClearsOldDefault(t *testing.T) {
@@ -142,8 +182,19 @@ func TestUpdateConfigRejectsChangingStorageDefault(t *testing.T) {
 		Config:    map[string]any{"type": "local", "local_path": t.TempDir()},
 		IsDefault: bptr(true),
 	})
-	assert.ErrorIs(t, err, ErrCannotSetDisabledStorageDefault)
+	assert.ErrorIs(t, err, ErrStorageDefaultChangeRequiresEndpoint)
 	assert.Equal(t, "def", defaultStorageIDName(t, mgr))
+}
+
+func TestUpdateConfigRejectsCategoryMismatch(t *testing.T) {
+	mgr := newStorageTestManager(t)
+	id := createStorage(t, mgr, "storage", false, true)
+
+	_, err := mgr.UpdateConfig(context.Background(), id, &models.SystemConfigStoreRequest{
+		Category: models.ConfigCategoryOAuth,
+		Config:   map[string]any{"type": "local", "local_path": t.TempDir()},
+	})
+	assert.ErrorIs(t, err, ErrConfigCategoryMismatch)
 }
 
 func defaultStorageIDName(t *testing.T, mgr *Manager) string {

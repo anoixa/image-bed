@@ -13,6 +13,7 @@ import (
 	"github.com/anoixa/image-bed/storage"
 	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var configManagerLog = utils.ForModule("ConfigManager")
@@ -119,17 +120,13 @@ func (m *Manager) CreateConfig(ctx context.Context, req *models.SystemConfigStor
 		Category:    req.Category,
 		Name:        req.Name,
 		Key:         key,
+		IsEnabled:   effectiveEnabled,
+		IsDefault:   effectiveDefault,
 		ConfigJSON:  encrypted,
 		Description: req.Description,
 		CreatedBy:   userID,
 	}
 
-	if req.IsEnabled != nil {
-		config.IsEnabled = *req.IsEnabled
-	}
-	if req.IsDefault != nil {
-		config.IsDefault = *req.IsDefault
-	}
 	if req.Priority != nil {
 		config.Priority = *req.Priority
 	}
@@ -143,7 +140,20 @@ func (m *Manager) CreateConfig(ctx context.Context, req *models.SystemConfigStor
 				return err
 			}
 		}
-		return tx.Create(config).Error
+		if err := tx.Create(config).Error; err != nil {
+			return err
+		}
+		// GORM applies the model's default:true to a zero bool during Create.
+		// Persist an explicitly requested false value inside the same transaction.
+		if !effectiveEnabled {
+			if err := tx.Model(&models.SystemConfig{}).
+				Where("id = ?", config.ID).
+				UpdateColumn("is_enabled", false).Error; err != nil {
+				return err
+			}
+			config.IsEnabled = false
+		}
+		return nil
 	}); err != nil {
 		return nil, fmt.Errorf("failed to create config: %w", err)
 	}
@@ -156,48 +166,87 @@ func (m *Manager) CreateConfig(ctx context.Context, req *models.SystemConfigStor
 
 // UpdateConfig 更新配置
 func (m *Manager) UpdateConfig(ctx context.Context, id uint, req *models.SystemConfigStoreRequest) (*models.ConfigResponse, error) {
-	config, err := m.repo.GetByID(ctx, id)
-	if err != nil {
-		return nil, fmt.Errorf("config not found: %w", err)
-	}
+	var config models.SystemConfig
+	err := m.repo.Transaction(ctx, func(tx *gorm.DB) error {
+		current, err := getConfigForUpdate(tx, id)
+		if err != nil {
+			return fmt.Errorf("config not found: %w", err)
+		}
+		if req.Category != "" && req.Category != current.Category {
+			return ErrConfigCategoryMismatch
+		}
 
-	if err := m.mergeConfig(config, req.Config); err != nil {
+		if err := m.mergeConfig(&current, req.Config); err != nil {
+			return err
+		}
+
+		if req.Name != "" {
+			current.Name = req.Name
+		}
+		if req.Description != "" {
+			current.Description = req.Description
+		}
+		if current.Category == models.ConfigCategoryStorage && req.IsDefault != nil && *req.IsDefault != current.IsDefault {
+			return ErrStorageDefaultChangeRequiresEndpoint
+		}
+		if current.Category != models.ConfigCategoryStorage && req.IsDefault != nil {
+			current.IsDefault = *req.IsDefault
+		}
+		if req.IsEnabled != nil {
+			current.IsEnabled = *req.IsEnabled
+		}
+		if req.Priority != nil {
+			current.Priority = *req.Priority
+		}
+
+		if current.Category == models.ConfigCategoryStorage && current.IsDefault && !current.IsEnabled {
+			return ErrCannotDisableDefaultStorage
+		}
+
+		updates := map[string]any{
+			"config_json": current.ConfigJSON,
+		}
+		if req.Name != "" {
+			updates["name"] = current.Name
+		}
+		if req.Description != "" {
+			updates["description"] = current.Description
+		}
+		if req.IsEnabled != nil {
+			updates["is_enabled"] = current.IsEnabled
+		}
+		if current.Category != models.ConfigCategoryStorage && req.IsDefault != nil {
+			updates["is_default"] = current.IsDefault
+		}
+		if req.Priority != nil {
+			updates["priority"] = current.Priority
+		}
+
+		query := tx.Model(&models.SystemConfig{}).Where("id = ?", id)
+		if current.Category == models.ConfigCategoryStorage && req.IsEnabled != nil && !current.IsEnabled {
+			query = query.Where("is_default = ?", false)
+		}
+		result := query.Updates(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			if current.Category == models.ConfigCategoryStorage && req.IsEnabled != nil && !current.IsEnabled {
+				return ErrCannotDisableDefaultStorage
+			}
+			return gorm.ErrRecordNotFound
+		}
+
+		return tx.First(&config, id).Error
+	})
+	if err != nil {
 		return nil, err
 	}
 
-	if req.Name != "" {
-		config.Name = req.Name
-	}
-	if req.Description != "" {
-		config.Description = req.Description
-	}
-	// 存储的默认状态只能通过专用 SetDefault 操作改变；通用更新拒绝改变 is_default。
-	if config.Category == models.ConfigCategoryStorage && req.IsDefault != nil && *req.IsDefault != config.IsDefault {
-		return nil, fmt.Errorf("storage default can only be changed via the /default endpoint: %w", ErrCannotSetDisabledStorageDefault)
-	}
-	if config.Category != models.ConfigCategoryStorage && req.IsDefault != nil {
-		config.IsDefault = *req.IsDefault
-	}
-	if req.IsEnabled != nil {
-		config.IsEnabled = *req.IsEnabled
-	}
-	if req.Priority != nil {
-		config.Priority = *req.Priority
-	}
-
-	// 不允许通过通用更新把存储留在「默认但禁用」状态。
-	if config.Category == models.ConfigCategoryStorage && config.IsDefault && !config.IsEnabled {
-		return nil, ErrCannotDisableDefaultStorage
-	}
-
-	if err := m.repo.Update(ctx, config); err != nil {
-		return nil, fmt.Errorf("failed to update config: %w", err)
-	}
-
 	m.cache.Invalidate(config.Category)
-	m.eventBus.Publish(EventConfigUpdated, config)
+	m.eventBus.Publish(EventConfigUpdated, &config)
 
-	return m.ToResponseWithMask(ctx, config, true)
+	return m.ToResponseWithMask(ctx, &config, true)
 }
 
 // mergeConfig 合并配置
@@ -313,8 +362,8 @@ func (m *Manager) ToResponseWithMask(ctx context.Context, config *models.SystemC
 func (m *Manager) SetDefault(ctx context.Context, id uint) error {
 	var target *models.SystemConfig
 	err := m.repo.Transaction(ctx, func(tx *gorm.DB) error {
-		var cfg models.SystemConfig
-		if err := tx.First(&cfg, id).Error; err != nil {
+		cfg, err := getConfigForUpdate(tx, id)
+		if err != nil {
 			return err
 		}
 		target = &cfg
@@ -327,7 +376,11 @@ func (m *Manager) SetDefault(ctx context.Context, id uint) error {
 			Update("is_default", false).Error; err != nil {
 			return err
 		}
-		q := tx.Model(&models.SystemConfig{}).Where("id = ?", id).Update("is_default", true)
+		query := tx.Model(&models.SystemConfig{}).Where("id = ?", id)
+		if cfg.Category == models.ConfigCategoryStorage {
+			query = query.Where("is_enabled = ?", true)
+		}
+		q := query.Update("is_default", true)
 		if q.Error != nil {
 			return q.Error
 		}
@@ -335,6 +388,7 @@ func (m *Manager) SetDefault(ctx context.Context, id uint) error {
 		if cfg.Category == models.ConfigCategoryStorage && q.RowsAffected == 0 {
 			return ErrCannotSetDisabledStorageDefault
 		}
+		target.IsDefault = true
 		return nil
 	})
 	if err != nil {
@@ -369,8 +423,8 @@ func (m *Manager) Enable(ctx context.Context, id uint) error {
 func (m *Manager) Disable(ctx context.Context, id uint) error {
 	var target *models.SystemConfig
 	err := m.repo.Transaction(ctx, func(tx *gorm.DB) error {
-		var cfg models.SystemConfig
-		if err := tx.First(&cfg, id).Error; err != nil {
+		cfg, err := getConfigForUpdate(tx, id)
+		if err != nil {
 			return err
 		}
 		target = &cfg
@@ -392,6 +446,7 @@ func (m *Manager) Disable(ctx context.Context, id uint) error {
 			}
 			return ErrCannotDisableDefaultStorage
 		}
+		target.IsEnabled = false
 		return nil
 	})
 	if err != nil {
@@ -402,6 +457,16 @@ func (m *Manager) Disable(ctx context.Context, id uint) error {
 	m.eventBus.Publish(EventConfigUpdated, target)
 
 	return nil
+}
+
+func getConfigForUpdate(tx *gorm.DB, id uint) (models.SystemConfig, error) {
+	var config models.SystemConfig
+	query := tx
+	if tx.Dialector.Name() == "postgres" {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	err := query.First(&config, id).Error
+	return config, err
 }
 
 // GetStorageConfigs 获取存储配置

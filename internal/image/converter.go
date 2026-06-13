@@ -50,11 +50,10 @@ func (c *Converter) TriggerConversionWithLocalFile(image *models.Image, localFil
 	c.triggerConversion(image, false, localFile)
 }
 
-// TriggerConversionFromSweeper re-submits stale work recovered by the sweeper.
-// This path intentionally ignores variant retry windows because the sweeper has
-// already decided the stale work should be retried now.
+// TriggerConversionFromSweeper re-submits work selected by the sweeper while
+// preserving each variant's retry window.
 func (c *Converter) TriggerConversionFromSweeper(image *models.Image) {
-	c.triggerConversion(image, true, nil)
+	c.triggerConversion(image, false, nil)
 }
 
 func (c *Converter) triggerConversion(image *models.Image, ignoreRetryWindow bool, localFile *worker.LocalFileLease) {

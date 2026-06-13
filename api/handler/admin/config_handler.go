@@ -157,6 +157,7 @@ func (h *ConfigHandler) GetConfig(c *gin.Context) {
 // @Success      200      {object}  common.Response  "Configuration created successfully"
 // @Failure      400      {object}  common.Response  "Invalid request or configuration test failed"
 // @Failure      401      {object}  common.Response  "Unauthorized"
+// @Failure      409      {object}  common.Response  "Storage state conflict"
 // @Failure      500      {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
 // @Router       /api/v1/admin/configs [post]
@@ -174,6 +175,7 @@ func (h *ConfigHandler) CreateConfig(c *gin.Context) {
 	}
 
 	userID := c.GetUint("user_id")
+	var previousDefault *models.ConfigResponse
 
 	// test connection
 	if req.Category == models.ConfigCategoryStorage {
@@ -185,13 +187,21 @@ func (h *ConfigHandler) CreateConfig(c *gin.Context) {
 			common.RespondError(c, http.StatusBadRequest, fmt.Sprintf("Storage configuration test failed: %s", testResult.Message))
 			return
 		}
+		if req.IsDefault != nil && *req.IsDefault {
+			capturedDefault, captureErr := h.findDefaultConfig(ctx, models.ConfigCategoryStorage)
+			if captureErr != nil {
+				adminConfigLog.Errorf("Failed to capture previous default storage: %v", captureErr)
+				common.RespondError(c, http.StatusInternalServerError, "Failed to inspect current default storage")
+				return
+			}
+			previousDefault = capturedDefault
+		}
 	}
 
 	config, err := h.manager.CreateConfig(ctx, &req, userID)
 	if err != nil {
 		adminConfigLog.Errorf("Failed to create config: %v", err)
-		if errors.Is(err, configsvc.ErrInvalidOAuthConfig) {
-			common.RespondError(c, http.StatusBadRequest, err.Error())
+		if respondConfigMutationError(c, err) {
 			return
 		}
 		common.RespondError(c, http.StatusInternalServerError, "Failed to create config")
@@ -202,6 +212,9 @@ func (h *ConfigHandler) CreateConfig(c *gin.Context) {
 		if err := h.reloadStorageConfig(config.ID, req.Config, config.IsDefault, config.IsEnabled); err != nil {
 			if rollbackErr := h.manager.DeleteConfig(c.Request.Context(), config.ID); rollbackErr != nil {
 				adminConfigLog.Errorf("Failed to rollback storage config creation: %v", rollbackErr)
+			}
+			if restoreErr := h.restoreStorageDefault(c.Request.Context(), previousDefault); restoreErr != nil {
+				adminConfigLog.Errorf("Failed to restore previous default storage after creation rollback: %v", restoreErr)
 			}
 			adminConfigLog.Errorf("Failed to load storage configuration: %v", err)
 			common.RespondError(c, http.StatusInternalServerError, "Failed to load storage configuration")
@@ -224,6 +237,7 @@ func (h *ConfigHandler) CreateConfig(c *gin.Context) {
 // @Failure      400      {object}  common.Response  "Invalid request or configuration test failed"
 // @Failure      401      {object}  common.Response  "Unauthorized"
 // @Failure      404      {object}  common.Response  "Config not found"
+// @Failure      409      {object}  common.Response  "Storage state conflict"
 // @Failure      500      {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
 // @Router       /api/v1/admin/configs/{id} [put]
@@ -246,10 +260,29 @@ func (h *ConfigHandler) UpdateConfig(c *gin.Context) {
 		return
 	}
 
-	if req.Category == models.ConfigCategoryStorage {
+	existing, err := h.manager.GetConfig(ctx, uint(id), false)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			common.RespondError(c, http.StatusNotFound, "Config not found")
+		} else {
+			adminConfigLog.Errorf("Failed to get config %d before update: %v", id, err)
+			common.RespondError(c, http.StatusInternalServerError, "Failed to get config")
+		}
+		return
+	}
+	if isHiddenExternalConfigCategory(existing.Category) {
+		common.RespondError(c, http.StatusNotFound, "Config not found")
+		return
+	}
+	if req.Category != existing.Category {
+		common.RespondError(c, http.StatusBadRequest, "Configuration category cannot be changed")
+		return
+	}
+
+	if existing.Category == models.ConfigCategoryStorage {
 		testResult := h.testConfig(ctx, &models.TestConfigRequest{
-			Category: req.Category,
-			Config:   req.Config,
+			Category: existing.Category,
+			Config:   mergeConfigMaps(existing.Config, req.Config),
 		})
 		if !testResult.Success {
 			common.RespondError(c, http.StatusBadRequest, fmt.Sprintf("Storage configuration test failed: %s", testResult.Message))
@@ -260,8 +293,7 @@ func (h *ConfigHandler) UpdateConfig(c *gin.Context) {
 	config, err := h.manager.UpdateConfig(ctx, uint(id), &req)
 	if err != nil {
 		adminConfigLog.Errorf("Failed to update config: %v", err)
-		if errors.Is(err, configsvc.ErrInvalidOAuthConfig) {
-			common.RespondError(c, http.StatusBadRequest, err.Error())
+		if respondConfigMutationError(c, err) {
 			return
 		}
 		common.RespondError(c, http.StatusInternalServerError, "Failed to update config")
@@ -269,14 +301,20 @@ func (h *ConfigHandler) UpdateConfig(c *gin.Context) {
 	}
 
 	// 如果是存储配置，热重载到存储层（使用合并后的未脱敏配置，避免 req.Config 中的 "******" 覆盖真实凭证）
-	if req.Category == models.ConfigCategoryStorage {
+	if config.Category == models.ConfigCategoryStorage {
 		merged, mErr := h.manager.GetConfig(c.Request.Context(), config.ID, false)
 		if mErr != nil {
+			if rollbackErr := h.rollbackStorageUpdate(c.Request.Context(), existing); rollbackErr != nil {
+				adminConfigLog.Errorf("Failed to rollback storage update after fetch error: %v", rollbackErr)
+			}
 			adminConfigLog.Errorf("Failed to fetch merged storage config %d for reload: %v", config.ID, mErr)
 			common.RespondError(c, http.StatusInternalServerError, "Failed to reload storage configuration")
 			return
 		}
 		if err := h.reloadStorageConfig(merged.ID, merged.Config, merged.IsDefault, merged.IsEnabled); err != nil {
+			if rollbackErr := h.rollbackStorageUpdate(c.Request.Context(), existing); rollbackErr != nil {
+				adminConfigLog.Errorf("Failed to rollback storage update after reload error: %v", rollbackErr)
+			}
 			adminConfigLog.Errorf("Failed to reload storage configuration: %v", err)
 			common.RespondError(c, http.StatusInternalServerError, "Failed to reload storage configuration")
 			return
@@ -354,6 +392,7 @@ func (h *ConfigHandler) DeleteConfig(c *gin.Context) {
 // @Failure      400  {object}  common.Response  "Invalid config ID or storage provider not loaded"
 // @Failure      401  {object}  common.Response  "Unauthorized"
 // @Failure      404  {object}  common.Response  "Config not found"
+// @Failure      409  {object}  common.Response  "Storage is disabled"
 // @Failure      500  {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
 // @Router       /api/v1/admin/configs/{id}/default [post]
@@ -382,7 +421,11 @@ func (h *ConfigHandler) SetDefaultConfig(c *gin.Context) {
 	}
 
 	if config.Category == models.ConfigCategoryStorage {
-		_, err := storage.GetByID(uint(id))
+		if !config.IsEnabled {
+			common.RespondError(c, http.StatusConflict, "Cannot set a disabled storage as default; enable it first")
+			return
+		}
+		_, err := storage.GetWritableByID(uint(id))
 		if err != nil {
 			// Provider 未加载，尝试热重载
 			if loadErr := h.reloadStorageConfig(config.ID, config.Config, false, config.IsEnabled); loadErr != nil {
@@ -392,10 +435,15 @@ func (h *ConfigHandler) SetDefaultConfig(c *gin.Context) {
 			}
 		}
 	}
+	previousDefault, previousErr := h.findDefaultConfig(ctx, config.Category)
+	if previousErr != nil {
+		adminConfigLog.Errorf("Failed to capture previous default config: %v", previousErr)
+		common.RespondError(c, http.StatusInternalServerError, "Failed to inspect current default config")
+		return
+	}
 
 	if err := h.manager.SetDefault(ctx, uint(id)); err != nil {
-		if errors.Is(err, configsvc.ErrCannotSetDisabledStorageDefault) {
-			common.RespondError(c, http.StatusConflict, "Cannot set a disabled storage as default; enable it first")
+		if respondConfigMutationError(c, err) {
 			return
 		}
 		adminConfigLog.Errorf("Failed to set default: %v", err)
@@ -405,6 +453,17 @@ func (h *ConfigHandler) SetDefaultConfig(c *gin.Context) {
 
 	if config.Category == models.ConfigCategoryStorage {
 		if err := storage.SetDefaultID(uint(id)); err != nil {
+			// Registry may have been concurrently reloaded. Rebuild the target once
+			// before rolling the database default back.
+			if reloadErr := h.reloadStorageConfig(config.ID, config.Config, true, true); reloadErr == nil {
+				if retryErr := storage.SetDefaultID(uint(id)); retryErr == nil {
+					common.RespondSuccess(c, gin.H{"message": "Default config set successfully"})
+					return
+				}
+			}
+			if rollbackErr := h.restoreStorageDefault(ctx, previousDefault); rollbackErr != nil {
+				adminConfigLog.Errorf("Failed to rollback default storage after registry update error: %v", rollbackErr)
+			}
 			adminConfigLog.Errorf("Failed to set default storage: %v", err)
 			common.RespondError(c, http.StatusInternalServerError, "Failed to set default storage")
 			return
@@ -424,6 +483,7 @@ func (h *ConfigHandler) SetDefaultConfig(c *gin.Context) {
 // @Success      200  {object}  common.Response  "Config enabled successfully"
 // @Failure      400  {object}  common.Response  "Invalid config ID"
 // @Failure      401  {object}  common.Response  "Unauthorized"
+// @Failure      409  {object}  common.Response  "Default storage cannot be disabled"
 // @Failure      500  {object}  common.Response  "Internal server error"
 // @Security     ApiKeyAuth
 // @Router       /api/v1/admin/configs/{id}/enable [post]
@@ -457,8 +517,15 @@ func (h *ConfigHandler) EnableConfig(c *gin.Context) {
 	// 如果是存储配置，启用后热重载到内存（标记为可写）
 	if config.Category == models.ConfigCategoryStorage {
 		if err := h.reloadStorageConfig(config.ID, config.Config, config.IsDefault, true); err != nil {
-			// 热重载失败但不回滚启用操作，只是记录日志
-			adminConfigLog.Debugf("Failed to hot reload storage config %d after enable: %v", config.ID, err)
+			if !config.IsEnabled {
+				if rollbackErr := h.manager.Disable(ctx, uint(id)); rollbackErr != nil {
+					adminConfigLog.Errorf("Failed to rollback storage enable: %v", rollbackErr)
+				}
+				_ = storage.SetProviderWritable(uint(id), false)
+			}
+			adminConfigLog.Errorf("Failed to hot reload storage config %d after enable: %v", config.ID, err)
+			common.RespondError(c, http.StatusInternalServerError, "Failed to enable storage configuration")
+			return
 		}
 	}
 
@@ -515,7 +582,14 @@ func (h *ConfigHandler) DisableConfig(c *gin.Context) {
 	// 存储配置禁用后标记 registry 中对应 provider 为只读（保留历史图片可读）。
 	if config.Category == models.ConfigCategoryStorage {
 		if err := storage.SetProviderWritable(uint(id), false); err != nil {
-			adminConfigLog.Warnf("Failed to mark storage provider read-only: %v", err)
+			if config.IsEnabled {
+				if rollbackErr := h.manager.Enable(ctx, uint(id)); rollbackErr != nil {
+					adminConfigLog.Errorf("Failed to rollback storage disable: %v", rollbackErr)
+				}
+			}
+			adminConfigLog.Errorf("Failed to mark storage provider read-only: %v", err)
+			common.RespondError(c, http.StatusInternalServerError, "Failed to disable storage configuration")
+			return
 		}
 	}
 
@@ -838,6 +912,7 @@ func (h *ConfigHandler) ListStorageProviders(c *gin.Context) {
 			"name":       p.Name,
 			"type":       p.Type,
 			"is_default": p.IsDefault,
+			"writable":   p.Writable,
 		})
 	}
 	common.RespondSuccess(c, result)
@@ -939,6 +1014,86 @@ func (h *ConfigHandler) hotReloadStorageConfig(id uint, config map[string]any, i
 	}
 
 	return storage.AddOrUpdateProvider(cfg)
+}
+
+func respondConfigMutationError(c *gin.Context, err error) bool {
+	switch {
+	case errors.Is(err, configsvc.ErrInvalidOAuthConfig), errors.Is(err, configsvc.ErrConfigCategoryMismatch):
+		common.RespondError(c, http.StatusBadRequest, err.Error())
+		return true
+	case errors.Is(err, configsvc.ErrCannotDisableDefaultStorage),
+		errors.Is(err, configsvc.ErrCannotSetDisabledStorageDefault),
+		errors.Is(err, configsvc.ErrStorageDefaultChangeRequiresEndpoint):
+		common.RespondError(c, http.StatusConflict, err.Error())
+		return true
+	default:
+		return false
+	}
+}
+
+func mergeConfigMaps(existing, updates map[string]any) map[string]any {
+	merged := make(map[string]any, len(existing)+len(updates))
+	for key, value := range existing {
+		merged[key] = value
+	}
+	for key, value := range updates {
+		if text, ok := value.(string); ok && text == "******" {
+			continue
+		}
+		merged[key] = value
+	}
+	return merged
+}
+
+func (h *ConfigHandler) findDefaultConfig(ctx context.Context, category models.ConfigCategory) (*models.ConfigResponse, error) {
+	configs, err := h.manager.ListConfigs(ctx, category, false, false)
+	if err != nil {
+		return nil, err
+	}
+	for _, config := range configs {
+		if config != nil && config.IsDefault {
+			return config, nil
+		}
+	}
+	return nil, nil
+}
+
+func (h *ConfigHandler) restoreStorageDefault(ctx context.Context, previous *models.ConfigResponse) error {
+	if previous == nil {
+		return nil
+	}
+	if err := h.manager.SetDefault(ctx, previous.ID); err != nil {
+		return err
+	}
+	if err := storage.SetDefaultID(previous.ID); err == nil {
+		return nil
+	}
+	if err := h.reloadStorageConfig(previous.ID, previous.Config, true, previous.IsEnabled); err != nil {
+		return err
+	}
+	return storage.SetDefaultID(previous.ID)
+}
+
+func (h *ConfigHandler) rollbackStorageUpdate(ctx context.Context, previous *models.ConfigResponse) error {
+	if previous == nil {
+		return nil
+	}
+	enabled := previous.IsEnabled
+	isDefault := previous.IsDefault
+	priority := previous.Priority
+	_, err := h.manager.UpdateConfig(ctx, previous.ID, &models.SystemConfigStoreRequest{
+		Category:    previous.Category,
+		Name:        previous.Name,
+		Config:      previous.Config,
+		IsEnabled:   &enabled,
+		IsDefault:   &isDefault,
+		Priority:    &priority,
+		Description: previous.Description,
+	})
+	if err != nil {
+		return err
+	}
+	return h.reloadStorageConfig(previous.ID, previous.Config, previous.IsDefault, previous.IsEnabled)
 }
 
 func getString(m map[string]any, key string) string {

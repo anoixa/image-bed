@@ -286,17 +286,18 @@ func (t *ImagePipelineTask) Execute() {
 	defer cancel()
 
 	// 重新从当前 registry 快照解析写入目标：
-	//   - 明确禁用（已加载但不可写）→ 暂停，保持 pending，不消耗重试；
-	//   - 可写 → 刷新到当前 provider，避免 reload/默认切换后的旧指针 TOCTOU；
-	//   - 未加载/无默认 → 沿用任务构造时传入的 t.Storage（旧行为），由下游暴露失败。
+	//   - 禁用、未加载或无默认 → 暂停，保持 pending，不消耗重试；
+	//   - 可写 → 刷新到当前 provider，避免 reload/默认切换后的旧指针 TOCTOU。
 	provider, _, resolveErr := storage.ResolveWritable(t.StorageConfigID)
-	switch {
-	case resolveErr == nil:
-		t.Storage = provider
-	case errors.Is(resolveErr, storage.ErrProviderDisabled):
-		pipelineLog.Infof("Task for image %s skipped: storage disabled", t.ImageIdentifier)
+	if resolveErr != nil {
+		if errors.Is(resolveErr, storage.ErrProviderDisabled) {
+			pipelineLog.Infof("Task for image %s skipped: storage disabled", t.ImageIdentifier)
+		} else {
+			pipelineLog.Warnf("Task for image %s skipped: storage unavailable: %v", t.ImageIdentifier, resolveErr)
+		}
 		return
 	}
+	t.Storage = provider
 
 	if t.ThumbVariantID > 0 {
 		acquired, err := t.VariantRepo.UpdateStatusCAS(

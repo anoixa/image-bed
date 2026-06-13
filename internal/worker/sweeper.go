@@ -14,6 +14,7 @@ const sweeperInterval = 5 * time.Minute
 const staleThreshold = 15 * time.Minute
 const staleMaxRetries = 3
 const pendingScanBatch = 100
+const pendingScanRunLimit = 100
 
 var sweeperLog = utils.ForModule("Sweeper")
 
@@ -119,8 +120,10 @@ func sweepOnce(ctx context.Context, variantRepo *images.VariantRepository, image
 		iRepo := imageRepo.WithContext(ctx)
 		cursor := uint(0)
 		var pendingTriggered uint64
-		for {
-			page, err := vRepo.ListDuePendingImageIDs(cursor, pendingScanBatch)
+		for pendingTriggered < pendingScanRunLimit {
+			remaining := pendingScanRunLimit - int(pendingTriggered)
+			pageSize := min(pendingScanBatch, remaining)
+			page, err := vRepo.ListDuePendingImageIDs(cursor, pageSize)
 			if err != nil {
 				recordSweeperError(now, err.Error())
 				sweeperLog.Warnf("Failed to list due pending variants: %v", err)
@@ -145,8 +148,11 @@ func sweepOnce(ctx context.Context, variantRepo *images.VariantRepository, image
 				triggerFn(img)
 				pendingTriggered++
 				retriggered++
+				if pendingTriggered >= pendingScanRunLimit {
+					break
+				}
 			}
-			if uint(len(page)) < pendingScanBatch {
+			if len(page) < pageSize || pendingTriggered >= pendingScanRunLimit {
 				break
 			}
 			cursor = lastID

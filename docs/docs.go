@@ -865,6 +865,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/common.Response"
                         }
                     },
+                    "409": {
+                        "description": "Storage state conflict",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
                     "500": {
                         "description": "Internal server error",
                         "schema": {
@@ -1000,6 +1006,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/common.Response"
                         }
                     },
+                    "409": {
+                        "description": "Storage state conflict",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
                     "500": {
                         "description": "Internal server error",
                         "schema": {
@@ -1120,6 +1132,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/common.Response"
                         }
                     },
+                    "409": {
+                        "description": "Storage is disabled",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
                     "500": {
                         "description": "Internal server error",
                         "schema": {
@@ -1226,6 +1244,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "409": {
+                        "description": "Default storage cannot be disabled",
                         "schema": {
                             "$ref": "#/definitions/common.Response"
                         }
