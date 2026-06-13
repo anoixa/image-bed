@@ -41,7 +41,7 @@ type configManager interface {
 type ConfigHandler struct {
 	manager                      configManager
 	imagesRepo                   *imagesRepo.Repository
-	reloadStorageConfig          func(id uint, config map[string]any, isDefault bool) error
+	reloadStorageConfig          func(id uint, config map[string]any, isDefault, enabled bool) error
 	allowPrivateStorageEndpoints bool
 }
 
@@ -199,7 +199,7 @@ func (h *ConfigHandler) CreateConfig(c *gin.Context) {
 	}
 
 	if req.Category == models.ConfigCategoryStorage {
-		if err := h.reloadStorageConfig(config.ID, req.Config, config.IsDefault); err != nil {
+		if err := h.reloadStorageConfig(config.ID, req.Config, config.IsDefault, config.IsEnabled); err != nil {
 			if rollbackErr := h.manager.DeleteConfig(c.Request.Context(), config.ID); rollbackErr != nil {
 				adminConfigLog.Errorf("Failed to rollback storage config creation: %v", rollbackErr)
 			}
@@ -268,9 +268,15 @@ func (h *ConfigHandler) UpdateConfig(c *gin.Context) {
 		return
 	}
 
-	// 如果是存储配置，热重载到存储层
+	// 如果是存储配置，热重载到存储层（使用合并后的未脱敏配置，避免 req.Config 中的 "******" 覆盖真实凭证）
 	if req.Category == models.ConfigCategoryStorage {
-		if err := h.reloadStorageConfig(config.ID, req.Config, config.IsDefault); err != nil {
+		merged, mErr := h.manager.GetConfig(c.Request.Context(), config.ID, false)
+		if mErr != nil {
+			adminConfigLog.Errorf("Failed to fetch merged storage config %d for reload: %v", config.ID, mErr)
+			common.RespondError(c, http.StatusInternalServerError, "Failed to reload storage configuration")
+			return
+		}
+		if err := h.reloadStorageConfig(merged.ID, merged.Config, merged.IsDefault, merged.IsEnabled); err != nil {
 			adminConfigLog.Errorf("Failed to reload storage configuration: %v", err)
 			common.RespondError(c, http.StatusInternalServerError, "Failed to reload storage configuration")
 			return
@@ -379,7 +385,7 @@ func (h *ConfigHandler) SetDefaultConfig(c *gin.Context) {
 		_, err := storage.GetByID(uint(id))
 		if err != nil {
 			// Provider 未加载，尝试热重载
-			if loadErr := h.reloadStorageConfig(config.ID, config.Config, false); loadErr != nil {
+			if loadErr := h.reloadStorageConfig(config.ID, config.Config, false, config.IsEnabled); loadErr != nil {
 				adminConfigLog.Errorf("Storage provider not loaded and failed to reload: %v", loadErr)
 				common.RespondError(c, http.StatusBadRequest, "Storage provider not loaded and failed to reload")
 				return
@@ -388,6 +394,10 @@ func (h *ConfigHandler) SetDefaultConfig(c *gin.Context) {
 	}
 
 	if err := h.manager.SetDefault(ctx, uint(id)); err != nil {
+		if errors.Is(err, configsvc.ErrCannotSetDisabledStorageDefault) {
+			common.RespondError(c, http.StatusConflict, "Cannot set a disabled storage as default; enable it first")
+			return
+		}
 		adminConfigLog.Errorf("Failed to set default: %v", err)
 		common.RespondError(c, http.StatusInternalServerError, "Failed to set default")
 		return
@@ -444,9 +454,9 @@ func (h *ConfigHandler) EnableConfig(c *gin.Context) {
 		return
 	}
 
-	// 如果是存储配置，启用后热重载到内存
+	// 如果是存储配置，启用后热重载到内存（标记为可写）
 	if config.Category == models.ConfigCategoryStorage {
-		if err := h.reloadStorageConfig(config.ID, config.Config, config.IsDefault); err != nil {
+		if err := h.reloadStorageConfig(config.ID, config.Config, config.IsDefault, true); err != nil {
 			// 热重载失败但不回滚启用操作，只是记录日志
 			adminConfigLog.Debugf("Failed to hot reload storage config %d after enable: %v", config.ID, err)
 		}
@@ -493,9 +503,20 @@ func (h *ConfigHandler) DisableConfig(c *gin.Context) {
 	}
 
 	if err := h.manager.Disable(ctx, uint(id)); err != nil {
+		if errors.Is(err, configsvc.ErrCannotDisableDefaultStorage) {
+			common.RespondError(c, http.StatusConflict, "Cannot disable the default storage; switch the default first")
+			return
+		}
 		adminConfigLog.Errorf("Failed to disable config: %v", err)
 		common.RespondError(c, http.StatusInternalServerError, "Failed to disable config")
 		return
+	}
+
+	// 存储配置禁用后标记 registry 中对应 provider 为只读（保留历史图片可读）。
+	if config.Category == models.ConfigCategoryStorage {
+		if err := storage.SetProviderWritable(uint(id), false); err != nil {
+			adminConfigLog.Warnf("Failed to mark storage provider read-only: %v", err)
+		}
 	}
 
 	common.RespondSuccess(c, gin.H{"message": "Config disabled successfully"})
@@ -861,12 +882,9 @@ func (h *ConfigHandler) ReloadStorageConfig(c *gin.Context) {
 		common.RespondError(c, http.StatusBadRequest, "Config is not a storage configuration")
 		return
 	}
-	if !config.IsEnabled {
-		common.RespondError(c, http.StatusBadRequest, "Storage configuration is disabled")
-		return
-	}
 
-	if err := h.reloadStorageConfig(config.ID, config.Config, config.IsDefault); err != nil {
+	// 禁用存储也允许 reload：作为只读 provider 加载（writable=false），保留历史图片可读。
+	if err := h.reloadStorageConfig(config.ID, config.Config, config.IsDefault, config.IsEnabled); err != nil {
 		adminConfigLog.Errorf("Failed to reload storage config %d: %v", id, err)
 		common.RespondError(c, http.StatusInternalServerError, "Failed to reload storage configuration")
 		return
@@ -876,7 +894,7 @@ func (h *ConfigHandler) ReloadStorageConfig(c *gin.Context) {
 }
 
 // hotReloadStorageConfig 热重载存储配置
-func (h *ConfigHandler) hotReloadStorageConfig(id uint, config map[string]any, isDefault bool) error {
+func (h *ConfigHandler) hotReloadStorageConfig(id uint, config map[string]any, isDefault, enabled bool) error {
 	storageType := getString(config, "type")
 	if storageType == "" {
 		return fmt.Errorf("storage type is required")
@@ -887,6 +905,7 @@ func (h *ConfigHandler) hotReloadStorageConfig(id uint, config map[string]any, i
 		Name:      getString(config, "name"),
 		Type:      storageType,
 		IsDefault: isDefault,
+		IsEnabled: enabled,
 	}
 
 	switch storageType {

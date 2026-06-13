@@ -105,6 +105,7 @@ func TestDeleteSingleDoesNotDeletePhysicalFileWhenDatabaseDeleteFails(t *testing
 		ID:        providerID,
 		Name:      "test-local",
 		Type:      "local",
+		IsEnabled: true,
 		LocalPath: tempDir,
 	}))
 	t.Cleanup(func() {
@@ -159,6 +160,7 @@ func TestUploadSingleSourceDoesNotReuseSoftDeletedImageWithoutBackingFile(t *tes
 		ID:        providerID,
 		Name:      "test-local-reuse",
 		Type:      "local",
+		IsEnabled: true,
 		LocalPath: tempDir,
 	}))
 	t.Cleanup(func() {
@@ -225,6 +227,7 @@ func TestUploadSingleSourceCleansTempFileForDuplicateImage(t *testing.T) {
 		ID:        providerID,
 		Name:      "test-local-duplicate-cleanup",
 		Type:      "local",
+		IsEnabled: true,
 		LocalPath: tempDir,
 	}))
 	t.Cleanup(func() {
@@ -278,6 +281,7 @@ func TestUploadSingleSourceCleansTempFileForReusableSoftDeletedImage(t *testing.
 		ID:        providerID,
 		Name:      "test-local-soft-delete-cleanup",
 		Type:      "local",
+		IsEnabled: true,
 		LocalPath: tempDir,
 	}))
 	t.Cleanup(func() {
@@ -341,6 +345,7 @@ func TestUploadSingleSourceCleansTempFileWhenConversionTaskIsDropped(t *testing.
 		ID:        providerID,
 		Name:      "test-local-task-drop-cleanup",
 		Type:      "local",
+		IsEnabled: true,
 		LocalPath: tempDir,
 	}))
 	t.Cleanup(func() {

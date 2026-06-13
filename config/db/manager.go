@@ -91,6 +91,19 @@ func (m *Manager) CreateConfig(ctx context.Context, req *models.SystemConfigStor
 		}
 	}
 
+	// 计算有效启用/默认状态用于不变量校验（未提供时按模型默认 true / false）。
+	effectiveEnabled := true
+	if req.IsEnabled != nil {
+		effectiveEnabled = *req.IsEnabled
+	}
+	effectiveDefault := false
+	if req.IsDefault != nil {
+		effectiveDefault = *req.IsDefault
+	}
+	if req.Category == models.ConfigCategoryStorage && effectiveDefault && !effectiveEnabled {
+		return nil, ErrCannotSetDisabledStorageDefault
+	}
+
 	baseKey := fmt.Sprintf("%s:%s", req.Category, req.Name)
 	key, err := m.repo.EnsureKeyUnique(ctx, baseKey)
 	if err != nil {
@@ -121,7 +134,17 @@ func (m *Manager) CreateConfig(ctx context.Context, req *models.SystemConfigStor
 		config.Priority = *req.Priority
 	}
 
-	if err := m.repo.Create(ctx, config); err != nil {
+	// 创建新的默认存储时，在同一事务中清除同类旧默认。
+	if err := m.repo.Transaction(ctx, func(tx *gorm.DB) error {
+		if config.Category == models.ConfigCategoryStorage && config.IsDefault {
+			if err := tx.Model(&models.SystemConfig{}).
+				Where("category = ?", config.Category).
+				Update("is_default", false).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Create(config).Error
+	}); err != nil {
 		return nil, fmt.Errorf("failed to create config: %w", err)
 	}
 
@@ -148,11 +171,23 @@ func (m *Manager) UpdateConfig(ctx context.Context, id uint, req *models.SystemC
 	if req.Description != "" {
 		config.Description = req.Description
 	}
+	// 存储的默认状态只能通过专用 SetDefault 操作改变；通用更新拒绝改变 is_default。
+	if config.Category == models.ConfigCategoryStorage && req.IsDefault != nil && *req.IsDefault != config.IsDefault {
+		return nil, fmt.Errorf("storage default can only be changed via the /default endpoint: %w", ErrCannotSetDisabledStorageDefault)
+	}
+	if config.Category != models.ConfigCategoryStorage && req.IsDefault != nil {
+		config.IsDefault = *req.IsDefault
+	}
 	if req.IsEnabled != nil {
 		config.IsEnabled = *req.IsEnabled
 	}
 	if req.Priority != nil {
 		config.Priority = *req.Priority
+	}
+
+	// 不允许通过通用更新把存储留在「默认但禁用」状态。
+	if config.Category == models.ConfigCategoryStorage && config.IsDefault && !config.IsEnabled {
+		return nil, ErrCannotDisableDefaultStorage
 	}
 
 	if err := m.repo.Update(ctx, config); err != nil {
@@ -274,19 +309,40 @@ func (m *Manager) ToResponseWithMask(ctx context.Context, config *models.SystemC
 	}, nil
 }
 
-// SetDefault 设置默认配置
+// SetDefault 设置默认配置。存储配置要求目标已启用（事务内条件更新校验）。
 func (m *Manager) SetDefault(ctx context.Context, id uint) error {
-	config, err := m.repo.GetByID(ctx, id)
+	var target *models.SystemConfig
+	err := m.repo.Transaction(ctx, func(tx *gorm.DB) error {
+		var cfg models.SystemConfig
+		if err := tx.First(&cfg, id).Error; err != nil {
+			return err
+		}
+		target = &cfg
+		if cfg.Category == models.ConfigCategoryStorage && !cfg.IsEnabled {
+			return ErrCannotSetDisabledStorageDefault
+		}
+		// 清除同类所有默认，再设置目标。
+		if err := tx.Model(&models.SystemConfig{}).
+			Where("category = ?", cfg.Category).
+			Update("is_default", false).Error; err != nil {
+			return err
+		}
+		q := tx.Model(&models.SystemConfig{}).Where("id = ?", id).Update("is_default", true)
+		if q.Error != nil {
+			return q.Error
+		}
+		// RowsAffected==0 表示并发 Disable 抢先禁用了该存储默认。
+		if cfg.Category == models.ConfigCategoryStorage && q.RowsAffected == 0 {
+			return ErrCannotSetDisabledStorageDefault
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}
 
-	if err := m.repo.SetDefault(ctx, id, config.Category); err != nil {
-		return err
-	}
-
-	m.cache.Invalidate(config.Category)
-	m.eventBus.Publish(EventConfigUpdated, config)
+	m.cache.Invalidate(target.Category)
+	m.eventBus.Publish(EventConfigUpdated, target)
 
 	return nil
 }
@@ -309,20 +365,41 @@ func (m *Manager) Enable(ctx context.Context, id uint) error {
 	return nil
 }
 
-// Disable 禁用配置
+// Disable 禁用配置。存储配置的默认项不能被禁用（条件更新校验 RowsAffected）。
 func (m *Manager) Disable(ctx context.Context, id uint) error {
-	if err := m.repo.Disable(ctx, id); err != nil {
+	var target *models.SystemConfig
+	err := m.repo.Transaction(ctx, func(tx *gorm.DB) error {
+		var cfg models.SystemConfig
+		if err := tx.First(&cfg, id).Error; err != nil {
+			return err
+		}
+		target = &cfg
+		if cfg.Category != models.ConfigCategoryStorage {
+			return tx.Model(&models.SystemConfig{}).Where("id = ?", id).Update("is_enabled", false).Error
+		}
+		// 存储配置：条件更新——只禁用非默认行。
+		q := tx.Model(&models.SystemConfig{}).
+			Where("id = ? AND is_default = ?", id, false).
+			Update("is_enabled", false)
+		if q.Error != nil {
+			return q.Error
+		}
+		if q.RowsAffected == 0 {
+			// 要么是默认项，要么不存在：区分。
+			var exists models.SystemConfig
+			if e := tx.Select("id").First(&exists, id).Error; e != nil {
+				return e
+			}
+			return ErrCannotDisableDefaultStorage
+		}
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 
 	m.cache.InvalidateAll()
-
-	config, err := m.repo.GetByID(ctx, id)
-	if err != nil {
-		configManagerLog.Errorf("Disable: failed to fetch config %d after update: %v", id, err)
-		return nil
-	}
-	m.eventBus.Publish(EventConfigUpdated, config)
+	m.eventBus.Publish(EventConfigUpdated, target)
 
 	return nil
 }
@@ -352,6 +429,7 @@ func (m *Manager) GetStorageConfigs(ctx context.Context) ([]storage.StorageConfi
 			ID:        cfg.ID,
 			Name:      cfg.Name,
 			IsDefault: cfg.IsDefault,
+			IsEnabled: cfg.IsEnabled,
 		}
 
 		storageType := getStringFromMap(configMap, "type", "local")

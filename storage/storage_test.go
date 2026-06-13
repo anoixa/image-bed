@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -23,8 +24,20 @@ func resetStorage(t *testing.T) {
 	providersMu.Lock()
 	defer providersMu.Unlock()
 	registryPtr.Store(&registryState{
-		providers: make(map[uint]Provider),
+		providers: make(map[uint]providerEntry),
 	})
+}
+
+func TestErrSentinelsAreDistinct(t *testing.T) {
+	if !errors.Is(ErrProviderDisabled, ErrProviderDisabled) {
+		t.Fatal("ErrProviderDisabled must support errors.Is")
+	}
+	if errors.Is(ErrProviderDisabled, ErrProviderNotFound) {
+		t.Fatal("disabled and not-found must be distinct")
+	}
+	if errors.Is(ErrProviderDisabled, ErrCannotDisableDefaultProvider) {
+		t.Fatal("disabled and cannot-disable-default must be distinct")
+	}
 }
 
 // TestConcurrentAccess 测试并发访问 providers map
@@ -96,6 +109,7 @@ func TestAddOrUpdateProvider(t *testing.T) {
 		Type:      "local",
 		LocalPath: filepath.Join(tempDir, "test1"),
 		IsDefault: false,
+		IsEnabled: true,
 	}
 
 	err := AddOrUpdateProvider(cfg)
@@ -183,6 +197,7 @@ func TestSetDefaultID(t *testing.T) {
 		Type:      "local",
 		LocalPath: filepath.Join(tempDir, "test10"),
 		IsDefault: true,
+		IsEnabled: true,
 	}
 	cfg2 := StorageConfig{
 		ID:        11,
@@ -190,6 +205,7 @@ func TestSetDefaultID(t *testing.T) {
 		Type:      "local",
 		LocalPath: filepath.Join(tempDir, "test11"),
 		IsDefault: false,
+		IsEnabled: true,
 	}
 
 	_ = AddOrUpdateProvider(cfg1)
@@ -291,4 +307,161 @@ func TestLocalStoragePathProvider_Traversal(t *testing.T) {
 
 	_, err = pp.GetFilePath("/etc/passwd")
 	assert.Error(t, err, "absolute path must be rejected")
+}
+
+// --- writable / disabled semantics ---
+
+func TestGetWritableByIDAndIsWritable(t *testing.T) {
+	tempDir := setupTestDir(t)
+	resetStorage(t)
+
+	require.NoError(t, AddOrUpdateProvider(StorageConfig{
+		ID: 1, Name: "on", Type: "local", LocalPath: filepath.Join(tempDir, "on"), IsEnabled: true,
+	}))
+	require.NoError(t, AddOrUpdateProvider(StorageConfig{
+		ID: 2, Name: "off", Type: "local", LocalPath: filepath.Join(tempDir, "off"), IsEnabled: false,
+	}))
+
+	// readable access ignores writable
+	if _, err := GetByID(2); err != nil {
+		t.Fatalf("GetByID(disabled) must succeed (read): %v", err)
+	}
+	// writable access enforces it
+	if _, err := GetWritableByID(1); err != nil {
+		t.Fatalf("GetWritableByID(enabled): %v", err)
+	}
+	if _, err := GetWritableByID(2); !errors.Is(err, ErrProviderDisabled) {
+		t.Fatalf("GetWritableByID(disabled) = %v, want ErrProviderDisabled", err)
+	}
+	if _, err := GetWritableByID(999); !errors.Is(err, ErrProviderNotFound) {
+		t.Fatalf("GetWritableByID(unknown) = %v, want ErrProviderNotFound", err)
+	}
+	assert.True(t, IsWritable(1))
+	assert.False(t, IsWritable(2))
+	assert.False(t, IsWritable(999))
+	assert.False(t, IsWritable(0), "no default configured -> IsWritable(0) false")
+}
+
+func TestResolveWritable(t *testing.T) {
+	tempDir := setupTestDir(t)
+	resetStorage(t)
+
+	require.NoError(t, AddOrUpdateProvider(StorageConfig{
+		ID: 7, Name: "def", Type: "local", LocalPath: filepath.Join(tempDir, "def"), IsDefault: true, IsEnabled: true,
+	}))
+	require.NoError(t, AddOrUpdateProvider(StorageConfig{
+		ID: 8, Name: "off", Type: "local", LocalPath: filepath.Join(tempDir, "off"), IsEnabled: false,
+	}))
+
+	p, id, err := ResolveWritable(0)
+	require.NoError(t, err)
+	assert.Equal(t, uint(7), id)
+	assert.NotNil(t, p)
+	assert.Equal(t, GetDefaultID(), id, "resolved id must equal GetDefaultID (same snapshot)")
+
+	if _, _, err := ResolveWritable(8); !errors.Is(err, ErrProviderDisabled) {
+		t.Fatalf("ResolveWritable(disabled) = %v, want ErrProviderDisabled", err)
+	}
+	if _, _, err := ResolveWritable(999); !errors.Is(err, ErrProviderNotFound) {
+		t.Fatalf("ResolveWritable(unknown) = %v, want ErrProviderNotFound", err)
+	}
+}
+
+func TestAddOrUpdateProviderDefaultPointerRefreshAndClear(t *testing.T) {
+	tempDir := setupTestDir(t)
+	resetStorage(t)
+
+	require.NoError(t, AddOrUpdateProvider(StorageConfig{
+		ID: 1, Name: "v1", Type: "local", LocalPath: filepath.Join(tempDir, "1"), IsDefault: true, IsEnabled: true,
+	}))
+	assert.Equal(t, uint(1), GetDefaultID())
+
+	// update same default id (still IsDefault&&IsEnabled) -> default must remain set to id 1
+	require.NoError(t, AddOrUpdateProvider(StorageConfig{
+		ID: 1, Name: "v2", Type: "local", LocalPath: filepath.Join(tempDir, "1b"), IsDefault: true, IsEnabled: true,
+	}))
+	assert.Equal(t, uint(1), GetDefaultID(), "default must remain on id 1 after in-place update")
+	assert.NotNil(t, GetDefault(), "default provider must remain set after in-place update")
+
+	// flip current default to non-default -> dangling default cleared
+	require.NoError(t, AddOrUpdateProvider(StorageConfig{
+		ID: 1, Name: "v2", Type: "local", LocalPath: filepath.Join(tempDir, "1b"), IsDefault: false, IsEnabled: true,
+	}))
+	assert.Equal(t, uint(0), GetDefaultID(), "clearing is_default on current default must null default")
+	assert.Nil(t, GetDefault())
+
+	// disable the current default -> dangling default cleared
+	require.NoError(t, AddOrUpdateProvider(StorageConfig{
+		ID: 2, Name: "d2", Type: "local", LocalPath: filepath.Join(tempDir, "2"), IsDefault: true, IsEnabled: true,
+	}))
+	require.NoError(t, AddOrUpdateProvider(StorageConfig{
+		ID: 2, Name: "d2", Type: "local", LocalPath: filepath.Join(tempDir, "2"), IsDefault: true, IsEnabled: false,
+	}))
+	assert.Equal(t, uint(0), GetDefaultID(), "disabling current default must null default")
+}
+
+func TestSetDefaultIDRejectsDisabled(t *testing.T) {
+	tempDir := setupTestDir(t)
+	resetStorage(t)
+	require.NoError(t, AddOrUpdateProvider(StorageConfig{
+		ID: 5, Name: "off", Type: "local", LocalPath: filepath.Join(tempDir, "5"), IsEnabled: false,
+	}))
+	if err := SetDefaultID(5); !errors.Is(err, ErrProviderDisabled) {
+		t.Fatalf("SetDefaultID(disabled) = %v, want ErrProviderDisabled", err)
+	}
+}
+
+func TestSetProviderWritableGuardsDefault(t *testing.T) {
+	tempDir := setupTestDir(t)
+	resetStorage(t)
+	require.NoError(t, AddOrUpdateProvider(StorageConfig{
+		ID: 9, Name: "def", Type: "local", LocalPath: filepath.Join(tempDir, "9"), IsDefault: true, IsEnabled: true,
+	}))
+	if err := SetProviderWritable(9, false); !errors.Is(err, ErrCannotDisableDefaultProvider) {
+		t.Fatalf("SetProviderWritable(default,false) = %v, want ErrCannotDisableDefaultProvider", err)
+	}
+	// non-default toggle
+	require.NoError(t, AddOrUpdateProvider(StorageConfig{
+		ID: 10, Name: "aux", Type: "local", LocalPath: filepath.Join(tempDir, "10"), IsEnabled: true,
+	}))
+	require.NoError(t, SetProviderWritable(10, false))
+	if _, err := GetWritableByID(10); !errors.Is(err, ErrProviderDisabled) {
+		t.Fatalf("after disable, GetWritableByID = %v, want ErrProviderDisabled", err)
+	}
+	// re-enable
+	require.NoError(t, SetProviderWritable(10, true))
+	if _, err := GetWritableByID(10); err != nil {
+		t.Fatalf("after re-enable, GetWritableByID = %v", err)
+	}
+	// unknown id is no-op
+	if err := SetProviderWritable(999, false); err != nil {
+		t.Fatalf("SetProviderWritable(unknown) = %v, want nil", err)
+	}
+}
+
+func TestInitStoragePublishesReadableBeforeError(t *testing.T) {
+	tempDir := setupTestDir(t)
+	resetStorage(t)
+	err := InitStorage([]StorageConfig{
+		{ID: 1, Name: "off", Type: "local", LocalPath: filepath.Join(tempDir, "off"), IsEnabled: false},
+	})
+	require.Error(t, err, "no writable default -> error")
+	// disabled provider must still be readable
+	p, gerr := GetByID(1)
+	require.NoError(t, gerr)
+	assert.NotNil(t, p)
+	if _, werr := GetWritableByID(1); !errors.Is(werr, ErrProviderDisabled) {
+		t.Fatalf("disabled provider must not be writable: %v", werr)
+	}
+}
+
+func TestInitStorageDisabledDefaultDegradesToEnabled(t *testing.T) {
+	tempDir := setupTestDir(t)
+	resetStorage(t)
+	err := InitStorage([]StorageConfig{
+		{ID: 1, Name: "off-but-default", Type: "local", LocalPath: filepath.Join(tempDir, "1"), IsDefault: true, IsEnabled: false},
+		{ID: 2, Name: "on", Type: "local", LocalPath: filepath.Join(tempDir, "2"), IsEnabled: true},
+	})
+	require.NoError(t, err, "degraded success expected")
+	assert.Equal(t, uint(2), GetDefaultID(), "default should fall back to enabled provider")
 }

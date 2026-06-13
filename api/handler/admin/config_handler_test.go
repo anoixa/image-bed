@@ -105,7 +105,7 @@ func TestEnableConfigReloadsWithUnmaskedStorageSecrets(t *testing.T) {
 		manager:    manager,
 		imagesRepo: nil,
 	}
-	handler.reloadStorageConfig = func(id uint, config map[string]any, isDefault bool) error {
+	handler.reloadStorageConfig = func(id uint, config map[string]any, isDefault, enabled bool) error {
 		reloaded = config
 		return nil
 	}
@@ -385,7 +385,7 @@ func TestReloadStorageConfigReloadsWithUnmaskedSecrets(t *testing.T) {
 	var reloadedID uint
 	var reloaded map[string]any
 	handler := &ConfigHandler{manager: manager}
-	handler.reloadStorageConfig = func(id uint, config map[string]any, isDefault bool) error {
+	handler.reloadStorageConfig = func(id uint, config map[string]any, isDefault, enabled bool) error {
 		reloadedID = id
 		reloaded = config
 		return nil
@@ -409,7 +409,7 @@ func TestReloadStorageConfigNotFound(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	handler := &ConfigHandler{manager: &stubConfigManager{getConfigErr: gorm.ErrRecordNotFound}}
-	handler.reloadStorageConfig = func(uint, map[string]any, bool) error {
+	handler.reloadStorageConfig = func(uint, map[string]any, bool, bool) error {
 		t.Fatal("reloadStorageConfig must not be called when config is missing")
 		return nil
 	}
@@ -431,7 +431,7 @@ func TestReloadStorageConfigRejectsNonStorageCategory(t *testing.T) {
 		config: &models.ConfigResponse{ID: 9, Category: models.ConfigCategoryJWT},
 	}
 	handler := &ConfigHandler{manager: manager}
-	handler.reloadStorageConfig = func(uint, map[string]any, bool) error {
+	handler.reloadStorageConfig = func(uint, map[string]any, bool, bool) error {
 		t.Fatal("reloadStorageConfig must not be called for non-storage category")
 		return nil
 	}
@@ -446,7 +446,7 @@ func TestReloadStorageConfigRejectsNonStorageCategory(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestReloadStorageConfigRejectsDisabledStorage(t *testing.T) {
+func TestReloadStorageConfigAllowsDisabledReadOnly(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	manager := &stubConfigManager{
@@ -457,8 +457,9 @@ func TestReloadStorageConfigRejectsDisabledStorage(t *testing.T) {
 		},
 	}
 	handler := &ConfigHandler{manager: manager}
-	handler.reloadStorageConfig = func(uint, map[string]any, bool) error {
-		t.Fatal("reloadStorageConfig must not be called for a disabled storage config")
+	var calledEnabled *bool
+	handler.reloadStorageConfig = func(_ uint, _ map[string]any, _ bool, enabled bool) error {
+		calledEnabled = &enabled
 		return nil
 	}
 
@@ -469,6 +470,7 @@ func TestReloadStorageConfigRejectsDisabledStorage(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), "Storage configuration is disabled")
+	require.Equal(t, http.StatusOK, w.Code)
+	require.NotNil(t, calledEnabled, "reloadStorageConfig must be called for disabled storage")
+	assert.False(t, *calledEnabled, "disabled storage must reload with enabled=false")
 }

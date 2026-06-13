@@ -46,6 +46,7 @@ func TestCheckStorageAvailable(t *testing.T) {
 		Name:      "local-test",
 		Type:      "local",
 		IsDefault: true,
+		IsEnabled: true,
 		LocalPath: t.TempDir(),
 	}}); err != nil {
 		t.Fatalf("InitStorage: %v", err)
