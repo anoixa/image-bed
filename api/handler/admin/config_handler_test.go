@@ -88,6 +88,7 @@ func TestEnableConfigReloadsWithUnmaskedStorageSecrets(t *testing.T) {
 		config: &models.ConfigResponse{
 			ID:        42,
 			Category:  models.ConfigCategoryStorage,
+			IsEnabled: true,
 			IsDefault: true,
 			Config: map[string]any{
 				"type":              "s3",
@@ -360,4 +361,114 @@ func TestSetDefaultConfigReturnsInternalErrorWhenGetConfigFails(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+func TestReloadStorageConfigReloadsWithUnmaskedSecrets(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	manager := &stubConfigManager{
+		config: &models.ConfigResponse{
+			ID:        42,
+			Category:  models.ConfigCategoryStorage,
+			IsEnabled: true,
+			IsDefault: true,
+			Config: map[string]any{
+				"type":              "s3",
+				"endpoint":          "https://s3.example.com",
+				"bucket_name":       "images",
+				"access_key_id":     "ACCESS_KEY",
+				"secret_access_key": "SECRET_VALUE",
+			},
+		},
+	}
+
+	var reloadedID uint
+	var reloaded map[string]any
+	handler := &ConfigHandler{manager: manager}
+	handler.reloadStorageConfig = func(id uint, config map[string]any, isDefault bool) error {
+		reloadedID = id
+		reloaded = config
+		return nil
+	}
+
+	router := gin.New()
+	router.POST("/storage/reload/:id", handler.ReloadStorageConfig)
+
+	req := httptest.NewRequest(http.MethodPost, "/storage/reload/42", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.False(t, manager.getConfigMaskSensitive, "reload must use unmasked secrets")
+	assert.Equal(t, uint(42), reloadedID)
+	require.NotNil(t, reloaded)
+	assert.Equal(t, "SECRET_VALUE", reloaded["secret_access_key"])
+}
+
+func TestReloadStorageConfigNotFound(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	handler := &ConfigHandler{manager: &stubConfigManager{getConfigErr: gorm.ErrRecordNotFound}}
+	handler.reloadStorageConfig = func(uint, map[string]any, bool) error {
+		t.Fatal("reloadStorageConfig must not be called when config is missing")
+		return nil
+	}
+
+	router := gin.New()
+	router.POST("/storage/reload/:id", handler.ReloadStorageConfig)
+
+	req := httptest.NewRequest(http.MethodPost, "/storage/reload/42", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestReloadStorageConfigRejectsNonStorageCategory(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	manager := &stubConfigManager{
+		config: &models.ConfigResponse{ID: 9, Category: models.ConfigCategoryJWT},
+	}
+	handler := &ConfigHandler{manager: manager}
+	handler.reloadStorageConfig = func(uint, map[string]any, bool) error {
+		t.Fatal("reloadStorageConfig must not be called for non-storage category")
+		return nil
+	}
+
+	router := gin.New()
+	router.POST("/storage/reload/:id", handler.ReloadStorageConfig)
+
+	req := httptest.NewRequest(http.MethodPost, "/storage/reload/9", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestReloadStorageConfigRejectsDisabledStorage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	manager := &stubConfigManager{
+		config: &models.ConfigResponse{
+			ID:        42,
+			Category:  models.ConfigCategoryStorage,
+			IsEnabled: false,
+		},
+	}
+	handler := &ConfigHandler{manager: manager}
+	handler.reloadStorageConfig = func(uint, map[string]any, bool) error {
+		t.Fatal("reloadStorageConfig must not be called for a disabled storage config")
+		return nil
+	}
+
+	router := gin.New()
+	router.POST("/storage/reload/:id", handler.ReloadStorageConfig)
+
+	req := httptest.NewRequest(http.MethodPost, "/storage/reload/42", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "Storage configuration is disabled")
 }

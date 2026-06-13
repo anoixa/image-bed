@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,6 +18,14 @@ var (
 	providersMu sync.Mutex
 	registryPtr atomic.Pointer[registryState]
 	storageLog  = utils.ForModule("Storage")
+)
+
+// 存储不可用的哨兵错误，供上层用 errors.Is 判断并映射为 503。
+var (
+	// ErrNoDefaultStorage 表示当前没有可用的默认存储。
+	ErrNoDefaultStorage = errors.New("no default storage configured")
+	// ErrProviderNotFound 表示指定 ID 的存储 Provider 未加载。
+	ErrProviderNotFound = errors.New("storage provider not found")
 )
 
 type registryState struct {
@@ -205,7 +214,7 @@ func GetDefaultID() uint {
 func GetByID(id uint) (Provider, error) {
 	provider, ok := currentRegistry().providers[id]
 	if !ok {
-		return nil, fmt.Errorf("storage provider with ID %d not found", id)
+		return nil, fmt.Errorf("storage provider with ID %d: %w", id, ErrProviderNotFound)
 	}
 	return provider, nil
 }

@@ -91,7 +91,7 @@ func getStorageProviderByID(storageID uint) (storage.Provider, error) {
 	if storageID == 0 {
 		provider := storage.GetDefault()
 		if provider == nil {
-			return nil, errors.New("no default storage configured")
+			return nil, storage.ErrNoDefaultStorage
 		}
 		return provider, nil
 	}
@@ -101,6 +101,18 @@ func getStorageProviderByID(storageID uint) (storage.Provider, error) {
 		return nil, fmt.Errorf("failed to get storage provider by ID %d: %w", storageID, err)
 	}
 	return provider, nil
+}
+
+// IsStorageUnavailable 判断错误是否表示目标存储或默认存储当前不可用，
+// 供上层据此返回 503 Service Unavailable (F7 降级语义)。
+func IsStorageUnavailable(err error) bool {
+	return errors.Is(err, storage.ErrNoDefaultStorage) || errors.Is(err, storage.ErrProviderNotFound)
+}
+
+// CheckStorageAvailable 校验指定存储 ID（0 表示默认存储）对应的 Provider 是否已就绪。
+func CheckStorageAvailable(storageID uint) error {
+	_, err := getStorageProviderByID(storageID)
+	return err
 }
 
 // getSafeFileExtension 根据MIME类型获取安全的文件扩展名

@@ -824,17 +824,55 @@ func (h *ConfigHandler) ListStorageProviders(c *gin.Context) {
 
 // ReloadStorageConfig 热重载存储配置
 // @Summary      Reload storage configuration
-// @Description  Hot reload a storage configuration (not supported in simplified mode)
+// @Description  Hot reload a storage configuration into the runtime registry
 // @Tags         admin
 // @Accept       json
 // @Produce      json
 // @Param        id   path      int  true  "Storage config ID"
 // @Success      200  {object}  common.Response  "Reload status"
+// @Failure      400  {object}  common.Response  "Invalid request"
 // @Failure      401  {object}  common.Response  "Unauthorized"
+// @Failure      404  {object}  common.Response  "Config not found"
+// @Failure      500  {object}  common.Response  "Failed to reload storage configuration"
 // @Security     ApiKeyAuth
 // @Router       /api/v1/admin/storage/reload/{id} [post]
 func (h *ConfigHandler) ReloadStorageConfig(c *gin.Context) {
-	common.RespondSuccess(c, gin.H{"message": "Storage reload not supported in simplified mode"})
+	ctx := c.Request.Context()
+
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		common.RespondError(c, http.StatusBadRequest, "Invalid config ID")
+		return
+	}
+
+	// 使用未脱敏配置，否则热重载会丢失密钥等敏感字段。
+	config, err := h.manager.GetConfig(ctx, uint(id), false)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			common.RespondError(c, http.StatusNotFound, "Config not found")
+		} else {
+			adminConfigLog.Errorf("Failed to get config %d for reload: %v", id, err)
+			common.RespondError(c, http.StatusInternalServerError, "Failed to get config")
+		}
+		return
+	}
+
+	if config.Category != models.ConfigCategoryStorage {
+		common.RespondError(c, http.StatusBadRequest, "Config is not a storage configuration")
+		return
+	}
+	if !config.IsEnabled {
+		common.RespondError(c, http.StatusBadRequest, "Storage configuration is disabled")
+		return
+	}
+
+	if err := h.reloadStorageConfig(config.ID, config.Config, config.IsDefault); err != nil {
+		adminConfigLog.Errorf("Failed to reload storage config %d: %v", id, err)
+		common.RespondError(c, http.StatusInternalServerError, "Failed to reload storage configuration")
+		return
+	}
+
+	common.RespondSuccess(c, gin.H{"message": "Storage configuration reloaded"})
 }
 
 // hotReloadStorageConfig 热重载存储配置

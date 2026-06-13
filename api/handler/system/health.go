@@ -20,18 +20,21 @@ var (
 )
 
 type HealthHandler struct {
-	sqlDB           *sql.DB
-	storageProvider storage.Provider
+	sqlDB              *sql.DB
+	getStorageProvider func() storage.Provider
 
 	mu         sync.Mutex
 	lastStatus map[string]string
 }
 
-func NewHealthHandler(sqlDB *sql.DB, storageProvider storage.Provider) *HealthHandler {
+func NewHealthHandler(sqlDB *sql.DB, getStorageProvider func() storage.Provider) *HealthHandler {
+	if getStorageProvider == nil {
+		getStorageProvider = func() storage.Provider { return nil }
+	}
 	return &HealthHandler{
-		sqlDB:           sqlDB,
-		storageProvider: storageProvider,
-		lastStatus:      make(map[string]string),
+		sqlDB:              sqlDB,
+		getStorageProvider: getStorageProvider,
+		lastStatus:         make(map[string]string),
 	}
 }
 
@@ -110,11 +113,12 @@ func checkCacheHealth() string {
 }
 
 func (h *HealthHandler) checkStorageHealth(ctx context.Context) string {
-	if h.storageProvider == nil {
+	storageProvider := h.getStorageProvider()
+	if storageProvider == nil {
 		return "error: no default storage provider"
 	}
 
-	if err := h.storageProvider.Health(ctx); err != nil {
+	if err := storageProvider.Health(ctx); err != nil {
 		// 响应体不暴露底层存储错误细节，仅按状态变化记录服务端日志。
 		h.logStatusChange("storage", "error", err)
 		return "error"

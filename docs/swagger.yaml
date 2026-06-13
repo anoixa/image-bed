@@ -1843,8 +1843,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: Hot reload a storage configuration (not supported in simplified
-        mode)
+      description: Hot reload a storage configuration into the runtime registry
       parameters:
       - description: Storage config ID
         in: path
@@ -1858,8 +1857,20 @@ paths:
           description: Reload status
           schema:
             $ref: '#/definitions/common.Response'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/common.Response'
         "401":
           description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.Response'
+        "404":
+          description: Config not found
+          schema:
+            $ref: '#/definitions/common.Response'
+        "500":
+          description: Failed to reload storage configuration
           schema:
             $ref: '#/definitions/common.Response'
       security:
@@ -2987,6 +2998,11 @@ paths:
         in: formData
         name: strategy_id
         type: string
+      - description: Storage strategy ID (overrides the multipart field and enables
+          fail-fast availability checks)
+        in: query
+        name: strategy_id
+        type: string
       - description: 'Whether images are public (default: true)'
         in: formData
         name: is_public
@@ -3012,6 +3028,10 @@ paths:
             $ref: '#/definitions/common.Response'
         "500":
           description: Internal server error
+          schema:
+            $ref: '#/definitions/common.Response'
+        "503":
+          description: Storage backend unavailable
           schema:
             $ref: '#/definitions/common.Response'
       security:

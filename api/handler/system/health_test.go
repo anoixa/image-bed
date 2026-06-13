@@ -37,7 +37,9 @@ func TestHealthDoesNotLeakStorageError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	secret := "dial tcp 10.1.2.3:9000: secret-internal-detail"
-	h := NewHealthHandler(nil, &failingStorage{err: errors.New(secret)})
+	h := NewHealthHandler(nil, func() storage.Provider {
+		return &failingStorage{err: errors.New(secret)}
+	})
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -60,6 +62,20 @@ func TestHealthDoesNotLeakStorageError(t *testing.T) {
 	}
 	if resp.Checks["storage"] != "error" {
 		t.Fatalf("expected storage check = %q, got %q", "error", resp.Checks["storage"])
+	}
+}
+
+func TestStorageHealthUsesCurrentProvider(t *testing.T) {
+	var current storage.Provider
+	h := NewHealthHandler(nil, func() storage.Provider { return current })
+
+	if got := h.checkStorageHealth(context.Background()); got != "error: no default storage provider" {
+		t.Fatalf("expected unavailable storage, got %q", got)
+	}
+
+	current = &failingStorage{}
+	if got := h.checkStorageHealth(context.Background()); got != "ok" {
+		t.Fatalf("expected recovered storage, got %q", got)
 	}
 }
 
