@@ -11,4 +11,6 @@ var (
 	ErrStorageDefaultChangeRequiresEndpoint = errors.New("storage default can only be changed via the default endpoint")
 	// ErrConfigCategoryMismatch 表示更新请求不能改变已有配置的类别。
 	ErrConfigCategoryMismatch = errors.New("configuration category does not match the stored configuration")
+	// ErrInvalidConfig 表示动态配置不符合对应类别的 schema。
+	ErrInvalidConfig = errors.New("invalid system configuration")
 )

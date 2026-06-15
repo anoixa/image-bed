@@ -86,10 +86,8 @@ func (m *Manager) ClearCache() {
 
 // CreateConfig 创建配置
 func (m *Manager) CreateConfig(ctx context.Context, req *models.SystemConfigStoreRequest, userID uint) (*models.ConfigResponse, error) {
-	if req.Category == models.ConfigCategoryOAuth {
-		if err := ValidateOAuthConfigMap(req.Config); err != nil {
-			return nil, err
-		}
+	if err := ValidateSystemConfigMap(req.Category, req.Config); err != nil {
+		return nil, err
 	}
 
 	// 计算有效启用/默认状态用于不变量校验（未提供时按模型默认 true / false）。
@@ -264,10 +262,8 @@ func (m *Manager) mergeConfig(config *models.SystemConfig, newConfig map[string]
 		existingConfig[key] = value
 	}
 
-	if config.Category == models.ConfigCategoryOAuth {
-		if err := ValidateOAuthConfigMap(existingConfig); err != nil {
-			return err
-		}
+	if err := ValidateSystemConfigMap(config.Category, existingConfig); err != nil {
+		return err
 	}
 
 	encrypted, err := m.crypto.Encrypt(existingConfig)

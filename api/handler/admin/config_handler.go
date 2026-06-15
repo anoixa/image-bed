@@ -173,6 +173,10 @@ func (h *ConfigHandler) CreateConfig(c *gin.Context) {
 		common.RespondError(c, http.StatusBadRequest, "Unsupported config category")
 		return
 	}
+	if err := configsvc.ValidateSystemConfigMap(req.Category, req.Config); err != nil {
+		common.RespondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	userID := c.GetUint("user_id")
 	var previousDefault *models.ConfigResponse
@@ -279,10 +283,16 @@ func (h *ConfigHandler) UpdateConfig(c *gin.Context) {
 		return
 	}
 
+	mergedConfig := mergeConfigMaps(existing.Config, req.Config)
+	if err := configsvc.ValidateSystemConfigMap(existing.Category, mergedConfig); err != nil {
+		common.RespondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	if existing.Category == models.ConfigCategoryStorage {
 		testResult := h.testConfig(ctx, &models.TestConfigRequest{
 			Category: existing.Category,
-			Config:   mergeConfigMaps(existing.Config, req.Config),
+			Config:   mergedConfig,
 		})
 		if !testResult.Success {
 			common.RespondError(c, http.StatusBadRequest, fmt.Sprintf("Storage configuration test failed: %s", testResult.Message))
@@ -661,14 +671,15 @@ func filterVisibleConfigs(configs []*models.ConfigResponse) []*models.ConfigResp
 
 // testConfig 测试配置
 func (h *ConfigHandler) testConfig(ctx context.Context, req *models.TestConfigRequest) *models.TestConfigResponse {
+	if err := configsvc.ValidateSystemConfigMap(req.Category, req.Config); err != nil {
+		return &models.TestConfigResponse{
+			Success: false,
+			Message: err.Error(),
+		}
+	}
+
 	switch req.Category {
 	case models.ConfigCategoryOAuth:
-		if err := configsvc.ValidateOAuthConfigMap(req.Config); err != nil {
-			return &models.TestConfigResponse{
-				Success: false,
-				Message: err.Error(),
-			}
-		}
 		return &models.TestConfigResponse{
 			Success: true,
 			Message: "OAuth provider configuration is valid",
@@ -691,6 +702,13 @@ func (h *ConfigHandler) testConfig(ctx context.Context, req *models.TestConfigRe
 
 // testStorageConfig 测试存储配置
 func (h *ConfigHandler) testStorageConfig(ctx context.Context, config map[string]any) *models.TestConfigResponse {
+	if err := configsvc.ValidateSystemConfigMap(models.ConfigCategoryStorage, config); err != nil {
+		return &models.TestConfigResponse{
+			Success: false,
+			Message: err.Error(),
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
@@ -1018,7 +1036,9 @@ func (h *ConfigHandler) hotReloadStorageConfig(id uint, config map[string]any, i
 
 func respondConfigMutationError(c *gin.Context, err error) bool {
 	switch {
-	case errors.Is(err, configsvc.ErrInvalidOAuthConfig), errors.Is(err, configsvc.ErrConfigCategoryMismatch):
+	case errors.Is(err, configsvc.ErrInvalidConfig),
+		errors.Is(err, configsvc.ErrInvalidOAuthConfig),
+		errors.Is(err, configsvc.ErrConfigCategoryMismatch):
 		common.RespondError(c, http.StatusBadRequest, err.Error())
 		return true
 	case errors.Is(err, configsvc.ErrCannotDisableDefaultStorage),

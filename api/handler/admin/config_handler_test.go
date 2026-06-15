@@ -255,9 +255,9 @@ func TestTestStorageConfigRejectsBlockedRemoteAddresses(t *testing.T) {
 		t.Parallel()
 
 		result := handler.testStorageConfig(context.Background(), map[string]any{
-			"type":        "webdav",
-			"webdav_url":  "http://localhost:8080/dav",
-			"webdav_root": "/",
+			"type":             "webdav",
+			"webdav_url":       "http://localhost:8080/dav",
+			"webdav_root_path": "/",
 		})
 
 		require.NotNil(t, result)

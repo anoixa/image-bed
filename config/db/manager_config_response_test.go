@@ -20,9 +20,9 @@ func TestCreateConfigReturnsMaskedSensitiveValues(t *testing.T) {
 		Name:     "s3-private",
 		Config: map[string]any{
 			"type":              "s3",
+			"endpoint":          "https://s3.example.com",
 			"access_key_id":     "AKIA_TEST",
 			"secret_access_key": "secret-value",
-			"client_secret":     "oauth-secret",
 			"bucket_name":       "images",
 		},
 	}, 7)
@@ -30,7 +30,6 @@ func TestCreateConfigReturnsMaskedSensitiveValues(t *testing.T) {
 
 	assert.Equal(t, "******", resp.Config["access_key_id"])
 	assert.Equal(t, "******", resp.Config["secret_access_key"])
-	assert.Equal(t, "******", resp.Config["client_secret"])
 	assert.Equal(t, "images", resp.Config["bucket_name"])
 
 	stored, err := manager.repo.GetByID(context.Background(), resp.ID)
