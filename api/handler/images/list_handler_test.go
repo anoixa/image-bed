@@ -126,7 +126,7 @@ func TestListImagesFiltersByVisibility(t *testing.T) {
 			IsPublic:     false,
 		},
 	} {
-		require.NoError(t, repo.SaveImage(image))
+		require.NoError(t, repo.SaveImageWithVisibility(image, image.IsPublic))
 	}
 
 	router := gin.New()

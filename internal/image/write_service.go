@@ -336,7 +336,7 @@ func (s *WriteService) processAndSaveImage(ctx context.Context, userID uint, sou
 	}
 
 	dbWriteStart := time.Now()
-	if err := s.repo.WithContext(ctx).SaveImage(newImg); err != nil {
+	if err := s.repo.WithContext(ctx).SaveImageWithVisibility(newImg, isPublic); err != nil {
 		cleanupSavedUpload(storageProvider, storagePath)
 		return nil, false, errors.New("failed to save image metadata")
 	}
@@ -459,7 +459,7 @@ func (s *WriteService) createDedupedImageRecord(ctx context.Context, existing *m
 		UserID:          userID,
 	}
 
-	if err := s.repo.WithContext(ctx).SaveImage(newImg); err != nil {
+	if err := s.repo.WithContext(ctx).SaveImageWithVisibility(newImg, isPublic); err != nil {
 		return nil, err
 	}
 

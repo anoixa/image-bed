@@ -54,12 +54,16 @@ func NewRepository(db *gorm.DB) *Repository {
 
 // SaveImage 保存图片
 func (r *Repository) SaveImage(image *models.Image) error {
-	isPublic := image.IsPublic
-	if err := r.db.Create(image).Error; err != nil {
+	return r.db.Create(image).Error
+}
+
+func (r *Repository) SaveImageWithVisibility(image *models.Image, isPublic bool) error {
+	image.IsPublic = isPublic
+	if err := r.SaveImage(image); err != nil {
 		return err
 	}
 	if !isPublic {
-		return r.db.Model(image).Update("is_public", false).Error
+		return r.db.Model(image).UpdateColumn("is_public", false).Error
 	}
 	return nil
 }

@@ -242,7 +242,7 @@ func TestRepository_GetImageListFiltersByVisibility(t *testing.T) {
 	}
 
 	for _, image := range images {
-		require.NoError(t, repo.SaveImage(image))
+		require.NoError(t, repo.SaveImageWithVisibility(image, image.IsPublic))
 	}
 
 	isPublic := false
