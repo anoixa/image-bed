@@ -224,11 +224,33 @@ func TestRepository_GetImageListFiltersByStorageConfigIDs(t *testing.T) {
 		require.NoError(t, repo.SaveImage(image))
 	}
 
-	result, total, err := repo.GetImageList([]uint{10}, "", "", nil, 0, 0, "desc", 1, 10, 1)
+	result, total, err := repo.GetImageList([]uint{10}, "", "", nil, nil, 0, 0, "desc", 1, 10, 1)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), total)
 	require.Len(t, result, 1)
 	assert.Equal(t, "local-1", result[0].Identifier)
+}
+
+func TestRepository_GetImageListFiltersByVisibility(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewRepository(db)
+
+	images := []*models.Image{
+		{Identifier: "public-1", OriginalName: "public.jpg", FileHash: "visibility-h1", UserID: 1, IsPublic: true},
+		{Identifier: "private-1", OriginalName: "private.jpg", FileHash: "visibility-h2", UserID: 1, IsPublic: false},
+		{Identifier: "other-user-private", OriginalName: "other.jpg", FileHash: "visibility-h3", UserID: 2, IsPublic: false},
+	}
+
+	for _, image := range images {
+		require.NoError(t, repo.SaveImage(image))
+	}
+
+	isPublic := false
+	result, total, err := repo.GetImageList(nil, "", "", nil, &isPublic, 0, 0, "desc", 1, 10, 1)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, result, 1)
+	assert.Equal(t, "private-1", result[0].Identifier)
 }
 
 func TestRepository_DeleteImageByIdentifierAndUser(t *testing.T) {

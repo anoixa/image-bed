@@ -54,7 +54,14 @@ func NewRepository(db *gorm.DB) *Repository {
 
 // SaveImage 保存图片
 func (r *Repository) SaveImage(image *models.Image) error {
-	return r.db.Create(&image).Error
+	isPublic := image.IsPublic
+	if err := r.db.Create(image).Error; err != nil {
+		return err
+	}
+	if !isPublic {
+		return r.db.Model(image).Update("is_public", false).Error
+	}
+	return nil
 }
 
 // CreateWithTx 在指定事务中创建图片记录
@@ -234,7 +241,7 @@ func (r *Repository) UpdateImageByIdentifier(identifier string, updates map[stri
 }
 
 // GetImageList 获取图片列表
-func (r *Repository) GetImageList(storageConfigIDs []uint, identifier, search string, albumID *uint, startTime, endTime int64, sort string, page, pageSize, userID int) ([]*models.Image, int64, error) {
+func (r *Repository) GetImageList(storageConfigIDs []uint, identifier, search string, albumID *uint, isPublic *bool, startTime, endTime int64, sort string, page, pageSize, userID int) ([]*models.Image, int64, error) {
 	var imageList []*models.Image
 	var total int64
 
@@ -253,6 +260,9 @@ func (r *Repository) GetImageList(storageConfigIDs []uint, identifier, search st
 	if albumID != nil {
 		db = db.Joins("JOIN album_images ON album_images.image_id = images.id").
 			Where("album_images.album_id = ?", *albumID)
+	}
+	if isPublic != nil {
+		db = db.Where("images.is_public = ?", *isPublic)
 	}
 	// 时间区间过滤（Unix时间戳秒）
 	if startTime > 0 {
