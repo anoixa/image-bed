@@ -33,6 +33,7 @@ type ImageRequestBody struct {
 	IsPublic    *bool  `json:"is_public"`
 	StartTime   int64  `json:"start_time"` // Unix时间戳（毫秒）
 	EndTime     int64  `json:"end_time"`   // Unix时间戳（毫秒）
+	SortBy      string `json:"sort_by"`    // created_at 或 file_size，默认 created_at
 	Sort        string `json:"sort"`       // asc 或 desc，默认 desc
 
 	Page  int `json:"page" binding:"required"`
@@ -83,7 +84,7 @@ func (h *Handler) ListImages(c *gin.Context) {
 		limit = config.MaxPerPage
 	}
 
-	result, err := h.queryService.ListImages(c.Request.Context(), body.StorageType, body.Identifier, body.Search, body.AlbumID, body.IsPublic, body.StartTime, body.EndTime, body.Sort, page, limit, int(userID))
+	result, err := h.queryService.ListImages(c.Request.Context(), body.StorageType, body.Identifier, body.Search, body.AlbumID, body.IsPublic, body.StartTime, body.EndTime, body.SortBy, body.Sort, page, limit, int(userID))
 	if err != nil {
 		imageHandlerLog.Errorf("Failed to get image list for user=%d: %v", userID, err)
 		common.RespondError(c, http.StatusInternalServerError, "Failed to get image list")

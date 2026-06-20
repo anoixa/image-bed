@@ -245,7 +245,7 @@ func (r *Repository) UpdateImageByIdentifier(identifier string, updates map[stri
 }
 
 // GetImageList 获取图片列表
-func (r *Repository) GetImageList(storageConfigIDs []uint, identifier, search string, albumID *uint, isPublic *bool, startTime, endTime int64, sort string, page, pageSize, userID int) ([]*models.Image, int64, error) {
+func (r *Repository) GetImageList(storageConfigIDs []uint, identifier, search string, albumID *uint, isPublic *bool, startTime, endTime int64, sortBy, sort string, page, pageSize, userID int) ([]*models.Image, int64, error) {
 	var imageList []*models.Image
 	var total int64
 
@@ -282,11 +282,16 @@ func (r *Repository) GetImageList(storageConfigIDs []uint, identifier, search st
 
 	offset := (page - 1) * pageSize
 
-	// 根据 sort 参数设置排序方向
-	orderBy := "created_at desc"
-	if sort == "asc" {
-		orderBy = "created_at asc"
+	sortColumn := "images.created_at"
+	if sortBy == "file_size" {
+		sortColumn = "images.file_size"
 	}
+
+	sortDirection := "desc"
+	if sort == "asc" {
+		sortDirection = "asc"
+	}
+	orderBy := fmt.Sprintf("%s %s, images.id %s", sortColumn, sortDirection, sortDirection)
 
 	err := db.Select(imageListSelectColumns).Order(orderBy).Offset(offset).Limit(pageSize).Find(&imageList).Error
 	return imageList, total, err
