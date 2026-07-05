@@ -396,7 +396,7 @@ func registerStaticRoutesWithFS(router *gin.Engine, staticFS http.FileSystem) {
 		}
 
 		if file, info, ok := openStaticFile(staticFS, filePath); ok {
-			defer file.Close()
+			defer func() { _ = file.Close() }()
 			setStaticCacheHeaders(c, filePath)
 			http.ServeContent(c.Writer, c.Request, filePath, info.ModTime(), file)
 			return
@@ -412,7 +412,7 @@ func registerStaticRoutesWithFS(router *gin.Engine, staticFS http.FileSystem) {
 			c.String(500, "Failed to load index.html")
 			return
 		}
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 		setStaticCacheHeaders(c, "index.html")
 		http.ServeContent(c.Writer, c.Request, "index.html", info.ModTime(), file)
 	})
@@ -426,7 +426,7 @@ func openStaticFile(staticFS http.FileSystem, filePath string) (http.File, fs.Fi
 
 	info, err := file.Stat()
 	if err != nil || info.IsDir() {
-		file.Close()
+		_ = file.Close()
 		return nil, nil, false
 	}
 
