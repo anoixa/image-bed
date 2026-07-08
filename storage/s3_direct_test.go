@@ -12,7 +12,7 @@ func TestS3Storage_GetDirectURL(t *testing.T) {
 		expectedURL string
 	}{
 		{
-			name: "public domain with custom domain",
+			name: "path-style public domain keeps bucket prefix for regular S3",
 			storage: &S3Storage{
 				bucketName:     "images",
 				publicDomain:   "https://img.cdn.com",
@@ -25,25 +25,54 @@ func TestS3Storage_GetDirectURL(t *testing.T) {
 		{
 			name: "private bucket returns empty",
 			storage: &S3Storage{
-				bucketName:     "images",
-				publicDomain:   "https://img.cdn.com",
-				isPrivate:      true,
-				forcePathStyle: true,
+				bucketName:   "images",
+				publicDomain: "https://img.cdn.com",
+				isPrivate:    true,
 			},
 			storagePath: "2024/01/test.jpg",
 			expectedURL: "",
 		},
 		{
-			name: "virtual host style without public domain",
+			name: "regular S3 endpoint without public domain",
 			storage: &S3Storage{
-				bucketName:     "images",
-				endpoint:       "https://s3.amazonaws.com",
-				isPrivate:      false,
-				forcePathStyle: false,
-				publicDomain:   "https://images.s3.amazonaws.com",
+				bucketName: "images",
+				endpoint:   "https://s3.amazonaws.com",
+				isPrivate:  false,
 			},
 			storagePath: "2024/01/test.jpg",
-			expectedURL: "https://images.s3.amazonaws.com/2024/01/test.jpg",
+			expectedURL: "https://s3.amazonaws.com/images/2024/01/test.jpg",
+		},
+		{
+			name: "regular S3 public domain without path style maps directly to object key",
+			storage: &S3Storage{
+				bucketName:   "images",
+				endpoint:     "https://s3.amazonaws.com",
+				publicDomain: "https://images.example.com",
+				isPrivate:    false,
+			},
+			storagePath: "2024/01/test.jpg",
+			expectedURL: "https://images.example.com/2024/01/test.jpg",
+		},
+		{
+			name: "R2 API endpoint without public domain falls back to proxy",
+			storage: &S3Storage{
+				bucketName: "images",
+				endpoint:   "https://account-id.r2.cloudflarestorage.com",
+				isPrivate:  false,
+			},
+			storagePath: "2024/01/test.jpg",
+			expectedURL: "",
+		},
+		{
+			name: "R2 custom domain maps directly to object key",
+			storage: &S3Storage{
+				bucketName:   "images",
+				endpoint:     "https://account-id.r2.cloudflarestorage.com",
+				publicDomain: "https://images.example.com/",
+				isPrivate:    false,
+			},
+			storagePath: "2024/01/test.jpg",
+			expectedURL: "https://images.example.com/2024/01/test.jpg",
 		},
 		{
 			name: "path with special characters is encoded",
@@ -85,6 +114,32 @@ func TestS3Storage_SupportsDirectLink(t *testing.T) {
 			name: "private bucket - not supported",
 			storage: &S3Storage{
 				isPrivate: true,
+			},
+			expected: false,
+		},
+		{
+			name: "R2 API endpoint is not a public object origin",
+			storage: &S3Storage{
+				endpoint:  "account-id.r2.cloudflarestorage.com",
+				isPrivate: false,
+			},
+			expected: false,
+		},
+		{
+			name: "R2 custom public domain supports direct links",
+			storage: &S3Storage{
+				endpoint:     "https://account-id.r2.cloudflarestorage.com",
+				publicDomain: "https://pub.example.com",
+				isPrivate:    false,
+			},
+			expected: true,
+		},
+		{
+			name: "R2 API endpoint cannot be used as public domain",
+			storage: &S3Storage{
+				endpoint:     "https://account-id.r2.cloudflarestorage.com",
+				publicDomain: "https://account-id.r2.cloudflarestorage.com",
+				isPrivate:    false,
 			},
 			expected: false,
 		},
@@ -169,6 +224,16 @@ func TestS3Storage_ShouldProxy(t *testing.T) {
 			name: "always_direct + public image + no support = proxy (fallback)",
 			storage: &S3Storage{
 				isPrivate: true,
+			},
+			imageIsPublic: true,
+			globalMode:    TransferModeAlwaysDirect,
+			expected:      true,
+		},
+		{
+			name: "always_direct + R2 API endpoint = proxy (fallback)",
+			storage: &S3Storage{
+				endpoint:  "https://account-id.r2.cloudflarestorage.com",
+				isPrivate: false,
 			},
 			imageIsPublic: true,
 			globalMode:    TransferModeAlwaysDirect,

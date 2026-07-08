@@ -331,13 +331,6 @@ func (s *S3Storage) GetDirectURL(storagePath string) string {
 		return ""
 	}
 
-	base := s.publicDomain
-	if base == "" {
-		base = s.endpoint
-	}
-
-	base = strings.TrimRight(base, "/")
-
 	segments := strings.Split(storagePath, "/")
 	encodedSegments := make([]string, len(segments))
 	for i, seg := range segments {
@@ -345,15 +338,41 @@ func (s *S3Storage) GetDirectURL(storagePath string) string {
 	}
 	encodedPath := path.Join(encodedSegments...)
 
-	if s.forcePathStyle || s.publicDomain == "" {
-		return fmt.Sprintf("%s/%s/%s", base, s.bucketName, encodedPath)
+	if s.publicDomain != "" {
+		if s.forcePathStyle && !isCloudflareR2APIEndpoint(s.endpoint) {
+			return fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.publicDomain, "/"), s.bucketName, encodedPath)
+		}
+		return fmt.Sprintf("%s/%s", strings.TrimRight(s.publicDomain, "/"), encodedPath)
 	}
 
-	return fmt.Sprintf("%s/%s", base, encodedPath)
+	return fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.endpoint, "/"), s.bucketName, encodedPath)
 }
 
 func (s *S3Storage) SupportsDirectLink() bool {
-	return !s.isPrivate
+	if s.isPrivate {
+		return false
+	}
+	if s.publicDomain != "" {
+		return !isCloudflareR2APIEndpoint(s.publicDomain)
+	}
+	return !isCloudflareR2APIEndpoint(s.endpoint)
+}
+
+func isCloudflareR2APIEndpoint(rawURL string) bool {
+	value := strings.TrimSpace(rawURL)
+	if value == "" {
+		return false
+	}
+	if !strings.Contains(value, "://") {
+		value = "//" + value
+	}
+
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	return host == "r2.cloudflarestorage.com" || strings.HasSuffix(host, ".r2.cloudflarestorage.com")
 }
 
 func (s *S3Storage) ShouldProxy(imageIsPublic bool, globalMode TransferMode) bool {
