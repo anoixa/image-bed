@@ -35,6 +35,7 @@ func TestDeleteSingleKeepsSharedOriginalFile(t *testing.T) {
 		Name:      "local",
 		Type:      "local",
 		IsDefault: true,
+		IsEnabled: true,
 		LocalPath: tempDir,
 	}}))
 
@@ -90,6 +91,7 @@ func TestDeleteSingleCancelsProcessingVariantsAndDeletesCompletedVariants(t *tes
 		Name:      "local",
 		Type:      "local",
 		IsDefault: true,
+		IsEnabled: true,
 		LocalPath: tempDir,
 	}}))
 
@@ -162,6 +164,7 @@ func TestDeleteSingleKeepsSharedVariantFile(t *testing.T) {
 		Name:      "local",
 		Type:      "local",
 		IsDefault: true,
+		IsEnabled: true,
 		LocalPath: tempDir,
 	}}))
 

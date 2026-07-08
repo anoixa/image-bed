@@ -865,6 +865,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/common.Response"
                         }
                     },
+                    "409": {
+                        "description": "Storage state conflict",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
                     "500": {
                         "description": "Internal server error",
                         "schema": {
@@ -1000,6 +1006,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/common.Response"
                         }
                     },
+                    "409": {
+                        "description": "Storage state conflict",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
                     "500": {
                         "description": "Internal server error",
                         "schema": {
@@ -1120,6 +1132,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/common.Response"
                         }
                     },
+                    "409": {
+                        "description": "Storage is disabled",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
                     "500": {
                         "description": "Internal server error",
                         "schema": {
@@ -1226,6 +1244,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "409": {
+                        "description": "Default storage cannot be disabled",
                         "schema": {
                             "$ref": "#/definitions/common.Response"
                         }
@@ -1527,7 +1551,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Hot reload a storage configuration (not supported in simplified mode)",
+                "description": "Hot reload a storage configuration into the runtime registry",
                 "consumes": [
                     "application/json"
                 ],
@@ -1554,8 +1578,26 @@ const docTemplate = `{
                             "$ref": "#/definitions/common.Response"
                         }
                     },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Config not found",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to reload storage configuration",
                         "schema": {
                             "$ref": "#/definitions/common.Response"
                         }
@@ -3232,6 +3274,12 @@ const docTemplate = `{
                         "in": "formData"
                     },
                     {
+                        "type": "string",
+                        "description": "Storage strategy ID (overrides the multipart field and enables fail-fast availability checks)",
+                        "name": "strategy_id",
+                        "in": "query"
+                    },
+                    {
                         "type": "boolean",
                         "description": "Whether images are public (default: true)",
                         "name": "is_public",
@@ -3265,6 +3313,12 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    },
+                    "503": {
+                        "description": "Storage backend unavailable",
                         "schema": {
                             "$ref": "#/definitions/common.Response"
                         }

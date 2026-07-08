@@ -2,6 +2,8 @@ package core
 
 import (
 	"database/sql"
+	"io/fs"
+	"net/http"
 	"net/http/pprof"
 	"strings"
 
@@ -98,7 +100,7 @@ func registerBasicRoutes(router *gin.Engine, deps *RouterDependencies) {
 	}
 	{
 		systemHandler := handlerSystem.NewHandler()
-		healthHandler := handlerSystem.NewHealthHandler(deps.SqlDB, storage.GetDefault())
+		healthHandler := handlerSystem.NewHealthHandler(deps.SqlDB, storage.GetDefault)
 
 		systemGroup.GET("/health", healthHandler.Handle)
 		systemGroup.HEAD("/health", healthHandler.Handle)
@@ -376,21 +378,27 @@ func registerAdminRoutes(v1 *gin.RouterGroup, deps *RouterDependencies, imageHan
 
 // registerStaticRoutes 注册静态文件路由
 func registerStaticRoutes(router *gin.Engine) {
+	registerStaticRoutesWithFS(router, public.DistFS)
+}
+
+func registerStaticRoutesWithFS(router *gin.Engine, staticFS http.FileSystem) {
 	router.NoRoute(func(c *gin.Context) {
-		path := c.Request.URL.Path
+		requestPath := c.Request.URL.Path
 
 		// 跳过 API 路径
-		if isStaticAPIPath(path) {
+		if isStaticAPIPath(requestPath) {
 			c.JSON(404, gin.H{"error": "Not found"})
 			return
 		}
-		filePath := strings.TrimPrefix(path, "/")
+		filePath := strings.TrimPrefix(requestPath, "/")
 		if filePath == "" {
 			filePath = "index.html"
 		}
 
-		if filePath != "index.html" && public.Exists(filePath) && !public.Exists(filePath+"/index.html") {
-			c.FileFromFS(filePath, public.DistFS)
+		if file, info, ok := openStaticFile(staticFS, filePath); ok {
+			defer func() { _ = file.Close() }()
+			setStaticCacheHeaders(c, filePath)
+			http.ServeContent(c.Writer, c.Request, filePath, info.ModTime(), file)
 			return
 		}
 
@@ -399,13 +407,48 @@ func registerStaticRoutes(router *gin.Engine) {
 			return
 		}
 
-		content, err := public.ReadFile("index.html")
-		if err != nil {
+		file, info, ok := openStaticFile(staticFS, "index.html")
+		if !ok {
 			c.String(500, "Failed to load index.html")
 			return
 		}
-		c.Data(200, "text/html; charset=utf-8", content)
+		defer func() { _ = file.Close() }()
+		setStaticCacheHeaders(c, "index.html")
+		http.ServeContent(c.Writer, c.Request, "index.html", info.ModTime(), file)
 	})
+}
+
+func openStaticFile(staticFS http.FileSystem, filePath string) (http.File, fs.FileInfo, bool) {
+	file, err := staticFS.Open("/" + strings.TrimPrefix(filePath, "/"))
+	if err != nil {
+		return nil, nil, false
+	}
+
+	info, err := file.Stat()
+	if err != nil || info.IsDir() {
+		_ = file.Close()
+		return nil, nil, false
+	}
+
+	return file, info, true
+}
+
+func setStaticCacheHeaders(c *gin.Context, filePath string) {
+	if filePath == "index.html" {
+		c.Header("Cache-Control", "no-store, no-cache, must-revalidate")
+		c.Header("Pragma", "no-cache")
+		c.Header("Expires", "0")
+		return
+	}
+
+	if strings.HasPrefix(filePath, "assets/") && isStaticAssetFile(filePath) {
+		c.Header("Cache-Control", "public, max-age=31536000, immutable")
+		return
+	}
+
+	if isStaticAssetFile(filePath) {
+		c.Header("Cache-Control", "public, max-age=3600")
+	}
 }
 
 // isStaticAPIPath 检查路径是否为 API 路径
@@ -416,6 +459,7 @@ func isStaticAPIPath(p string) bool {
 		"/thumbnails/",
 		"/system/",
 		"/swagger/",
+		"/debug/",
 	}
 	for _, prefix := range apiPaths {
 		if strings.HasPrefix(p, prefix) {

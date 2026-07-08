@@ -181,6 +181,7 @@ type ImagePipelineTask struct {
 	FileSize        int64  // used by detectImageComplexity instead of len(fileBytes)
 	MimeType        string // used for GIF guard in generateThumbnail
 	Storage         storage.Provider
+	StorageConfigID uint
 	Settings        *dbconfig.ImageProcessingSettings
 	VariantRepo     VariantRepository
 	ImageRepo       ImageRepository
@@ -245,9 +246,7 @@ func (t *ImagePipelineTask) getProcessingFilePath(ctx context.Context) (path str
 		cleanupFn()
 		return "", noop, fmt.Errorf("get stream: %w", err)
 	}
-	if closer, ok := stream.(io.Closer); ok {
-		defer func() { _ = closer.Close() }()
-	}
+	defer func() { _ = stream.Close() }()
 
 	bufPtr := pool.SharedBufferPool.Get().(*[]byte)
 	defer pool.SharedBufferPool.Put(bufPtr)
@@ -285,6 +284,20 @@ func (t *ImagePipelineTask) Execute() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
+
+	// 重新从当前 registry 快照解析写入目标：
+	//   - 禁用、未加载或无默认 → 暂停，保持 pending，不消耗重试；
+	//   - 可写 → 刷新到当前 provider，避免 reload/默认切换后的旧指针 TOCTOU。
+	provider, _, resolveErr := storage.ResolveWritable(t.StorageConfigID)
+	if resolveErr != nil {
+		if errors.Is(resolveErr, storage.ErrProviderDisabled) {
+			pipelineLog.Infof("Task for image %s skipped: storage disabled", t.ImageIdentifier)
+		} else {
+			pipelineLog.Warnf("Task for image %s skipped: storage unavailable: %v", t.ImageIdentifier, resolveErr)
+		}
+		return
+	}
+	t.Storage = provider
 
 	if t.ThumbVariantID > 0 {
 		acquired, err := t.VariantRepo.UpdateStatusCAS(

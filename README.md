@@ -74,6 +74,8 @@ docker compose up -d --build
 
 默认使用 SQLite 和 Docker named volume，未提供 `.env` 也可以启动。首次启动会自动创建管理员账号，密码查看容器日志。
 
+> **生产模式与 HTTPS**：Docker 镜像默认以生产模式运行（`APP_ENV=production`），会关闭 pprof/Swagger 并将认证 Cookie 标记为 `Secure`。这要求通过 HTTPS 访问（直接 TLS 或由反向代理终止 TLS，浏览器侧为 HTTPS 即可）。若仅在本地用明文 `http://localhost:8080` 测试，登录的 refresh token Cookie 不会被浏览器保存，需临时降级为开发模式：使用 `docker compose` 时在 `.env` 中加入一行 `APP_ENV=development`（Compose 会经 `env_file` 读取该文件）；使用 `docker run` 时追加 `-e APP_ENV=development`。
+
 如使用已发布镜像，可直接运行：
 
 ```bash
@@ -205,15 +207,34 @@ WORKER_MEMORY_LIMIT_MB=512
 ```bash
 # 数据库备份
 ./image-bed backup
-./image-bed backup --output ./backups/my-backup.tar.gz
+./image-bed backup --output ./data/backups/my-backup.tar.gz
+
+# 校验归档但不写入数据库
+./image-bed restore --input ./data/backups/my-backup.tar.gz --dry-run
+
+# 清空归档包含的表后恢复
+./image-bed restore --input ./data/backups/my-backup.tar.gz --truncate --yes
 
 # 清理缓存
 ./image-bed cache clear
 ./image-bed cache clear --all
 
-# 数据库迁移
-./image-bed migrate
+# 数据库迁移示例
+./image-bed migrate run --from-sqlite ./data/image-bed.db \
+  --to-postgres "host=localhost user=postgres password=secret dbname=imagebed"
 ```
+
+### 灾备说明
+
+- 数据库归档包含所有持久化数据库表，包括密码哈希、动态配置密文、OAuth 身份和 TOTP 设置；文件权限为 `0600`。
+- 数据库归档**不包含实际图片对象**。本地存储的 `./data/upload`、S3 bucket 或 WebDAV 目录必须通过对应存储系统独立备份，并与数据库归档使用一致的恢复点。
+- 默认归档不包含 `./data/config/master.key`。恢复包含 `system_configs` 或 `user_totp_settings` 数据的归档时，目标主机必须使用原来的 `master.key`；使用 `CONFIG_ENCRYPTION_KEY` 的部署必须独立保存该环境密钥。
+- `backup --include-master-key` 可生成自包含归档，但只允许在同时备份全部密钥依赖表时使用。归档一旦泄露即可解密其中的配置和 TOTP secret，应再使用组织现有的备份加密、签名和密钥管理系统保护，且加密密钥不能与归档放在同一位置。
+- v2.1 归档为每张表保存 SHA-256，并对密钥指纹、表清单、记录数和校验和计算 HMAC。无内置密钥的推荐模式下，篡改或使用错误密钥会在数据库写入前失败。自包含归档中的 HMAC 不能替代外部签名，因为验证密钥也在归档中。
+- restore 继续读取旧 v1.0 和 v2.0 归档；旧格式缺少部分字段或真实性信息，恢复时会警告，不能提供与 v2.1 相同的完整性保证。
+- 恢复密钥时，数据库事务内会记录恢复日志。若进程在数据库提交后、`master.key` 原子切换前中断，下次启动会自动完成密钥安装；无法安全恢复时服务会拒绝启动。
+
+建议至少定期执行以下演练：将数据库归档恢复到空数据库，恢复对应图片对象，使用原密钥启动服务，然后验证登录、OAuth、2FA、原图读取和缩略图读取。归档和对象备份应保存到异地主机或独立存储账户，并按实际 RPO/RTO 设置保留周期。
 
 ## 许可证
 

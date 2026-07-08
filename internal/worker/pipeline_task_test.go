@@ -268,6 +268,12 @@ func TestFinalizeOnlyRollsBackStillTrackedVariants(t *testing.T) {
 }
 
 func TestExecuteMemoryBackpressureFailureAfterSemaphore(t *testing.T) {
+	storage.ResetForTest()
+	t.Cleanup(storage.ResetForTest)
+	require.NoError(t, storage.AddOrUpdateProvider(storage.StorageConfig{
+		ID: 1, Name: "memory-test", Type: "local", LocalPath: t.TempDir(), IsEnabled: true,
+	}))
+
 	previousCheck := workerMemoryCheck
 	workerMemoryCheck = func() error {
 		return errors.New("memory limit exceeded")
@@ -291,6 +297,7 @@ func TestExecuteMemoryBackpressureFailureAfterSemaphore(t *testing.T) {
 		ImageID:         42,
 		ImageIdentifier: "memory-test",
 		WebPVariantID:   7,
+		StorageConfigID: 1,
 		VariantRepo:     variantRepo,
 		ImageRepo:       imageRepo,
 	}

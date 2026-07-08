@@ -50,11 +50,10 @@ func (c *Converter) TriggerConversionWithLocalFile(image *models.Image, localFil
 	c.triggerConversion(image, false, localFile)
 }
 
-// TriggerConversionFromSweeper re-submits stale work recovered by the sweeper.
-// This path intentionally ignores variant retry windows because the sweeper has
-// already decided the stale work should be retried now.
+// TriggerConversionFromSweeper re-submits work selected by the sweeper while
+// preserving each variant's retry window.
 func (c *Converter) TriggerConversionFromSweeper(image *models.Image) {
-	c.triggerConversion(image, true, nil)
+	c.triggerConversion(image, false, nil)
 }
 
 func (c *Converter) triggerConversion(image *models.Image, ignoreRetryWindow bool, localFile *worker.LocalFileLease) {
@@ -87,21 +86,15 @@ func (c *Converter) triggerConversion(image *models.Image, ignoreRetryWindow boo
 	webpEnabled := settings.IsFormatEnabled(models.FormatWebP)
 	avifEnabled := settings.IsFormatEnabled(models.FormatAVIF) && vipsfile.SupportsAVIFEncoding()
 
-	// Check runtime dependencies before creating variant rows. If storage or the
-	// worker pool is unavailable, creating pending variants only to mark them
-	// failed creates noisy writes and makes recovery harder.
-	storageProvider := c.getStorageForImage(image)
-	if storageProvider == nil {
+	// 先解析存储可写性（单一快照），分三态：
+	//   未加载 → 沿用旧行为（不建行 + markUnavailable）
+	//   已加载但禁用 → 建行后暂停（设退避，不提交、不增重试、不标 failed），待存储重新启用后由 sweeper 恢复
+	//   可写 → 建行后提交
+	writableState, resolved := c.resolveStorageWritable(image)
+	if writableState == storageWriteUnavailable {
 		converterLog.Warnf("Storage provider unavailable for image %s (StorageConfigID=%d)",
 			image.Identifier, image.StorageConfigID)
 		c.markImageConversionUnavailable(imageRepo, image, "storage provider unavailable")
-		return
-	}
-
-	pool := worker.GetGlobalPool()
-	if pool == nil {
-		converterLog.Warnf("Worker pool unavailable for image %s", image.Identifier)
-		c.markImageConversionUnavailable(imageRepo, image, "worker pool not initialized")
 		return
 	}
 
@@ -143,6 +136,26 @@ func (c *Converter) triggerConversion(image *models.Image, ignoreRetryWindow boo
 		return
 	}
 
+	// 已加载但禁用：暂停。保留 pending 行，设退避，不提交、不增重试、不标 failed。
+	if writableState == storageWriteDisabled {
+		backoffAt := now.Add(conversionPauseBackoff)
+		if err := variantRepo.SetPendingBackoff(collectVariantIDs(thumbVariant, webpVariant, avifVariant), backoffAt); err != nil {
+			converterLog.Warnf("Failed to set pause backoff for image %s: %v", image.Identifier, err)
+		}
+		converterLog.Infof("Paused variant conversion for image %s: storage disabled (backoff until %s)",
+			image.Identifier, backoffAt.Format(time.RFC3339))
+		return
+	}
+
+	// 可写：检查 worker pool 后提交。
+	pool := worker.GetGlobalPool()
+	if pool == nil {
+		converterLog.Warnf("Worker pool unavailable for image %s", image.Identifier)
+		c.markImageConversionUnavailable(imageRepo, image, "worker pool not initialized")
+		return
+	}
+
+	storageProvider := resolved.provider
 	// 提交统一流水线任务
 	ok := pool.Submit(func() {
 		task := &worker.ImagePipelineTask{
@@ -155,6 +168,7 @@ func (c *Converter) triggerConversion(image *models.Image, ignoreRetryWindow boo
 			FileSize:        image.FileSize,
 			MimeType:        image.MimeType,
 			Storage:         storageProvider,
+			StorageConfigID: image.StorageConfigID,
 			Settings:        settings,
 			VariantRepo:     c.variantRepo,
 			ImageRepo:       c.imageRepo,
@@ -310,26 +324,42 @@ func (c *Converter) markImageProcessing(imageRepo *images.Repository, image *mod
 	return nil
 }
 
-// getStorageForImage 获取图片对应的存储提供者
-func (c *Converter) getStorageForImage(image *models.Image) storage.Provider {
-	// 如果图片指定了 StorageConfigID，尝试获取对应的 provider
-	if image.StorageConfigID > 0 {
-		provider, err := storage.GetByID(image.StorageConfigID)
-		if err == nil {
-			return provider
+// conversionPauseBackoff 在图片存储被禁用时应用到 pending 变体上的退避时长，
+// 使 sweeper 不会每个周期都重投；>= sweeper 周期（5 分钟）。
+const conversionPauseBackoff = 10 * time.Minute
+
+type storageWritableState int
+
+const (
+	storageWriteOK storageWritableState = iota
+	storageWriteDisabled
+	storageWriteUnavailable
+)
+
+type resolvedStorage struct {
+	provider storage.Provider
+}
+
+// resolveStorageWritable 从单一 registry 快照把图片存储解析为三态之一。
+func (c *Converter) resolveStorageWritable(image *models.Image) (storageWritableState, resolvedStorage) {
+	provider, _, err := storage.ResolveWritable(image.StorageConfigID)
+	switch {
+	case err == nil:
+		return storageWriteOK, resolvedStorage{provider: provider}
+	case errors.Is(err, storage.ErrProviderDisabled):
+		return storageWriteDisabled, resolvedStorage{}
+	default:
+		return storageWriteUnavailable, resolvedStorage{}
+	}
+}
+
+// collectVariantIDs 收集非空变体的 ID。
+func collectVariantIDs(variants ...*models.ImageVariant) []uint {
+	ids := make([]uint, 0, len(variants))
+	for _, v := range variants {
+		if v != nil {
+			ids = append(ids, v.ID)
 		}
-		converterLog.Warnf("Failed to get storage provider ID=%d: %v",
-			image.StorageConfigID, err)
-		return nil
 	}
-
-	if c.storage != nil {
-		return c.storage
-	}
-
-	provider := storage.GetDefault()
-	if provider == nil {
-		converterLog.Warnf("No default storage configured")
-	}
-	return provider
+	return ids
 }

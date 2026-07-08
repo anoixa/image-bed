@@ -2,15 +2,49 @@ package images
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
+	"os"
 	"testing"
 
+	appconfig "github.com/anoixa/image-bed/config"
 	dbconfig "github.com/anoixa/image-bed/config/db"
+	imagesvc "github.com/anoixa/image-bed/internal/image"
+	"github.com/anoixa/image-bed/storage"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestUploadErrorStatusMapsStorageUnavailableTo503(t *testing.T) {
+	assert.Equal(t, http.StatusServiceUnavailable, uploadErrorStatus(storage.ErrNoDefaultStorage))
+	assert.Equal(t, http.StatusServiceUnavailable, uploadErrorStatus(storage.ErrProviderNotFound))
+	assert.Equal(t, http.StatusServiceUnavailable, uploadErrorStatus(imagesvc.CheckStorageAvailable(99999)))
+	assert.Equal(t, http.StatusInternalServerError, uploadErrorStatus(errors.New("disk full")))
+}
+
+func TestResolveStorageConfigIDQueryOverridesMultipartValue(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/upload?strategy_id=7", nil)
+
+	id, err := (&Handler{}).resolveStorageConfigIDValue(c, "12")
+	require.NoError(t, err)
+	assert.Equal(t, uint(7), id)
+}
+
+func TestResolveStorageConfigIDMarksInvalidValues(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/upload?strategy_id=invalid", nil)
+
+	_, err := (&Handler{}).resolveStorageConfigIDValue(c, "")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, errInvalidStrategyID)
+}
 
 func TestParseMultipartUploadRequestStreamsFilesAndFields(t *testing.T) {
 	body := &bytes.Buffer{}
@@ -149,6 +183,8 @@ func TestParseMultipartUploadRequestCleanupSkipsReleasedTempFile(t *testing.T) {
 }
 
 func TestWritePartToTempFileStopsAtRemainingBatchLimit(t *testing.T) {
+	require.NoError(t, os.MkdirAll(appconfig.TempDir, 0o700))
+
 	_, _, _, err := writePartToTempFile(bytes.NewReader([]byte("hello")), 0, 4, 1, 0)
 
 	require.Error(t, err)

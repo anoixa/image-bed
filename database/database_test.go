@@ -31,6 +31,9 @@ func TestAutoMigrateIndexFixesAreQuietWhenAlreadyApplied(t *testing.T) {
 	assert.False(t, db.Migrator().HasIndex(&models.Image{}, "idx_identifier"))
 	assert.False(t, db.Migrator().HasIndex(&models.Image{}, "idx_images_identifier"))
 	assert.True(t, db.Migrator().HasIndex(&models.Image{}, "idx_images_identifier_active"))
+	assert.True(t, db.Migrator().HasIndex(&models.Image{}, "idx_images_user_created_at"))
+	assert.True(t, db.Migrator().HasIndex(&models.Image{}, "idx_images_user_storage_created_at"))
+	assert.True(t, db.Migrator().HasIndex(&models.Image{}, "idx_images_storage_config_id"))
 	assert.True(t, db.Migrator().HasIndex(&models.SystemConfig{}, "idx_key_unique"))
 
 	logs.Reset()
@@ -42,4 +45,7 @@ func TestAutoMigrateIndexFixesAreQuietWhenAlreadyApplied(t *testing.T) {
 	assert.NotContains(t, output, "Created partial unique index idx_images_identifier_active")
 	assert.False(t, db.Migrator().HasIndex(&models.Image{}, "idx_identifier"))
 	assert.True(t, db.Migrator().HasIndex(&models.Image{}, "idx_images_identifier_active"))
+	assert.True(t, db.Migrator().HasIndex(&models.Image{}, "idx_images_user_created_at"))
+	assert.True(t, db.Migrator().HasIndex(&models.Image{}, "idx_images_user_storage_created_at"))
+	assert.True(t, db.Migrator().HasIndex(&models.Image{}, "idx_images_storage_config_id"))
 }

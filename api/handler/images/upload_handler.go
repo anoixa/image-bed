@@ -3,6 +3,7 @@ package images
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,12 +29,14 @@ import (
 // @Produce      json
 // @Param        files        formData  file    true   "Image file(s) to upload (max 10)"
 // @Param        strategy_id  formData  string  false  "Storage strategy ID"
+// @Param        strategy_id  query     string  false  "Storage strategy ID (overrides the multipart field and enables fail-fast availability checks)"
 // @Param        is_public    formData  bool    false  "Whether images are public (default: true)"
 // @Success      200  {object}  common.Response  "Upload successful"
 // @Failure      400  {object}  common.Response  "Invalid form data or too many files"
 // @Failure      401  {object}  common.Response  "Unauthorized"
 // @Failure      413  {object}  common.Response  "File too large"
 // @Failure      500  {object}  common.Response  "Internal server error"
+// @Failure      503  {object}  common.Response  "Storage backend unavailable"
 // @Security     ApiKeyAuth
 // @Router       /api/v1/images/upload [post]
 func (h *Handler) UploadImage(c *gin.Context) {
@@ -51,6 +54,27 @@ func (h *Handler) UploadImage(c *gin.Context) {
 	}
 
 	parseStart := time.Now()
+	// multipart 字段只有读取请求体后才能确定，因此仅对 query 中明确指定的存储做可靠预检。
+	// query 参数优先于兼容保留的 multipart 字段。
+	if queryStrategyID := c.Query("strategy_id"); queryStrategyID != "" {
+		earlyID, perr := h.resolveStorageConfigIDValue(c, queryStrategyID)
+		if perr != nil {
+			common.RespondError(c, http.StatusBadRequest, perr.Error())
+			return
+		}
+		if cerr := imagesvc.CheckStorageAvailable(earlyID); cerr != nil {
+			switch {
+			case imagesvc.IsStorageDisabled(cerr):
+				common.RespondError(c, http.StatusConflict, "Target storage is disabled")
+			case imagesvc.IsStorageUnavailable(cerr):
+				common.RespondError(c, http.StatusServiceUnavailable, "Storage backend is currently unavailable")
+			default:
+				common.RespondError(c, http.StatusInternalServerError, "Failed to check storage backend")
+			}
+			return
+		}
+	}
+
 	request, cleanup, err := parseMultipartUploadRequest(c.Request, settings)
 	middleware.RecordUploadParseDuration(time.Since(parseStart))
 	if err != nil {
@@ -71,8 +95,20 @@ func (h *Handler) UploadImage(c *gin.Context) {
 
 	storageConfigID, err := h.resolveStorageConfigIDValue(c, request.strategyID)
 	if err != nil {
-		imageHandlerLog.Errorf("Failed to resolve storage config: %v", err)
+		// resolveStorageConfigIDValue 现仅返回 errInvalidStrategyID（无策略 ID 时返回 0 不报错）。
+		imageHandlerLog.Warnf("Invalid storage strategy id: %v", err)
 		common.RespondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := imagesvc.CheckStorageAvailable(storageConfigID); err != nil {
+		switch {
+		case imagesvc.IsStorageDisabled(err):
+			common.RespondError(c, http.StatusConflict, "Target storage is disabled")
+		case imagesvc.IsStorageUnavailable(err):
+			common.RespondError(c, http.StatusServiceUnavailable, "Storage backend is currently unavailable")
+		default:
+			common.RespondError(c, http.StatusInternalServerError, "Failed to check storage backend")
+		}
 		return
 	}
 
@@ -89,7 +125,7 @@ func (h *Handler) UploadImage(c *gin.Context) {
 		result, err := h.writeService.UploadSingleSource(ctx, userID, request.files[0], storageConfigID, isPublic, settings.DefaultAlbumID)
 		if err != nil {
 			if !c.IsAborted() {
-				common.RespondError(c, http.StatusInternalServerError, err.Error())
+				common.RespondError(c, uploadErrorStatus(err), err.Error())
 			}
 			return
 		}
@@ -108,7 +144,7 @@ func (h *Handler) UploadImage(c *gin.Context) {
 	if err != nil {
 		imageHandlerLog.Errorf("Failed to process batch upload for user=%d: %v", userID, err)
 		if !c.IsAborted() {
-			common.RespondError(c, http.StatusInternalServerError, "Failed to process uploads")
+			common.RespondError(c, uploadErrorStatus(err), "Failed to process uploads")
 		}
 		return
 	}
@@ -138,24 +174,35 @@ func (h *Handler) UploadImage(c *gin.Context) {
 	})
 }
 
+// uploadErrorStatus 将上传失败映射为 HTTP 状态码：存储禁用返回 409，不可用返回 503，其余返回 500。
+func uploadErrorStatus(err error) int {
+	if imagesvc.IsStorageDisabled(err) {
+		return http.StatusConflict
+	}
+	if imagesvc.IsStorageUnavailable(err) {
+		return http.StatusServiceUnavailable
+	}
+	return http.StatusInternalServerError
+}
+
+var errInvalidStrategyID = errors.New("invalid strategy_id")
+
 func (h *Handler) resolveStorageConfigIDValue(c *gin.Context, strategyIDStr string) (uint, error) {
-	if strategyIDStr == "" {
-		strategyIDStr = c.Query("strategy_id")
+	if queryStrategyID := c.Query("strategy_id"); queryStrategyID != "" {
+		strategyIDStr = queryStrategyID
 	}
 
 	if strategyIDStr != "" {
 		strategyID, err := strconv.ParseUint(strategyIDStr, 10, 32)
 		if err != nil {
-			return 0, fmt.Errorf("invalid strategy_id: %s", strategyIDStr)
+			return 0, fmt.Errorf("%w: %s", errInvalidStrategyID, strategyIDStr)
 		}
 		return uint(strategyID), nil
 	}
 
-	defaultID, err := h.configManager.GetDefaultStorageConfigID(c.Request.Context())
-	if err != nil {
-		return 0, err
-	}
-	return defaultID, nil
+	// 无显式目标：返回 0，交由写路径用 registry 默认解析并落库，
+	// 保证实际写入目标与记录的 StorageConfigID 一致。
+	return 0, nil
 }
 
 type parsedUploadRequest struct {

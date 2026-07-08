@@ -139,15 +139,28 @@ func (s *WebDAVStorage) SaveWithContext(ctx context.Context, storagePath string,
 	return nil
 }
 
+// tempFileReadSeeker 包装本地临时文件，使其在 Close 时一并从磁盘删除，
+// 避免 WebDAV 下载产生的临时文件泄漏。
+type tempFileReadSeeker struct {
+	*os.File
+}
+
+func (t *tempFileReadSeeker) Close() error {
+	closeErr := t.File.Close()
+	if removeErr := os.Remove(t.Name()); removeErr != nil && !os.IsNotExist(removeErr) && closeErr == nil {
+		closeErr = removeErr
+	}
+	return closeErr
+}
+
 // GetWithContext 从 WebDAV 获取文件
-func (s *WebDAVStorage) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeeker, error) {
+func (s *WebDAVStorage) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeekCloser, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	default:
 	}
 
-	fullPath := s.fullPath(storagePath)
 	if err := os.MkdirAll(config.TempDir, 0700); err != nil {
 		return nil, fmt.Errorf("failed to create temp dir: %w", err)
 	}
@@ -162,17 +175,35 @@ func (s *WebDAVStorage) GetWithContext(ctx context.Context, storagePath string) 
 		_ = os.Remove(tmp.Name())
 	}
 
-	stream, err := s.client.ReadStream(fullPath)
+	fileURL := s.buildFileURL(storagePath)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fileURL, nil)
+	if err != nil {
+		cleanup()
+		return nil, fmt.Errorf("failed to create request for %s: %w", storagePath, err)
+	}
+	if s.username != "" {
+		req.SetBasicAuth(s.username, s.password)
+	}
+
+	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		cleanup()
 		return nil, fmt.Errorf("failed to read file %s: %w", storagePath, err)
 	}
-	defer func() { _ = stream.Close() }()
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusNotFound {
+		cleanup()
+		return nil, fmt.Errorf("file not found: %s", storagePath)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		cleanup()
+		return nil, fmt.Errorf("unexpected status code %d for %s", resp.StatusCode, storagePath)
+	}
 
 	bufPtr := pool.SharedBufferPool.Get().(*[]byte)
 	defer pool.SharedBufferPool.Put(bufPtr)
 
-	if _, err := io.CopyBuffer(tmp, stream, *bufPtr); err != nil {
+	if _, err := io.CopyBuffer(tmp, resp.Body, *bufPtr); err != nil {
 		cleanup()
 		return nil, fmt.Errorf("failed to copy file %s to temp file: %w", storagePath, err)
 	}
@@ -181,7 +212,7 @@ func (s *WebDAVStorage) GetWithContext(ctx context.Context, storagePath string) 
 		return nil, fmt.Errorf("failed to reset temp file for %s: %w", storagePath, err)
 	}
 
-	return tmp, nil
+	return &tempFileReadSeeker{File: tmp}, nil
 }
 
 // DeleteWithContext 从 WebDAV 删除文件

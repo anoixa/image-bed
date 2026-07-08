@@ -86,6 +86,10 @@ func InitDependencies(cfg *config.Config) (*Dependencies, error) {
 		return nil, fmt.Errorf("failed to auto migrate database: %w", err)
 	}
 	dependenciesLog.Infof("Database migration completed")
+	if err := recoverPendingMasterKey(db, config.DefaultDataDir); err != nil {
+		_ = database.Close(db)
+		return nil, fmt.Errorf("failed to recover an interrupted restore: %w", err)
+	}
 
 	sqlDB, err := db.DB()
 	if err != nil {

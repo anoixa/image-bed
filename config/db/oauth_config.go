@@ -55,19 +55,32 @@ func ValidateOAuthConfigMap(configMap map[string]any) error {
 }
 
 func parseOAuthProviderConfig(configMap map[string]any) (OAuthProviderConfig, error) {
-	provider := strings.ToLower(strings.TrimSpace(getStringFromMap(configMap, "provider", "")))
+	if err := rejectUnknownKeys(configMap, keySet("provider", "client_id", "client_secret")); err != nil {
+		return OAuthProviderConfig{}, fmt.Errorf("%w: %v", ErrInvalidOAuthConfig, err)
+	}
+
+	providerRaw, err := requiredString(configMap, "provider")
+	if err != nil {
+		return OAuthProviderConfig{}, fmt.Errorf("%w: %v", ErrInvalidOAuthConfig, err)
+	}
+	provider := strings.ToLower(strings.TrimSpace(providerRaw))
 	switch provider {
 	case "github", "google", "gitee":
 	default:
 		return OAuthProviderConfig{}, fmt.Errorf("%w: provider must be one of github, google, gitee", ErrInvalidOAuthConfig)
 	}
 
-	clientID := strings.TrimSpace(getStringFromMap(configMap, "client_id", ""))
-	if clientID == "" {
-		return OAuthProviderConfig{}, fmt.Errorf("%w: client_id is required", ErrInvalidOAuthConfig)
+	clientID, err := requiredString(configMap, "client_id")
+	if err != nil {
+		return OAuthProviderConfig{}, fmt.Errorf("%w: %v", ErrInvalidOAuthConfig, err)
 	}
+	clientID = strings.TrimSpace(clientID)
 
-	clientSecret := strings.TrimSpace(getStringFromMap(configMap, "client_secret", ""))
+	clientSecret, err := requiredString(configMap, "client_secret")
+	if err != nil {
+		return OAuthProviderConfig{}, fmt.Errorf("%w: %v", ErrInvalidOAuthConfig, err)
+	}
+	clientSecret = strings.TrimSpace(clientSecret)
 	if clientSecret == "" || clientSecret == "******" {
 		return OAuthProviderConfig{}, fmt.Errorf("%w: client_secret is required", ErrInvalidOAuthConfig)
 	}

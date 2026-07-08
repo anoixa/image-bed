@@ -133,7 +133,7 @@ func (s *LocalStorage) SaveWithContext(ctx context.Context, storagePath string, 
 }
 
 // GetWithContext 从本地存储获取文件
-func (s *LocalStorage) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeeker, error) {
+func (s *LocalStorage) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeekCloser, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()

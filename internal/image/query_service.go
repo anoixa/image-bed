@@ -25,7 +25,7 @@ func NewQueryService(repo *images.Repository, configManager *dbconfig.Manager) *
 }
 
 // ListImages 获取图片列表
-func (s *QueryService) ListImages(ctx context.Context, storageType string, identifier string, search string, albumID *uint, startTime, endTime int64, sort string, page int, limit int, userID int) (*ListImagesResult, error) {
+func (s *QueryService) ListImages(ctx context.Context, storageType string, identifier string, search string, albumID *uint, isPublic *bool, startTime, endTime int64, sortBy, sort string, page int, limit int, userID int) (*ListImagesResult, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -51,7 +51,7 @@ func (s *QueryService) ListImages(ctx context.Context, storageType string, ident
 		}, nil
 	}
 
-	list, total, err := s.repo.WithContext(ctx).GetImageList(storageConfigIDs, identifier, search, albumID, startTime, endTime, sort, page, limit, userID)
+	list, total, err := s.repo.WithContext(ctx).GetImageList(storageConfigIDs, identifier, search, albumID, isPublic, startTime, endTime, sortBy, sort, page, limit, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get image list: %w", err)
 	}

@@ -135,18 +135,9 @@ func configurePool(db *gorm.DB, cfg *config.Config) {
 
 // AutoMigrate 自动迁移数据库结构
 func AutoMigrate(db *gorm.DB) error {
-	if err := db.AutoMigrate(
-		&models.User{},
-		&models.Device{},
-		&models.Image{},
-		&models.ApiToken{},
-		&models.Album{},
-		&models.SystemConfig{},
-		&models.ImageVariant{},
-		&models.UserIdentity{},
-		&models.UserTOTPSetting{},
-		&models.TwoFactorChallenge{},
-	); err != nil {
+	// Models are sourced from the durable-table manifest (manifest.go), the
+	// single authoritative list shared with backup/restore/migrate.
+	if err := db.AutoMigrate(MigrationModels()...); err != nil {
 		return err
 	}
 

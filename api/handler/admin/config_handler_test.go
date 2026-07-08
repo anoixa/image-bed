@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	configsvc "github.com/anoixa/image-bed/config/db"
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/storage"
 	"github.com/gin-gonic/gin"
@@ -20,15 +22,28 @@ import (
 type stubConfigManager struct {
 	getConfigMaskSensitive bool
 	getConfigCalls         int
+	createCalls            int
+	updateCalls            int
+	deleteCalls            int
+	setDefaultCalls        int
 	enableCalls            int
 	disableCalls           int
 	config                 *models.ConfigResponse
+	listConfigs            []*models.ConfigResponse
+	createResponse         *models.ConfigResponse
+	updateResponse         *models.ConfigResponse
+	listErr                error
 	getConfigErr           error
+	createErr              error
+	updateErr              error
+	deleteErr              error
+	setDefaultErr          error
+	enableErr              error
 	disableErr             error
 }
 
 func (m *stubConfigManager) ListConfigs(ctx context.Context, category models.ConfigCategory, enabledOnly, maskSensitive bool) ([]*models.ConfigResponse, error) {
-	return nil, nil
+	return m.listConfigs, m.listErr
 }
 
 func (m *stubConfigManager) GetConfig(ctx context.Context, id uint, maskSensitive bool) (*models.ConfigResponse, error) {
@@ -38,24 +53,28 @@ func (m *stubConfigManager) GetConfig(ctx context.Context, id uint, maskSensitiv
 }
 
 func (m *stubConfigManager) CreateConfig(ctx context.Context, req *models.SystemConfigStoreRequest, userID uint) (*models.ConfigResponse, error) {
-	return nil, nil
+	m.createCalls++
+	return m.createResponse, m.createErr
 }
 
 func (m *stubConfigManager) UpdateConfig(ctx context.Context, id uint, req *models.SystemConfigStoreRequest) (*models.ConfigResponse, error) {
-	return nil, nil
+	m.updateCalls++
+	return m.updateResponse, m.updateErr
 }
 
 func (m *stubConfigManager) DeleteConfig(ctx context.Context, id uint) error {
-	return nil
+	m.deleteCalls++
+	return m.deleteErr
 }
 
 func (m *stubConfigManager) SetDefault(ctx context.Context, id uint) error {
-	return nil
+	m.setDefaultCalls++
+	return m.setDefaultErr
 }
 
 func (m *stubConfigManager) Enable(ctx context.Context, id uint) error {
 	m.enableCalls++
-	return nil
+	return m.enableErr
 }
 
 func (m *stubConfigManager) Disable(ctx context.Context, id uint) error {
@@ -88,6 +107,7 @@ func TestEnableConfigReloadsWithUnmaskedStorageSecrets(t *testing.T) {
 		config: &models.ConfigResponse{
 			ID:        42,
 			Category:  models.ConfigCategoryStorage,
+			IsEnabled: true,
 			IsDefault: true,
 			Config: map[string]any{
 				"type":              "s3",
@@ -104,7 +124,7 @@ func TestEnableConfigReloadsWithUnmaskedStorageSecrets(t *testing.T) {
 		manager:    manager,
 		imagesRepo: nil,
 	}
-	handler.reloadStorageConfig = func(id uint, config map[string]any, isDefault bool) error {
+	handler.reloadStorageConfig = func(id uint, config map[string]any, isDefault, enabled bool) error {
 		reloaded = config
 		return nil
 	}
@@ -123,6 +143,34 @@ func TestEnableConfigReloadsWithUnmaskedStorageSecrets(t *testing.T) {
 	require.NotNil(t, reloaded)
 	assert.Equal(t, "SECRET_VALUE", reloaded["secret_access_key"])
 	assert.Equal(t, "ACCESS_KEY", reloaded["access_key_id"])
+}
+
+func TestEnableConfigRollsBackWhenStorageReloadFails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	manager := &stubConfigManager{config: &models.ConfigResponse{
+		ID:        42,
+		Category:  models.ConfigCategoryStorage,
+		IsEnabled: false,
+		Config: map[string]any{
+			"type":       "local",
+			"local_path": t.TempDir(),
+		},
+	}}
+	handler := &ConfigHandler{manager: manager}
+	handler.reloadStorageConfig = func(uint, map[string]any, bool, bool) error {
+		return errors.New("reload failed")
+	}
+
+	router := gin.New()
+	router.POST("/configs/:id/enable", handler.EnableConfig)
+	req := httptest.NewRequest(http.MethodPost, "/configs/42/enable", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Equal(t, 1, manager.enableCalls)
+	assert.Equal(t, 1, manager.disableCalls, "failed enable must be compensated in the database")
 }
 
 func TestValidateRemoteStorageTestTarget(t *testing.T) {
@@ -207,9 +255,9 @@ func TestTestStorageConfigRejectsBlockedRemoteAddresses(t *testing.T) {
 		t.Parallel()
 
 		result := handler.testStorageConfig(context.Background(), map[string]any{
-			"type":        "webdav",
-			"webdav_url":  "http://localhost:8080/dav",
-			"webdav_root": "/",
+			"type":             "webdav",
+			"webdav_url":       "http://localhost:8080/dav",
+			"webdav_root_path": "/",
 		})
 
 		require.NotNil(t, result)
@@ -276,6 +324,74 @@ func TestCreateConfigRejectsJWTCategory(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestCreateConfigMapsStorageConflictTo409(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	manager := &stubConfigManager{createErr: configsvc.ErrCannotSetDisabledStorageDefault}
+	handler := NewConfigHandler(manager, nil)
+	router := gin.New()
+	router.POST("/configs", handler.CreateConfig)
+
+	body := bytes.NewBufferString(fmt.Sprintf(`{"category":"storage","name":"bad","config":{"type":"local","local_path":%q},"is_enabled":false,"is_default":true}`, t.TempDir()))
+	req := httptest.NewRequest(http.MethodPost, "/configs", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusConflict, w.Code)
+	assert.Equal(t, 1, manager.createCalls)
+}
+
+func TestUpdateConfigRejectsCategorySpoofing(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	manager := &stubConfigManager{config: &models.ConfigResponse{
+		ID:       42,
+		Category: models.ConfigCategoryStorage,
+		Config:   map[string]any{"type": "local", "local_path": t.TempDir()},
+	}}
+	handler := NewConfigHandler(manager, nil)
+	router := gin.New()
+	router.PUT("/configs/:id", handler.UpdateConfig)
+
+	body := bytes.NewBufferString(`{"category":"oauth","name":"spoofed","config":{"provider":"github"}}`)
+	req := httptest.NewRequest(http.MethodPut, "/configs/42", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, 0, manager.updateCalls)
+}
+
+func TestUpdateConfigMapsStorageConflictTo409(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	path := t.TempDir()
+	manager := &stubConfigManager{
+		config: &models.ConfigResponse{
+			ID:        42,
+			Category:  models.ConfigCategoryStorage,
+			IsEnabled: true,
+			IsDefault: true,
+			Config:    map[string]any{"type": "local", "local_path": path},
+		},
+		updateErr: configsvc.ErrCannotDisableDefaultStorage,
+	}
+	handler := NewConfigHandler(manager, nil)
+	router := gin.New()
+	router.PUT("/configs/:id", handler.UpdateConfig)
+
+	body := bytes.NewBufferString(fmt.Sprintf(`{"category":"storage","name":"default","config":{"type":"local","local_path":%q},"is_enabled":false}`, path))
+	req := httptest.NewRequest(http.MethodPut, "/configs/42", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusConflict, w.Code)
+	assert.Equal(t, 1, manager.updateCalls)
 }
 
 func TestDisableConfigReturnsNotFoundForMissingConfig(t *testing.T) {
@@ -360,4 +476,116 @@ func TestSetDefaultConfigReturnsInternalErrorWhenGetConfigFails(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+func TestReloadStorageConfigReloadsWithUnmaskedSecrets(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	manager := &stubConfigManager{
+		config: &models.ConfigResponse{
+			ID:        42,
+			Category:  models.ConfigCategoryStorage,
+			IsEnabled: true,
+			IsDefault: true,
+			Config: map[string]any{
+				"type":              "s3",
+				"endpoint":          "https://s3.example.com",
+				"bucket_name":       "images",
+				"access_key_id":     "ACCESS_KEY",
+				"secret_access_key": "SECRET_VALUE",
+			},
+		},
+	}
+
+	var reloadedID uint
+	var reloaded map[string]any
+	handler := &ConfigHandler{manager: manager}
+	handler.reloadStorageConfig = func(id uint, config map[string]any, isDefault, enabled bool) error {
+		reloadedID = id
+		reloaded = config
+		return nil
+	}
+
+	router := gin.New()
+	router.POST("/storage/reload/:id", handler.ReloadStorageConfig)
+
+	req := httptest.NewRequest(http.MethodPost, "/storage/reload/42", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.False(t, manager.getConfigMaskSensitive, "reload must use unmasked secrets")
+	assert.Equal(t, uint(42), reloadedID)
+	require.NotNil(t, reloaded)
+	assert.Equal(t, "SECRET_VALUE", reloaded["secret_access_key"])
+}
+
+func TestReloadStorageConfigNotFound(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	handler := &ConfigHandler{manager: &stubConfigManager{getConfigErr: gorm.ErrRecordNotFound}}
+	handler.reloadStorageConfig = func(uint, map[string]any, bool, bool) error {
+		t.Fatal("reloadStorageConfig must not be called when config is missing")
+		return nil
+	}
+
+	router := gin.New()
+	router.POST("/storage/reload/:id", handler.ReloadStorageConfig)
+
+	req := httptest.NewRequest(http.MethodPost, "/storage/reload/42", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestReloadStorageConfigRejectsNonStorageCategory(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	manager := &stubConfigManager{
+		config: &models.ConfigResponse{ID: 9, Category: models.ConfigCategoryJWT},
+	}
+	handler := &ConfigHandler{manager: manager}
+	handler.reloadStorageConfig = func(uint, map[string]any, bool, bool) error {
+		t.Fatal("reloadStorageConfig must not be called for non-storage category")
+		return nil
+	}
+
+	router := gin.New()
+	router.POST("/storage/reload/:id", handler.ReloadStorageConfig)
+
+	req := httptest.NewRequest(http.MethodPost, "/storage/reload/9", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestReloadStorageConfigAllowsDisabledReadOnly(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	manager := &stubConfigManager{
+		config: &models.ConfigResponse{
+			ID:        42,
+			Category:  models.ConfigCategoryStorage,
+			IsEnabled: false,
+		},
+	}
+	handler := &ConfigHandler{manager: manager}
+	var calledEnabled *bool
+	handler.reloadStorageConfig = func(_ uint, _ map[string]any, _ bool, enabled bool) error {
+		calledEnabled = &enabled
+		return nil
+	}
+
+	router := gin.New()
+	router.POST("/storage/reload/:id", handler.ReloadStorageConfig)
+
+	req := httptest.NewRequest(http.MethodPost, "/storage/reload/42", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.NotNil(t, calledEnabled, "reloadStorageConfig must be called for disabled storage")
+	assert.False(t, *calledEnabled, "disabled storage must reload with enabled=false")
 }

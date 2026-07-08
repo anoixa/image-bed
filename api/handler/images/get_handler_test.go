@@ -21,6 +21,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// nopCloserReadSeeker 为 io.ReadSeeker 补一个 no-op Close，满足 io.ReadSeekCloser。
+type nopCloserReadSeeker struct{ io.ReadSeeker }
+
+func (nopCloserReadSeeker) Close() error { return nil }
+
 func TestCheckETagSupportsWeakAndMultiValueIfNoneMatch(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -113,12 +118,12 @@ func (m *MockDirectURLProvider) SaveWithContext(ctx context.Context, storagePath
 	return m.Called(ctx, storagePath, file).Error(0)
 }
 
-func (m *MockDirectURLProvider) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeeker, error) {
+func (m *MockDirectURLProvider) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeekCloser, error) {
 	args := m.Called(ctx, storagePath)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(io.ReadSeeker), args.Error(1)
+	return args.Get(0).(io.ReadSeekCloser), args.Error(1)
 }
 
 func (m *MockDirectURLProvider) DeleteWithContext(ctx context.Context, storagePath string) error {
@@ -511,7 +516,7 @@ func (p *testPathProvider) SaveWithContext(ctx context.Context, storagePath stri
 	return nil
 }
 
-func (p *testPathProvider) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeeker, error) {
+func (p *testPathProvider) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeekCloser, error) {
 	return nil, nil
 }
 
@@ -541,7 +546,7 @@ func (p *testRemoteProvider) SaveWithContext(ctx context.Context, storagePath st
 	return nil
 }
 
-func (p *testRemoteProvider) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeeker, error) {
+func (p *testRemoteProvider) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeekCloser, error) {
 	return nil, nil
 }
 
@@ -591,10 +596,10 @@ func (p *cacheFillProvider) SaveWithContext(ctx context.Context, storagePath str
 	return nil
 }
 
-func (p *cacheFillProvider) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeeker, error) {
+func (p *cacheFillProvider) GetWithContext(ctx context.Context, storagePath string) (io.ReadSeekCloser, error) {
 	p.getCalls.Add(1)
 	p.storageKey = storagePath
-	return bytes.NewReader(p.data), nil
+	return nopCloserReadSeeker{bytes.NewReader(p.data)}, nil
 }
 
 func (p *cacheFillProvider) DeleteWithContext(ctx context.Context, storagePath string) error {

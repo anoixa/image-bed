@@ -3,19 +3,25 @@ package cmd
 import (
 	"archive/tar"
 	"bufio"
+	"bytes"
 	"compress/gzip"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strconv"
 	"strings"
-	"time"
 
 	"github.com/anoixa/image-bed/config"
 	"github.com/anoixa/image-bed/database"
-	"github.com/anoixa/image-bed/database/models"
 	"github.com/anoixa/image-bed/utils"
+	cryptopackage "github.com/anoixa/image-bed/utils/crypto"
 	"github.com/spf13/cobra"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -23,24 +29,75 @@ import (
 
 var restoreLog = utils.ForModule("Restore")
 
+const (
+	// Supported archive major versions. v1 archives were serialized from the
+	// API-facing GORM models (dropping json:"-" columns); v2 archives use the
+	// dedicated backup DTOs plus per-table SHA-256 checksums. The codec is
+	// chosen by the declared major version — v1 is never auto-upgraded to v2.
+	archiveMajorV1 = 1
+	archiveMajorV2 = 2
+
+	restoreBatchSize = 100
+
+	// Bounds to keep a single oversized/expanding archive from exhausting disk
+	// or memory during extraction and JSONL decoding.
+	maxJSONLLineBytes    = 16 << 20       // 16 MiB per record line
+	maxArchiveFileBytes  = int64(4) << 30 // 4 GiB per extracted file
+	maxArchiveTotalBytes = int64(8) << 30 // 8 GiB total expanded
+	maxArchiveEntries    = 256
+)
+
+// archiveMajorVersion parses the major component of a "MAJOR.MINOR" version
+// string. Unknown optional fields within a supported major are tolerated by the
+// JSON decoder; an unknown major is rejected by the caller.
+func archiveMajorVersion(v string) (int, error) {
+	major := v
+	if before, _, found := strings.Cut(v, "."); found {
+		major = before
+	}
+	n, err := strconv.Atoi(major)
+	if err != nil {
+		return 0, fmt.Errorf("malformed archive version %q", v)
+	}
+	return n, nil
+}
+
+// recordForVersion returns a fresh pointer to the record type used to decode and
+// insert a table for the given archive major version: the v2 backup DTO for v2,
+// the legacy model for v1.
+func recordForVersion(spec database.TableSpec, major int) any {
+	if major >= archiveMajorV2 {
+		return spec.V2Record()
+	}
+	return spec.NewRecord()
+}
+
 // restoreCmd 数据库还原命令
 var restoreCmd = &cobra.Command{
 	Use:   "restore",
 	Short: "Restore database from backup archive",
-	Long: `Restore database from tar.gz backup archive created by backup command.
+	Long: `Restore database from a tar.gz backup archive created by the backup command.
+
+The entire restore runs inside a single transaction: the archive is fully
+validated before any data is touched, and any error rolls everything back and
+exits non-zero, leaving the database unchanged.
+
+For v2.1 archives containing encrypted data, restore also requires the original
+CONFIG_ENCRYPTION_KEY or master.key and validates its fingerprint plus the
+archive HMAC before modifying the database.
 
 Example:
-  # Restore from backup file
+  # Restore from a backup file
   image-bed restore --input ./backups/backup_20260214_222320.tar.gz
 
-  # Restore with dry-run (preview only)
+  # Preview only (validate the archive, write nothing)
   image-bed restore --input ./backup.tar.gz --dry-run
 
   # Restore specific tables only
   image-bed restore --input ./backup.tar.gz --tables users,images
 
-  # Clear existing data before restore
-  image-bed restore --input ./backup.tar.gz --truncate`,
+  # Clear existing data first, without an interactive prompt
+  image-bed restore --input ./backup.tar.gz --truncate --yes`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := initCommandLogger(); err != nil {
 			exitWithErrorf("Failed to initialize config/logger: %v", err)
@@ -50,8 +107,10 @@ Example:
 		tables, _ := cmd.Flags().GetStringSlice("tables")
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		truncate, _ := cmd.Flags().GetBool("truncate")
+		assumeYes, _ := cmd.Flags().GetBool("yes")
+		restoreMasterKey, _ := cmd.Flags().GetBool("restore-master-key")
 
-		if err := runRestore(inputFile, tables, dryRun, truncate); err != nil {
+		if err := runRestore(inputFile, tables, dryRun, truncate, assumeYes, restoreMasterKey); err != nil {
 			exitWithErrorf("Restore failed: %v", err)
 		}
 	},
@@ -60,31 +119,31 @@ Example:
 func init() {
 	rootCmd.AddCommand(restoreCmd)
 	restoreCmd.Flags().StringP("input", "i", "", "Input tar.gz backup file path (required)")
-	restoreCmd.Flags().StringSliceP("tables", "t", []string{}, "Specific tables to restore (default: all)")
-	restoreCmd.Flags().Bool("dry-run", false, "Preview restore without actually writing to database")
+	restoreCmd.Flags().StringSliceP("tables", "t", []string{}, "Specific tables to restore (default: all in archive)")
+	restoreCmd.Flags().Bool("dry-run", false, "Validate the archive and preview the plan without writing to the database")
 	restoreCmd.Flags().Bool("truncate", false, "Clear existing data before restore")
+	restoreCmd.Flags().Bool("yes", false, "Skip the interactive confirmation prompt (for scripted restores)")
+	restoreCmd.Flags().Bool("restore-master-key", false, "Replace an existing master.key during a complete --truncate restore of encrypted tables")
 
 	_ = restoreCmd.MarkFlagRequired("input")
 }
 
-// restoreStats 还原统计
+// restoreStats summarises a restore run.
 type restoreStats struct {
-	Restored             map[string]int64
-	Skipped              map[string]int64
-	Errors               map[string]int64
-	AutoIncrementUpdates int
+	Restored       map[string]int64
+	Truncated      bool
+	SequencesReset int
 }
 
 func newRestoreStats() *restoreStats {
-	return &restoreStats{
-		Restored: make(map[string]int64),
-		Skipped:  make(map[string]int64),
-		Errors:   make(map[string]int64),
-	}
+	return &restoreStats{Restored: make(map[string]int64)}
 }
 
-// runRestore 执行还原
-func runRestore(inputFile string, tables []string, dryRun, truncate bool) error {
+// runRestore orchestrates the CLI flow. Order is deliberate: extract, validate
+// metadata, resolve the table selection, stream-validate every record, show the
+// plan, confirm, and only then execute the transaction. All validation happens
+// before the prompt and before the first database mutation.
+func runRestore(inputFile string, tables []string, dryRun, truncate, assumeYes, restoreMasterKey bool) error {
 	if _, err := os.Stat(inputFile); err != nil {
 		return fmt.Errorf("backup file not found: %w", err)
 	}
@@ -96,39 +155,76 @@ func runRestore(inputFile string, tables []string, dryRun, truncate bool) error 
 		return err
 	}
 	defer func() { _ = database.Close(db) }()
+	if err := recoverPendingMasterKey(db, config.DefaultDataDir); err != nil {
+		return fmt.Errorf("failed to recover an interrupted restore: %w", err)
+	}
 
-	tempDir := filepath.Join(os.TempDir(), fmt.Sprintf("image-bed-restore-%d", time.Now().Unix()))
-	if err := os.MkdirAll(tempDir, 0755); err != nil {
+	tempDir, err := os.MkdirTemp("", "image-bed-restore-*")
+	if err != nil {
 		return fmt.Errorf("failed to create temp directory: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	restoreLog.Infof("Extracting backup: %s", inputFile)
-
-	// 解压 tar.gz
 	if err := extractTarGz(inputFile, tempDir); err != nil {
 		return fmt.Errorf("failed to extract backup: %w", err)
 	}
 
-	metadataPath := filepath.Join(tempDir, "metadata.json")
-	metadata, err := readMetadata(metadataPath)
+	meta, err := loadAndValidateMetadata(tempDir)
 	if err != nil {
-		return fmt.Errorf("failed to read metadata: %w", err)
+		return err
 	}
-
+	major, err := archiveMajorVersion(meta.Version)
+	if err != nil {
+		return err
+	}
 	restoreLog.Infof("Backup version: %s, Database: %s, Timestamp: %s",
-		metadata.Version, metadata.Database, metadata.Timestamp.Format("2006-01-02 15:04:05"))
+		meta.Version, meta.Database, meta.Timestamp.Format("2006-01-02 15:04:05"))
 
-	// 确定要还原的表
-	if len(tables) == 0 {
-		tables = metadata.Tables
+	// fullRestore is true only when both: (1) user did NOT pass --tables, AND
+	// (2) the archive itself contains all BackupData tables. A partial backup
+	// (created with backup --tables) never triggers ephemeral-table clearing.
+	fullRestore := len(tables) == 0 && archiveIsComplete(meta, major)
+	selected, err := resolveRestoreTables(meta, tables)
+	if err != nil {
+		return err
+	}
+	if err := validateArchiveSecurity(tempDir, config.DefaultDataDir, meta); err != nil {
+		return err
 	}
 
-	// 确认还原
-	if !dryRun {
-		fmt.Println("\nWarning: This will restore data from backup to the current database.")
+	// Full archive/record validation before any prompt or mutation. For v2 this
+	// also verifies each table's SHA-256 against the metadata.
+	if err := validateArchiveData(tempDir, meta, selected, major); err != nil {
+		return err
+	}
+
+	// Validate a bundled master key BEFORE any database or filesystem mutation.
+	// Staging happens only after dry-run/confirmation handling below.
+	keyPlan, err := validateBundledMasterKey(tempDir, config.DefaultDataDir, meta, restoreMasterKey, truncate, selected)
+	if err != nil {
+		return err
+	}
+
+	printRestorePlan(meta, selected, truncate, dryRun)
+
+	if major == archiveMajorV1 {
+		fmt.Println("\n⚠️  WARNING: This is a v1.0 (legacy) archive.")
+		fmt.Println("Historical backup serialization used API-facing JSON models and may have")
+		fmt.Println("omitted security-sensitive fields such as password hashes, encrypted configs,")
+		fmt.Println("soft-delete state, and internal flags. This restore cannot guarantee a fully")
+		fmt.Println("equivalent system. For complete disaster recovery, re-export with a current build.")
+	}
+
+	if dryRun {
+		fmt.Println("\n[dry-run] Archive validated. No changes were written.")
+		return nil
+	}
+
+	if !assumeYes {
+		fmt.Println("\nWarning: This will restore data from the backup into the current database.")
 		if truncate {
-			fmt.Println("Existing data will be TRUNCATED.")
+			fmt.Println("Existing data in the selected tables will be TRUNCATED.")
 		}
 		fmt.Print("Do you want to continue? [y/N]: ")
 		var response string
@@ -139,68 +235,628 @@ func runRestore(inputFile string, tables []string, dryRun, truncate bool) error 
 		}
 	}
 
-	stats := newRestoreStats()
+	keyPlan, err = stageMasterKeyFile(keyPlan)
+	if err != nil {
+		return err
+	}
+	defer cleanupStagedMasterKey(keyPlan)
 
-	// 如果需要，清空现有数据（按依赖顺序逆序）
-	if truncate && !dryRun {
-		restoreLog.Infof("Truncating existing data")
-		if err := truncateTables(db, tables); err != nil {
-			return fmt.Errorf("failed to truncate tables: %w", err)
-		}
+	stats, err := executeRestore(db, cfg.DBType, tempDir, meta, selected, major, fullRestore, truncate, keyPlan)
+	if err != nil {
+		return err
 	}
 
-	// 按依赖顺序还原表
-	// 顺序：users -> devices -> images -> image_variants -> albums -> album_images -> api_tokens
-	restoreOrder := []string{"users", "devices", "images", "image_variants", "albums", "album_images", "api_tokens"}
-
-	for _, table := range restoreOrder {
-		if !contains(tables, table) {
-			continue
-		}
-
-		jsonlPath := filepath.Join(tempDir, table+".jsonl")
-		if _, err := os.Stat(jsonlPath); os.IsNotExist(err) {
-			restoreLog.Warnf("Skipping %s: file not found in backup", table)
-			continue
-		}
-
-		restoreLog.Infof("Restoring table: %s", table)
-		if err := restoreTable(db, table, jsonlPath, stats, dryRun); err != nil {
-			restoreLog.Errorf("Error restoring table %s: %v", table, err)
-			stats.Errors[table] = 1
-		}
+	// All fallible key I/O was completed before the database transaction. The
+	// final same-directory rename is atomic and only happens after DB commit.
+	if err := commitMasterKeyFile(keyPlan, db); err != nil {
+		return err
 	}
 
-	if !dryRun {
-		restoreLog.Infof("Updating auto-increment sequences")
-		if err := updateAutoIncrementSequences(db, cfg.DBType, stats); err != nil {
-			restoreLog.Warnf("Failed to update auto-increment sequences: %v", err)
-		}
-	}
-
-	printRestoreSummary(stats, dryRun)
-
+	printRestoreSummary(stats)
 	return nil
 }
 
-// readMetadata 读取元数据
-func readMetadata(path string) (*backupMetadata, error) {
-	file, err := os.Open(path)
+// masterKeyPlan is the validated decision about a bundled master key, produced
+// before any mutation and applied after the data commits.
+type masterKeyPlan struct {
+	write    bool
+	dest     string
+	data     []byte
+	tempPath string
+}
+
+// validateBundledMasterKey fully validates a bundled master key against the
+// metadata and the target, BEFORE the database is touched. It returns the action
+// to take (write or keep-existing). All failure modes are reported here so a key
+// problem never surfaces only after the database has already been modified.
+func validateBundledMasterKey(extractDir, dataPath string, meta *backupMetadata, force, truncate bool, selected []string) (masterKeyPlan, error) {
+	if !meta.MasterKeyIncluded {
+		return masterKeyPlan{}, nil
+	}
+
+	src := filepath.Join(extractDir, masterKeyArchiveEntry)
+	data, err := os.ReadFile(src)
 	if err != nil {
-		return nil, err
+		if os.IsNotExist(err) {
+			return masterKeyPlan{}, fmt.Errorf("archive metadata declares a bundled master key but %q is missing from the archive", masterKeyArchiveEntry)
+		}
+		return masterKeyPlan{}, fmt.Errorf("failed to read bundled master key: %w", err)
+	}
+
+	// Integrity: the key file must match the checksum recorded at backup time.
+	if meta.MasterKeyChecksum != "" {
+		sum := sha256.Sum256(data)
+		if got := hex.EncodeToString(sum[:]); got != meta.MasterKeyChecksum {
+			return masterKeyPlan{}, fmt.Errorf("bundled master key checksum mismatch (archive corrupted): expected %s, got %s", meta.MasterKeyChecksum, got)
+		}
+	}
+
+	// Structure: must be base64 of exactly 32 bytes (the MasterKeyManager format).
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(data)))
+	if err != nil {
+		return masterKeyPlan{}, fmt.Errorf("bundled master key is not valid base64: %w", err)
+	}
+	if len(raw) != 32 {
+		return masterKeyPlan{}, fmt.Errorf("bundled master key must decode to 32 bytes, got %d", len(raw))
+	}
+
+	dest := filepath.Join(dataPath, cryptopackage.KeyDir, cryptopackage.MasterKeyFile)
+	existing, statErr := os.ReadFile(dest)
+	keyExists := statErr == nil
+	if statErr != nil && !os.IsNotExist(statErr) {
+		return masterKeyPlan{}, fmt.Errorf("failed to read existing master key: %w", statErr)
+	}
+
+	if !usesMasterKey(selected) {
+		restoreLog.Warnf("archive contains a master key, but no key-dependent table is selected; the key will not be restored")
+		return masterKeyPlan{}, nil
+	}
+	if os.Getenv("CONFIG_ENCRYPTION_KEY") != "" {
+		return masterKeyPlan{}, errors.New("cannot restore encrypted tables from an archive with a bundled master.key while CONFIG_ENCRYPTION_KEY is set because the environment key takes precedence")
+	}
+
+	keysEqual := keyExists && bytes.Equal(bytes.TrimSpace(existing), bytes.TrimSpace(data))
+	if keysEqual {
+		return masterKeyPlan{}, nil
+	}
+
+	if keyExists && !force {
+		// Keeping the existing key. If it differs from the archive's key and we
+		// are restoring config rows encrypted with the archive's key, those rows
+		// would be undecryptable — refuse rather than corrupt silently.
+		return masterKeyPlan{}, fmt.Errorf(
+			"the existing master key at %s differs from the archive's key while encrypted tables are being restored; restored secrets would be undecryptable. Re-run with --restore-master-key --truncate to perform a complete key-dependent restore", dest)
+	}
+
+	if !truncate || !containsAllTables(selected, masterKeyDependentTables) {
+		return masterKeyPlan{}, fmt.Errorf("restoring a bundled master key requires --truncate and all key-dependent tables: %s", strings.Join(masterKeyDependentTables, ", "))
+	}
+	return masterKeyPlan{write: true, dest: dest, data: data}, nil
+}
+
+// stageMasterKeyFile performs all fallible writes before database mutation. The
+// temporary file is created in the destination directory so the final rename is
+// atomic on the same filesystem.
+func stageMasterKeyFile(plan masterKeyPlan) (masterKeyPlan, error) {
+	if !plan.write {
+		return plan, nil
+	}
+	dir := filepath.Dir(plan.dest)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return masterKeyPlan{}, fmt.Errorf("failed to create key directory: %w", err)
+	}
+	if err := os.Chmod(dir, 0700); err != nil {
+		return masterKeyPlan{}, fmt.Errorf("failed to secure key directory: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, ".master-key-*.tmp")
+	if err != nil {
+		return masterKeyPlan{}, fmt.Errorf("failed to create staged master key: %w", err)
+	}
+	plan.tempPath = tmp.Name()
+	committed := false
+	defer func() {
+		_ = tmp.Close()
+		if !committed {
+			_ = os.Remove(plan.tempPath)
+		}
+	}()
+	if err := tmp.Chmod(0600); err != nil {
+		return masterKeyPlan{}, fmt.Errorf("failed to secure staged master key: %w", err)
+	}
+	if _, err := tmp.Write(plan.data); err != nil {
+		return masterKeyPlan{}, fmt.Errorf("failed to stage master key: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		return masterKeyPlan{}, fmt.Errorf("failed to flush staged master key: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return masterKeyPlan{}, fmt.Errorf("failed to close staged master key: %w", err)
+	}
+	committed = true
+	return plan, nil
+}
+
+func cleanupStagedMasterKey(plan masterKeyPlan) {
+	if plan.tempPath != "" {
+		_ = os.Remove(plan.tempPath)
+	}
+}
+
+func commitMasterKeyFile(plan masterKeyPlan, dbs ...*gorm.DB) error {
+	if !plan.write {
+		return nil
+	}
+	if plan.tempPath == "" {
+		return errors.New("master key was not staged before commit")
+	}
+	if err := os.Rename(plan.tempPath, plan.dest); err != nil {
+		return fmt.Errorf("failed to atomically install master key: %w", err)
+	}
+	if err := syncDirectory(filepath.Dir(plan.dest)); err != nil {
+		return err
+	}
+	if len(dbs) > 0 && dbs[0] != nil {
+		if err := deleteRestoreKeyJournal(dbs[0]); err != nil {
+			return fmt.Errorf("master key installed but restore journal cleanup failed: %w", err)
+		}
+	}
+	restoreLog.Infof("Restored master key to %s", plan.dest)
+	return nil
+}
+
+// loadAndValidateMetadata reads and structurally validates metadata.json.
+func loadAndValidateMetadata(dir string) (*backupMetadata, error) {
+	file, err := os.Open(filepath.Join(dir, "metadata.json"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read metadata: %w", err)
 	}
 	defer func() { _ = file.Close() }()
 
-	var metadata backupMetadata
-	decoder := json.NewDecoder(file)
-	if err := decoder.Decode(&metadata); err != nil {
-		return nil, err
+	var meta backupMetadata
+	if err := json.NewDecoder(file).Decode(&meta); err != nil {
+		return nil, fmt.Errorf("failed to parse metadata: %w", err)
 	}
 
-	return &metadata, nil
+	if meta.Version == "" {
+		return nil, errors.New("archive metadata has no version")
+	}
+	major, err := archiveMajorVersion(meta.Version)
+	if err != nil {
+		return nil, err
+	}
+	if major != archiveMajorV1 && major != archiveMajorV2 {
+		return nil, fmt.Errorf("unsupported archive major version %d (version %q); this build supports 1 and 2", major, meta.Version)
+	}
+	if major >= archiveMajorV2 && meta.MasterKeyIncluded && meta.MasterKeyChecksum == "" {
+		return nil, errors.New("v2 archive metadata declares a bundled master key but has no master key checksum")
+	}
+	_, minor, err := archiveVersion(meta.Version)
+	if err != nil {
+		return nil, err
+	}
+	if major == archiveMajorV2 && minor >= 1 && archiveContainsKeyDependentData(&meta) {
+		if meta.EncryptionKeyFingerprint == "" || meta.ArchiveMAC == "" {
+			return nil, errors.New("v2.1 archive containing encrypted data is missing its encryption-key fingerprint or authentication code")
+		}
+	}
+	if len(meta.Tables) == 0 {
+		return nil, errors.New("archive metadata lists no tables")
+	}
+	seen := make(map[string]bool, len(meta.Tables))
+	for _, t := range meta.Tables {
+		if seen[t] {
+			return nil, fmt.Errorf("duplicate table %q in archive metadata", t)
+		}
+		seen[t] = true
+	}
+	for t, c := range meta.RecordCount {
+		if c < 0 {
+			return nil, fmt.Errorf("negative record count for table %q", t)
+		}
+	}
+	return &meta, nil
 }
 
-// extractTarGz 解压 tar.gz 文件
+// resolveRestoreTables determines which tables to restore, in manifest
+// dependency order. A default (no --tables) restore uses every backed-up data
+// table present in the archive. An explicit selection must be a subset of both
+// the archive and the manifest's backup-data tables.
+func resolveRestoreTables(meta *backupMetadata, requested []string) ([]string, error) {
+	inArchive := make(map[string]bool, len(meta.Tables))
+	for _, t := range meta.Tables {
+		inArchive[t] = true
+	}
+
+	if len(requested) == 0 {
+		// For v1.0 archives (fixed format), unknown tables indicate a corrupted
+		// or incompatible archive and must fail rather than silently skip data.
+		for _, t := range meta.Tables {
+			spec, ok := database.TableByName(t)
+			if !ok {
+				return nil, fmt.Errorf("archive contains unknown table %q (not in manifest); v1.0 archives must match the current manifest exactly", t)
+			}
+			if !spec.BackupData {
+				return nil, fmt.Errorf("archive table %q is not a restorable data table", t)
+			}
+		}
+		var selected []string
+		for _, spec := range database.RestoreOrder(meta.Tables) {
+			selected = append(selected, spec.Name)
+		}
+		if len(selected) == 0 {
+			return nil, errors.New("archive contains no restorable tables")
+		}
+		return selected, nil
+	}
+
+	for _, t := range requested {
+		spec, ok := database.TableByName(t)
+		if !ok || !spec.BackupData {
+			return nil, fmt.Errorf("table %q is not a restorable data table", t)
+		}
+		if !inArchive[t] {
+			return nil, fmt.Errorf("table %q is not present in the archive", t)
+		}
+	}
+	var selected []string
+	for _, spec := range database.RestoreOrder(requested) {
+		selected = append(selected, spec.Name)
+	}
+	return selected, nil
+}
+
+// validateArchiveData streams every selected JSONL file, decoding each record
+// into the version-appropriate record type and confirming the line count matches
+// the metadata. For v2 archives it also verifies each file's SHA-256 against the
+// checksum recorded at backup time, failing before any mutation on mismatch. It
+// holds no more than one line in memory at a time.
+func validateArchiveData(dir string, meta *backupMetadata, selected []string, major int) error {
+	for _, table := range selected {
+		spec, ok := database.TableByName(table)
+		if !ok {
+			return fmt.Errorf("table %q is not in the durable-table manifest", table)
+		}
+		expected, ok := meta.RecordCount[table]
+		if !ok {
+			return fmt.Errorf("archive metadata is missing a record count for %q", table)
+		}
+		path := filepath.Join(dir, table+".jsonl")
+		if _, err := os.Stat(path); err != nil {
+			return fmt.Errorf("archive is missing the data file for %q: %w", table, err)
+		}
+
+		if major >= archiveMajorV2 {
+			want, ok := meta.Checksums[table]
+			if !ok || want == "" {
+				return fmt.Errorf("v2 archive metadata is missing a checksum for %q", table)
+			}
+			got, err := fileSHA256(path)
+			if err != nil {
+				return fmt.Errorf("failed to checksum %q: %w", table, err)
+			}
+			if got != want {
+				return fmt.Errorf("table %s: checksum mismatch (archive corrupted): expected %s, got %s", table, want, got)
+			}
+		}
+
+		count, err := streamJSONL(path, func(lineNum int, data []byte) error {
+			rec := recordForVersion(spec, major)
+			if err := json.Unmarshal(data, rec); err != nil {
+				return fmt.Errorf("table %s: invalid record at line %d: %w", table, lineNum, err)
+			}
+			if table == "system_configs" {
+				value := reflect.ValueOf(rec)
+				if value.Kind() == reflect.Pointer {
+					value = value.Elem()
+				}
+				key := value.FieldByName("Key")
+				if key.IsValid() && key.Kind() == reflect.String && key.String() == restoreKeyJournalConfigKey {
+					return fmt.Errorf("table %s: record at line %d uses reserved internal key %q", table, lineNum, restoreKeyJournalConfigKey)
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		if count != expected {
+			return fmt.Errorf("table %s: archive contains %d records but metadata expects %d", table, count, expected)
+		}
+	}
+	return nil
+}
+
+// fileSHA256 returns the hex-encoded SHA-256 of a file's bytes.
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// executeRestore performs the entire restore within one transaction. Any error
+// rolls the transaction back, leaving the database untouched.
+func executeRestore(db *gorm.DB, dbType, dir string, meta *backupMetadata, selected []string, major int, fullRestore, truncate bool, keyPlans ...masterKeyPlan) (*restoreStats, error) {
+	stats := newRestoreStats()
+	stats.Truncated = truncate
+
+	preCounts := make(map[string]int64, len(selected))
+
+	err := db.Transaction(func(tx *gorm.DB) error {
+		if truncate {
+			for _, name := range database.TruncateOrder(selected, fullRestore) {
+				if err := tx.Table(name).Where("1 = 1").Delete(nil).Error; err != nil {
+					return fmt.Errorf("failed to truncate %s: %w", name, err)
+				}
+			}
+		} else {
+			for _, table := range selected {
+				n, err := physicalCount(tx, table)
+				if err != nil {
+					return err
+				}
+				preCounts[table] = n
+			}
+		}
+
+		for _, spec := range database.RestoreOrder(selected) {
+			affected, err := insertTable(tx, spec, dir, major)
+			if err != nil {
+				return fmt.Errorf("failed to restore %s: %w", spec.Name, err)
+			}
+			stats.Restored[spec.Name] = affected
+		}
+
+		reset, err := resetSequences(tx, dbType, selected)
+		if err != nil {
+			return err
+		}
+		stats.SequencesReset = reset
+
+		// Verify the resulting row counts against the archive.
+		for _, table := range selected {
+			expected := meta.RecordCount[table]
+			final, err := physicalCount(tx, table)
+			if err != nil {
+				return err
+			}
+			if truncate {
+				if final != expected {
+					return fmt.Errorf("table %s: expected %d rows after restore, found %d", table, expected, final)
+				}
+				continue
+			}
+			affected := stats.Restored[table]
+			if affected != expected {
+				return fmt.Errorf("table %s: inserted %d rows, expected %d", table, affected, expected)
+			}
+			if delta := final - preCounts[table]; delta != expected {
+				return fmt.Errorf("table %s: row count grew by %d, expected %d", table, delta, expected)
+			}
+		}
+		if len(keyPlans) > 0 {
+			if err := writeRestoreKeyJournal(tx, keyPlans[0]); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return stats, nil
+}
+
+// insertTable streams a table's JSONL file and inserts it in bounded batches,
+// requiring each batch to affect exactly as many rows as were submitted. The
+// record type is selected by archive major version (v2 backup DTO or v1 model).
+func insertTable(tx *gorm.DB, spec database.TableSpec, dir string, major int) (int64, error) {
+	elemType := reflect.TypeOf(recordForVersion(spec, major)).Elem() // e.g. database.BackupUser
+	ptrSliceType := reflect.SliceOf(reflect.PointerTo(elemType))
+
+	batch := reflect.MakeSlice(ptrSliceType, 0, restoreBatchSize)
+	var affected int64
+
+	flush := func() error {
+		if batch.Len() == 0 {
+			return nil
+		}
+		holder := reflect.New(ptrSliceType)
+		holder.Elem().Set(batch)
+
+		var res *gorm.DB
+		if spec.IsJoinTable {
+			// Composite-key join table: insert exactly, no model, no conflict
+			// handling. A duplicate key during a merge restore is a real error.
+			res = tx.Table(spec.Name).CreateInBatches(holder.Interface(), batch.Len())
+		} else {
+			// Insert only the row's own columns; never cascade into associations.
+			res = tx.Omit(clause.Associations).CreateInBatches(holder.Interface(), batch.Len())
+		}
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected != int64(batch.Len()) {
+			return fmt.Errorf("batch inserted %d of %d rows", res.RowsAffected, batch.Len())
+		}
+		affected += res.RowsAffected
+		batch = reflect.MakeSlice(ptrSliceType, 0, restoreBatchSize)
+		return nil
+	}
+
+	path := filepath.Join(dir, spec.Name+".jsonl")
+	_, err := streamJSONL(path, func(lineNum int, data []byte) error {
+		recPtr := reflect.New(elemType)
+		if err := json.Unmarshal(data, recPtr.Interface()); err != nil {
+			return fmt.Errorf("invalid record at line %d: %w", lineNum, err)
+		}
+		batch = reflect.Append(batch, recPtr)
+		if batch.Len() >= restoreBatchSize {
+			return flush()
+		}
+		return nil
+	})
+	if err != nil {
+		return affected, err
+	}
+	if err := flush(); err != nil {
+		return affected, err
+	}
+	return affected, nil
+}
+
+// resetSequences resets the auto-increment sequence of each restored table so
+// the next inserted row gets an id above the restored maximum. Sequence errors
+// fail the restore.
+func resetSequences(tx *gorm.DB, dbType string, selected []string) (int, error) {
+	specs := database.AutoIDTables(selected)
+	if len(specs) == 0 {
+		return 0, nil
+	}
+	switch dbType {
+	case "sqlite", "sqlite3":
+		return resetSQLiteSequences(tx, specs)
+	case "postgres", "postgresql":
+		return resetPostgresSequences(tx, specs)
+	default:
+		return 0, nil
+	}
+}
+
+// resetSQLiteSequences resets the AUTOINCREMENT counters. If the schema uses
+// plain rowid primary keys (no AUTOINCREMENT, hence no sqlite_sequence table),
+// there is nothing to reset: SQLite already derives the next id from max+1.
+func resetSQLiteSequences(tx *gorm.DB, specs []database.TableSpec) (int, error) {
+	var hasSeqTable int64
+	if err := tx.Raw(
+		"SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_sequence'",
+	).Scan(&hasSeqTable).Error; err != nil {
+		return 0, fmt.Errorf("failed to inspect sqlite_sequence: %w", err)
+	}
+	if hasSeqTable == 0 {
+		return 0, nil
+	}
+
+	reset := 0
+	for _, spec := range specs {
+		maxID, err := maxTableID(tx, spec.Name)
+		if err != nil {
+			return reset, err
+		}
+		// Deterministic: clear any existing counter, then set it only when the
+		// table has rows. An empty table is left without a counter so the next
+		// insert starts at 1.
+		if err := tx.Exec("DELETE FROM sqlite_sequence WHERE name = ?", spec.Name).Error; err != nil {
+			return reset, fmt.Errorf("failed to reset sequence for %s: %w", spec.Name, err)
+		}
+		if maxID > 0 {
+			if err := tx.Exec("INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)", spec.Name, maxID).Error; err != nil {
+				return reset, fmt.Errorf("failed to set sequence for %s: %w", spec.Name, err)
+			}
+		}
+		reset++
+	}
+	return reset, nil
+}
+
+// resetPostgresSequences uses transactional ALTER SEQUENCE ... RESTART to
+// reset each table's serial sequence. Unlike setval(), RESTART participates in
+// transaction rollback. Sequence names are resolved via pg_get_serial_sequence,
+// which is safe because table names come from the validated manifest.
+func resetPostgresSequences(tx *gorm.DB, specs []database.TableSpec) (int, error) {
+	reset := 0
+	for _, spec := range specs {
+		maxID, err := maxTableID(tx, spec.Name)
+		if err != nil {
+			return reset, err
+		}
+		var seqName *string
+		if err := tx.Raw("SELECT pg_get_serial_sequence(?, 'id')", spec.Name).Scan(&seqName).Error; err != nil {
+			return reset, fmt.Errorf("failed to resolve sequence for %s: %w", spec.Name, err)
+		}
+		if seqName == nil || *seqName == "" {
+			continue // table has no serial-backed id sequence; nothing to reset
+		}
+		// Use identifier quoting to safely embed the resolved sequence name.
+		// ALTER SEQUENCE is transactional: it will roll back with the restore.
+		if maxID > 0 {
+			if err := tx.Exec(fmt.Sprintf("ALTER SEQUENCE %s RESTART WITH %d", *seqName, maxID+1)).Error; err != nil {
+				return reset, fmt.Errorf("failed to restart sequence for %s: %w", spec.Name, err)
+			}
+		} else {
+			if err := tx.Exec(fmt.Sprintf("ALTER SEQUENCE %s RESTART WITH 1", *seqName)).Error; err != nil {
+				return reset, fmt.Errorf("failed to restart sequence for %s: %w", spec.Name, err)
+			}
+		}
+		reset++
+	}
+	return reset, nil
+}
+
+func maxTableID(tx *gorm.DB, table string) (int64, error) {
+	var maxID int64
+	if err := tx.Table(table).Select("COALESCE(MAX(id), 0)").Scan(&maxID).Error; err != nil {
+		return 0, fmt.Errorf("failed to read max id for %s: %w", table, err)
+	}
+	return maxID, nil
+}
+
+// physicalCount returns the physical row count of a table (including
+// soft-deleted rows, since Table() applies no soft-delete scope).
+func physicalCount(tx *gorm.DB, table string) (int64, error) {
+	var n int64
+	if err := tx.Table(table).Count(&n).Error; err != nil {
+		return 0, fmt.Errorf("failed to count %s: %w", table, err)
+	}
+	return n, nil
+}
+
+// streamJSONL reads a JSONL file line by line, rejecting blank lines and lines
+// over maxJSONLLineBytes, invoking handle for each non-empty line. It never
+// retains more than a single line. It returns the number of records.
+func streamJSONL(path string, handle func(lineNum int, data []byte) error) (int64, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = file.Close() }()
+
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxJSONLLineBytes)
+
+	var count int64
+	lineNum := 0
+	for scanner.Scan() {
+		lineNum++
+		line := scanner.Bytes()
+		if len(bytes.TrimSpace(line)) == 0 {
+			return count, fmt.Errorf("%s: unexpected blank line at line %d", filepath.Base(path), lineNum)
+		}
+		buf := make([]byte, len(line))
+		copy(buf, line)
+		if err := handle(lineNum, buf); err != nil {
+			return count, err
+		}
+		count++
+	}
+	if err := scanner.Err(); err != nil {
+		if errors.Is(err, bufio.ErrTooLong) {
+			return count, fmt.Errorf("%s: record exceeds the %d byte line limit", filepath.Base(path), maxJSONLLineBytes)
+		}
+		return count, fmt.Errorf("%s: read error: %w", filepath.Base(path), err)
+	}
+	return count, nil
+}
+
+// extractTarGz extracts a backup archive into destDir. It accepts only
+// top-level regular files and enforces entry-count, per-file, and total-size
+// limits to defend against path traversal and archive-expansion attacks.
 func extractTarGz(archivePath, destDir string) error {
 	file, err := os.Open(archivePath)
 	if err != nil {
@@ -215,6 +871,9 @@ func extractTarGz(archivePath, destDir string) error {
 	defer func() { _ = gzReader.Close() }()
 
 	tarReader := tar.NewReader(gzReader)
+	seen := make(map[string]bool)
+	var total int64
+	entries := 0
 
 	for {
 		header, err := tarReader.Next()
@@ -225,359 +884,111 @@ func extractTarGz(archivePath, destDir string) error {
 			return err
 		}
 
-		targetPath := filepath.Join(destDir, header.Name)
+		entries++
+		if entries > maxArchiveEntries {
+			return fmt.Errorf("archive has too many entries (>%d)", maxArchiveEntries)
+		}
 
-		destDirAbs, err := filepath.Abs(destDir)
+		name := header.Name
+		// Legacy v1 archives written by createTarGz included the source root as
+		// a "." directory entry. It carries no data, so accept and ignore only
+		// this exact directory while continuing to reject all other non-files.
+		if name == "." && header.Typeflag == tar.TypeDir {
+			continue
+		}
+		if header.Typeflag != tar.TypeReg {
+			return fmt.Errorf("archive contains a non-regular entry %q (type %d)", name, header.Typeflag)
+		}
+		if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) || strings.Contains(name, "..") || filepath.IsAbs(name) {
+			return fmt.Errorf("illegal entry name in archive: %q", name)
+		}
+		if seen[name] {
+			return fmt.Errorf("duplicate entry in archive: %q", name)
+		}
+		seen[name] = true
+		if header.Size > maxArchiveFileBytes {
+			return fmt.Errorf("archive entry %q is too large", name)
+		}
+
+		target := filepath.Join(destDir, name)
+		outFile, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 		if err != nil {
-			return fmt.Errorf("failed to get absolute path for destDir: %w", err)
+			return err
 		}
-		targetPathAbs, err := filepath.Abs(targetPath)
+		written, err := io.Copy(outFile, io.LimitReader(tarReader, maxArchiveFileBytes+1))
+		_ = outFile.Close()
 		if err != nil {
-			return fmt.Errorf("failed to get absolute path for target: %w", err)
+			return err
 		}
-		if !strings.HasPrefix(targetPathAbs, destDirAbs+string(os.PathSeparator)) {
-			return fmt.Errorf("illegal file path in archive: %s", header.Name)
+		if written > maxArchiveFileBytes {
+			return fmt.Errorf("archive entry %q exceeds the size limit", name)
 		}
-
-		switch header.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(targetPath, 0755); err != nil {
-				return err
-			}
-		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
-				return err
-			}
-
-			outFile, err := os.Create(targetPath)
-			if err != nil {
-				return err
-			}
-
-			if _, err := io.Copy(outFile, tarReader); err != nil {
-				_ = outFile.Close()
-				return err
-			}
-			_ = outFile.Close()
+		total += written
+		if total > maxArchiveTotalBytes {
+			return fmt.Errorf("archive expands beyond the total size limit (%d bytes)", maxArchiveTotalBytes)
 		}
 	}
-
 	return nil
 }
 
-// restoreTable 还原单张表（使用批量插入优化）
-func restoreTable(db *gorm.DB, tableName, jsonlPath string, stats *restoreStats, dryRun bool) error {
-	file, err := os.Open(jsonlPath)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = file.Close() }()
-
-	scanner := bufio.NewScanner(file)
-	var lineNum int
-	batchSize := 100 // 每批插入 100 条
-
-	// 使用通用批量还原函数
-	switch tableName {
-	case "users":
-		restoreBatch(db, scanner, &lineNum, batchSize, dryRun, stats, tableName,
-			func() any { return &models.User{} })
-	case "devices":
-		restoreBatch(db, scanner, &lineNum, batchSize, dryRun, stats, tableName,
-			func() any { return &models.Device{} })
-	case "images":
-		restoreBatchWithCleanup(db, scanner, &lineNum, batchSize, dryRun, stats, tableName,
-			func() *models.Image { return &models.Image{} },
-			func(r *models.Image) { r.Albums = nil })
-	case "image_variants":
-		restoreBatchWithCleanup(db, scanner, &lineNum, batchSize, dryRun, stats, tableName,
-			func() *models.ImageVariant { return &models.ImageVariant{} },
-			func(r *models.ImageVariant) {})
-	case "albums":
-		restoreBatchWithCleanup(db, scanner, &lineNum, batchSize, dryRun, stats, tableName,
-			func() *models.Album { return &models.Album{} },
-			func(r *models.Album) { r.Images = nil })
-	case "album_images":
-		restoreAlbumImagesBatch(db, scanner, &lineNum, batchSize, dryRun, stats)
-	case "api_tokens":
-		restoreBatch(db, scanner, &lineNum, batchSize, dryRun, stats, tableName,
-			func() any { return &models.ApiToken{} })
+// archiveIsComplete returns true if meta.Tables includes every BackupData table
+// from the manifest. Only complete archives should clear ephemeral tables.
+func archiveIsComplete(meta *backupMetadata, major int) bool {
+	inArchive := make(map[string]bool, len(meta.Tables))
+	for _, t := range meta.Tables {
+		inArchive[t] = true
 	}
 
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("error reading JSONL: %w", err)
-	}
-
-	restoreLog.Infof("Restored %d records to %s", stats.Restored[tableName], tableName)
-	return nil
-}
-
-// restoreBatch 通用批量还原
-func restoreBatch(db *gorm.DB, scanner *bufio.Scanner, lineNum *int, batchSize int, dryRun bool, stats *restoreStats, tableName string, newRecord func() any) {
-	batch := make([]any, 0, batchSize)
-
-	for scanner.Scan() {
-		*lineNum++
-		line := scanner.Text()
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-
-		record := newRecord()
-		if err := json.Unmarshal([]byte(line), record); err != nil {
-			restoreLog.Warnf("Failed to unmarshal %s record at line %d: %v", tableName, *lineNum, err)
-			stats.Errors[tableName]++
-			continue
-		}
-		batch = append(batch, record)
-
-		if len(batch) >= batchSize {
-			insertBatch(db, batch, dryRun, stats, tableName)
-			batch = batch[:0]
-		}
-	}
-
-	if len(batch) > 0 {
-		insertBatch(db, batch, dryRun, stats, tableName)
-	}
-}
-
-// restoreBatchWithCleanup 带清理的批量还原
-func restoreBatchWithCleanup[T any](db *gorm.DB, scanner *bufio.Scanner, lineNum *int, batchSize int, dryRun bool, stats *restoreStats, tableName string, newRecord func() *T, cleanup func(*T)) {
-	batch := make([]*T, 0, batchSize)
-
-	for scanner.Scan() {
-		*lineNum++
-		line := scanner.Text()
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-
-		record := newRecord()
-		if err := json.Unmarshal([]byte(line), record); err != nil {
-			restoreLog.Warnf("Failed to unmarshal %s record at line %d: %v", tableName, *lineNum, err)
-			stats.Errors[tableName]++
-			continue
-		}
-		cleanup(record)
-		batch = append(batch, record)
-
-		if len(batch) >= batchSize {
-			if !dryRun {
-				if err := db.CreateInBatches(batch, batchSize).Error; err != nil {
-					restoreLog.Warnf("Failed to insert batch: %v", err)
-					stats.Errors[tableName] += int64(len(batch))
-				} else {
-					stats.Restored[tableName] += int64(len(batch))
-				}
-			} else {
-				stats.Restored[tableName] += int64(len(batch))
-			}
-			batch = batch[:0]
-		}
-	}
-
-	if len(batch) > 0 && !dryRun {
-		if err := db.CreateInBatches(batch, len(batch)).Error; err != nil {
-			restoreLog.Warnf("Failed to insert final batch: %v", err)
-			stats.Errors[tableName] += int64(len(batch))
-		} else {
-			stats.Restored[tableName] += int64(len(batch))
-		}
-	} else if len(batch) > 0 {
-		stats.Restored[tableName] += int64(len(batch))
-	}
-}
-
-// restoreAlbumImagesBatch 还原 album_images（使用原始 SQL）
-func restoreAlbumImagesBatch(db *gorm.DB, scanner *bufio.Scanner, lineNum *int, batchSize int, dryRun bool, stats *restoreStats) {
-	batch := make([]albumImageRecord, 0, batchSize)
-
-	for scanner.Scan() {
-		*lineNum++
-		line := scanner.Text()
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-
-		var record albumImageRecord
-		if err := json.Unmarshal([]byte(line), &record); err != nil {
-			restoreLog.Warnf("Failed to unmarshal album_images record at line %d: %v", *lineNum, err)
-			stats.Errors["album_images"]++
-			continue
-		}
-		batch = append(batch, record)
-
-		if len(batch) >= batchSize {
-			insertAlbumImagesBatch(db, batch, dryRun, stats)
-			batch = batch[:0]
-		}
-	}
-
-	if len(batch) > 0 {
-		insertAlbumImagesBatch(db, batch, dryRun, stats)
-	}
-}
-
-// insertBatch 插入批量记录
-func insertBatch(db *gorm.DB, batch []any, dryRun bool, stats *restoreStats, tableName string) {
-	if dryRun {
-		stats.Restored[tableName] += int64(len(batch))
-		return
-	}
-
-	if len(batch) == 0 {
-		return
-	}
-
-	if err := db.CreateInBatches(batch, len(batch)).Error; err != nil {
-		restoreLog.Warnf("Failed to insert batch for %s: %v", tableName, err)
-		stats.Errors[tableName] += int64(len(batch))
-	} else {
-		stats.Restored[tableName] += int64(len(batch))
-	}
-}
-
-// insertAlbumImagesBatch 批量插入 album_images（跨数据库兼容版）
-func insertAlbumImagesBatch(db *gorm.DB, batch []albumImageRecord, dryRun bool, stats *restoreStats) {
-	if dryRun {
-		stats.Restored["album_images"] += int64(len(batch))
-		return
-	}
-
-	if len(batch) == 0 {
-		return
-	}
-
-	// 使用 GORM 的 OnConflict 实现跨数据库兼容的"存在则忽略"插入
-	// SQLite: INSERT OR IGNORE
-	// MySQL: INSERT IGNORE
-	// PostgreSQL: ON CONFLICT DO NOTHING
-	err := db.Table("album_images").
-		Clauses(clause.OnConflict{DoNothing: true}).
-		CreateInBatches(&batch, len(batch)).Error
-
-	if err != nil {
-		restoreLog.Warnf("Failed to insert album_images batch: %v", err)
-		stats.Errors["album_images"] += int64(len(batch))
-	} else {
-		stats.Restored["album_images"] += int64(len(batch))
-	}
-}
-
-// truncateTables 清空表数据
-func truncateTables(db *gorm.DB, tablesToClear []string) error {
-	truncateOrder := []string{
-		"album_images", "image_variants", "api_tokens", "images",
-		"albums", "devices", "users",
-	}
-
-	for _, safeTable := range truncateOrder {
-		if !contains(tablesToClear, safeTable) {
-			continue
-		}
-
-		restoreLog.Infof("Truncating table: %s", safeTable)
-
-		if err := db.Table(safeTable).Where("1 = 1").Delete(nil).Error; err != nil {
-			return fmt.Errorf("failed to truncate %s: %w", safeTable, err)
-		}
-	}
-
-	return nil
-}
-
-// updateAutoIncrementSequences 更新自增序列
-func updateAutoIncrementSequences(db *gorm.DB, dbType string, stats *restoreStats) error {
-	type tableInfo struct {
-		TableName string
-		Model     any
-	}
-
-	tables := []tableInfo{
-		{"users", &models.User{}},
-		{"devices", &models.Device{}},
-		{"images", &models.Image{}},
-		{"image_variants", &models.ImageVariant{}},
-		{"albums", &models.Album{}},
-		{"api_tokens", &models.ApiToken{}},
-	}
-
-	for _, info := range tables {
-		var maxID uint
-		if err := db.Table(info.TableName).Select("COALESCE(MAX(id), 0)").Scan(&maxID).Error; err != nil {
-			restoreLog.Warnf("Failed to get max ID for %s: %v", info.TableName, err)
-			continue
-		}
-
-		if maxID == 0 {
-			continue
-		}
-
-		nextID := maxID + 1
-
-		switch dbType {
-		case "sqlite":
-			if err := db.Exec(
-				"UPDATE sqlite_sequence SET seq = ? WHERE name = ?",
-				maxID, info.TableName,
-			).Error; err != nil {
-				db.Exec("INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)",
-					info.TableName, maxID)
-			}
-
-		case "postgres", "postgresql":
-			sequenceName := info.TableName + "_id_seq"
-			if err := db.Exec(
-				fmt.Sprintf("ALTER SEQUENCE IF EXISTS %s RESTART WITH %d", sequenceName, nextID),
-			).Error; err != nil {
-				restoreLog.Warnf("Failed to update sequence for %s: %v", info.TableName, err)
+	if major == archiveMajorV1 {
+		for _, name := range legacyV1DefaultBackupTables {
+			if !inArchive[name] {
+				return false
 			}
 		}
-
-		stats.AutoIncrementUpdates++
+		return true
 	}
 
-	return nil
+	for _, spec := range database.BackupTables() {
+		if !inArchive[spec.Name] {
+			return false
+		}
+	}
+	return true
 }
 
-// printRestoreSummary 打印还原摘要
-func printRestoreSummary(stats *restoreStats, dryRun bool) {
+// printRestorePlan shows the validated plan before any prompt.
+func printRestorePlan(meta *backupMetadata, selected []string, truncate, dryRun bool) {
 	fmt.Println()
 	fmt.Println("========================================")
 	if dryRun {
-		fmt.Println("       [DRY RUN MODE]")
+		fmt.Println("       [DRY RUN] Restore Plan")
+	} else {
+		fmt.Println("            Restore Plan")
 	}
-	fmt.Println("         Restore Summary")
 	fmt.Println("========================================")
-
-	if len(stats.Restored) > 0 {
-		fmt.Println("Restored records:")
-		for table, count := range stats.Restored {
-			fmt.Printf("  %-15s %d\n", table+":", count)
-		}
+	fmt.Printf("Archive version: %s\n", meta.Version)
+	fmt.Printf("Source database: %s\n", meta.Database)
+	fmt.Printf("Truncate first:  %v\n", truncate)
+	fmt.Println("Tables to restore:")
+	for _, table := range selected {
+		fmt.Printf("  %-22s %d records\n", table+":", meta.RecordCount[table])
 	}
-
-	if len(stats.Errors) > 0 {
-		fmt.Println("\nErrors:")
-		for table, count := range stats.Errors {
-			fmt.Printf("  %-15s %d\n", table+":", count)
-		}
-	}
-
-	if !dryRun {
-		fmt.Printf("\nAuto-increment sequences updated: %d\n", stats.AutoIncrementUpdates)
-	}
-
 	fmt.Println("========================================")
 }
 
-// contains 检查字符串是否在切片中
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
+// printRestoreSummary prints the result of a completed restore.
+func printRestoreSummary(stats *restoreStats) {
+	fmt.Println()
+	fmt.Println("========================================")
+	fmt.Println("           Restore Summary")
+	fmt.Println("========================================")
+	if stats.Truncated {
+		fmt.Println("Existing data was truncated before restore.")
 	}
-	return false
+	fmt.Println("Restored records:")
+	for table, count := range stats.Restored {
+		fmt.Printf("  %-22s %d\n", table+":", count)
+	}
+	fmt.Printf("\nAuto-increment sequences reset: %d\n", stats.SequencesReset)
+	fmt.Println("========================================")
 }

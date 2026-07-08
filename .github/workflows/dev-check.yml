@@ -14,8 +14,8 @@ jobs:
     name: Lint & Security Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.26"
           cache: true
@@ -33,15 +33,12 @@ jobs:
           go mod download
           go mod verify
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@v9
         with:
           version: v2.10.1
           args: --timeout=5m
       - name: Run govulncheck
-        uses: golang/govulncheck-action@v1
-        with:
-          go-version-input: "1.26"
-          go-package: ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
   ########################################
   # Tests
@@ -51,8 +48,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: lint
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.26"
           cache: true

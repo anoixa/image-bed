@@ -315,6 +315,47 @@ func staleRetryDelay(retryCount int) time.Duration {
 	}
 }
 
+// SetPendingBackoff sets next_retry_at on the given pending variants without
+// changing retry_count. Used to pause variants whose storage is disabled so the
+// sweeper skips them until the backoff elapses.
+func (r *VariantRepository) SetPendingBackoff(ids []uint, at time.Time) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return r.db.Model(&models.ImageVariant{}).
+		Where("id IN ? AND status = ?", ids, models.VariantStatusPending).
+		Update("next_retry_at", at).Error
+}
+
+// ListDuePendingImageIDs returns distinct image IDs that have at least one pending
+// variant due now (next_retry_at IS NULL OR <= now) and whose image is not
+// soft-deleted. Paginated by image_id cursor to bound per-run work.
+// 用于恢复因存储被禁用而暂停的 pending 变体（sweeper 周期扫描）。
+func (r *VariantRepository) ListDuePendingImageIDs(cursorID uint, limit int) ([]uint, error) {
+	if limit <= 0 {
+		limit = pendingScanLimit
+	}
+	now := time.Now()
+	query := r.db.Model(&models.ImageVariant{}).
+		Joins("JOIN images ON images.id = image_variants.image_id").
+		Where("image_variants.status = ?", models.VariantStatusPending).
+		Where("image_variants.deleted_at IS NULL").
+		Where("images.deleted_at IS NULL").
+		Where("image_variants.next_retry_at IS NULL OR image_variants.next_retry_at <= ?", now)
+	if cursorID > 0 {
+		query = query.Where("image_variants.image_id > ?", cursorID)
+	}
+	var ids []uint
+	err := query.
+		Distinct("image_variants.image_id").
+		Order("image_variants.image_id ASC").
+		Limit(limit).
+		Pluck("image_variants.image_id", &ids).Error
+	return ids, err
+}
+
+const pendingScanLimit = 100
+
 func (r *VariantRepository) ResetVariantsToPending(ids []uint) (int64, error) {
 	if len(ids) == 0 {
 		return 0, nil

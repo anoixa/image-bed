@@ -3,6 +3,7 @@ package images
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/anoixa/image-bed/database/models"
 	"github.com/stretchr/testify/assert"
@@ -224,11 +225,73 @@ func TestRepository_GetImageListFiltersByStorageConfigIDs(t *testing.T) {
 		require.NoError(t, repo.SaveImage(image))
 	}
 
-	result, total, err := repo.GetImageList([]uint{10}, "", "", nil, 0, 0, "desc", 1, 10, 1)
+	result, total, err := repo.GetImageList([]uint{10}, "", "", nil, nil, 0, 0, "created_at", "desc", 1, 10, 1)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), total)
 	require.Len(t, result, 1)
 	assert.Equal(t, "local-1", result[0].Identifier)
+}
+
+func TestRepository_GetImageListFiltersByVisibility(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewRepository(db)
+
+	images := []*models.Image{
+		{Identifier: "public-1", OriginalName: "public.jpg", FileHash: "visibility-h1", UserID: 1, IsPublic: true},
+		{Identifier: "private-1", OriginalName: "private.jpg", FileHash: "visibility-h2", UserID: 1, IsPublic: false},
+		{Identifier: "other-user-private", OriginalName: "other.jpg", FileHash: "visibility-h3", UserID: 2, IsPublic: false},
+	}
+
+	for _, image := range images {
+		require.NoError(t, repo.SaveImageWithVisibility(image, image.IsPublic))
+	}
+
+	isPublic := false
+	result, total, err := repo.GetImageList(nil, "", "", nil, &isPublic, 0, 0, "created_at", "desc", 1, 10, 1)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, result, 1)
+	assert.Equal(t, "private-1", result[0].Identifier)
+}
+
+func TestRepository_GetImageListUsesStableRequestedSort(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewRepository(db)
+	createdAt := time.Unix(1_700_000_000, 0)
+
+	for _, image := range []*models.Image{
+		{Identifier: "medium-first", OriginalName: "1.jpg", FileHash: "sort-h1", FileSize: 20, UserID: 1, CreatedAt: createdAt},
+		{Identifier: "small", OriginalName: "2.jpg", FileHash: "sort-h2", FileSize: 10, UserID: 1, CreatedAt: createdAt},
+		{Identifier: "medium-last", OriginalName: "3.jpg", FileHash: "sort-h3", FileSize: 20, UserID: 1, CreatedAt: createdAt},
+	} {
+		require.NoError(t, repo.SaveImage(image))
+	}
+
+	ascending, _, err := repo.GetImageList(nil, "", "", nil, nil, 0, 0, "file_size", "asc", 1, 10, 1)
+	require.NoError(t, err)
+	require.Len(t, ascending, 3)
+	assert.Equal(t, []string{"small", "medium-first", "medium-last"}, []string{
+		ascending[0].Identifier,
+		ascending[1].Identifier,
+		ascending[2].Identifier,
+	})
+
+	descending, _, err := repo.GetImageList(nil, "", "", nil, nil, 0, 0, "file_size", "desc", 1, 10, 1)
+	require.NoError(t, err)
+	require.Len(t, descending, 3)
+	assert.Equal(t, []string{"medium-last", "medium-first", "small"}, []string{
+		descending[0].Identifier,
+		descending[1].Identifier,
+		descending[2].Identifier,
+	})
+
+	byCreatedAt, _, err := repo.GetImageList(nil, "", "", nil, nil, 0, 0, "created_at", "desc", 1, 10, 1)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"medium-last", "small", "medium-first"}, []string{
+		byCreatedAt[0].Identifier,
+		byCreatedAt[1].Identifier,
+		byCreatedAt[2].Identifier,
+	})
 }
 
 func TestRepository_DeleteImageByIdentifierAndUser(t *testing.T) {

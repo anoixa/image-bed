@@ -13,6 +13,8 @@ import (
 const sweeperInterval = 5 * time.Minute
 const staleThreshold = 15 * time.Minute
 const staleMaxRetries = 3
+const pendingScanBatch = 100
+const pendingScanRunLimit = 100
 
 var sweeperLog = utils.ForModule("Sweeper")
 
@@ -105,6 +107,60 @@ func sweepOnce(ctx context.Context, variantRepo *images.VariantRepository, image
 		}
 		sweeperStats.retriggered.Add(retriggered)
 		sweeperLog.Infof("Re-triggered conversion for %d images", retriggered)
+	}
+
+	// 重新触发那些有"到期 pending 变体"的图片（例如因存储被禁用而暂停、现已到期的变体）。
+	// 按 image_id 游标分页，跳过本轮已重投的图片。
+	if triggerFn != nil {
+		skip := make(map[uint]bool, len(retriedImageIDs))
+		for _, id := range retriedImageIDs {
+			skip[id] = true
+		}
+		vRepo := variantRepo.WithContext(ctx)
+		iRepo := imageRepo.WithContext(ctx)
+		cursor := uint(0)
+		var pendingTriggered uint64
+		for pendingTriggered < pendingScanRunLimit {
+			remaining := pendingScanRunLimit - int(pendingTriggered)
+			pageSize := min(pendingScanBatch, remaining)
+			page, err := vRepo.ListDuePendingImageIDs(cursor, pageSize)
+			if err != nil {
+				recordSweeperError(now, err.Error())
+				sweeperLog.Warnf("Failed to list due pending variants: %v", err)
+				break
+			}
+			if len(page) == 0 {
+				break
+			}
+			lastID := cursor
+			for _, imageID := range page {
+				if imageID > lastID {
+					lastID = imageID
+				}
+				if skip[imageID] {
+					continue
+				}
+				img, err := iRepo.GetImageByID(imageID)
+				if err != nil {
+					sweeperLog.Warnf("Failed to fetch pending image %d: %v", imageID, err)
+					continue
+				}
+				triggerFn(img)
+				pendingTriggered++
+				retriggered++
+				if pendingTriggered >= pendingScanRunLimit {
+					break
+				}
+			}
+			if len(page) < pageSize || pendingTriggered >= pendingScanRunLimit {
+				break
+			}
+			cursor = lastID
+		}
+		if pendingTriggered > 0 {
+			sweeperStats.retriggered.Add(pendingTriggered)
+			sweeperLog.Infof("Re-triggered %d due-pending images", pendingTriggered)
+		}
 	}
 
 	// Images that are no longer processing and have at least one failed

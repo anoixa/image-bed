@@ -87,20 +87,60 @@ func SubmitBackgroundTask(task func()) {
 	_ = submitBackgroundTask(task)
 }
 
-func getStorageProviderByID(storageID uint) (storage.Provider, error) {
+func getReadableStorageProviderByID(storageID uint) (storage.Provider, error) {
 	if storageID == 0 {
 		provider := storage.GetDefault()
 		if provider == nil {
-			return nil, errors.New("no default storage configured")
+			return nil, storage.ErrNoDefaultStorage
 		}
 		return provider, nil
 	}
 
 	provider, err := storage.GetByID(storageID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get storage provider by ID %d: %w", storageID, err)
+		return nil, fmt.Errorf("failed to get readable storage provider by ID %d: %w", storageID, err)
 	}
 	return provider, nil
+}
+
+func getWritableStorageProviderByID(storageID uint) (storage.Provider, error) {
+	if storageID == 0 {
+		provider := storage.GetDefault()
+		if provider == nil {
+			return nil, storage.ErrNoDefaultStorage
+		}
+		return provider, nil
+	}
+
+	provider, err := storage.GetWritableByID(storageID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get writable storage provider by ID %d: %w", storageID, err)
+	}
+	return provider, nil
+}
+
+// IsStorageUnavailable 判断错误是否表示目标存储或默认存储当前不可用，
+// 供上层据此返回 503 Service Unavailable (F7 降级语义)。
+func IsStorageUnavailable(err error) bool {
+	return errors.Is(err, storage.ErrNoDefaultStorage) || errors.Is(err, storage.ErrProviderNotFound)
+}
+
+// IsStorageDisabled 判断错误是否表示目标存储已加载但被禁用（写访问），供上层返回 409。
+func IsStorageDisabled(err error) bool {
+	return errors.Is(err, storage.ErrProviderDisabled)
+}
+
+// CheckStorageAvailable 校验指定存储 ID（0 表示默认存储）对应的 Provider 是否可写就绪。
+func CheckStorageAvailable(storageID uint) error {
+	_, err := getWritableStorageProviderByID(storageID)
+	return err
+}
+
+// resolveWritableStorageForUpload 从单一 registry 快照解析上传写入目标（provider + 解析后 ID）。
+// storageID==0 解析当前默认存储；返回的 ID 即将落库到 image.StorageConfigID，
+// 保证实际写入目标与记录的 StorageConfigID 一致（消除 DB 默认与 registry 默认的漂移）。
+func resolveWritableStorageForUpload(storageID uint) (storage.Provider, uint, error) {
+	return storage.ResolveWritable(storageID)
 }
 
 // getSafeFileExtension 根据MIME类型获取安全的文件扩展名

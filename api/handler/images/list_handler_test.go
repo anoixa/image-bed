@@ -99,3 +99,61 @@ func TestListImagesNormalizesNegativePaginationValues(t *testing.T) {
 	assert.Equal(t, 1, payload.TotalPages)
 	assert.Equal(t, int64(5), payload.Total)
 }
+
+func TestListImagesFiltersByVisibility(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	handler, repo := setupListHandler(t)
+	for _, image := range []*models.Image{
+		{
+			Identifier:   "public-image",
+			OriginalName: "public.jpg",
+			FileHash:     "visibility-public-hash",
+			StoragePath:  "uploads/public.jpg",
+			FileSize:     1024,
+			MimeType:     "image/jpeg",
+			UserID:       1,
+			IsPublic:     true,
+		},
+		{
+			Identifier:   "private-image",
+			OriginalName: "private.jpg",
+			FileHash:     "visibility-private-hash",
+			StoragePath:  "uploads/private.jpg",
+			FileSize:     1024,
+			MimeType:     "image/jpeg",
+			UserID:       1,
+			IsPublic:     false,
+		},
+	} {
+		require.NoError(t, repo.SaveImageWithVisibility(image, image.IsPublic))
+	}
+
+	router := gin.New()
+	router.POST("/images", func(c *gin.Context) {
+		c.Set(middleware.ContextUserIDKey, uint(1))
+		handler.ListImages(c)
+	})
+
+	body := []byte(`{"page":1,"limit":10,"is_public":false}`)
+	req := httptest.NewRequest(http.MethodPost, "/images", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var response common.Response
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+
+	dataBytes, err := json.Marshal(response.Data)
+	require.NoError(t, err)
+
+	var payload ImageListResponse
+	require.NoError(t, json.Unmarshal(dataBytes, &payload))
+	require.Equal(t, int64(1), payload.Total)
+	require.Len(t, payload.Images, 1)
+	assert.Equal(t, "private-image", payload.Images[0].Identifier)
+	assert.False(t, payload.Images[0].IsPublic)
+}
